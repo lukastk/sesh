@@ -6,12 +6,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "sesh.json"
+
+
+def load_config(config_path: Path | None = None) -> dict:
+    """Load config from sesh.json. Missing file or keys use built-in defaults."""
+    defaults = {"claude_command": "claude", "opencode_command": "opencode"}
+    path = config_path or DEFAULT_CONFIG_PATH
+    if path.exists():
+        data = json.loads(path.read_text())
+        defaults.update(data)
+    return defaults
+
+
 @dataclass
 class AiSession:
     name: str
     type: str  # "claude" | "opencode"
     session_id: str
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    command: str = ""
 
 
 @dataclass
@@ -29,17 +43,18 @@ class Session:
 
 
 class SessionStore:
-    DATA_DIR = Path.home() / ".sesh"
-    SESSIONS_FILE = DATA_DIR / "sessions.json"
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self.data_dir = data_dir or (Path.home() / ".sesh")
+        self.sessions_file = self.data_dir / "sessions.json"
 
     def _ensure_dir(self) -> None:
-        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def load(self) -> dict[str, Session]:
         self._ensure_dir()
-        if not self.SESSIONS_FILE.exists():
+        if not self.sessions_file.exists():
             return {}
-        data = json.loads(self.SESSIONS_FILE.read_text())
+        data = json.loads(self.sessions_file.read_text())
         sessions = {}
         for name, s in data.get("sessions", {}).items():
             ai_raw = s.pop("ai_sessions", [])
@@ -53,9 +68,9 @@ class SessionStore:
             "version": 1,
             "sessions": {name: asdict(s) for name, s in sessions.items()},
         }
-        tmp = self.SESSIONS_FILE.with_suffix(".tmp")
+        tmp = self.sessions_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2) + "\n")
-        tmp.rename(self.SESSIONS_FILE)
+        tmp.rename(self.sessions_file)
 
     def get(self, name: str) -> Session:
         sessions = self.load()

@@ -13,12 +13,26 @@ from rich.table import Table
 from rich.tree import Tree
 
 from sesh import tmux
-from sesh.store import AiSession, Session, SessionStore
+from sesh.store import AiSession, Session, SessionStore, load_config
 
 app = typer.Typer(add_completion=False)
 ai_app = typer.Typer(add_completion=False, help="Manage AI coding sessions.")
 app.add_typer(ai_app, name="ai")
 store = SessionStore()
+_config_path: Path | None = None
+
+
+@app.callback()
+def main(
+    config: Annotated[Optional[Path], typer.Option("--config", help="Path to config file")] = None,
+    data_dir: Annotated[Optional[Path], typer.Option("--data-dir", help="Path to sesh data directory")] = None,
+) -> None:
+    """Session manager with tmux integration."""
+    global store, _config_path
+    if data_dir is not None:
+        store = SessionStore(data_dir=data_dir)
+    if config is not None:
+        _config_path = config
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +113,7 @@ def new(
     tag: Annotated[Optional[list[str]], typer.Option("--tag")] = None,
     claude: Annotated[bool, typer.Option("--claude", help="Also create a Claude Code AI session (implies --tmux)")] = False,
     opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
+    cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
 ) -> None:
     """Create a new session."""
     if claude or opencode:
@@ -158,9 +173,9 @@ def new(
     typer.echo(f"Created session '{name}' → {dir_path}", err=True)
 
     if claude:
-        _create_ai_session(session, ai_type="claude")
+        _create_ai_session(session, ai_type="claude", cmd=cmd)
     if opencode:
-        _create_ai_session(session, ai_type="opencode")
+        _create_ai_session(session, ai_type="opencode", cmd=cmd)
 
 
 # ---------------------------------------------------------------------------
@@ -554,10 +569,19 @@ def _ensure_tmux(session: Session) -> Session:
     return session
 
 
+def _resolve_ai_command(ai_type: str, cmd: str | None = None) -> str:
+    """Resolve the AI command binary. Priority: --cmd flag > config file > built-in default."""
+    if cmd:
+        return cmd
+    config = load_config(_config_path)
+    return config[f"{ai_type}_command"]
+
+
 def _create_ai_session(
     session: Session,
     ai_type: str,
     ai_name: str | None = None,
+    cmd: str | None = None,
 ) -> AiSession:
     """Create and launch a new AI session in the sesh's tmux session."""
     if ai_name is None:
@@ -569,24 +593,25 @@ def _create_ai_session(
             typer.echo(f"AI session '{ai_name}' already exists in sesh '{session.name}'.", err=True)
             raise typer.Exit(code=1)
 
+    command = _resolve_ai_command(ai_type, cmd)
     session = _ensure_tmux(session)
 
     if ai_type == "claude":
         sid = str(uuid.uuid4())
-        ai = AiSession(name=ai_name, type="claude", session_id=sid)
+        ai = AiSession(name=ai_name, type="claude", session_id=sid, command=command)
         session.ai_sessions.append(ai)
         store.update(session)
-        cmd = f"claude --session-id {sid}"
-        tmux.new_window(session.tmux_session, ai_name, cmd, session.dir)
+        tmux_cmd = f"{command} --session-id {sid}"
+        tmux.new_window(session.tmux_session, ai_name, tmux_cmd, session.dir)
     elif ai_type == "opencode":
-        ai = AiSession(name=ai_name, type="opencode", session_id="pending")
+        ai = AiSession(name=ai_name, type="opencode", session_id="pending", command=command)
         session.ai_sessions.append(ai)
         store.update(session)
         wrapper = (
             f'bash -c \''
-            f'BEFORE=$(opencode session list 2>/dev/null || true); '
-            f'opencode {session.dir}; '
-            f'AFTER=$(opencode session list 2>/dev/null || true); '
+            f'BEFORE=$({command} session list 2>/dev/null || true); '
+            f'{command} {session.dir}; '
+            f'AFTER=$({command} session list 2>/dev/null || true); '
             f'NEW_ID=$(comm -13 <(echo "$BEFORE" | sort) <(echo "$AFTER" | sort) | head -1); '
             f'if [ -n "$NEW_ID" ]; then sesh ai _register {session.name} {ai_name} "$NEW_ID"; fi'
             f'\''
@@ -626,11 +651,12 @@ def ai_list(
     table = Table()
     table.add_column("NAME")
     table.add_column("TYPE")
+    table.add_column("COMMAND")
     table.add_column("SESSION_ID")
     table.add_column("CREATED")
 
     for a in session.ai_sessions:
-        table.add_row(a.name, a.type, a.session_id, a.created)
+        table.add_row(a.name, a.type, a.command or a.type, a.session_id, a.created)
 
     from rich.console import Console
 
@@ -648,10 +674,11 @@ def ai_new(
     sesh_name: Annotated[Optional[str], typer.Argument()] = None,
     ai_type: Annotated[str, typer.Option("--type")] = "claude",
     ai_name: Annotated[Optional[str], typer.Option("--name")] = None,
+    cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
 ) -> None:
     """Create a new AI session and launch it in tmux."""
     session = _resolve_sesh(sesh_name)
-    _create_ai_session(session, ai_type=ai_type, ai_name=ai_name)
+    _create_ai_session(session, ai_type=ai_type, ai_name=ai_name, cmd=cmd)
 
 
 # ---------------------------------------------------------------------------
@@ -688,18 +715,21 @@ def ai_resume(
 
     session = _ensure_tmux(session)
 
+    # Use stored command, fall back to config/defaults for old sessions
+    command = ai.command or _resolve_ai_command(ai.type)
+
     if ai.type == "claude":
-        cmd = f"claude --resume {ai.session_id}"
+        tmux_cmd = f"{command} --resume {ai.session_id}"
     elif ai.type == "opencode":
         if ai.session_id == "pending":
             typer.echo(f"AI session '{ai.name}' has no session ID yet (pending).", err=True)
             raise typer.Exit(code=1)
-        cmd = f"opencode -s {ai.session_id} {session.dir}"
+        tmux_cmd = f"{command} -s {ai.session_id} {session.dir}"
     else:
         typer.echo(f"Unknown AI type '{ai.type}'.", err=True)
         raise typer.Exit(code=1)
 
-    tmux.new_window(session.tmux_session, ai.name, cmd, session.dir)
+    tmux.new_window(session.tmux_session, ai.name, tmux_cmd, session.dir)
     typer.echo(f"Resumed AI session '{ai.name}' in sesh '{session.name}'.", err=True)
 
 

@@ -105,6 +105,9 @@ def new(
         tmux_flag = True
     dir_path = str((dir or Path.cwd()).resolve())
 
+    # Create directory if it doesn't exist
+    Path(dir_path).mkdir(parents=True, exist_ok=True)
+
     # Auto-detect name if not provided
     if name is None:
         rd_name, _ = _repoyard_detect(dir_path)
@@ -573,7 +576,7 @@ def _create_ai_session(
         ai = AiSession(name=ai_name, type="claude", session_id=sid)
         session.ai_sessions.append(ai)
         store.update(session)
-        cmd = f"claude --session-id {sid} --resume {sid}"
+        cmd = f"claude --session-id {sid}"
         tmux.new_window(session.tmux_session, ai_name, cmd, session.dir)
     elif ai_type == "opencode":
         ai = AiSession(name=ai_name, type="opencode", session_id="pending")

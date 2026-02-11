@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -12,9 +13,11 @@ from rich.table import Table
 from rich.tree import Tree
 
 from sesh import tmux
-from sesh.store import Session, SessionStore
+from sesh.store import AiSession, Session, SessionStore
 
 app = typer.Typer(add_completion=False)
+ai_app = typer.Typer(add_completion=False, help="Manage AI coding sessions.")
+app.add_typer(ai_app, name="ai")
 store = SessionStore()
 
 
@@ -94,8 +97,12 @@ def new(
     tmux_flag: Annotated[bool, typer.Option("--tmux")] = False,
     parent: Annotated[Optional[str], typer.Option("--parent")] = None,
     tag: Annotated[Optional[list[str]], typer.Option("--tag")] = None,
+    claude: Annotated[bool, typer.Option("--claude", help="Also create a Claude Code AI session (implies --tmux)")] = False,
+    opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
 ) -> None:
     """Create a new session."""
+    if claude or opencode:
+        tmux_flag = True
     dir_path = str((dir or Path.cwd()).resolve())
 
     # Auto-detect name if not provided
@@ -146,6 +153,11 @@ def new(
         store.update(session)
 
     typer.echo(f"Created session '{name}' → {dir_path}", err=True)
+
+    if claude:
+        _create_ai_session(session, ai_type="claude")
+    if opencode:
+        _create_ai_session(session, ai_type="opencode")
 
 
 # ---------------------------------------------------------------------------
@@ -494,3 +506,274 @@ def delete(
 
     store.remove(name)
     typer.echo(f"Deleted session '{name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# AI session helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_sesh(name: str | None) -> Session:
+    """Resolve a sesh by name or auto-detect from context."""
+    if name is not None:
+        try:
+            return store.get(name)
+        except KeyError:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(code=1)
+    current = _detect_current_session()
+    if current is None:
+        typer.echo("Could not detect current session. Pass SESH_NAME explicitly.", err=True)
+        raise typer.Exit(code=1)
+    return current
+
+
+def _auto_ai_name(session: Session, ai_type: str) -> str:
+    """Generate next auto-name like claude-1, claude-2, etc."""
+    existing = {a.name for a in session.ai_sessions}
+    i = 1
+    while True:
+        candidate = f"{ai_type}-{i}"
+        if candidate not in existing:
+            return candidate
+        i += 1
+
+
+def _ensure_tmux(session: Session) -> Session:
+    """Ensure the sesh has a running tmux session, creating one if needed."""
+    if session.tmux_session and tmux.session_exists(session.tmux_session):
+        return session
+    if not session.tmux_session:
+        session.tmux_session = session.name
+    if not tmux.session_exists(session.tmux_session):
+        tmux.create_session(session.tmux_session, session.dir)
+    store.update(session)
+    return session
+
+
+def _create_ai_session(
+    session: Session,
+    ai_type: str,
+    ai_name: str | None = None,
+) -> AiSession:
+    """Create and launch a new AI session in the sesh's tmux session."""
+    if ai_name is None:
+        ai_name = _auto_ai_name(session, ai_type)
+
+    # Check for duplicate name
+    for a in session.ai_sessions:
+        if a.name == ai_name:
+            typer.echo(f"AI session '{ai_name}' already exists in sesh '{session.name}'.", err=True)
+            raise typer.Exit(code=1)
+
+    session = _ensure_tmux(session)
+
+    if ai_type == "claude":
+        sid = str(uuid.uuid4())
+        ai = AiSession(name=ai_name, type="claude", session_id=sid)
+        session.ai_sessions.append(ai)
+        store.update(session)
+        cmd = f"claude --session-id {sid} --resume {sid}"
+        tmux.new_window(session.tmux_session, ai_name, cmd, session.dir)
+    elif ai_type == "opencode":
+        ai = AiSession(name=ai_name, type="opencode", session_id="pending")
+        session.ai_sessions.append(ai)
+        store.update(session)
+        wrapper = (
+            f'bash -c \''
+            f'BEFORE=$(opencode session list 2>/dev/null || true); '
+            f'opencode {session.dir}; '
+            f'AFTER=$(opencode session list 2>/dev/null || true); '
+            f'NEW_ID=$(comm -13 <(echo "$BEFORE" | sort) <(echo "$AFTER" | sort) | head -1); '
+            f'if [ -n "$NEW_ID" ]; then sesh ai _register {session.name} {ai_name} "$NEW_ID"; fi'
+            f'\''
+        )
+        tmux.new_window(session.tmux_session, ai_name, wrapper, session.dir)
+    else:
+        typer.echo(f"Unknown AI type '{ai_type}'. Use 'claude' or 'opencode'.", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Created AI session '{ai_name}' ({ai_type}) in sesh '{session.name}'.", err=True)
+    return ai
+
+
+# ---------------------------------------------------------------------------
+# sesh ai list
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("list")
+def ai_list(
+    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List AI sessions for a sesh."""
+    session = _resolve_sesh(sesh_name)
+
+    if not session.ai_sessions:
+        typer.echo(f"No AI sessions in sesh '{session.name}'.", err=True)
+        return
+
+    if json_output:
+        from dataclasses import asdict
+
+        typer.echo(json.dumps([asdict(a) for a in session.ai_sessions], indent=2))
+        return
+
+    table = Table()
+    table.add_column("NAME")
+    table.add_column("TYPE")
+    table.add_column("SESSION_ID")
+    table.add_column("CREATED")
+
+    for a in session.ai_sessions:
+        table.add_row(a.name, a.type, a.session_id, a.created)
+
+    from rich.console import Console
+
+    console = Console(stderr=True)
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai new
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("new")
+def ai_new(
+    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+    ai_type: Annotated[str, typer.Option("--type")] = "claude",
+    ai_name: Annotated[Optional[str], typer.Option("--name")] = None,
+) -> None:
+    """Create a new AI session and launch it in tmux."""
+    session = _resolve_sesh(sesh_name)
+    _create_ai_session(session, ai_type=ai_type, ai_name=ai_name)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai resume
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("resume")
+def ai_resume(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Resume an existing AI session in tmux."""
+    session = _resolve_sesh(sesh_name)
+
+    if not session.ai_sessions:
+        typer.echo(f"No AI sessions in sesh '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    # Auto-select if only one and no name given
+    if ai_name is None:
+        if len(session.ai_sessions) == 1:
+            ai = session.ai_sessions[0]
+        else:
+            names = ", ".join(a.name for a in session.ai_sessions)
+            typer.echo(f"Multiple AI sessions exist. Specify one: {names}", err=True)
+            raise typer.Exit(code=1)
+    else:
+        matches = [a for a in session.ai_sessions if a.name == ai_name]
+        if not matches:
+            typer.echo(f"AI session '{ai_name}' not found in sesh '{session.name}'.", err=True)
+            raise typer.Exit(code=1)
+        ai = matches[0]
+
+    session = _ensure_tmux(session)
+
+    if ai.type == "claude":
+        cmd = f"claude --resume {ai.session_id}"
+    elif ai.type == "opencode":
+        if ai.session_id == "pending":
+            typer.echo(f"AI session '{ai.name}' has no session ID yet (pending).", err=True)
+            raise typer.Exit(code=1)
+        cmd = f"opencode -s {ai.session_id} {session.dir}"
+    else:
+        typer.echo(f"Unknown AI type '{ai.type}'.", err=True)
+        raise typer.Exit(code=1)
+
+    tmux.new_window(session.tmux_session, ai.name, cmd, session.dir)
+    typer.echo(f"Resumed AI session '{ai.name}' in sesh '{session.name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai add
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("add")
+def ai_add(
+    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+    ai_type: Annotated[str, typer.Option("--type")] = "claude",
+    ai_name: Annotated[str, typer.Option("--name")] = ...,
+    session_id: Annotated[str, typer.Option("--id")] = ...,
+) -> None:
+    """Manually register an existing AI session ID."""
+    session = _resolve_sesh(sesh_name)
+
+    for a in session.ai_sessions:
+        if a.name == ai_name:
+            typer.echo(f"AI session '{ai_name}' already exists in sesh '{session.name}'.", err=True)
+            raise typer.Exit(code=1)
+
+    ai = AiSession(name=ai_name, type=ai_type, session_id=session_id)
+    session.ai_sessions.append(ai)
+    store.update(session)
+    typer.echo(f"Added AI session '{ai_name}' ({ai_type}) to sesh '{session.name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai remove
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("remove")
+def ai_remove(
+    ai_name: Annotated[str, typer.Argument()],
+    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Remove an AI session record from a sesh."""
+    session = _resolve_sesh(sesh_name)
+
+    original_len = len(session.ai_sessions)
+    session.ai_sessions = [a for a in session.ai_sessions if a.name != ai_name]
+
+    if len(session.ai_sessions) == original_len:
+        typer.echo(f"AI session '{ai_name}' not found in sesh '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    store.update(session)
+    typer.echo(f"Removed AI session '{ai_name}' from sesh '{session.name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai _register (internal, hidden)
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("_register", hidden=True)
+def ai_register(
+    sesh_name: Annotated[str, typer.Argument()],
+    ai_name: Annotated[str, typer.Argument()],
+    session_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Internal: update a pending AI session ID."""
+    try:
+        session = store.get(sesh_name)
+    except KeyError:
+        typer.echo(f"Session '{sesh_name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    for ai in session.ai_sessions:
+        if ai.name == ai_name:
+            ai.session_id = session_id
+            store.update(session)
+            typer.echo(f"Registered session ID for '{ai_name}'.", err=True)
+            return
+
+    typer.echo(f"AI session '{ai_name}' not found in sesh '{sesh_name}'.", err=True)
+    raise typer.Exit(code=1)

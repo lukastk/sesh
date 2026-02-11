@@ -7,6 +7,14 @@ from pathlib import Path
 
 
 @dataclass
+class AiSession:
+    name: str
+    type: str  # "claude" | "opencode"
+    session_id: str
+    created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@dataclass
 class Session:
     name: str
     dir: str
@@ -17,6 +25,7 @@ class Session:
     children: list[str] = field(default_factory=list)
     repoyard_index_name: str | None = None
     tags: list[str] = field(default_factory=list)
+    ai_sessions: list[AiSession] = field(default_factory=list)
 
 
 class SessionStore:
@@ -31,7 +40,12 @@ class SessionStore:
         if not self.SESSIONS_FILE.exists():
             return {}
         data = json.loads(self.SESSIONS_FILE.read_text())
-        return {name: Session(**s) for name, s in data.get("sessions", {}).items()}
+        sessions = {}
+        for name, s in data.get("sessions", {}).items():
+            ai_raw = s.pop("ai_sessions", [])
+            session = Session(**s, ai_sessions=[AiSession(**a) for a in ai_raw])
+            sessions[name] = session
+        return sessions
 
     def save(self, sessions: dict[str, Session]) -> None:
         self._ensure_dir()

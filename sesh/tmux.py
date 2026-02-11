@@ -41,3 +41,21 @@ def list_sessions() -> list[str]:
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.strip().splitlines() if line]
+
+
+def new_window(session: str, name: str, cmd: str, cwd: str) -> None:
+    subprocess.run(
+        ["tmux", "new-window", "-t", session, "-n", name, "-c", cwd, cmd],
+        check=True,
+    )
+
+
+def has_window(session: str, name: str) -> bool:
+    result = subprocess.run(
+        ["tmux", "list-windows", "-t", session, "-F", "#{window_name}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    return name in result.stdout.strip().splitlines()

@@ -145,9 +145,6 @@ def new(
         session.tmux_session = name
         store.update(session)
 
-    # Create per-session directory
-    store.session_dir(name)
-
     typer.echo(f"Created session '{name}' → {dir_path}", err=True)
 
 
@@ -496,5 +493,4 @@ def delete(
             pass
 
     store.remove(name)
-    store.remove_session_dir(name)
     typer.echo(f"Deleted session '{name}'.", err=True)

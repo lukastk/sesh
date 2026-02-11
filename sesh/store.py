@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,12 +76,3 @@ class SessionStore:
             return list(sessions.values())
         return [s for s in sessions.values() if s.status == status]
 
-    def session_dir(self, name: str) -> Path:
-        d = self.DATA_DIR / "sessions" / name
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def remove_session_dir(self, name: str) -> None:
-        d = self.DATA_DIR / "sessions" / name
-        if d.exists():
-            shutil.rmtree(d)

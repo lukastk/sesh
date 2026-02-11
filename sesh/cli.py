@@ -440,6 +440,49 @@ def switch(
 
 
 # ---------------------------------------------------------------------------
+# sesh attach-tmux
+# ---------------------------------------------------------------------------
+
+
+@app.command("attach-tmux")
+def attach_tmux(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+    existing: Annotated[Optional[str], typer.Option("--existing", help="Name of an existing tmux session to attach")] = None,
+) -> None:
+    """Attach a tmux session to an existing sesh. Creates a new tmux session by default, or use --existing to link an already-running one."""
+    if name is None:
+        current = _detect_current_session()
+        if current is None:
+            typer.echo("Could not detect current session.", err=True)
+            raise typer.Exit(code=1)
+        name = current.name
+
+    try:
+        session = store.get(name)
+    except KeyError:
+        typer.echo(f"Session '{name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    if session.tmux_session and tmux.session_exists(session.tmux_session):
+        typer.echo(f"Session '{name}' already has a running tmux session '{session.tmux_session}'.", err=True)
+        raise typer.Exit(code=1)
+
+    if existing:
+        if not tmux.session_exists(existing):
+            typer.echo(f"Tmux session '{existing}' not found.", err=True)
+            raise typer.Exit(code=1)
+        session.tmux_session = existing
+        store.update(session)
+        typer.echo(f"Attached existing tmux session '{existing}' to sesh '{name}'.", err=True)
+    else:
+        tmux_name = session.tmux_session or session.name
+        tmux.create_session(tmux_name, session.dir)
+        session.tmux_session = tmux_name
+        store.update(session)
+        typer.echo(f"Created tmux session '{tmux_name}' for sesh '{name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
 # sesh archive
 # ---------------------------------------------------------------------------
 

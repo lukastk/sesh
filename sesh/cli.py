@@ -333,41 +333,90 @@ def _print_tree(sessions: list[Session], current_name: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _tree_picker(sessions: list[Session], current_name: str | None) -> str | None:
+    """Show an interactive tree picker using Textual inline mode. Returns selected session name or None."""
+    from textual.app import App, ComposeResult
+    from textual.widgets import Tree as TextualTree
+
+    session_map = {s.name: s for s in sessions}
+    roots = [s for s in sessions if s.parent is None or s.parent not in session_map]
+
+    class SessionPicker(App[str]):
+        CSS = """
+        Screen {
+            &:inline { height: auto; max-height: 50vh; }
+        }
+        Tree { height: auto; max-height: 50vh; }
+        """
+        INLINE_PADDING = 0
+
+        def compose(self) -> ComposeResult:
+            tree: TextualTree[str] = TextualTree("Sessions")
+            tree.show_root = False
+            self._build_tree(tree.root, roots)
+            yield tree
+
+        def _build_tree(self, parent_node, parent_sessions):
+            for s in parent_sessions:
+                label = f"* {s.name}" if s.name == current_name else s.name
+                children_sessions = [session_map[c] for c in s.children if c in session_map]
+                if children_sessions:
+                    node = parent_node.add(label, data=s.name)
+                    self._build_tree(node, children_sessions)
+                else:
+                    parent_node.add_leaf(label, data=s.name)
+
+        def on_tree_node_selected(self, event: TextualTree.NodeSelected) -> None:
+            if event.node.data is not None:
+                self.exit(event.node.data)
+
+    picker = SessionPicker()
+    return picker.run(inline=True)
+
+
 @app.command()
 def switch(
     name: Annotated[Optional[str], typer.Argument()] = None,
+    tree: Annotated[bool, typer.Option("--tree")] = False,
 ) -> None:
     """Switch to a session. Outputs JSON to stdout for shell wrapper."""
     if name is None:
-        # fzf picker
         sessions = store.list(status="active")
         if not sessions:
             typer.echo("No active sessions.", err=True)
             raise typer.Exit(code=1)
 
-        lines = []
-        for s in sessions:
-            tmux_status = ""
-            if s.tmux_session:
-                tmux_status = "tmux" if tmux.session_exists(s.tmux_session) else "tmux(stopped)"
-            lines.append(f"{s.name}\t{s.dir}\t{tmux_status}")
+        if tree:
+            current = _detect_current_session()
+            current_name = current.name if current else None
+            name = _tree_picker(sessions, current_name)
+            if name is None:
+                raise typer.Exit(code=1)
+        else:
+            # fzf picker
+            lines = []
+            for s in sessions:
+                tmux_status = ""
+                if s.tmux_session:
+                    tmux_status = "tmux" if tmux.session_exists(s.tmux_session) else "tmux(stopped)"
+                lines.append(f"{s.name}\t{s.dir}\t{tmux_status}")
 
-        fzf_input = "\n".join(lines)
-        try:
-            result = subprocess.run(
-                ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--no-sort"],
-                input=fzf_input,
-                text=True,
-                capture_output=True,
-            )
-        except FileNotFoundError:
-            typer.echo("fzf not found. Install fzf or pass a session name.", err=True)
-            raise typer.Exit(code=1)
+            fzf_input = "\n".join(lines)
+            try:
+                result = subprocess.run(
+                    ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--no-sort"],
+                    input=fzf_input,
+                    text=True,
+                    capture_output=True,
+                )
+            except FileNotFoundError:
+                typer.echo("fzf not found. Install fzf or pass a session name.", err=True)
+                raise typer.Exit(code=1)
 
-        if result.returncode != 0:
-            raise typer.Exit(code=1)
+            if result.returncode != 0:
+                raise typer.Exit(code=1)
 
-        name = result.stdout.strip().split("\t")[0]
+            name = result.stdout.strip().split("\t")[0]
 
     try:
         session = store.get(name)

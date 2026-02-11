@@ -7,7 +7,7 @@ name = "sesh"
 version = "0.1.0"
 description = "Session manager with tmux integration"
 requires-python = ">=3.11"
-dependencies = ["typer>=0.15"]
+dependencies = ["typer>=0.15", "textual>=1.0"]
 
 [project.scripts]
 sesh = "sesh.cli:app"

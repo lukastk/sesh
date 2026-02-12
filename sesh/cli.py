@@ -374,7 +374,7 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
         def on_mount(self) -> None:
             if self.current_node is not None:
                 tree = self.query_one(TextualTree)
-                tree.select_node(self.current_node)
+                tree.move_cursor(self.current_node)
 
         def on_tree_node_selected(self, event: TextualTree.NodeSelected) -> None:
             if event.node.data is not None:

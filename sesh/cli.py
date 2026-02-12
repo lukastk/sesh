@@ -404,7 +404,7 @@ def switch(
             fzf_input = "\n".join(lines)
             try:
                 result = subprocess.run(
-                    ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--no-sort"],
+                    ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--nth=1", "--no-sort"],
                     input=fzf_input,
                     text=True,
                     capture_output=True,

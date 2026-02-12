@@ -349,6 +349,7 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
         Tree { height: auto; max-height: 50vh; }
         """
         INLINE_PADDING = 0
+        current_node = None
 
         def compose(self) -> ComposeResult:
             tree: TextualTree[str] = TextualTree("Sessions")
@@ -362,9 +363,18 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
                 children_sessions = [session_map[c] for c in s.children if c in session_map]
                 if children_sessions:
                     node = parent_node.add(label, data=s.name)
+                    if s.name == current_name:
+                        self.current_node = node
                     self._build_tree(node, children_sessions)
                 else:
-                    parent_node.add_leaf(label, data=s.name)
+                    node = parent_node.add_leaf(label, data=s.name)
+                    if s.name == current_name:
+                        self.current_node = node
+
+        def on_mount(self) -> None:
+            if self.current_node is not None:
+                tree = self.query_one(TextualTree)
+                tree.select_node(self.current_node)
 
         def on_tree_node_selected(self, event: TextualTree.NodeSelected) -> None:
             if event.node.data is not None:
@@ -386,25 +396,32 @@ def switch(
             typer.echo("No active sessions.", err=True)
             raise typer.Exit(code=1)
 
+        current = _detect_current_session()
+        current_name = current.name if current else None
+
         if tree:
-            current = _detect_current_session()
-            current_name = current.name if current else None
             name = _tree_picker(sessions, current_name)
             if name is None:
                 raise typer.Exit(code=1)
         else:
             # fzf picker
             lines = []
-            for s in sessions:
+            current_line_num = None
+            for idx, s in enumerate(sessions, 1):
                 tmux_status = ""
                 if s.tmux_session:
                     tmux_status = "tmux" if tmux.session_exists(s.tmux_session) else "tmux(stopped)"
                 lines.append(f"{s.name}\t{s.dir}\t{tmux_status}")
+                if current_name and s.name == current_name:
+                    current_line_num = idx
 
             fzf_input = "\n".join(lines)
+            fzf_cmd = ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--nth=1", "--no-sort"]
+            if current_line_num is not None:
+                fzf_cmd.extend(["--bind", f"load:pos({current_line_num})"])
             try:
                 result = subprocess.run(
-                    ["fzf", "--delimiter=\t", "--with-nth=1,2,3", "--nth=1", "--no-sort"],
+                    fzf_cmd,
                     input=fzf_input,
                     text=True,
                     capture_output=True,

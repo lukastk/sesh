@@ -669,6 +669,122 @@ def _resolve_ai_command(ai_type: str, cmd: str | None = None) -> str:
     return config[f"{ai_type}_command"]
 
 
+def _resolve_ai_session(session: Session, ai_name: str | None) -> AiSession:
+    """Resolve an AI session by name, or auto-select if only one exists."""
+    if not session.ai_sessions:
+        typer.echo(f"No AI sessions in sesh '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    if ai_name is None:
+        if len(session.ai_sessions) == 1:
+            return session.ai_sessions[0]
+        names = ", ".join(a.name for a in session.ai_sessions)
+        typer.echo(f"Multiple AI sessions exist. Specify one: {names}", err=True)
+        raise typer.Exit(code=1)
+
+    matches = [a for a in session.ai_sessions if a.name == ai_name]
+    if not matches:
+        typer.echo(f"AI session '{ai_name}' not found in sesh '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+    return matches[0]
+
+
+def _find_claude_jsonl(session_id: str) -> Path | None:
+    """Glob ~/.claude/projects/*/<session_id>.jsonl to locate the transcript file."""
+    claude_dir = Path.home() / ".claude" / "projects"
+    if not claude_dir.exists():
+        return None
+    matches = list(claude_dir.glob(f"*/{session_id}.jsonl"))
+    return matches[0] if matches else None
+
+
+def _extract_text_from_content(content) -> str:
+    """Normalize Claude message content — handles string and array-of-blocks formats."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, dict) and block.get("type") == "tool_result":
+                # Skip tool results in transcript text
+                pass
+        return "\n".join(parts) if parts else ""
+    return ""
+
+
+def _parse_claude_jsonl(path: Path) -> list[dict]:
+    """Read Claude JSONL, filter user/assistant messages, return normalized list."""
+    messages = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("type") not in ("user", "assistant"):
+            continue
+        msg = entry.get("message", {})
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = _extract_text_from_content(msg.get("content", ""))
+        if not text.strip():
+            continue
+        messages.append({
+            "role": role,
+            "text": text,
+            "timestamp": entry.get("timestamp", ""),
+        })
+    return messages
+
+
+def _opencode_export(session: Session, ai_session: AiSession) -> dict:
+    """Run opencode export <session_id> with cwd=session.dir, return parsed JSON."""
+    command = ai_session.command or _resolve_ai_command("opencode")
+    result = subprocess.run(
+        [command, "export", ai_session.session_id],
+        capture_output=True,
+        text=True,
+        cwd=session.dir,
+    )
+    if result.returncode != 0:
+        typer.echo(f"opencode export failed: {result.stderr.strip()}", err=True)
+        raise typer.Exit(code=1)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        typer.echo(f"Failed to parse opencode export output.", err=True)
+        raise typer.Exit(code=1)
+
+
+def _parse_opencode_messages(export_data: dict) -> list[dict]:
+    """Parse opencode export messages into normalized list."""
+    messages = []
+    for msg in export_data.get("messages", []):
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        parts = msg.get("parts", [])
+        text_parts = []
+        for part in parts:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+        text = "\n".join(text_parts)
+        if not text.strip():
+            continue
+        messages.append({
+            "role": role,
+            "text": text,
+            "timestamp": msg.get("createdAt", ""),
+        })
+    return messages
+
+
 def _create_ai_session(
     session: Session,
     ai_type: str,
@@ -785,26 +901,7 @@ def ai_resume(
 ) -> None:
     """Resume an existing AI session in tmux."""
     session = _resolve_sesh(sesh_name)
-
-    if not session.ai_sessions:
-        typer.echo(f"No AI sessions in sesh '{session.name}'.", err=True)
-        raise typer.Exit(code=1)
-
-    # Auto-select if only one and no name given
-    if ai_name is None:
-        if len(session.ai_sessions) == 1:
-            ai = session.ai_sessions[0]
-        else:
-            names = ", ".join(a.name for a in session.ai_sessions)
-            typer.echo(f"Multiple AI sessions exist. Specify one: {names}", err=True)
-            raise typer.Exit(code=1)
-    else:
-        matches = [a for a in session.ai_sessions if a.name == ai_name]
-        if not matches:
-            typer.echo(f"AI session '{ai_name}' not found in sesh '{session.name}'.", err=True)
-            raise typer.Exit(code=1)
-        ai = matches[0]
-
+    ai = _resolve_ai_session(session, ai_name)
     session = _ensure_tmux(session)
 
     # Use stored command, fall back to config/defaults for old sessions
@@ -902,3 +999,134 @@ def ai_register(
 
     typer.echo(f"AI session '{ai_name}' not found in sesh '{sesh_name}'.", err=True)
     raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# sesh ai transcript
+# ---------------------------------------------------------------------------
+
+
+def _get_transcript(session: Session, ai: AiSession) -> list[dict]:
+    """Get parsed transcript messages for an AI session."""
+    if ai.type == "claude":
+        path = _find_claude_jsonl(ai.session_id)
+        if path is None:
+            typer.echo(f"Could not find Claude JSONL for session '{ai.session_id}'.", err=True)
+            raise typer.Exit(code=1)
+        return _parse_claude_jsonl(path)
+    elif ai.type == "opencode":
+        export_data = _opencode_export(session, ai)
+        return _parse_opencode_messages(export_data)
+    else:
+        typer.echo(f"Unknown AI type '{ai.type}'.", err=True)
+        raise typer.Exit(code=1)
+
+
+@ai_app.command("transcript")
+def ai_transcript(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+) -> None:
+    """Get the full chat transcript for an AI session. Outputs JSON to stdout."""
+    session = _resolve_sesh(sesh_name)
+    ai = _resolve_ai_session(session, ai_name)
+    messages = _get_transcript(session, ai)
+
+    output = {
+        "sesh": session.name,
+        "ai_session": ai.name,
+        "ai_type": ai.type,
+        "session_id": ai.session_id,
+        "message_count": len(messages),
+        "messages": messages,
+    }
+    sys.stdout.write(json.dumps(output, indent=2) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# sesh ai last-message
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("last-message")
+def ai_last_message(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    role: Annotated[Optional[str], typer.Option("--role", help="Filter by role: user or assistant")] = None,
+) -> None:
+    """Get the last message from an AI session. Outputs JSON to stdout."""
+    session = _resolve_sesh(sesh_name)
+    ai = _resolve_ai_session(session, ai_name)
+    messages = _get_transcript(session, ai)
+
+    if role:
+        messages = [m for m in messages if m["role"] == role]
+
+    if not messages:
+        typer.echo("No messages found.", err=True)
+        raise typer.Exit(code=1)
+
+    last = messages[-1]
+    output = {
+        "sesh": session.name,
+        "ai_session": ai.name,
+        "ai_type": ai.type,
+        "role": last["role"],
+        "text": last["text"],
+        "timestamp": last["timestamp"],
+    }
+    sys.stdout.write(json.dumps(output, indent=2) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# sesh ai send
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("send")
+def ai_send(
+    message: Annotated[str, typer.Argument()],
+    name: Annotated[Optional[str], typer.Option("--name", help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+) -> None:
+    """Send a message to an AI session and return the response. Outputs JSON to stdout."""
+    session = _resolve_sesh(sesh_name)
+    ai = _resolve_ai_session(session, name)
+
+    command = ai.command or _resolve_ai_command(ai.type)
+
+    if ai.type == "claude":
+        result = subprocess.run(
+            [command, "-p", message, "--resume", ai.session_id, "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            cwd=session.dir,
+        )
+    elif ai.type == "opencode":
+        result = subprocess.run(
+            [command, "run", "-s", ai.session_id, message],
+            capture_output=True,
+            text=True,
+            cwd=session.dir,
+        )
+    else:
+        typer.echo(f"Unknown AI type '{ai.type}'.", err=True)
+        raise typer.Exit(code=1)
+
+    if result.returncode != 0:
+        typer.echo(f"AI command failed: {result.stderr.strip()}", err=True)
+        raise typer.Exit(code=1)
+
+    # Try to parse as JSON, otherwise wrap raw output
+    try:
+        response_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        response_data = result.stdout.strip()
+
+    output = {
+        "sesh": session.name,
+        "ai_session": ai.name,
+        "ai_type": ai.type,
+        "response": response_data,
+    }
+    sys.stdout.write(json.dumps(output, indent=2) + "\n")

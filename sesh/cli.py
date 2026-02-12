@@ -58,7 +58,11 @@ def _detect_current_session() -> Session | None:
                     return s
 
     # 2. Try repoyard which --json on $PWD → match by repoyard_index_name
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except (FileNotFoundError, OSError):
+        return None
+
     try:
         result = subprocess.run(
             ["repoyard", "which", "--json", "--path", cwd],
@@ -114,6 +118,7 @@ def new(
     claude: Annotated[bool, typer.Option("--claude", help="Also create a Claude Code AI session (implies --tmux)")] = False,
     opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
+    pin: Annotated[bool, typer.Option("--pin", help="Pin the session")] = False,
 ) -> None:
     """Create a new session."""
     if claude or opencode:
@@ -154,6 +159,7 @@ def new(
         parent=parent,
         repoyard_index_name=index_name,
         tags=tag or [],
+        pinned=pin,
     )
     store.add(session)
 

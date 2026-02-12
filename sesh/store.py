@@ -39,6 +39,7 @@ class Session:
     children: list[str] = field(default_factory=list)
     repoyard_index_name: str | None = None
     tags: list[str] = field(default_factory=list)
+    pinned: bool = False
     ai_sessions: list[AiSession] = field(default_factory=list)
 
 
@@ -99,9 +100,12 @@ class SessionStore:
         del sessions[name]
         self.save(sessions)
 
-    def list(self, status: str | None = None) -> list[Session]:
+    def list(self, status: str | None = None, pinned: bool | None = None) -> list[Session]:
         sessions = self.load()
-        if status is None:
-            return list(sessions.values())
-        return [s for s in sessions.values() if s.status == status]
+        result = list(sessions.values())
+        if status is not None:
+            result = [s for s in result if s.status == status]
+        if pinned is not None:
+            result = [s for s in result if s.pinned == pinned]
+        return result
 

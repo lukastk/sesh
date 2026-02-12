@@ -214,6 +214,7 @@ def info(
             "tmux_session": session.tmux_session,
             "tmux_live": tmux_live,
             "status": session.status,
+            "pinned": session.pinned,
             "created": session.created,
             "parent": session.parent,
             "children": session.children,
@@ -225,6 +226,8 @@ def info(
         typer.echo(f"Name:      {session.name}")
         typer.echo(f"Dir:       {session.dir}")
         typer.echo(f"Status:    {session.status}")
+        if session.pinned:
+            typer.echo(f"Pinned:    yes")
         typer.echo(f"Created:   {session.created}")
         if session.tmux_session:
             status_str = "running" if tmux_live else "not running"
@@ -240,6 +243,70 @@ def info(
 
 
 # ---------------------------------------------------------------------------
+# sesh pin / sesh unpin
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def pin(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+    toggle: Annotated[bool, typer.Option("--toggle")] = False,
+) -> None:
+    """Pin a session."""
+    if name is None:
+        current = _detect_current_session()
+        if current is None:
+            typer.echo("Could not detect current session.", err=True)
+            raise typer.Exit(code=1)
+        name = current.name
+
+    try:
+        session = store.get(name)
+    except KeyError:
+        typer.echo(f"Session '{name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    if toggle:
+        session.pinned = not session.pinned
+    else:
+        if session.pinned:
+            typer.echo(f"Session '{name}' is already pinned.", err=True)
+            raise typer.Exit(code=1)
+        session.pinned = True
+
+    store.update(session)
+    state = "pinned" if session.pinned else "unpinned"
+    typer.echo(f"Session '{name}' is now {state}.", err=True)
+
+
+@app.command()
+def unpin(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Unpin a session."""
+    if name is None:
+        current = _detect_current_session()
+        if current is None:
+            typer.echo("Could not detect current session.", err=True)
+            raise typer.Exit(code=1)
+        name = current.name
+
+    try:
+        session = store.get(name)
+    except KeyError:
+        typer.echo(f"Session '{name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    if not session.pinned:
+        typer.echo(f"Session '{name}' is not pinned.", err=True)
+        raise typer.Exit(code=1)
+
+    session.pinned = False
+    store.update(session)
+    typer.echo(f"Session '{name}' is now unpinned.", err=True)
+
+
+# ---------------------------------------------------------------------------
 # sesh list
 # ---------------------------------------------------------------------------
 
@@ -248,6 +315,7 @@ def info(
 def list_sessions(
     all: Annotated[bool, typer.Option("--all")] = False,
     archived: Annotated[bool, typer.Option("--archived")] = False,
+    pinned: Annotated[bool, typer.Option("--pinned")] = False,
     tree: Annotated[bool, typer.Option("--tree")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -259,7 +327,8 @@ def list_sessions(
     else:
         status_filter = "active"
 
-    sessions = store.list(status=status_filter)
+    pinned_filter = True if pinned else None
+    sessions = store.list(status=status_filter, pinned=pinned_filter)
 
     if not sessions:
         typer.echo("No sessions found.", err=True)
@@ -393,10 +462,15 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
 def switch(
     name: Annotated[Optional[str], typer.Argument()] = None,
     tree: Annotated[bool, typer.Option("--tree")] = False,
+    pinned: Annotated[bool, typer.Option("--pinned")] = False,
+    next_session: Annotated[bool, typer.Option("--next")] = False,
+    prev_session: Annotated[bool, typer.Option("--prev")] = False,
 ) -> None:
     """Switch to a session. Outputs JSON to stdout for shell wrapper."""
+    pinned_filter = True if pinned else None
+
     if name is None:
-        sessions = store.list(status="active")
+        sessions = store.list(status="active", pinned=pinned_filter)
         if not sessions:
             typer.echo("No active sessions.", err=True)
             raise typer.Exit(code=1)
@@ -404,7 +478,18 @@ def switch(
         current = _detect_current_session()
         current_name = current.name if current else None
 
-        if tree:
+        if next_session or prev_session:
+            if current_name is None:
+                typer.echo("Could not detect current session.", err=True)
+                raise typer.Exit(code=1)
+            names = [s.name for s in sessions]
+            if current_name not in names:
+                typer.echo(f"Current session '{current_name}' not in list.", err=True)
+                raise typer.Exit(code=1)
+            idx = names.index(current_name)
+            offset = 1 if next_session else -1
+            name = names[(idx + offset) % len(names)]
+        elif tree:
             name = _tree_picker(sessions, current_name)
             if name is None:
                 raise typer.Exit(code=1)

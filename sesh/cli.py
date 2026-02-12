@@ -1145,7 +1145,71 @@ def ai_transcript(
         "ai_type": ai.type,
         "session_id": ai.session_id,
         "message_count": len(messages),
+        "total_messages": len(messages),
         "messages": messages,
+    }
+    sys.stdout.write(json.dumps(output, indent=2) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# sesh ai transcript-head / transcript-tail
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("transcript-head")
+def ai_transcript_head(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    count: Annotated[int, typer.Option("-n", "--count", help="Number of messages to show")] = 10,
+    offset: Annotated[int, typer.Option("--offset", help="Skip this many messages from the start")] = 0,
+) -> None:
+    """Get the first N messages from an AI transcript. Outputs JSON to stdout."""
+    session = _resolve_sesh(sesh_name)
+    ai = _resolve_ai_session(session, ai_name)
+    messages = _get_transcript(session, ai)
+    total = len(messages)
+    sliced = messages[offset:offset + count]
+
+    output = {
+        "sesh": session.name,
+        "ai_session": ai.name,
+        "ai_type": ai.type,
+        "session_id": ai.session_id,
+        "message_count": len(sliced),
+        "total_messages": total,
+        "messages": sliced,
+    }
+    sys.stdout.write(json.dumps(output, indent=2) + "\n")
+
+
+@ai_app.command("transcript-tail")
+def ai_transcript_tail(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    count: Annotated[int, typer.Option("-n", "--count", help="Number of messages to show")] = 10,
+    offset: Annotated[int, typer.Option("--offset", help="Skip this many messages from the end")] = 0,
+) -> None:
+    """Get the last N messages from an AI transcript. Outputs JSON to stdout."""
+    session = _resolve_sesh(sesh_name)
+    ai = _resolve_ai_session(session, ai_name)
+    messages = _get_transcript(session, ai)
+    total = len(messages)
+
+    if offset > 0:
+        end = max(total - offset, 0)
+        start = max(end - count, 0)
+        sliced = messages[start:end]
+    else:
+        sliced = messages[-count:] if total > count else messages
+
+    output = {
+        "sesh": session.name,
+        "ai_session": ai.name,
+        "ai_type": ai.type,
+        "session_id": ai.session_id,
+        "message_count": len(sliced),
+        "total_messages": total,
+        "messages": sliced,
     }
     sys.stdout.write(json.dumps(output, indent=2) + "\n")
 

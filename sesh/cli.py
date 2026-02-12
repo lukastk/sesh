@@ -373,6 +373,11 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
 
         def on_mount(self) -> None:
             if self.current_node is not None:
+                # Expand ancestors so the node is visible
+                ancestor = self.current_node.parent
+                while ancestor is not None:
+                    ancestor.expand()
+                    ancestor = ancestor.parent
                 tree = self.query_one(TextualTree)
                 tree.move_cursor(self.current_node)
 

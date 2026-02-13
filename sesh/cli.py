@@ -1160,6 +1160,65 @@ def ai_resume(
 
 
 # ---------------------------------------------------------------------------
+# sesh ai enter
+# ---------------------------------------------------------------------------
+
+
+@ai_app.command("enter")
+def ai_enter(
+    ai_name: Annotated[Optional[str], typer.Argument()] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
+) -> None:
+    """Enter an AI session interactively in the current terminal."""
+    session = _resolve_sesh(sesh_name)
+
+    if not session.ai_sessions:
+        typer.echo(f"No AI sessions in sesh '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+
+    if ai_name is not None:
+        ai = _resolve_ai_session(session, ai_name)
+    elif len(session.ai_sessions) == 1:
+        ai = session.ai_sessions[0]
+    else:
+        # fzf picker
+        lines = []
+        for a in session.ai_sessions:
+            lines.append(f"{a.name}\t{a.type}\t{a.session_id}")
+        fzf_input = "\n".join(lines)
+        try:
+            result = subprocess.run(
+                ["fzf", "--delimiter=\t", "--with-nth=1,2", "--nth=1"],
+                input=fzf_input,
+                text=True,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            typer.echo("fzf not found. Specify an AI session name.", err=True)
+            raise typer.Exit(code=1)
+        if result.returncode != 0:
+            raise typer.Exit(code=1)
+        ai_name = result.stdout.strip().split("\t")[0]
+        ai = _resolve_ai_session(session, ai_name)
+
+    command = cmd or ai.command or _resolve_ai_command(ai.type)
+
+    if ai.type == "claude":
+        shell_cmd = f"{command} --resume {ai.session_id}"
+    elif ai.type == "opencode":
+        if ai.session_id == "pending":
+            typer.echo(f"AI session '{ai.name}' has no session ID yet (pending).", err=True)
+            raise typer.Exit(code=1)
+        shell_cmd = f"{command} -s {ai.session_id} {session.dir}"
+    else:
+        typer.echo(f"Unknown AI type '{ai.type}'.", err=True)
+        raise typer.Exit(code=1)
+
+    os.execvp("sh", ["sh", "-c", shell_cmd])
+
+
+# ---------------------------------------------------------------------------
 # sesh ai add
 # ---------------------------------------------------------------------------
 

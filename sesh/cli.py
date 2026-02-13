@@ -382,6 +382,22 @@ def unflag(
 
 
 # ---------------------------------------------------------------------------
+# sesh markers (for tmux status line)
+# ---------------------------------------------------------------------------
+
+
+@app.command(hidden=True)
+def markers() -> None:
+    """Output marker string for the current session. Designed for tmux #()."""
+    current = _detect_current_session()
+    if current is None:
+        return
+    m = _session_markers(current)
+    if m:
+        sys.stdout.write(m)
+
+
+# ---------------------------------------------------------------------------
 # sesh list
 # ---------------------------------------------------------------------------
 

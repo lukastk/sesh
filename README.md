@@ -8,7 +8,7 @@ A CLI tool for managing working sessions. Tracks sessions with parent/child rela
 uv pip install -e .
 ```
 
-Requires Python 3.11+ and [tmux](https://github.com/tmux/tmux). Optional: [fzf](https://github.com/junegunn/fzf) for interactive session switching, [repoyard](https://github.com/lukas/repoyard) for auto-detection.
+Requires Python 3.11+ and [tmux](https://github.com/tmux/tmux). Optional: [fzf](https://github.com/junegunn/fzf) for interactive session switching, [boxyard](https://github.com/lukas/boxyard) for auto-detection.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ sesh delete myapp --force
 
 ### `sesh new [NAME]`
 
-Create a new session. If NAME is omitted, it's auto-detected from repoyard or the directory basename.
+Create a new session. If NAME is omitted, it's auto-detected from boxyard or the directory basename.
 
 ```bash
 sesh new myapp --dir ~/projects/myapp
@@ -212,5 +212,5 @@ s myapp    # direct switch
 When you omit the session name from commands like `sesh info` or `sesh ai new`, sesh tries to detect the current session by:
 
 1. Matching the current tmux session name
-2. Matching via repoyard index name (from `$PWD`)
+2. Matching via boxyard index name (from `$PWD`)
 3. Matching by directory (`$PWD`)

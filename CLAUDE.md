@@ -55,7 +55,7 @@ sesh/
       "created": "ISO 8601 timestamp",
       "parent": "string | null",
       "children": ["string"],
-      "repoyard_index_name": "string | null",
+      "boxyard_index_name": "string | null",
       "tags": ["string"]
     }
   }

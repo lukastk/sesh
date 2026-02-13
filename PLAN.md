@@ -52,7 +52,7 @@ class Session:
     created: str  # ISO 8601
     parent: str | None
     children: list[str]
-    repoyard_index_name: str | None
+    boxyard_index_name: str | None
     tags: list[str]
 ```
 
@@ -142,12 +142,12 @@ def new(
 
 1. `dir` defaults to `Path.cwd()`
 2. If `name` not given:
-   - Try `rd which --json` on `dir` → extract `.name`
+   - Try `boxyard which --json` on `dir` → extract `.name`
    - Fall back to `dir.name` (basename)
 3. Check store for existing session with same name:
    - If active → error
    - If archived → print message suggesting `sesh restore`; exit 1
-4. Detect repoyard: run `rd which --json --path <dir>`, capture `index_name` field (ignore errors)
+4. Detect boxyard: run `boxyard which --json --path <dir>`, capture `index_name` field (ignore errors)
 5. If `--parent`: validate parent exists in store; error if not found
 6. Create `Session` object with `status="active"`, `created=now()`
 7. `store.add(session)`
@@ -182,7 +182,7 @@ def info(
 
 1. If `name` not given:
    - Check `$TMUX` env → get current tmux session name → look up in store
-   - Fall back to `rd which --json` on `$PWD` → match by repoyard_index_name
+   - Fall back to `boxyard which --json` on `$PWD` → match by boxyard_index_name
    - Fall back to matching session by `dir == $PWD`
    - Error if none found
 2. `session = store.get(name)`

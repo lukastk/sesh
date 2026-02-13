@@ -37,7 +37,7 @@ class Session:
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     parent: str | None = None
     children: list[str] = field(default_factory=list)
-    repoyard_index_name: str | None = None
+    boxyard_index_name: str | None = None
     tags: list[str] = field(default_factory=list)
     pinned: bool = False
     flagged: bool = False
@@ -60,6 +60,9 @@ class SessionStore:
         sessions = {}
         for name, s in data.get("sessions", {}).items():
             ai_raw = s.pop("ai_sessions", [])
+            # Migrate old repoyard_index_name → boxyard_index_name
+            if "repoyard_index_name" in s:
+                s["boxyard_index_name"] = s.pop("repoyard_index_name")
             session = Session(**s, ai_sessions=[AiSession(**a) for a in ai_raw])
             sessions[name] = session
         return sessions

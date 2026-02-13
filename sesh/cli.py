@@ -57,7 +57,7 @@ def _detect_current_session() -> Session | None:
                 if s.tmux_session == tmux_name:
                     return s
 
-    # 2. Try repoyard which --json on $PWD → match by repoyard_index_name
+    # 2. Try boxyard which --json on $PWD → match by boxyard_index_name
     try:
         cwd = os.getcwd()
     except (FileNotFoundError, OSError):
@@ -65,16 +65,16 @@ def _detect_current_session() -> Session | None:
 
     try:
         result = subprocess.run(
-            ["repoyard", "which", "--json", "--path", cwd],
+            ["boxyard", "which", "--json", "--path", cwd],
             capture_output=True,
             text=True,
         )
         if result.returncode == 0:
-            rd_data = json.loads(result.stdout)
-            index_name = rd_data.get("index_name")
+            by_data = json.loads(result.stdout)
+            index_name = by_data.get("index_name")
             if index_name:
                 for s in sessions.values():
-                    if s.repoyard_index_name == index_name:
+                    if s.boxyard_index_name == index_name:
                         return s
     except (FileNotFoundError, json.JSONDecodeError):
         pass
@@ -87,11 +87,11 @@ def _detect_current_session() -> Session | None:
     return None
 
 
-def _repoyard_detect(dir_path: str) -> tuple[str | None, str | None]:
-    """Run repoyard which --json on a path. Returns (name, index_name) or (None, None)."""
+def _boxyard_detect(dir_path: str) -> tuple[str | None, str | None]:
+    """Run boxyard which --json on a path. Returns (name, index_name) or (None, None)."""
     try:
         result = subprocess.run(
-            ["repoyard", "which", "--json", "--path", dir_path],
+            ["boxyard", "which", "--json", "--path", dir_path],
             capture_output=True,
             text=True,
         )
@@ -131,8 +131,8 @@ def new(
 
     # Auto-detect name if not provided
     if name is None:
-        rd_name, _ = _repoyard_detect(dir_path)
-        name = rd_name or Path(dir_path).name
+        by_name, _ = _boxyard_detect(dir_path)
+        name = by_name or Path(dir_path).name
 
     # Check for existing session
     sessions = store.load()
@@ -151,14 +151,14 @@ def new(
             typer.echo(f"Parent session '{parent}' not found.", err=True)
             raise typer.Exit(code=1)
 
-    # Detect repoyard index name
-    _, index_name = _repoyard_detect(dir_path)
+    # Detect boxyard index name
+    _, index_name = _boxyard_detect(dir_path)
 
     session = Session(
         name=name,
         dir=dir_path,
         parent=parent,
-        repoyard_index_name=index_name,
+        boxyard_index_name=index_name,
         tags=tag or [],
         pinned=pin,
         flagged=flag,
@@ -227,7 +227,7 @@ def info(
             "created": session.created,
             "parent": session.parent,
             "children": session.children,
-            "repoyard_index_name": session.repoyard_index_name,
+            "boxyard_index_name": session.boxyard_index_name,
             "tags": session.tags,
         }
         typer.echo(json.dumps(data, indent=2))
@@ -247,8 +247,8 @@ def info(
             typer.echo(f"Parent:    {session.parent}")
         if session.children:
             typer.echo(f"Children:  {', '.join(session.children)}")
-        if session.repoyard_index_name:
-            typer.echo(f"Repoyard:  {session.repoyard_index_name}")
+        if session.boxyard_index_name:
+            typer.echo(f"Boxyard:   {session.boxyard_index_name}")
         if session.tags:
             typer.echo(f"Tags:      {', '.join(session.tags)}")
 

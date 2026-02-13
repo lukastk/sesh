@@ -119,6 +119,7 @@ def new(
     opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
     pin: Annotated[bool, typer.Option("--pin", help="Pin the session")] = False,
+    flag: Annotated[bool, typer.Option("--flag", help="Flag the session")] = False,
 ) -> None:
     """Create a new session."""
     if claude or opencode:
@@ -160,6 +161,7 @@ def new(
         repoyard_index_name=index_name,
         tags=tag or [],
         pinned=pin,
+        flagged=flag,
     )
     store.add(session)
 
@@ -221,6 +223,7 @@ def info(
             "tmux_live": tmux_live,
             "status": session.status,
             "pinned": session.pinned,
+            "flagged": session.flagged,
             "created": session.created,
             "parent": session.parent,
             "children": session.children,
@@ -234,6 +237,8 @@ def info(
         typer.echo(f"Status:    {session.status}")
         if session.pinned:
             typer.echo(f"Pinned:    yes")
+        if session.flagged:
+            typer.echo(f"Flagged:   yes")
         typer.echo(f"Created:   {session.created}")
         if session.tmux_session:
             status_str = "running" if tmux_live else "not running"
@@ -313,8 +318,93 @@ def unpin(
 
 
 # ---------------------------------------------------------------------------
+# sesh flag / sesh unflag
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def flag(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+    toggle: Annotated[bool, typer.Option("--toggle")] = False,
+) -> None:
+    """Flag a session."""
+    if name is None:
+        current = _detect_current_session()
+        if current is None:
+            typer.echo("Could not detect current session.", err=True)
+            raise typer.Exit(code=1)
+        name = current.name
+
+    try:
+        session = store.get(name)
+    except KeyError:
+        typer.echo(f"Session '{name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    if toggle:
+        session.flagged = not session.flagged
+    else:
+        if session.flagged:
+            typer.echo(f"Session '{name}' is already flagged.", err=True)
+            raise typer.Exit(code=1)
+        session.flagged = True
+
+    store.update(session)
+    state = "flagged" if session.flagged else "unflagged"
+    typer.echo(f"Session '{name}' is now {state}.", err=True)
+
+
+@app.command()
+def unflag(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Unflag a session."""
+    if name is None:
+        current = _detect_current_session()
+        if current is None:
+            typer.echo("Could not detect current session.", err=True)
+            raise typer.Exit(code=1)
+        name = current.name
+
+    try:
+        session = store.get(name)
+    except KeyError:
+        typer.echo(f"Session '{name}' not found.", err=True)
+        raise typer.Exit(code=1)
+
+    if not session.flagged:
+        typer.echo(f"Session '{name}' is not flagged.", err=True)
+        raise typer.Exit(code=1)
+
+    session.flagged = False
+    store.update(session)
+    typer.echo(f"Session '{name}' is now unflagged.", err=True)
+
+
+# ---------------------------------------------------------------------------
 # sesh list
 # ---------------------------------------------------------------------------
+
+
+def _resolve_show_markers(markers: bool | None) -> bool:
+    """Resolve show_markers: CLI flag overrides config default."""
+    if markers is not None:
+        return markers
+    config = load_config(_config_path)
+    return config.get("show_markers", True)
+
+
+def _session_markers(s: Session, show: bool = True) -> str:
+    if not show:
+        return ""
+    markers = ""
+    if s.pinned:
+        markers += "★"
+    if s.flagged:
+        markers += "⚑"
+    if s.status == "archived":
+        markers += "▪"
+    return f" {markers}" if markers else ""
 
 
 @app.command("list")
@@ -322,8 +412,11 @@ def list_sessions(
     all: Annotated[bool, typer.Option("--all")] = False,
     archived: Annotated[bool, typer.Option("--archived")] = False,
     pinned: Annotated[bool, typer.Option("--pinned")] = False,
+    flagged: Annotated[bool, typer.Option("--flagged")] = False,
+    any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
     tree: Annotated[bool, typer.Option("--tree")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
     """List sessions."""
     if all:
@@ -334,11 +427,15 @@ def list_sessions(
         status_filter = "active"
 
     pinned_filter = True if pinned else None
-    sessions = store.list(status=status_filter, pinned=pinned_filter)
+    flagged_filter = True if flagged else None
+    mode = "any" if any_filter else "all"
+    sessions = store.list(status=status_filter, pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
 
     if not sessions:
         typer.echo("No sessions found.", err=True)
         return
+
+    show_markers = _resolve_show_markers(markers)
 
     # Detect current session
     current = _detect_current_session()
@@ -351,14 +448,14 @@ def list_sessions(
         return
 
     if tree:
-        _print_tree(sessions, current_name)
+        _print_tree(sessions, current_name, show_markers)
         return
 
     # Default: table
-    _print_table(sessions, current_name)
+    _print_table(sessions, current_name, show_markers)
 
 
-def _print_table(sessions: list[Session], current_name: str | None) -> None:
+def _print_table(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> None:
     table = Table()
     table.add_column("NAME")
     table.add_column("DIR")
@@ -367,6 +464,7 @@ def _print_table(sessions: list[Session], current_name: str | None) -> None:
 
     for s in sessions:
         name_display = f"* {s.name}" if s.name == current_name else s.name
+        name_display += _session_markers(s, show_markers)
         tmux_status = ""
         if s.tmux_session:
             tmux_status = "running" if tmux.session_exists(s.tmux_session) else "stopped"
@@ -378,7 +476,7 @@ def _print_table(sessions: list[Session], current_name: str | None) -> None:
     console.print(table)
 
 
-def _print_tree(sessions: list[Session], current_name: str | None) -> None:
+def _print_tree(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> None:
     session_map = {s.name: s for s in sessions}
     roots = [s for s in sessions if s.parent is None or s.parent not in session_map]
 
@@ -389,11 +487,13 @@ def _print_tree(sessions: list[Session], current_name: str | None) -> None:
             if child_name in session_map:
                 child = session_map[child_name]
                 label = f"* {child.name}" if child.name == current_name else child.name
+                label += _session_markers(child, show_markers)
                 child_node = parent_node.add(f"{label} ({child.status})")
                 _add_children(child_node, child)
 
     for s in roots:
         label = f"* {s.name}" if s.name == current_name else s.name
+        label += _session_markers(s, show_markers)
         node = rich_tree.add(f"{label} ({s.status})")
         _add_children(node, s)
 
@@ -408,7 +508,7 @@ def _print_tree(sessions: list[Session], current_name: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _tree_picker(sessions: list[Session], current_name: str | None) -> str | None:
+def _tree_picker(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> str | None:
     """Show an interactive tree picker using Textual inline mode. Returns selected session name or None."""
     from textual.app import App, ComposeResult
     from textual.widgets import Tree as TextualTree
@@ -435,6 +535,7 @@ def _tree_picker(sessions: list[Session], current_name: str | None) -> str | Non
         def _build_tree(self, parent_node, parent_sessions):
             for s in parent_sessions:
                 label = f"* {s.name}" if s.name == current_name else s.name
+                label += _session_markers(s, show_markers)
                 children_sessions = [session_map[c] for c in s.children if c in session_map]
                 if children_sessions:
                     node = parent_node.add(label, data=s.name)
@@ -469,14 +570,20 @@ def switch(
     name: Annotated[Optional[str], typer.Argument()] = None,
     tree: Annotated[bool, typer.Option("--tree")] = False,
     pinned: Annotated[bool, typer.Option("--pinned")] = False,
+    flagged: Annotated[bool, typer.Option("--flagged")] = False,
+    any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
     next_session: Annotated[bool, typer.Option("--next")] = False,
     prev_session: Annotated[bool, typer.Option("--prev")] = False,
+    markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
     """Switch to a session. Outputs JSON to stdout for shell wrapper."""
     pinned_filter = True if pinned else None
+    flagged_filter = True if flagged else None
+    mode = "any" if any_filter else "all"
+    show_markers = _resolve_show_markers(markers)
 
     if name is None:
-        sessions = store.list(status="active", pinned=pinned_filter)
+        sessions = store.list(status="active", pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
         if not sessions:
             typer.echo("No active sessions.", err=True)
             raise typer.Exit(code=1)
@@ -496,7 +603,7 @@ def switch(
             offset = 1 if next_session else -1
             name = names[(idx + offset) % len(names)]
         elif tree:
-            name = _tree_picker(sessions, current_name)
+            name = _tree_picker(sessions, current_name, show_markers)
             if name is None:
                 raise typer.Exit(code=1)
         else:
@@ -507,7 +614,8 @@ def switch(
                 tmux_status = ""
                 if s.tmux_session:
                     tmux_status = "tmux" if tmux.session_exists(s.tmux_session) else "tmux(stopped)"
-                lines.append(f"{s.name}\t{s.dir}\t{tmux_status}")
+                m = _session_markers(s, show_markers)
+                lines.append(f"{s.name}{m}\t{s.dir}\t{tmux_status}")
                 if current_name and s.name == current_name:
                     current_line_num = idx
 
@@ -529,7 +637,7 @@ def switch(
             if result.returncode != 0:
                 raise typer.Exit(code=1)
 
-            name = result.stdout.strip().split("\t")[0]
+            name = result.stdout.strip().split("\t")[0].split(" ")[0]
 
     try:
         session = store.get(name)

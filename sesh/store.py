@@ -11,7 +11,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "sesh.json"
 
 def load_config(config_path: Path | None = None) -> dict:
     """Load config from sesh.json. Missing file or keys use built-in defaults."""
-    defaults = {"claude_command": "claude", "opencode_command": "opencode"}
+    defaults = {"claude_command": "claude", "opencode_command": "opencode", "show_markers": True}
     path = config_path or DEFAULT_CONFIG_PATH
     if path.exists():
         data = json.loads(path.read_text())
@@ -40,6 +40,7 @@ class Session:
     repoyard_index_name: str | None = None
     tags: list[str] = field(default_factory=list)
     pinned: bool = False
+    flagged: bool = False
     ai_sessions: list[AiSession] = field(default_factory=list)
 
 
@@ -100,12 +101,18 @@ class SessionStore:
         del sessions[name]
         self.save(sessions)
 
-    def list(self, status: str | None = None, pinned: bool | None = None) -> list[Session]:
+    def list(self, status: str | None = None, pinned: bool | None = None, flagged: bool | None = None, filter_mode: str = "all") -> list[Session]:
         sessions = self.load()
         result = list(sessions.values())
         if status is not None:
             result = [s for s in result if s.status == status]
+        bool_filters = []
         if pinned is not None:
-            result = [s for s in result if s.pinned == pinned]
+            bool_filters.append(lambda s: s.pinned == pinned)
+        if flagged is not None:
+            bool_filters.append(lambda s: s.flagged == flagged)
+        if bool_filters:
+            combine = all if filter_mode == "all" else any
+            result = [s for s in result if combine(f(s) for f in bool_filters)]
         return result
 

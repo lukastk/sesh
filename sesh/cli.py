@@ -507,7 +507,7 @@ def list_sessions(
     group: Annotated[Optional[list[str]], typer.Option("--group", help="Filter by group (repeatable)")] = None,
     any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
     tree: Annotated[bool, typer.Option("--tree", help="Show as parent-child tree")] = False,
-    groups_tree: Annotated[bool, typer.Option("--groups", help="Show as tree grouped by groups")] = False,
+    groups_tree: Annotated[bool, typer.Option("--tree-groups", help="Show as tree grouped by groups")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
     show_groups: Annotated[bool, typer.Option("--show-groups", help="Show groups column in table view")] = False,
     markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
@@ -764,8 +764,10 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
 @app.command()
 def switch(
     name: Annotated[Optional[str], typer.Argument(help="Session name (interactive picker if omitted)")] = None,
+    all: Annotated[bool, typer.Option("--all", help="Show all sessions including archived")] = False,
+    archived: Annotated[bool, typer.Option("--archived", help="Show only archived sessions")] = False,
     tree: Annotated[bool, typer.Option("--tree", help="Use tree picker")] = False,
-    groups_tree: Annotated[bool, typer.Option("--groups", help="Use tree picker grouped by groups")] = False,
+    groups_tree: Annotated[bool, typer.Option("--tree-groups", help="Use tree picker grouped by groups")] = False,
     group: Annotated[Optional[list[str]], typer.Option("--group", help="Filter by group (repeatable)")] = None,
     pinned: Annotated[bool, typer.Option("--pinned", help="Filter to pinned sessions")] = False,
     flagged: Annotated[bool, typer.Option("--flagged", help="Filter to flagged sessions")] = False,
@@ -775,13 +777,20 @@ def switch(
     markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
     """Switch to a session. Outputs JSON to stdout for shell wrapper."""
+    if all:
+        status_filter = None
+    elif archived:
+        status_filter = "archived"
+    else:
+        status_filter = "active"
+
     pinned_filter = True if pinned else None
     flagged_filter = True if flagged else None
     mode = "any" if any_filter else "all"
     show_markers = _resolve_show_markers(markers)
 
     if name is None:
-        sessions = store.list(status="active", pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
+        sessions = store.list(status=status_filter, pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
         _enrich_sessions(sessions)
 
         # Apply group filter after enrichment

@@ -11,7 +11,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "sesh.json"
 
 def load_config(config_path: Path | None = None) -> dict:
     """Load config from sesh.json. Missing file or keys use built-in defaults."""
-    defaults = {"claude_command": "claude", "opencode_command": "opencode", "show_markers": True, "boxyard_integration": True}
+    defaults = {"claude_command": "claude", "opencode_command": "opencode", "show_markers": True, "boxyard_integration": True, "tree_max_height": "90vh"}
     path = config_path or DEFAULT_CONFIG_PATH
     if path.exists():
         data = json.loads(path.read_text())

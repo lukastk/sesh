@@ -671,6 +671,9 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
     from textual.app import App, ComposeResult
     from textual.widgets import Tree as TextualTree
 
+    config = load_config(_config_path)
+    max_h = config.get("tree_max_height", "90vh")
+
     session_map = {s.name: s for s in sessions}
 
     # Build children map for parent-child tree
@@ -683,11 +686,11 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
     roots = [s for s in sessions if not s.parents or not any(p in session_map for p in s.parents)]
 
     class SessionPicker(App[str]):
-        CSS = """
-        Screen {
-            &:inline { height: auto; max-height: 50vh; }
-        }
-        Tree { height: auto; max-height: 50vh; }
+        CSS = f"""
+        Screen {{
+            &:inline {{ height: auto; max-height: {max_h}; }}
+        }}
+        Tree {{ height: auto; max-height: {max_h}; }}
         """
         INLINE_PADDING = 0
         current_node = None

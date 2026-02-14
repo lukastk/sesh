@@ -18,8 +18,16 @@ from sesh.store import AiSession, Session, SessionStore, load_config
 app = typer.Typer(add_completion=False)
 ai_app = typer.Typer(add_completion=False, help="Manage AI coding sessions.")
 app.add_typer(ai_app, name="ai")
+group_app = typer.Typer(add_completion=False, help="Manage session groups.")
+app.add_typer(group_app, name="group")
+parent_app = typer.Typer(add_completion=False, help="Manage session parents.")
+app.add_typer(parent_app, name="parent")
+boxyard_app = typer.Typer(add_completion=False, help="Per-session boxyard integration settings.")
+app.add_typer(boxyard_app, name="boxyard")
 store = SessionStore()
 _config_path: Path | None = None
+_boxyard_fast = None
+_boxyard_fast_loaded = False
 
 
 @app.callback()
@@ -40,6 +48,30 @@ def main(
 # ---------------------------------------------------------------------------
 
 
+def _get_boxyard_fast():
+    """Lazy-load BoxyardFast instance. Returns None if boxyard not available."""
+    global _boxyard_fast, _boxyard_fast_loaded
+    if not _boxyard_fast_loaded:
+        _boxyard_fast_loaded = True
+        try:
+            from boxyard._fast import BoxyardFast
+            _boxyard_fast = BoxyardFast.from_file()
+        except Exception:
+            _boxyard_fast = None
+    return _boxyard_fast
+
+
+def _boxyard_detect(dir_path: str) -> tuple[str | None, str | None]:
+    """Detect box name and index_name from a directory path."""
+    fast = _get_boxyard_fast()
+    if fast is None:
+        return None, None
+    result = fast.which(dir_path)
+    if result is None:
+        return None, None
+    return result.get("name"), result.get("index_name")
+
+
 def _detect_current_session() -> Session | None:
     """Try to detect the current session from environment context."""
     sessions = store.load()
@@ -57,27 +89,21 @@ def _detect_current_session() -> Session | None:
                 if s.tmux_session == tmux_name:
                     return s
 
-    # 2. Try boxyard which --json on $PWD → match by boxyard_index_name
+    # 2. Try boxyard on $PWD → match by boxyard_index_name
     try:
         cwd = os.getcwd()
     except (FileNotFoundError, OSError):
         return None
 
-    try:
-        result = subprocess.run(
-            ["boxyard", "which", "--json", "--path", cwd],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            by_data = json.loads(result.stdout)
-            index_name = by_data.get("index_name")
+    fast = _get_boxyard_fast()
+    if fast is not None:
+        by_result = fast.which(cwd)
+        if by_result is not None:
+            index_name = by_result.get("index_name")
             if index_name:
                 for s in sessions.values():
                     if s.boxyard_index_name == index_name:
                         return s
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
 
     # 3. Fall back to matching by dir == $PWD
     for s in sessions.values():
@@ -87,20 +113,46 @@ def _detect_current_session() -> Session | None:
     return None
 
 
-def _boxyard_detect(dir_path: str) -> tuple[str | None, str | None]:
-    """Run boxyard which --json on a path. Returns (name, index_name) or (None, None)."""
-    try:
-        result = subprocess.run(
-            ["boxyard", "which", "--json", "--path", dir_path],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            return data.get("name"), data.get("index_name")
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return None, None
+def _enrich_sessions(sessions: list[Session]) -> list[Session]:
+    """Merge boxyard groups and parents into sessions (in-memory only)."""
+    config = load_config(_config_path)
+    if not config.get("boxyard_integration", True):
+        return sessions
+    fast = _get_boxyard_fast()
+    if fast is None:
+        return sessions
+
+    # Build reverse map: boxyard_index_name → sesh session name
+    by_index = {s.boxyard_index_name: s.name for s in sessions if s.boxyard_index_name}
+
+    for s in sessions:
+        # Per-session override: skip if explicitly disabled
+        if s.boxyard_integration is False:
+            continue
+        if not s.boxyard_index_name:
+            continue
+        # Extract box_id from index_name (format: box_id__name)
+        parts = s.boxyard_index_name.split("__", 1)
+        if not parts:
+            continue
+        box_id = parts[0]
+
+        # Merge groups
+        by_groups = fast.groups_of(box_id)
+        for g in by_groups:
+            if g not in s.groups:
+                s.groups.append(g)
+
+        # Merge parents
+        by_parents = fast.parents_of(box_id)
+        for p in by_parents:
+            parent_index = p.get("index_name")
+            if parent_index and parent_index in by_index:
+                parent_name = by_index[parent_index]
+                if parent_name not in s.parents:
+                    s.parents.append(parent_name)
+
+    return sessions
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +165,8 @@ def new(
     name: Annotated[Optional[str], typer.Argument()] = None,
     dir: Annotated[Optional[Path], typer.Option("--dir")] = None,
     tmux_flag: Annotated[bool, typer.Option("--tmux")] = False,
-    parent: Annotated[Optional[str], typer.Option("--parent")] = None,
-    tag: Annotated[Optional[list[str]], typer.Option("--tag")] = None,
+    parent: Annotated[Optional[list[str]], typer.Option("--parent")] = None,
+    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
     claude: Annotated[bool, typer.Option("--claude", help="Also create a Claude Code AI session (implies --tmux)")] = False,
     opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
@@ -145,10 +197,11 @@ def new(
             typer.echo(f"Session '{name}' already exists and is active.", err=True)
             raise typer.Exit(code=1)
 
-    # Validate parent
-    if parent:
-        if parent not in sessions:
-            typer.echo(f"Parent session '{parent}' not found.", err=True)
+    # Validate parents
+    parents_list = parent or []
+    for p in parents_list:
+        if p not in sessions:
+            typer.echo(f"Parent session '{p}' not found.", err=True)
             raise typer.Exit(code=1)
 
     # Detect boxyard index name
@@ -157,20 +210,13 @@ def new(
     session = Session(
         name=name,
         dir=dir_path,
-        parent=parent,
+        parents=parents_list,
         boxyard_index_name=index_name,
-        tags=tag or [],
+        groups=group or [],
         pinned=pin,
         flagged=flag,
     )
     store.add(session)
-
-    # Update parent's children list
-    if parent:
-        parent_session = store.get(parent)
-        if name not in parent_session.children:
-            parent_session.children.append(name)
-            store.update(parent_session)
 
     # Create tmux session if requested
     if tmux_flag:
@@ -210,10 +256,31 @@ def info(
         typer.echo(f"Session '{name}' not found.", err=True)
         raise typer.Exit(code=1)
 
+    # Save sesh-owned values before enrichment
+    sesh_groups = list(session.groups)
+    sesh_parents = list(session.parents)
+
+    # Enrich with boxyard data
+    _enrich_sessions([session])
+
+    # Compute children dynamically
+    children = store.children_of(name)
+
     # Live-check tmux
     tmux_live = False
     if session.tmux_session:
         tmux_live = tmux.session_exists(session.tmux_session)
+
+    # Resolve boxyard integration status
+    config = load_config(_config_path)
+    global_by = config.get("boxyard_integration", True)
+    if session.boxyard_integration is not None:
+        by_enabled = session.boxyard_integration
+        by_source = "override"
+    else:
+        by_enabled = global_by
+        by_source = "global"
+    by_status = "enabled" if by_enabled else "disabled"
 
     if json_output:
         data = {
@@ -225,10 +292,11 @@ def info(
             "pinned": session.pinned,
             "flagged": session.flagged,
             "created": session.created,
-            "parent": session.parent,
-            "children": session.children,
+            "parents": session.parents,
+            "children": children,
             "boxyard_index_name": session.boxyard_index_name,
-            "tags": session.tags,
+            "boxyard_integration": f"{by_status} ({by_source})",
+            "groups": session.groups,
         }
         typer.echo(json.dumps(data, indent=2))
     else:
@@ -243,14 +311,21 @@ def info(
         if session.tmux_session:
             status_str = "running" if tmux_live else "not running"
             typer.echo(f"Tmux:      {session.tmux_session} ({status_str})")
-        if session.parent:
-            typer.echo(f"Parent:    {session.parent}")
-        if session.children:
-            typer.echo(f"Children:  {', '.join(session.children)}")
+        if session.parents:
+            labeled = []
+            for p in session.parents:
+                labeled.append(f"{p}*" if p not in sesh_parents else p)
+            typer.echo(f"Parents:   {', '.join(labeled)}")
+        if children:
+            typer.echo(f"Children:  {', '.join(children)}")
         if session.boxyard_index_name:
             typer.echo(f"Boxyard:   {session.boxyard_index_name}")
-        if session.tags:
-            typer.echo(f"Tags:      {', '.join(session.tags)}")
+        typer.echo(f"Boxyard:   {by_status} ({by_source})")
+        if session.groups:
+            labeled = []
+            for g in session.groups:
+                labeled.append(f"{g}*" if g not in sesh_groups else g)
+            typer.echo(f"Groups:    {', '.join(labeled)}")
 
 
 # ---------------------------------------------------------------------------
@@ -429,9 +504,12 @@ def list_sessions(
     archived: Annotated[bool, typer.Option("--archived")] = False,
     pinned: Annotated[bool, typer.Option("--pinned")] = False,
     flagged: Annotated[bool, typer.Option("--flagged")] = False,
+    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
     any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
     tree: Annotated[bool, typer.Option("--tree")] = False,
+    groups_tree: Annotated[bool, typer.Option("--groups", help="Tree view grouped by groups")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_groups: Annotated[bool, typer.Option("--show-groups", help="Show groups column in table view")] = False,
     markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
     """List sessions."""
@@ -445,7 +523,19 @@ def list_sessions(
     pinned_filter = True if pinned else None
     flagged_filter = True if flagged else None
     mode = "any" if any_filter else "all"
+
+    # Enrich before filtering so boxyard groups are available for --group filter
     sessions = store.list(status=status_filter, pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
+    _enrich_sessions(sessions)
+
+    # Apply group filter after enrichment
+    if group:
+        group_set = set(group)
+        if mode == "any" and (pinned or flagged):
+            # Groups participate in the OR filter alongside pinned/flagged
+            # Re-fetch without group filter, then apply combined OR
+            pass  # Already filtered by pinned/flagged with 'any', now add group match
+        sessions = [s for s in sessions if bool(set(s.groups) & group_set)]
 
     if not sessions:
         typer.echo("No sessions found.", err=True)
@@ -463,20 +553,25 @@ def list_sessions(
         typer.echo(json.dumps([asdict(s) for s in sessions], indent=2))
         return
 
-    if tree:
-        _print_tree(sessions, current_name, show_markers)
+    if tree or groups_tree:
+        if groups_tree:
+            _print_group_tree(sessions, current_name, show_markers)
+        else:
+            _print_tree(sessions, current_name, show_markers)
         return
 
     # Default: table
-    _print_table(sessions, current_name, show_markers)
+    _print_table(sessions, current_name, show_markers, show_groups=show_groups)
 
 
-def _print_table(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> None:
+def _print_table(sessions: list[Session], current_name: str | None, show_markers: bool = True, show_groups: bool = False) -> None:
     table = Table()
     table.add_column("NAME")
     table.add_column("DIR")
     table.add_column("TMUX")
     table.add_column("STATUS")
+    if show_groups:
+        table.add_column("GROUPS")
 
     for s in sessions:
         name_display = f"* {s.name}" if s.name == current_name else s.name
@@ -484,7 +579,10 @@ def _print_table(sessions: list[Session], current_name: str | None, show_markers
         tmux_status = ""
         if s.tmux_session:
             tmux_status = "running" if tmux.session_exists(s.tmux_session) else "stopped"
-        table.add_row(name_display, s.dir, tmux_status, s.status)
+        row = [name_display, s.dir, tmux_status, s.status]
+        if show_groups:
+            row.append(", ".join(s.groups) if s.groups else "")
+        table.add_row(*row)
 
     from rich.console import Console
 
@@ -494,24 +592,68 @@ def _print_table(sessions: list[Session], current_name: str | None, show_markers
 
 def _print_tree(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> None:
     session_map = {s.name: s for s in sessions}
-    roots = [s for s in sessions if s.parent is None or s.parent not in session_map]
+    # Roots: sessions with no parents, or whose parents are all outside this session list
+    roots = [s for s in sessions if not s.parents or not any(p in session_map for p in s.parents)]
+
+    # Build children map (a session with multiple parents appears under each)
+    children_map: dict[str, list[str]] = {s.name: [] for s in sessions}
+    for s in sessions:
+        for p in s.parents:
+            if p in children_map:
+                children_map[p].append(s.name)
 
     rich_tree = Tree("Sessions")
 
-    def _add_children(parent_node: Tree, parent_session: Session) -> None:
-        for child_name in parent_session.children:
+    def _add_children(parent_node: Tree, parent_name: str, visited: set[str]) -> None:
+        for child_name in children_map.get(parent_name, []):
             if child_name in session_map:
                 child = session_map[child_name]
                 label = f"* {child.name}" if child.name == current_name else child.name
                 label += _session_markers(child, show_markers)
                 child_node = parent_node.add(f"{label} ({child.status})")
-                _add_children(child_node, child)
+                if child_name not in visited:
+                    visited.add(child_name)
+                    _add_children(child_node, child_name, visited)
 
     for s in roots:
         label = f"* {s.name}" if s.name == current_name else s.name
         label += _session_markers(s, show_markers)
         node = rich_tree.add(f"{label} ({s.status})")
-        _add_children(node, s)
+        _add_children(node, s.name, {s.name})
+
+    from rich.console import Console
+
+    console = Console(stderr=True)
+    console.print(rich_tree)
+
+
+def _print_group_tree(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> None:
+    """Print sessions grouped by group name as a tree."""
+    # Collect all groups and their sessions
+    group_sessions: dict[str, list[Session]] = {}
+    ungrouped: list[Session] = []
+    for s in sessions:
+        if s.groups:
+            for g in s.groups:
+                group_sessions.setdefault(g, []).append(s)
+        else:
+            ungrouped.append(s)
+
+    rich_tree = Tree("Sessions")
+
+    for g in sorted(group_sessions):
+        group_node = rich_tree.add(f"[bold]{g}[/bold]")
+        for s in group_sessions[g]:
+            label = f"* {s.name}" if s.name == current_name else s.name
+            label += _session_markers(s, show_markers)
+            group_node.add(f"{label} ({s.status})")
+
+    if ungrouped:
+        other_node = rich_tree.add("[dim](ungrouped)[/dim]")
+        for s in ungrouped:
+            label = f"* {s.name}" if s.name == current_name else s.name
+            label += _session_markers(s, show_markers)
+            other_node.add(f"{label} ({s.status})")
 
     from rich.console import Console
 
@@ -524,13 +666,21 @@ def _print_tree(sessions: list[Session], current_name: str | None, show_markers:
 # ---------------------------------------------------------------------------
 
 
-def _tree_picker(sessions: list[Session], current_name: str | None, show_markers: bool = True) -> str | None:
+def _tree_picker(sessions: list[Session], current_name: str | None, show_markers: bool = True, groups_mode: bool = False) -> str | None:
     """Show an interactive tree picker using Textual inline mode. Returns selected session name or None."""
     from textual.app import App, ComposeResult
     from textual.widgets import Tree as TextualTree
 
     session_map = {s.name: s for s in sessions}
-    roots = [s for s in sessions if s.parent is None or s.parent not in session_map]
+
+    # Build children map for parent-child tree
+    children_map: dict[str, list[str]] = {s.name: [] for s in sessions}
+    for s in sessions:
+        for p in s.parents:
+            if p in children_map:
+                children_map[p].append(s.name)
+
+    roots = [s for s in sessions if not s.parents or not any(p in session_map for p in s.parents)]
 
     class SessionPicker(App[str]):
         CSS = """
@@ -545,21 +695,51 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
         def compose(self) -> ComposeResult:
             tree: TextualTree[str] = TextualTree("Sessions")
             tree.show_root = False
-            self._build_tree(tree.root, roots)
+            if groups_mode:
+                self._build_group_tree(tree.root)
+            else:
+                self._build_tree(tree.root, roots, set())
             yield tree
 
-        def _build_tree(self, parent_node, parent_sessions):
+        def _build_tree(self, parent_node, parent_sessions, visited):
             for s in parent_sessions:
                 label = f"* {s.name}" if s.name == current_name else s.name
                 label += _session_markers(s, show_markers)
-                children_sessions = [session_map[c] for c in s.children if c in session_map]
-                if children_sessions:
+                child_names = children_map.get(s.name, [])
+                child_sessions = [session_map[c] for c in child_names if c in session_map]
+                if child_sessions and s.name not in visited:
                     node = parent_node.add(label, data=s.name)
                     if s.name == current_name:
                         self.current_node = node
-                    self._build_tree(node, children_sessions)
+                    self._build_tree(node, child_sessions, visited | {s.name})
                 else:
                     node = parent_node.add_leaf(label, data=s.name)
+                    if s.name == current_name:
+                        self.current_node = node
+
+        def _build_group_tree(self, root_node):
+            group_sessions: dict[str, list[Session]] = {}
+            ungrouped: list[Session] = []
+            for s in sessions:
+                if s.groups:
+                    for g in s.groups:
+                        group_sessions.setdefault(g, []).append(s)
+                else:
+                    ungrouped.append(s)
+            for g in sorted(group_sessions):
+                group_node = root_node.add(g)
+                for s in group_sessions[g]:
+                    label = f"* {s.name}" if s.name == current_name else s.name
+                    label += _session_markers(s, show_markers)
+                    node = group_node.add_leaf(label, data=s.name)
+                    if s.name == current_name:
+                        self.current_node = node
+            if ungrouped:
+                other_node = root_node.add("(ungrouped)")
+                for s in ungrouped:
+                    label = f"* {s.name}" if s.name == current_name else s.name
+                    label += _session_markers(s, show_markers)
+                    node = other_node.add_leaf(label, data=s.name)
                     if s.name == current_name:
                         self.current_node = node
 
@@ -585,6 +765,8 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
 def switch(
     name: Annotated[Optional[str], typer.Argument()] = None,
     tree: Annotated[bool, typer.Option("--tree")] = False,
+    groups_tree: Annotated[bool, typer.Option("--groups", help="Tree view grouped by groups")] = False,
+    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
     pinned: Annotated[bool, typer.Option("--pinned")] = False,
     flagged: Annotated[bool, typer.Option("--flagged")] = False,
     any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
@@ -600,6 +782,13 @@ def switch(
 
     if name is None:
         sessions = store.list(status="active", pinned=pinned_filter, flagged=flagged_filter, filter_mode=mode)
+        _enrich_sessions(sessions)
+
+        # Apply group filter after enrichment
+        if group:
+            group_set = set(group)
+            sessions = [s for s in sessions if bool(set(s.groups) & group_set)]
+
         if not sessions:
             typer.echo("No active sessions.", err=True)
             raise typer.Exit(code=1)
@@ -618,8 +807,8 @@ def switch(
             idx = names.index(current_name)
             offset = 1 if next_session else -1
             name = names[(idx + offset) % len(names)]
-        elif tree:
-            name = _tree_picker(sessions, current_name, show_markers)
+        elif tree or groups_tree:
+            name = _tree_picker(sessions, current_name, show_markers, groups_mode=groups_tree)
             if name is None:
                 raise typer.Exit(code=1)
         else:
@@ -747,9 +936,10 @@ def archive(
         typer.echo(f"Session '{name}' is not active (status: {session.status}).", err=True)
         raise typer.Exit(code=1)
 
-    # Warn if active children
+    # Warn if active children (computed dynamically)
+    children = store.children_of(name)
     active_children = []
-    for child_name in session.children:
+    for child_name in children:
         try:
             child = store.get(child_name)
             if child.status == "active":
@@ -824,7 +1014,8 @@ def delete(
         typer.echo(f"Session '{name}' not found.", err=True)
         raise typer.Exit(code=1)
 
-    if (session.status == "active" or session.children) and not force:
+    children = store.children_of(name)
+    if (session.status == "active" or children) and not force:
         typer.echo(f"Session '{name}' is active or has children. Use --force to delete.", err=True)
         raise typer.Exit(code=1)
 
@@ -832,27 +1023,159 @@ def delete(
     if session.tmux_session and tmux.session_exists(session.tmux_session):
         tmux.kill_session(session.tmux_session)
 
-    # Remove from parent's children list
-    if session.parent:
-        try:
-            parent_session = store.get(session.parent)
-            if name in parent_session.children:
-                parent_session.children.remove(name)
-                store.update(parent_session)
-        except KeyError:
-            pass
-
-    # Orphan children (set parent to None)
-    for child_name in session.children:
+    # Orphan children (remove this session from their parents list)
+    for child_name in children:
         try:
             child = store.get(child_name)
-            child.parent = None
-            store.update(child)
+            if name in child.parents:
+                child.parents.remove(name)
+                store.update(child)
         except KeyError:
             pass
 
     store.remove(name)
     typer.echo(f"Deleted session '{name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh group add / remove / list
+# ---------------------------------------------------------------------------
+
+
+@group_app.command("add")
+def group_add(
+    group: Annotated[str, typer.Argument()],
+    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+) -> None:
+    """Add a group to a session."""
+    session = _resolve_sesh(name)
+    if group in session.groups:
+        typer.echo(f"Session '{session.name}' is already in group '{group}'.", err=True)
+        raise typer.Exit(code=1)
+    session.groups.append(group)
+    store.update(session)
+    typer.echo(f"Added group '{group}' to session '{session.name}'.", err=True)
+
+
+@group_app.command("remove")
+def group_remove(
+    group: Annotated[str, typer.Argument()],
+    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+) -> None:
+    """Remove a group from a session."""
+    session = _resolve_sesh(name)
+    if group not in session.groups:
+        typer.echo(f"Session '{session.name}' is not in group '{group}'.", err=True)
+        raise typer.Exit(code=1)
+    session.groups.remove(group)
+    store.update(session)
+    typer.echo(f"Removed group '{group}' from session '{session.name}'.", err=True)
+
+
+@group_app.command("list")
+def group_list(
+    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+) -> None:
+    """List groups. With --name: groups for that session. Without: all groups."""
+    if name is not None:
+        session = _resolve_sesh(name)
+        sesh_groups = set(session.groups)
+        _enrich_sessions([session])
+        labeled = []
+        for g in session.groups:
+            labeled.append(f"{g}*" if g not in sesh_groups else g)
+        if labeled:
+            typer.echo(", ".join(labeled), err=True)
+        else:
+            typer.echo("No groups.", err=True)
+    else:
+        sessions = store.list()
+        _enrich_sessions(sessions)
+        all_groups = set()
+        for s in sessions:
+            all_groups.update(s.groups)
+        if all_groups:
+            for g in sorted(all_groups):
+                typer.echo(g, err=True)
+        else:
+            typer.echo("No groups.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh parent add / remove
+# ---------------------------------------------------------------------------
+
+
+@parent_app.command("add")
+def parent_add(
+    parent: Annotated[str, typer.Argument()],
+    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+) -> None:
+    """Add a parent to a session."""
+    session = _resolve_sesh(name)
+    sessions = store.load()
+    if parent not in sessions:
+        typer.echo(f"Parent session '{parent}' not found.", err=True)
+        raise typer.Exit(code=1)
+    if parent in session.parents:
+        typer.echo(f"'{parent}' is already a parent of '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+    session.parents.append(parent)
+    store.update(session)
+    typer.echo(f"Added parent '{parent}' to session '{session.name}'.", err=True)
+
+
+@parent_app.command("remove")
+def parent_remove(
+    parent: Annotated[str, typer.Argument()],
+    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+) -> None:
+    """Remove a parent from a session."""
+    session = _resolve_sesh(name)
+    if parent not in session.parents:
+        typer.echo(f"'{parent}' is not a parent of '{session.name}'.", err=True)
+        raise typer.Exit(code=1)
+    session.parents.remove(parent)
+    store.update(session)
+    typer.echo(f"Removed parent '{parent}' from session '{session.name}'.", err=True)
+
+
+# ---------------------------------------------------------------------------
+# sesh boxyard enable / disable / reset
+# ---------------------------------------------------------------------------
+
+
+@boxyard_app.command("enable")
+def boxyard_enable(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Enable boxyard integration for a session (override)."""
+    session = _resolve_sesh(name)
+    session.boxyard_integration = True
+    store.update(session)
+    typer.echo(f"Boxyard integration enabled (override) for '{session.name}'.", err=True)
+
+
+@boxyard_app.command("disable")
+def boxyard_disable(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Disable boxyard integration for a session (override)."""
+    session = _resolve_sesh(name)
+    session.boxyard_integration = False
+    store.update(session)
+    typer.echo(f"Boxyard integration disabled (override) for '{session.name}'.", err=True)
+
+
+@boxyard_app.command("reset")
+def boxyard_reset(
+    name: Annotated[Optional[str], typer.Argument()] = None,
+) -> None:
+    """Reset boxyard integration to inherit from global config."""
+    session = _resolve_sesh(name)
+    session.boxyard_integration = None
+    store.update(session)
+    typer.echo(f"Boxyard integration reset to global default for '{session.name}'.", err=True)
 
 
 # ---------------------------------------------------------------------------

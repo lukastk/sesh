@@ -11,7 +11,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "sesh.json"
 
 def load_config(config_path: Path | None = None) -> dict:
     """Load config from sesh.json. Missing file or keys use built-in defaults."""
-    defaults = {"claude_command": "claude", "opencode_command": "opencode", "show_markers": True}
+    defaults = {"claude_command": "claude", "opencode_command": "opencode", "show_markers": True, "boxyard_integration": True}
     path = config_path or DEFAULT_CONFIG_PATH
     if path.exists():
         data = json.loads(path.read_text())
@@ -35,12 +35,12 @@ class Session:
     tmux_session: str | None = None
     status: str = "active"
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    parent: str | None = None
-    children: list[str] = field(default_factory=list)
+    parents: list[str] = field(default_factory=list)
     boxyard_index_name: str | None = None
-    tags: list[str] = field(default_factory=list)
+    groups: list[str] = field(default_factory=list)
     pinned: bool = False
     flagged: bool = False
+    boxyard_integration: bool | None = None
     ai_sessions: list[AiSession] = field(default_factory=list)
 
 
@@ -63,9 +63,23 @@ class SessionStore:
             # Migrate old repoyard_index_name → boxyard_index_name
             if "repoyard_index_name" in s:
                 s["boxyard_index_name"] = s.pop("repoyard_index_name")
+            # Migrate parent → parents
+            if "parent" in s:
+                old_parent = s.pop("parent")
+                s["parents"] = [old_parent] if old_parent else []
+            # Remove stored children (now computed dynamically)
+            s.pop("children", None)
+            # Migrate tags → groups
+            if "tags" in s:
+                s["groups"] = s.pop("tags")
             session = Session(**s, ai_sessions=[AiSession(**a) for a in ai_raw])
             sessions[name] = session
         return sessions
+
+    def children_of(self, name: str) -> list[str]:
+        """Compute children by scanning all sessions' parents."""
+        sessions = self.load()
+        return [s.name for s in sessions.values() if name in s.parents]
 
     def save(self, sessions: dict[str, Session]) -> None:
         self._ensure_dir()
@@ -104,7 +118,7 @@ class SessionStore:
         del sessions[name]
         self.save(sessions)
 
-    def list(self, status: str | None = None, pinned: bool | None = None, flagged: bool | None = None, filter_mode: str = "all") -> list[Session]:
+    def list(self, status: str | None = None, pinned: bool | None = None, flagged: bool | None = None, groups: list[str] | None = None, filter_mode: str = "all") -> list[Session]:
         sessions = self.load()
         result = list(sessions.values())
         if status is not None:
@@ -114,6 +128,9 @@ class SessionStore:
             bool_filters.append(lambda s: s.pinned == pinned)
         if flagged is not None:
             bool_filters.append(lambda s: s.flagged == flagged)
+        if groups is not None:
+            groups_set = set(groups)
+            bool_filters.append(lambda s, gs=groups_set: bool(set(s.groups) & gs))
         if bool_filters:
             combine = all if filter_mode == "all" else any
             result = [s for s in result if combine(f(s) for f in bool_filters)]

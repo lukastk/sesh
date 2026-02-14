@@ -162,11 +162,11 @@ def _enrich_sessions(sessions: list[Session]) -> list[Session]:
 
 @app.command()
 def new(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    dir: Annotated[Optional[Path], typer.Option("--dir")] = None,
-    tmux_flag: Annotated[bool, typer.Option("--tmux")] = False,
-    parent: Annotated[Optional[list[str]], typer.Option("--parent")] = None,
-    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected from dir if omitted)")] = None,
+    dir: Annotated[Optional[Path], typer.Option("--dir", help="Working directory for the session")] = None,
+    tmux_flag: Annotated[bool, typer.Option("--tmux", help="Create a tmux session")] = False,
+    parent: Annotated[Optional[list[str]], typer.Option("--parent", help="Parent session (repeatable)")] = None,
+    group: Annotated[Optional[list[str]], typer.Option("--group", help="Add to group (repeatable)")] = None,
     claude: Annotated[bool, typer.Option("--claude", help="Also create a Claude Code AI session (implies --tmux)")] = False,
     opencode: Annotated[bool, typer.Option("--opencode", help="Also create an OpenCode AI session (implies --tmux)")] = False,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
@@ -239,8 +239,8 @@ def new(
 
 @app.command()
 def info(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ) -> None:
     """Show info about a session."""
     if name is None:
@@ -335,8 +335,8 @@ def info(
 
 @app.command()
 def pin(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    toggle: Annotated[bool, typer.Option("--toggle")] = False,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    toggle: Annotated[bool, typer.Option("--toggle", help="Toggle pin state")] = False,
 ) -> None:
     """Pin a session."""
     if name is None:
@@ -367,7 +367,7 @@ def pin(
 
 @app.command()
 def unpin(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Unpin a session."""
     if name is None:
@@ -399,8 +399,8 @@ def unpin(
 
 @app.command()
 def flag(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    toggle: Annotated[bool, typer.Option("--toggle")] = False,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    toggle: Annotated[bool, typer.Option("--toggle", help="Toggle flag state")] = False,
 ) -> None:
     """Flag a session."""
     if name is None:
@@ -431,7 +431,7 @@ def flag(
 
 @app.command()
 def unflag(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Unflag a session."""
     if name is None:
@@ -500,15 +500,15 @@ def _session_markers(s: Session, show: bool = True) -> str:
 
 @app.command("list")
 def list_sessions(
-    all: Annotated[bool, typer.Option("--all")] = False,
-    archived: Annotated[bool, typer.Option("--archived")] = False,
-    pinned: Annotated[bool, typer.Option("--pinned")] = False,
-    flagged: Annotated[bool, typer.Option("--flagged")] = False,
-    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
+    all: Annotated[bool, typer.Option("--all", help="Show all sessions including archived")] = False,
+    archived: Annotated[bool, typer.Option("--archived", help="Show only archived sessions")] = False,
+    pinned: Annotated[bool, typer.Option("--pinned", help="Filter to pinned sessions")] = False,
+    flagged: Annotated[bool, typer.Option("--flagged", help="Filter to flagged sessions")] = False,
+    group: Annotated[Optional[list[str]], typer.Option("--group", help="Filter by group (repeatable)")] = None,
     any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
-    tree: Annotated[bool, typer.Option("--tree")] = False,
-    groups_tree: Annotated[bool, typer.Option("--groups", help="Tree view grouped by groups")] = False,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+    tree: Annotated[bool, typer.Option("--tree", help="Show as parent-child tree")] = False,
+    groups_tree: Annotated[bool, typer.Option("--groups", help="Show as tree grouped by groups")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
     show_groups: Annotated[bool, typer.Option("--show-groups", help="Show groups column in table view")] = False,
     markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
@@ -763,15 +763,15 @@ def _tree_picker(sessions: list[Session], current_name: str | None, show_markers
 
 @app.command()
 def switch(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    tree: Annotated[bool, typer.Option("--tree")] = False,
-    groups_tree: Annotated[bool, typer.Option("--groups", help="Tree view grouped by groups")] = False,
-    group: Annotated[Optional[list[str]], typer.Option("--group")] = None,
-    pinned: Annotated[bool, typer.Option("--pinned")] = False,
-    flagged: Annotated[bool, typer.Option("--flagged")] = False,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (interactive picker if omitted)")] = None,
+    tree: Annotated[bool, typer.Option("--tree", help="Use tree picker")] = False,
+    groups_tree: Annotated[bool, typer.Option("--groups", help="Use tree picker grouped by groups")] = False,
+    group: Annotated[Optional[list[str]], typer.Option("--group", help="Filter by group (repeatable)")] = None,
+    pinned: Annotated[bool, typer.Option("--pinned", help="Filter to pinned sessions")] = False,
+    flagged: Annotated[bool, typer.Option("--flagged", help="Filter to flagged sessions")] = False,
     any_filter: Annotated[bool, typer.Option("--any", help="Match any filter (OR) instead of all (AND)")] = False,
-    next_session: Annotated[bool, typer.Option("--next")] = False,
-    prev_session: Annotated[bool, typer.Option("--prev")] = False,
+    next_session: Annotated[bool, typer.Option("--next", help="Switch to next session in list")] = False,
+    prev_session: Annotated[bool, typer.Option("--prev", help="Switch to previous session in list")] = False,
     markers: Annotated[Optional[bool], typer.Option("--markers/--no-markers", help="Show status markers after session names")] = None,
 ) -> None:
     """Switch to a session. Outputs JSON to stdout for shell wrapper."""
@@ -872,7 +872,7 @@ def switch(
 
 @app.command("attach-tmux")
 def attach_tmux(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
     existing: Annotated[Optional[str], typer.Option("--existing", help="Name of an existing tmux session to attach")] = None,
 ) -> None:
     """Attach a tmux session to an existing sesh. Creates a new tmux session by default, or use --existing to link an already-running one."""
@@ -915,8 +915,8 @@ def attach_tmux(
 
 @app.command()
 def archive(
-    name: Annotated[Optional[str], typer.Argument()] = None,
-    kill_tmux: Annotated[bool, typer.Option("--kill-tmux")] = False,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    kill_tmux: Annotated[bool, typer.Option("--kill-tmux", help="Kill the tmux session instead of renaming it")] = False,
 ) -> None:
     """Archive a session."""
     if name is None:
@@ -973,7 +973,7 @@ def archive(
 
 @app.command()
 def restore(
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
     """Restore an archived session."""
     try:
@@ -1004,8 +1004,8 @@ def restore(
 
 @app.command()
 def delete(
-    name: Annotated[str, typer.Argument()],
-    force: Annotated[bool, typer.Option("--force")] = False,
+    name: Annotated[str, typer.Argument(help="Session name")],
+    force: Annotated[bool, typer.Option("--force", help="Force delete active sessions or sessions with children")] = False,
 ) -> None:
     """Delete a session."""
     try:
@@ -1044,8 +1044,8 @@ def delete(
 
 @group_app.command("add")
 def group_add(
-    group: Annotated[str, typer.Argument()],
-    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+    group: Annotated[str, typer.Argument(help="Group name")],
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Add a group to a session."""
     session = _resolve_sesh(name)
@@ -1059,8 +1059,8 @@ def group_add(
 
 @group_app.command("remove")
 def group_remove(
-    group: Annotated[str, typer.Argument()],
-    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+    group: Annotated[str, typer.Argument(help="Group name")],
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Remove a group from a session."""
     session = _resolve_sesh(name)
@@ -1074,7 +1074,7 @@ def group_remove(
 
 @group_app.command("list")
 def group_list(
-    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Show groups for this session only")] = None,
 ) -> None:
     """List groups. With --name: groups for that session. Without: all groups."""
     if name is not None:
@@ -1108,8 +1108,8 @@ def group_list(
 
 @parent_app.command("add")
 def parent_add(
-    parent: Annotated[str, typer.Argument()],
-    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+    parent: Annotated[str, typer.Argument(help="Parent session name")],
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Add a parent to a session."""
     session = _resolve_sesh(name)
@@ -1127,8 +1127,8 @@ def parent_add(
 
 @parent_app.command("remove")
 def parent_remove(
-    parent: Annotated[str, typer.Argument()],
-    name: Annotated[Optional[str], typer.Option("--name", "-n")] = None,
+    parent: Annotated[str, typer.Argument(help="Parent session name")],
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Remove a parent from a session."""
     session = _resolve_sesh(name)
@@ -1147,7 +1147,7 @@ def parent_remove(
 
 @boxyard_app.command("enable")
 def boxyard_enable(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Enable boxyard integration for a session (override)."""
     session = _resolve_sesh(name)
@@ -1158,7 +1158,7 @@ def boxyard_enable(
 
 @boxyard_app.command("disable")
 def boxyard_disable(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Disable boxyard integration for a session (override)."""
     session = _resolve_sesh(name)
@@ -1169,7 +1169,7 @@ def boxyard_disable(
 
 @boxyard_app.command("reset")
 def boxyard_reset(
-    name: Annotated[Optional[str], typer.Argument()] = None,
+    name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Reset boxyard integration to inherit from global config."""
     session = _resolve_sesh(name)
@@ -1400,8 +1400,8 @@ def _create_ai_session(
 
 @ai_app.command("list")
 def ai_list(
-    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+    sesh_name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ) -> None:
     """List AI sessions for a sesh."""
     session = _resolve_sesh(sesh_name)
@@ -1439,9 +1439,9 @@ def ai_list(
 
 @ai_app.command("new")
 def ai_new(
-    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
-    ai_type: Annotated[str, typer.Option("--type")] = "claude",
-    ai_name: Annotated[Optional[str], typer.Option("--name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    ai_type: Annotated[str, typer.Option("--type", help="AI type: claude or opencode")] = "claude",
+    ai_name: Annotated[Optional[str], typer.Option("--name", help="Name for the AI session")] = None,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
 ) -> None:
     """Create a new AI session and launch it in tmux."""
@@ -1456,8 +1456,8 @@ def ai_new(
 
 @ai_app.command("resume")
 def ai_resume(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Resume an existing AI session in tmux."""
     session = _resolve_sesh(sesh_name)
@@ -1489,8 +1489,8 @@ def ai_resume(
 
 @ai_app.command("enter")
 def ai_enter(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
     cmd: Annotated[Optional[str], typer.Option("--cmd", help="Override the AI command binary")] = None,
 ) -> None:
     """Enter an AI session interactively in the current terminal."""
@@ -1548,10 +1548,10 @@ def ai_enter(
 
 @ai_app.command("add")
 def ai_add(
-    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
-    ai_type: Annotated[str, typer.Option("--type")] = "claude",
-    ai_name: Annotated[str, typer.Option("--name")] = ...,
-    session_id: Annotated[str, typer.Option("--id")] = ...,
+    sesh_name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
+    ai_type: Annotated[str, typer.Option("--type", help="AI type: claude or opencode")] = "claude",
+    ai_name: Annotated[str, typer.Option("--name", help="Name for the AI session")] = ...,
+    session_id: Annotated[str, typer.Option("--id", help="Existing AI session ID to register")] = ...,
 ) -> None:
     """Manually register an existing AI session ID."""
     session = _resolve_sesh(sesh_name)
@@ -1574,8 +1574,8 @@ def ai_add(
 
 @ai_app.command("remove")
 def ai_remove(
-    ai_name: Annotated[str, typer.Argument()],
-    sesh_name: Annotated[Optional[str], typer.Argument()] = None,
+    ai_name: Annotated[str, typer.Argument(help="AI session name")],
+    sesh_name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Remove an AI session record from a sesh."""
     session = _resolve_sesh(sesh_name)
@@ -1598,9 +1598,9 @@ def ai_remove(
 
 @ai_app.command("_register", hidden=True)
 def ai_register(
-    sesh_name: Annotated[str, typer.Argument()],
-    ai_name: Annotated[str, typer.Argument()],
-    session_id: Annotated[str, typer.Argument()],
+    sesh_name: Annotated[str, typer.Argument(help="Session name")],
+    ai_name: Annotated[str, typer.Argument(help="AI session name")],
+    session_id: Annotated[str, typer.Argument(help="AI session ID")],
 ) -> None:
     """Internal: update a pending AI session ID."""
     try:
@@ -1643,8 +1643,8 @@ def _get_transcript(session: Session, ai: AiSession) -> list[dict]:
 
 @ai_app.command("transcript")
 def ai_transcript(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Get the full chat transcript for an AI session. Outputs JSON to stdout."""
     session = _resolve_sesh(sesh_name)
@@ -1670,8 +1670,8 @@ def ai_transcript(
 
 @ai_app.command("transcript-head")
 def ai_transcript_head(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
     count: Annotated[int, typer.Option("-n", "--count", help="Number of messages to show")] = 10,
     offset: Annotated[int, typer.Option("--offset", help="Skip this many messages from the start")] = 0,
 ) -> None:
@@ -1696,8 +1696,8 @@ def ai_transcript_head(
 
 @ai_app.command("transcript-tail")
 def ai_transcript_tail(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
     count: Annotated[int, typer.Option("-n", "--count", help="Number of messages to show")] = 10,
     offset: Annotated[int, typer.Option("--offset", help="Skip this many messages from the end")] = 0,
 ) -> None:
@@ -1733,8 +1733,8 @@ def ai_transcript_tail(
 
 @ai_app.command("last-message")
 def ai_last_message(
-    ai_name: Annotated[Optional[str], typer.Argument()] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    ai_name: Annotated[Optional[str], typer.Argument(help="AI session name")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
     role: Annotated[Optional[str], typer.Option("--role", help="Filter by role: user or assistant")] = None,
 ) -> None:
     """Get the last message from an AI session. Outputs JSON to stdout."""
@@ -1768,9 +1768,9 @@ def ai_last_message(
 
 @ai_app.command("send")
 def ai_send(
-    message: Annotated[str, typer.Argument()],
+    message: Annotated[str, typer.Argument(help="Message to send")],
     name: Annotated[Optional[str], typer.Option("--name", help="AI session name")] = None,
-    sesh_name: Annotated[Optional[str], typer.Option("--sesh")] = None,
+    sesh_name: Annotated[Optional[str], typer.Option("--sesh", help="Session name (auto-detected if omitted)")] = None,
 ) -> None:
     """Send a message to an AI session and return the response. Outputs JSON to stdout."""
     session = _resolve_sesh(sesh_name)

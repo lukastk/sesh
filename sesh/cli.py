@@ -814,11 +814,12 @@ def switch(
                 raise typer.Exit(code=1)
             names = [s.name for s in sessions]
             if current_name not in names:
-                typer.echo(f"Current session '{current_name}' not in list.", err=True)
-                raise typer.Exit(code=1)
-            idx = names.index(current_name)
-            offset = 1 if next_session else -1
-            name = names[(idx + offset) % len(names)]
+                # Current session not in filtered list — pick first or last
+                name = names[0] if next_session else names[-1]
+            else:
+                idx = names.index(current_name)
+                offset = 1 if next_session else -1
+                name = names[(idx + offset) % len(names)]
         elif tree or groups_tree:
             name = _tree_picker(sessions, current_name, show_markers, groups_mode=groups_tree)
             if name is None:

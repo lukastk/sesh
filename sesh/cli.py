@@ -237,6 +237,12 @@ def new(
 # ---------------------------------------------------------------------------
 
 
+@app.command("sessions-file")
+def sessions_file() -> None:
+    """Print the path to the sessions file."""
+    typer.echo(str(store.sessions_file))
+
+
 @app.command()
 def info(
     name: Annotated[Optional[str], typer.Argument(help="Session name (auto-detected if omitted)")] = None,

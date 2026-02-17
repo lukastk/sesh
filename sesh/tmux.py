@@ -5,7 +5,7 @@ import subprocess
 
 def session_exists(name: str) -> bool:
     result = subprocess.run(
-        ["tmux", "has-session", "-t", name],
+        ["tmux", "has-session", "-t", f"={name}"],
         capture_output=True,
     )
     return result.returncode == 0

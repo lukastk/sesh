@@ -72,7 +72,8 @@ class SessionStore:
             # Migrate tags → groups
             if "tags" in s:
                 s["groups"] = s.pop("tags")
-            session = Session(**s, ai_sessions=[AiSession(**a) for a in ai_raw])
+            s.pop("name", None)  # name derives from the dict key
+            session = Session(name=name, **s, ai_sessions=[AiSession(**a) for a in ai_raw])
             sessions[name] = session
         return sessions
 
@@ -85,7 +86,10 @@ class SessionStore:
         self._ensure_dir()
         data = {
             "version": 1,
-            "sessions": {name: asdict(s) for name, s in sessions.items()},
+            "sessions": {
+                name: {k: v for k, v in asdict(s).items() if k != "name"}
+                for name, s in sessions.items()
+            },
         }
         tmp = self.sessions_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2) + "\n")

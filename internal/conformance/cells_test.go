@@ -57,7 +57,7 @@ func init() {
 	skipAll("ticket.needs-input", "ticket.needs-input: derived view active && waiting")
 
 	// ---- daemon / API ----
-	skipAll("daemon.lifecycle", "daemon.lifecycle: start/stop/status")
+	// daemon.lifecycle: real tests bound in daemon_test.go (local + remote).
 	skipAll("daemon.mesh-read", "daemon.mesh-read: cross-machine read via peer mesh")
 	skipAll("ticket.ownership", "ticket.ownership: single canonical owner, writes route to owner")
 	skipAll("api.http-json", "api.http-json: client-facing HTTP+JSON surface")

@@ -20,6 +20,7 @@ import (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
+	cleanupHarness()
 
 	// Render the grid for humans...
 	matrix.RenderGrid(os.Stdout)

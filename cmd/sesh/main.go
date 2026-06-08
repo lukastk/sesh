@@ -22,6 +22,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh matrix:", err)
 			os.Exit(1)
 		}
+	case "daemon":
+		if err := runDaemon(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh daemon:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -37,6 +42,7 @@ func usage() {
 usage: sesh <command> [args]
 
 commands:
+  daemon    per-machine daemon (run | start | stop | status)
   matrix    report the feature-matrix state (grid | skips)
 
 (more commands land as the development plan progresses)`)

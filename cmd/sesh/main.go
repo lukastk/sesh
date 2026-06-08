@@ -27,6 +27,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh daemon:", err)
 			os.Exit(1)
 		}
+	case "tmux":
+		if err := runTmux(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh tmux:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -43,6 +48,7 @@ usage: sesh <command> [args]
 
 commands:
   daemon    per-machine daemon (run | start | stop | status)
+  tmux      tmux layer (current | info | create-session | create-pane | send-text | stage-file)
   matrix    report the feature-matrix state (grid | skips)
 
 (more commands land as the development plan progresses)`)

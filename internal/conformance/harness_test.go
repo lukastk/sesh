@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -71,42 +72,74 @@ type Runner interface {
 
 // Sandbox is an isolated daemon home plus the runner that drives it.
 type Sandbox struct {
-	Home    string
-	Machine string
-	Runner  Runner
+	Home       string
+	Machine    string
+	TmuxSocket string
+	Runner     Runner
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
 // dir cleaned up with the test; the runner is local (exec) or remote (ssh
-// localhost) accordingly.
+// localhost) accordingly. Each sandbox gets its OWN tmux socket so cells never
+// touch the user's real sessions and never collide with each other.
 func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 	t.Helper()
 	bin := seshBin(t)
 	home := t.TempDir()
-	machine := fmt.Sprintf("sb-%s-%d", loc, time.Now().UnixNano())
+	stamp := time.Now().UnixNano()
+	machine := fmt.Sprintf("sb-%s-%d", loc, stamp)
+	socket := fmt.Sprintf("sesh-test-%s-%d", loc, stamp)
+
+	env := map[string]string{
+		"SESH_HOME":        home,
+		"SESH_MACHINE":     machine,
+		"SESH_TMUX_SOCKET": socket,
+	}
 
 	var r Runner
 	switch loc {
 	case matrix.Local:
-		r = &localRunner{bin: bin, home: home, machine: machine}
+		r = &localRunner{bin: bin, env: env}
 	case matrix.Remote:
 		ensureSSHLocalhost(t)
-		r = &remoteRunner{bin: bin, home: home, machine: machine}
+		r = &remoteRunner{bin: bin, env: env}
 	default:
 		t.Fatalf("newSandbox: unknown locality %q", loc)
 	}
-	sb := &Sandbox{Home: home, Machine: machine, Runner: r}
+	sb := &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: r}
 
-	// Always tear the daemon down at the end of the test, regardless of where
-	// the test bailed — a leaked daemon would pollute later cells.
+	// Always tear down the daemon AND the tmux server at the end of the test,
+	// regardless of where the test bailed — a leak would pollute later cells.
 	t.Cleanup(func() {
-		r.Run(t, "daemon", "stop") //nolint:errcheck — best-effort teardown
+		r.Run(t, "daemon", "stop")                              //nolint:errcheck — best-effort
+		exec.Command("tmux", "-L", socket, "kill-server").Run() //nolint:errcheck — best-effort
 	})
 	return sb
 }
 
+// startDaemon starts the sandbox's daemon and fails the test if it does not
+// come up.
+func (sb *Sandbox) startDaemon(t *testing.T) {
+	t.Helper()
+	if _, stderr, err := sb.Runner.Run(t, "daemon", "start"); err != nil {
+		t.Fatalf("daemon start: %v\n%s", err, stderr)
+	}
+}
+
+// rawTmux runs `tmux -L <sandbox socket> <args...>` directly (bypassing sesh) so
+// a cell can verify the OBSERVABLE tmux effect independently of sesh's own
+// output. The tmux server is always on this box (remote = ssh localhost), so raw
+// verification is local in both localities.
+func (sb *Sandbox) rawTmux(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	full := append([]string{"-L", sb.TmuxSocket}, args...)
+	out, err := exec.Command("tmux", full...).CombinedOutput()
+	return string(out), err
+}
+
 type localRunner struct {
-	bin, home, machine string
+	bin string
+	env map[string]string
 }
 
 func (l *localRunner) Locality() matrix.Locality { return matrix.Local }
@@ -114,15 +147,16 @@ func (l *localRunner) Locality() matrix.Locality { return matrix.Local }
 func (l *localRunner) Run(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command(l.bin, args...)
-	cmd.Env = append(os.Environ(),
-		"SESH_HOME="+l.home,
-		"SESH_MACHINE="+l.machine,
-	)
+	cmd.Env = os.Environ()
+	for k, v := range l.env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	return runCmd(cmd)
 }
 
 type remoteRunner struct {
-	bin, home, machine string
+	bin string
+	env map[string]string
 }
 
 func (r *remoteRunner) Locality() matrix.Locality { return matrix.Remote }
@@ -131,13 +165,12 @@ func (r *remoteRunner) Locality() matrix.Locality { return matrix.Remote }
 // This is the honest remote path: a second daemon, reached only via ssh.
 func (r *remoteRunner) Run(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	// Build: env SESH_HOME=.. SESH_MACHINE=.. <bin> <args...>, shell-quoted.
-	parts := []string{
-		"env",
-		"SESH_HOME=" + shellQuote(r.home),
-		"SESH_MACHINE=" + shellQuote(r.machine),
-		shellQuote(r.bin),
+	// Build: env K=V ... <bin> <args...>, shell-quoted.
+	parts := []string{"env"}
+	for _, k := range sortedEnvKeys(r.env) {
+		parts = append(parts, k+"="+shellQuote(r.env[k]))
 	}
+	parts = append(parts, shellQuote(r.bin))
 	for _, a := range args {
 		parts = append(parts, shellQuote(a))
 	}
@@ -149,6 +182,15 @@ func (r *remoteRunner) Run(t *testing.T, args ...string) (string, string, error)
 		remoteCmd,
 	)
 	return runCmd(cmd)
+}
+
+func sortedEnvKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func runCmd(cmd *exec.Cmd) (string, string, error) {

@@ -144,3 +144,7 @@ func hasTest(c Cell) bool {
 	_, ok := cellTests[c.ID()]
 	return ok
 }
+
+// HasBoundTest reports whether a cell already has a bound test. Used by the
+// conformance suite to fill in Skips only for cells not yet implemented.
+func HasBoundTest(c Cell) bool { return hasTest(c) }

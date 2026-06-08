@@ -15,6 +15,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
+	"github.com/lukastk/sesh/internal/tmux"
 )
 
 // Version is the daemon/binary version string.
@@ -24,6 +25,7 @@ const Version = "0.1.0-dev"
 type Daemon struct {
 	cfg     config.Config
 	store   *store.Store
+	tmux    *tmux.Server
 	srv     *http.Server
 	ln      net.Listener
 	started time.Time
@@ -56,7 +58,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 
-	d := &Daemon{cfg: cfg, store: st}
+	d := &Daemon{cfg: cfg, store: st, tmux: tmux.NewServer(cfg.TmuxSocket)}
 	d.srv = &http.Server{Handler: d.routes()}
 	return d, nil
 }

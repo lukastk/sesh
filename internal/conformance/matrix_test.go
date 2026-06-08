@@ -19,6 +19,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Bind a Skip to every cell no real test claimed (order-independent: runs
+	// after all init()s, before any test).
+	registerRemainingSkips()
+
 	code := m.Run()
 	cleanupHarness()
 

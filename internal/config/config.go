@@ -15,6 +15,10 @@ type Config struct {
 	Home string
 	// Machine is this daemon's identity in the mesh.
 	Machine string
+	// TmuxSocket is the tmux server socket NAME (tmux -L) that sesh threads run
+	// on. Per the spec this is just a regular tmux server; the name carries no
+	// semantics. Default "mytmux"; overridable so tests use an isolated server.
+	TmuxSocket string
 }
 
 // Load resolves config from the environment:
@@ -44,7 +48,12 @@ func Load() Config {
 		machine = h
 	}
 
-	return Config{Home: home, Machine: machine}
+	socket := os.Getenv("SESH_TMUX_SOCKET")
+	if socket == "" {
+		socket = "mytmux"
+	}
+
+	return Config{Home: home, Machine: machine, TmuxSocket: socket}
 }
 
 // EnsureHome creates the home directory if missing.

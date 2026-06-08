@@ -41,8 +41,8 @@ func testDaemonLifecycle(t *testing.T, loc matrix.Locality) {
 	if st.Machine != sb.Machine {
 		t.Errorf("[%s] status machine = %q, want %q", loc, st.Machine, sb.Machine)
 	}
-	if st.SchemaVersion != 1 {
-		t.Errorf("[%s] schema_version = %d, want 1", loc, st.SchemaVersion)
+	if st.SchemaVersion < 1 {
+		t.Errorf("[%s] schema_version = %d, want >= 1 (migrations applied)", loc, st.SchemaVersion)
 	}
 	if st.Schema != api.SchemaVersion {
 		t.Errorf("[%s] api schema = %d, want %d", loc, st.Schema, api.SchemaVersion)

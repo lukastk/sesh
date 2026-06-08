@@ -2,16 +2,19 @@ package conformance
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
@@ -124,6 +127,86 @@ func (sb *Sandbox) startDaemon(t *testing.T) {
 	if _, stderr, err := sb.Runner.Run(t, "daemon", "start"); err != nil {
 		t.Fatalf("daemon start: %v\n%s", err, stderr)
 	}
+}
+
+// newThread spawns a thread via sesh and returns the parsed record.
+func (sb *Sandbox) newThread(t *testing.T, agent, name, cwd string) api.Thread {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", agent, "--name", name, "--cwd", cwd, "--json")
+	if err != nil {
+		t.Fatalf("thread new (%s): %v\n%s", agent, err, stderr)
+	}
+	var th api.Thread
+	if err := json.Unmarshal([]byte(stdout), &th); err != nil {
+		t.Fatalf("decode thread json: %v\nraw: %s", err, stdout)
+	}
+	return th
+}
+
+// markedPane returns the (pane id, pane pid) of the pane bearing threadID's
+// @sesh-thread-id marker, read directly from tmux (independent of sesh). ok is
+// false if no such pane exists.
+func (sb *Sandbox) markedPane(t *testing.T, threadID string) (pane string, pid int, ok bool) {
+	t.Helper()
+	out, err := sb.rawTmux(t, "list-panes", "-a", "-F", "#{pane_id}\t#{pane_pid}\t#{@sesh-thread-id}")
+	if err != nil {
+		return "", 0, false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) == 3 && f[2] == threadID {
+			pid, _ := strconv.Atoi(strings.TrimSpace(f[1]))
+			return f[0], pid, true
+		}
+	}
+	return "", 0, false
+}
+
+// agentRunningUnder reports whether a REAL process of the given agent kind is
+// running in panePID's process subtree, determined by an INDEPENDENT `ps` walk
+// (not sesh's own proctree). This is the honest "did the real agent spawn"
+// check; codex runs as a child of a `node` pane process, so we must walk
+// descendants, not just the pane process itself.
+func agentRunningUnder(panePID int, agent string) bool {
+	out, err := exec.Command("ps", "-eww", "-o", "pid=,ppid=,comm=").Output()
+	if err != nil {
+		return false
+	}
+	type row struct {
+		ppid int
+		comm string
+	}
+	procs := map[int]row{}
+	children := map[int][]int{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(f[0])
+		ppid, e2 := strconv.Atoi(f[1])
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		procs[pid] = row{ppid: ppid, comm: f[2]}
+		children[ppid] = append(children[ppid], pid)
+	}
+	// BFS from panePID (inclusive).
+	queue := []int{panePID}
+	seen := map[int]bool{}
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		if procs[pid].comm == agent {
+			return true
+		}
+		queue = append(queue, children[pid]...)
+	}
+	return false
 }
 
 // rawTmux runs `tmux -L <sandbox socket> <args...>` directly (bypassing sesh) so

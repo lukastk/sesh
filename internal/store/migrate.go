@@ -11,6 +11,20 @@ var migrations = []string{
 		id      INTEGER PRIMARY KEY CHECK (id = 1),
 		version INTEGER NOT NULL
 	);`,
+	// 2: threads. A thread is pinned to (machine, session_name); pane and
+	// runtime state are never stored, always re-derived live.
+	`CREATE TABLE IF NOT EXISTS threads (
+		id           TEXT PRIMARY KEY,
+		machine      TEXT NOT NULL,
+		session_name TEXT NOT NULL,
+		cwd          TEXT NOT NULL,
+		agent_kind   TEXT NOT NULL,
+		name         TEXT NOT NULL,
+		tags         TEXT NOT NULL DEFAULT '[]',
+		headless     INTEGER NOT NULL DEFAULT 0,
+		created_at   INTEGER NOT NULL,
+		UNIQUE (session_name)
+	);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

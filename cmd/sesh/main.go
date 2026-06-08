@@ -32,6 +32,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh tmux:", err)
 			os.Exit(1)
 		}
+	case "thread":
+		if err := runThread(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh thread:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -49,6 +54,7 @@ usage: sesh <command> [args]
 commands:
   daemon    per-machine daemon (run | start | stop | status)
   tmux      tmux layer (current | info | create-session | create-pane | send-text | stage-file)
+  thread    thread layer (new | list | kill | pane)
   matrix    report the feature-matrix state (grid | skips)
 
 (more commands land as the development plan progresses)`)

@@ -73,12 +73,19 @@ type Runner interface {
 	Locality() matrix.Locality
 }
 
-// Sandbox is an isolated daemon home plus the runner that drives it.
+// Sandbox is an isolated daemon home plus the runners that drive it. For a local
+// sandbox Runner and daemonRunner are the same. For a REMOTE (routed) sandbox,
+// Home/Machine/TmuxSocket describe the PEER machine; daemonRunner manages the
+// peer daemon directly (with the peer's full env), while Runner drives
+// OPERATIONS from a separate local client via `--machine peer` routing (a real
+// ssh hop) — so the test exercises the same code path that the v1 `--machine X`
+// bug broke.
 type Sandbox struct {
-	Home       string
-	Machine    string
-	TmuxSocket string
-	Runner     Runner
+	Home         string
+	Machine      string
+	TmuxSocket   string
+	Runner       Runner
+	daemonRunner Runner
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
@@ -98,33 +105,68 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 		"SESH_MACHINE":     machine,
 		"SESH_TMUX_SOCKET": socket,
 	}
+	peerDaemon := &localRunner{bin: bin, env: env}
 
-	var r Runner
+	var sb *Sandbox
 	switch loc {
 	case matrix.Local:
-		r = &localRunner{bin: bin, env: env}
+		sb = &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: peerDaemon, daemonRunner: peerDaemon}
 	case matrix.Remote:
+		// A separate local client machine that reaches the peer via `--machine`.
 		ensureSSHLocalhost(t)
-		r = &remoteRunner{bin: bin, env: env}
+		clientHome := t.TempDir()
+		clientMachine := fmt.Sprintf("client-%d", stamp)
+		clientEnv := map[string]string{"SESH_HOME": clientHome, "SESH_MACHINE": clientMachine}
+		// Register the peer with the client (exercises `sesh peer add`).
+		client := &localRunner{bin: bin, env: clientEnv}
+		if _, stderr, err := client.Run(t, "peer", "add", "--machine", machine, "--ssh", "localhost", "--home", home, "--binary", bin); err != nil {
+			t.Fatalf("peer add: %v\n%s", err, stderr)
+		}
+		sb = &Sandbox{
+			Home: home, Machine: machine, TmuxSocket: socket,
+			Runner:       &routingRunner{bin: bin, env: clientEnv, peerMachine: machine},
+			daemonRunner: peerDaemon, // peer daemon started directly with its full env
+		}
 	default:
 		t.Fatalf("newSandbox: unknown locality %q", loc)
 	}
-	sb := &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: r}
 
 	// Always tear down the daemon AND the tmux server at the end of the test,
 	// regardless of where the test bailed — a leak would pollute later cells.
 	t.Cleanup(func() {
-		r.Run(t, "daemon", "stop")                              //nolint:errcheck — best-effort
+		sb.daemonRunner.Run(t, "daemon", "stop")                //nolint:errcheck — best-effort
 		exec.Command("tmux", "-L", socket, "kill-server").Run() //nolint:errcheck — best-effort
 	})
 	return sb
 }
 
-// startDaemon starts the sandbox's daemon and fails the test if it does not
-// come up.
+// newSSHSandbox builds a remote sandbox whose operations run ON the far machine
+// via a real ssh hop (sshRunner) — for daemon.lifecycle/remote, which manages the
+// remote daemon directly rather than routing operations to it.
+func newSSHSandbox(t *testing.T) *Sandbox {
+	t.Helper()
+	bin := seshBin(t)
+	ensureSSHLocalhost(t)
+	home := t.TempDir()
+	stamp := time.Now().UnixNano()
+	machine := fmt.Sprintf("sb-ssh-%d", stamp)
+	socket := fmt.Sprintf("sesh-test-ssh-%d", stamp)
+	env := map[string]string{"SESH_HOME": home, "SESH_MACHINE": machine, "SESH_TMUX_SOCKET": socket}
+	r := &sshRunner{bin: bin, env: env}
+	sb := &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: r, daemonRunner: r}
+	t.Cleanup(func() {
+		r.Run(t, "daemon", "stop")                              //nolint:errcheck
+		exec.Command("tmux", "-L", socket, "kill-server").Run() //nolint:errcheck
+	})
+	return sb
+}
+
+// startDaemon starts the sandbox's (target machine's) daemon directly and fails
+// the test if it does not come up. Operations issued later via sb.Runner reach
+// this daemon (locally, or via `--machine` routing for a remote sandbox).
 func (sb *Sandbox) startDaemon(t *testing.T) {
 	t.Helper()
-	if _, stderr, err := sb.Runner.Run(t, "daemon", "start"); err != nil {
+	if _, stderr, err := sb.daemonRunner.Run(t, "daemon", "start"); err != nil {
 		t.Fatalf("daemon start: %v\n%s", err, stderr)
 	}
 }
@@ -312,18 +354,42 @@ func (l *localRunner) Run(t *testing.T, args ...string) (string, string, error) 
 	return runCmd(cmd)
 }
 
-type remoteRunner struct {
+// routingRunner drives OPERATIONS against a remote peer by running the local
+// sesh client (as a separate client machine) with `--machine peer` appended, so
+// main's global router forwards the command to the peer over a real ssh hop.
+// This is the honest remote operational path — it exercises the exact `--machine`
+// routing the v1 bug broke.
+type routingRunner struct {
+	bin         string
+	env         map[string]string // the local CLIENT machine's env (holds peers.json)
+	peerMachine string
+}
+
+func (r *routingRunner) Locality() matrix.Locality { return matrix.Remote }
+
+func (r *routingRunner) Run(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := exec.Command(r.bin, append(args, "--machine", r.peerMachine)...)
+	cmd.Env = os.Environ()
+	for k, v := range r.env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	return runCmd(cmd)
+}
+
+// sshRunner runs sesh ON the far machine via a real ssh hop into localhost — used
+// for daemon.lifecycle/remote, where the honest test is to MANAGE the remote
+// daemon directly (you reach a machine to manage its daemon; there is no
+// routing).
+type sshRunner struct {
 	bin string
 	env map[string]string
 }
 
-func (r *remoteRunner) Locality() matrix.Locality { return matrix.Remote }
+func (r *sshRunner) Locality() matrix.Locality { return matrix.Remote }
 
-// Run executes the command on the far side of a real ssh hop into localhost.
-// This is the honest remote path: a second daemon, reached only via ssh.
-func (r *remoteRunner) Run(t *testing.T, args ...string) (string, string, error) {
+func (r *sshRunner) Run(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	// Build: env K=V ... <bin> <args...>, shell-quoted.
 	parts := []string{"env"}
 	for _, k := range sortedEnvKeys(r.env) {
 		parts = append(parts, k+"="+shellQuote(r.env[k]))
@@ -332,12 +398,11 @@ func (r *remoteRunner) Run(t *testing.T, args ...string) (string, string, error)
 	for _, a := range args {
 		parts = append(parts, shellQuote(a))
 	}
-	remoteCmd := strings.Join(parts, " ")
 	cmd := exec.Command("ssh",
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"localhost",
-		remoteCmd,
+		strings.Join(parts, " "),
 	)
 	return runCmd(cmd)
 }

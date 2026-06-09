@@ -67,13 +67,11 @@ func tmuxCurrent(cfg config.Config, args []string) error {
 func tmuxInfo(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	session := fs.String("session", "", "filter to one session")
-	machine := fs.String("machine", "", "filter to one machine (mesh; not yet implemented)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *machine != "" && *machine != cfg.Machine {
-		return fmt.Errorf("NOT IMPLEMENTED: cross-machine `tmux info --machine %s` lands with the mesh (Phase 4)", *machine)
-	}
+	// Cross-machine `tmux info --machine X` is handled by the global router in
+	// main (it ssh-routes to X, which runs `tmux info` against its own daemon).
 	c := client.New(cfg.SocketPath())
 	resp, err := c.TmuxInfo(context.Background(), *session)
 	if err != nil {

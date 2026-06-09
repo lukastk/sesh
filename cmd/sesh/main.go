@@ -9,6 +9,8 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/lukastk/sesh/internal/config"
 )
 
 func main() {
@@ -16,6 +18,27 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+
+	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X
+	// is a remote peer, forward the whole command there via a real ssh hop. Local-
+	// only meta commands (`peer`, `matrix`, help) are excluded — their own args may
+	// legitimately contain `--machine` (e.g. `peer add --machine Q`).
+	if routableSubcommand(os.Args[1]) {
+		machine, rest := extractMachineFlag(os.Args[1:])
+		if machine != "" {
+			cfg := config.Load()
+			if machine != cfg.Machine {
+				if err := routeToMachine(cfg, machine, rest); err != nil {
+					fmt.Fprintln(os.Stderr, "sesh:", err)
+					os.Exit(1)
+				}
+				return
+			}
+			// machine == self: drop the flag and run locally.
+			os.Args = append([]string{os.Args[0]}, rest...)
+		}
+	}
+
 	switch os.Args[1] {
 	case "matrix":
 		if err := runMatrix(os.Args[2:]); err != nil {
@@ -37,6 +60,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh thread:", err)
 			os.Exit(1)
 		}
+	case "peer":
+		if err := runPeer(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh peer:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -55,7 +83,11 @@ commands:
   daemon    per-machine daemon (run | start | stop | status)
   tmux      tmux layer (current | info | create-session | create-pane | send-text | stage-file)
   thread    thread layer (new | list | kill | pane | status)
+  peer      mesh registry (add | list)
   matrix    report the feature-matrix state (grid | skips)
+
+global:
+  --machine X   route the command to remote machine X via a real ssh hop
 
 (more commands land as the development plan progresses)`)
 }

@@ -27,7 +27,14 @@ func testDaemonLifecycle(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, loc)
+	// daemon.lifecycle MANAGES a remote daemon directly (ssh-in), rather than
+	// routing operations to it.
+	var sb *Sandbox
+	if loc == matrix.Remote {
+		sb = newSSHSandbox(t)
+	} else {
+		sb = newSandbox(t, loc)
+	}
 	r := sb.Runner
 
 	// --- start ---

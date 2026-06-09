@@ -15,16 +15,22 @@ func init() {
 	// turn needed) — for all three real agents. runtime-state, send.* and
 	// new.headless need a real turn and land in Phase 3b. Remote needs the mesh
 	// (Phase 4).
-	for _, a := range matrix.AllAgents {
-		a := a
-		matrix.RegisterTest("thread.new.headed", a, matrix.Local,
-			func(t *testing.T) { testThreadNewHeaded(t, string(a)) })
-		matrix.RegisterTest("thread.kill", a, matrix.Local,
-			func(t *testing.T) { testThreadKill(t, string(a)) })
-		matrix.RegisterTest("thread.resolve-pane", a, matrix.Local,
-			func(t *testing.T) { testThreadResolvePane(t, string(a)) })
+	// Both localities: Remote = `--machine` routing into a peer daemon over a real
+	// ssh hop (the exact path the v1 `--machine X` bug broke).
+	for _, loc := range matrix.AllLocalities {
+		loc := loc
+		for _, a := range matrix.AllAgents {
+			a := a
+			matrix.RegisterTest("thread.new.headed", a, loc,
+				func(t *testing.T) { testThreadNewHeaded(t, string(a), loc) })
+			matrix.RegisterTest("thread.kill", a, loc,
+				func(t *testing.T) { testThreadKill(t, string(a), loc) })
+			matrix.RegisterTest("thread.resolve-pane", a, loc,
+				func(t *testing.T) { testThreadResolvePane(t, string(a), loc) })
+		}
+		matrix.RegisterTest("thread.list", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadList(t, loc) })
 	}
-	matrix.RegisterTest("thread.list", matrix.AgentAgnostic, matrix.Local, testThreadList)
 
 	// thread.runtime-state + thread.send.headful: the content-diff activity signal
 	// is agent-agnostic and reliable for claude and pi (both settle to waiting and
@@ -34,23 +40,26 @@ func init() {
 	// agent is exactly what this project forbids. codex needs dedicated
 	// startup-nag/approval handling before its turns can be induced reliably.
 	// Remote stays Skip until the mesh.
-	for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
-		a := a
-		matrix.RegisterTest("thread.runtime-state", a, matrix.Local,
-			func(t *testing.T) { testRuntimeState(t, string(a)) })
-		matrix.RegisterTest("thread.send.headful", a, matrix.Local,
-			func(t *testing.T) { testSendHeadful(t, string(a)) })
+	for _, loc := range matrix.AllLocalities {
+		loc := loc
+		for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
+			a := a
+			matrix.RegisterTest("thread.runtime-state", a, loc,
+				func(t *testing.T) { testRuntimeState(t, string(a), loc) })
+			matrix.RegisterTest("thread.send.headful", a, loc,
+				func(t *testing.T) { testSendHeadful(t, string(a), loc) })
+		}
 	}
 }
 
 // testSendHeadful asserts that `sesh thread send` actually delivers a message
 // into the agent's live pane: the observable proof is that the agent begins a
 // turn (activity flips to working) in response. A dead thread cannot be sent to.
-func testSendHeadful(t *testing.T, agent string) {
+func testSendHeadful(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	th := sb.newThread(t, agent, "send", "/tmp")
@@ -77,11 +86,11 @@ func testSendHeadful(t *testing.T, agent string) {
 //
 // This is the flagship honesty cell — the region the v1 codex bug lived in — so
 // it asserts the real, observable transitions, never internal state.
-func testRuntimeState(t *testing.T, agent string) {
+func testRuntimeState(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	th := sb.newThread(t, agent, "rt", "/tmp")
@@ -135,11 +144,11 @@ const agentStartTimeout = 20 * time.Second
 // OBSERVABLE facts: the session exists, the pane carries the thread marker,
 // SESH_THREAD_ID is injected into the pane env, and a REAL agent process of the
 // right kind is actually running under the pane (independent ps walk).
-func testThreadNewHeaded(t *testing.T, agent string) {
+func testThreadNewHeaded(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	th := sb.newThread(t, agent, "t1", "/tmp")
@@ -182,26 +191,24 @@ func testThreadNewHeaded(t *testing.T, agent string) {
 // testThreadKill asserts both directions: the agent is genuinely alive after
 // spawn, and genuinely dead (process gone, session gone, record gone) after
 // kill — the symmetry the v1 one-directional codex check lacked.
-func testThreadKill(t *testing.T, agent string) {
+func testThreadKill(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	th := sb.newThread(t, agent, "killme", "/tmp")
 
+	// Alive direction: a real agent of the right kind is genuinely running under
+	// the marked pane (this wait IS the alive assertion).
 	var panePID int
 	if !waitUntil(agentStartTimeout, func() bool {
 		_, pid, ok := sb.markedPane(t, th.ID)
 		panePID = pid
 		return ok && agentRunningUnder(pid, agent)
 	}) {
-		t.Fatalf("agent never came up for kill test")
-	}
-	// Alive direction.
-	if !pidAlive(panePID) || !agentRunningUnder(panePID, agent) {
-		t.Fatalf("precondition: agent should be alive before kill")
+		t.Fatalf("agent never came up alive for kill test")
 	}
 
 	if _, stderr, err := sb.Runner.Run(t, "thread", "kill", "--id", th.ID); err != nil {
@@ -228,11 +235,11 @@ func testThreadKill(t *testing.T, agent string) {
 // testThreadResolvePane asserts pane resolution works via the marker and SURVIVES
 // the pane being moved to another window (the whole point of marking the pane
 // instead of storing its location), and reports dead once the session is gone.
-func testThreadResolvePane(t *testing.T, agent string) {
+func testThreadResolvePane(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	th := sb.newThread(t, agent, "resolve", "/tmp")
@@ -245,12 +252,12 @@ func testThreadResolvePane(t *testing.T, agent string) {
 		t.Fatalf("marker pane never appeared")
 	}
 
-	loc := sb.resolvePane(t, th.ID)
-	if !loc.Found {
+	resolved := sb.resolvePane(t, th.ID)
+	if !resolved.Found {
 		t.Fatalf("resolve-pane reported not found for live thread")
 	}
-	if loc.Pane.Pane != markPane {
-		t.Errorf("resolved pane = %q, want marked pane %q", loc.Pane.Pane, markPane)
+	if resolved.Pane.Pane != markPane {
+		t.Errorf("resolved pane = %q, want marked pane %q", resolved.Pane.Pane, markPane)
 	}
 
 	// Move the agent pane to a new window; the @sesh-thread-id pane option
@@ -278,11 +285,11 @@ func testThreadResolvePane(t *testing.T, agent string) {
 
 // testThreadList asserts the thread list reflects creates and kills. Agent-
 // agnostic, so it uses pi (cheapest) for the spawns.
-func testThreadList(t *testing.T) {
+func testThreadList(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	a := sb.newThread(t, "pi", "list1", "/tmp")

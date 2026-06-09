@@ -13,14 +13,23 @@ import (
 )
 
 func init() {
-	// Phase 2: local tmux cells. Remote tmux + tmux.nav land with the mesh
-	// (Phase 4) and remain Skip until then.
+	// tmux.current is client-side (Local only). info/create-session/create-pane/
+	// send-text run both Local and Remote (Remote = `--machine` routing into a
+	// peer daemon over a real ssh hop, Phase 4). stage-file stays Local until
+	// remote file transfer lands; tmux.nav is its own Phase 4 cell.
 	matrix.RegisterTest("tmux.current", matrix.AgentAgnostic, matrix.Local, testTmuxCurrent)
-	matrix.RegisterTest("tmux.info", matrix.AgentAgnostic, matrix.Local, testTmuxInfo)
-	matrix.RegisterTest("tmux.create-session", matrix.AgentAgnostic, matrix.Local, testTmuxCreateSession)
-	matrix.RegisterTest("tmux.create-pane", matrix.AgentAgnostic, matrix.Local, testTmuxCreatePane)
-	matrix.RegisterTest("tmux.send-text", matrix.AgentAgnostic, matrix.Local, testTmuxSendText)
 	matrix.RegisterTest("tmux.stage-file", matrix.AgentAgnostic, matrix.Local, testTmuxStageFile)
+	for _, loc := range matrix.AllLocalities {
+		loc := loc
+		matrix.RegisterTest("tmux.info", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxInfo(t, loc) })
+		matrix.RegisterTest("tmux.create-session", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxCreateSession(t, loc) })
+		matrix.RegisterTest("tmux.create-pane", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxCreatePane(t, loc) })
+		matrix.RegisterTest("tmux.send-text", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxSendText(t, loc) })
+	}
 }
 
 // testTmuxCurrent runs `sesh tmux current` INSIDE a real tmux pane and asserts it
@@ -92,11 +101,11 @@ func testTmuxCurrent(t *testing.T) {
 
 // testTmuxInfo creates sessions directly via tmux (the world), then asserts the
 // daemon-served walker reports them faithfully.
-func testTmuxInfo(t *testing.T) {
+func testTmuxInfo(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	for _, name := range []string{"alpha", "beta"} {
@@ -131,11 +140,11 @@ func testTmuxInfo(t *testing.T) {
 
 // testTmuxCreateSession creates a session via sesh and verifies it exists in tmux
 // with the injected environment — checked directly through tmux, not sesh.
-func testTmuxCreateSession(t *testing.T) {
+func testTmuxCreateSession(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
 	if _, stderr, err := sb.Runner.Run(t, "tmux", "create-session", "--name", "made", "--env", "SESH_THREAD_ID=thr_xyz"); err != nil {
@@ -156,11 +165,11 @@ func testTmuxCreateSession(t *testing.T) {
 
 // testTmuxCreatePane splits a session via sesh and verifies the pane count grew
 // and the returned pane id really exists.
-func testTmuxCreatePane(t *testing.T) {
+func testTmuxCreatePane(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 	if out, err := sb.rawTmux(t, "new-session", "-d", "-s", "base"); err != nil {
 		t.Fatalf("new-session: %v\n%s", err, out)
@@ -186,11 +195,11 @@ func testTmuxCreatePane(t *testing.T) {
 
 // testTmuxSendText sends a command into a pane and asserts (via capture-pane)
 // that the text actually executed there.
-func testTmuxSendText(t *testing.T) {
+func testTmuxSendText(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
+	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 	if out, err := sb.rawTmux(t, "new-session", "-d", "-s", "typing"); err != nil {
 		t.Fatalf("new-session: %v\n%s", err, out)

@@ -72,3 +72,6 @@ func (c Config) DBPath() string { return filepath.Join(c.Home, "sesh.db") }
 
 // PIDPath records the running daemon's pid.
 func (c Config) PIDPath() string { return filepath.Join(c.Home, "daemon.pid") }
+
+// PeersPath is the local mesh registry (how to reach other machines).
+func (c Config) PeersPath() string { return filepath.Join(c.Home, "peers.json") }

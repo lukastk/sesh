@@ -96,26 +96,19 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	env := map[string]string{agents.EnvThreadID: id}
-
-	// codex: pre-trust the cwd so its directory-trust prompt does not appear (and
-	// eat input) at spawn; inject CODEX_HOME so the trust we wrote is the one it
-	// reads.
-	if kind == agents.Codex {
-		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err := agents.EnsureCodexTrust(codexHome, req.Cwd); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if d.cfg.CodexHome != "" {
-			env["CODEX_HOME"] = d.cfg.CodexHome
-		}
+	if err := d.prepCodexEnv(kind, env, req.Cwd); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind)); err != nil {
+	// Capture the agent session id at spawn for pi/claude (what resume needs);
+	// codex mints its own on the first turn and is discovered later.
+	agentSessionID := ""
+	if kind == agents.Pi || kind == agents.Claude {
+		agentSessionID = uuid.NewString()
+	}
+
+	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind, agentSessionID)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -135,15 +128,16 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	thread := api.Thread{
-		ID:            id,
-		Machine:       d.cfg.Machine,
-		SessionName:   session,
-		Cwd:           req.Cwd,
-		AgentKind:     string(kind),
-		Name:          req.Name,
-		Tags:          []string{},
-		Headless:      false,
-		CreatedAtUnix: time.Now().Unix(),
+		ID:             id,
+		Machine:        d.cfg.Machine,
+		SessionName:    session,
+		Cwd:            req.Cwd,
+		AgentKind:      string(kind),
+		Name:           req.Name,
+		Tags:           []string{},
+		Headless:       false,
+		CreatedAtUnix:  time.Now().Unix(),
+		AgentSessionID: agentSessionID,
 	}
 	if err := d.store.InsertThread(thread); err != nil {
 		d.tmux.KillSession(session) // keep store and runtime consistent
@@ -298,7 +292,10 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// The pane vanished mid-probe (e.g. the session was killed concurrently).
+		// An unreachable pane is dead, not a server error.
+		resp.Activity = api.ActivityDead
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	if working {
@@ -329,7 +326,7 @@ func (d *Daemon) resolveActivity(thread api.Thread) (api.Activity, error) {
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
-		return "", err
+		return api.ActivityDead, nil // pane vanished mid-probe => dead
 	}
 	if working {
 		return api.ActivityWorking, nil

@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +49,74 @@ func EnsureCodexTrust(codexHome, cwd string) error {
 		return fmt.Errorf("codex trust: write config: %w", err)
 	}
 	return nil
+}
+
+// DiscoverCodexSession finds the codex session id for a thread by walking codex's
+// rollout files under <codexHome>/sessions and returning the id of the NEWEST
+// rollout whose recorded cwd matches and which was created at/after afterUnix
+// (the thread's spawn time). codex mints its id on the first turn, so this is how
+// sesh recovers it for resume. Returns ("", false) if none — e.g. a codex thread
+// that died before its first turn (a legitimate N/A for resume).
+func DiscoverCodexSession(codexHome, cwd string, afterUnix int64) (string, bool, error) {
+	root := filepath.Join(codexHome, "sessions")
+	type cand struct {
+		id   string
+		name string // rollout file name (iso-ts prefixed -> sortable)
+	}
+	var best cand
+	err := filepath.WalkDir(root, func(p string, dEnt os.DirEntry, walkErr error) error {
+		if walkErr != nil || dEnt.IsDir() {
+			return nil
+		}
+		name := dEnt.Name()
+		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+			return nil
+		}
+		info, err := dEnt.Info()
+		if err != nil || info.ModTime().Unix() < afterUnix-2 {
+			return nil
+		}
+		id, rcwd := codexRolloutMeta(p)
+		if id == "" || rcwd != cwd {
+			return nil
+		}
+		if name > best.name { // iso-ts prefix => lexical sort is chronological
+			best = cand{id: id, name: name}
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return "", false, err
+	}
+	if best.id == "" {
+		return "", false, nil
+	}
+	return best.id, true, nil
+}
+
+// codexRolloutMeta reads a rollout's session_meta (first line) for its id + cwd.
+func codexRolloutMeta(path string) (id, cwd string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	if !sc.Scan() {
+		return "", ""
+	}
+	var line struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ID  string `json:"id"`
+			Cwd string `json:"cwd"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(sc.Bytes(), &line) != nil || line.Type != "session_meta" {
+		return "", ""
+	}
+	return line.Payload.ID, line.Payload.Cwd
 }
 
 // CodexHome resolves codex's home dir: the configured override if set, else the

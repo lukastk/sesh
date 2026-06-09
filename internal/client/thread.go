@@ -43,6 +43,12 @@ func (c *Client) ThreadDelete(ctx context.Context, id string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id}, nil)
 }
 
+// ThreadResume posts POST /v1/threads/resume (revive a dead headed thread).
+func (c *Client) ThreadResume(ctx context.Context, id string) (api.ThreadResponse, error) {
+	var out api.ThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/resume", api.ThreadResumeRequest{ID: id}, &out)
+}
+
 // ThreadKill posts POST /v1/threads/kill?id=.
 func (c *Client) ThreadKill(ctx context.Context, id string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/kill?id="+url.QueryEscape(id), struct{}{}, nil)

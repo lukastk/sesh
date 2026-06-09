@@ -37,11 +37,36 @@ func ParseKind(s string) (Kind, error) {
 }
 
 // HeadedCommand returns the shell command that launches the agent interactively
-// in a tmux pane. The bare binary opens each agent's TUI; the binary is resolved
-// from PATH on the target machine.
-//
-// (Working/waiting is detected agent-agnostically from pane content-diff, so no
-// per-agent transcript wiring is needed at spawn. A transcript fallback is noted
-// in _dev/SPEC.md §3 for any agent later found to have non-animating silent
-// turns.)
-func HeadedCommand(k Kind) string { return string(k) }
+// in a tmux pane, pinning the conversation to sessionID where the agent supports
+// it (pi/claude). codex cannot pre-assign its id, so it launches bare and its id
+// is discovered after the first turn (see DiscoverCodexSession) — which is what
+// lets a dead thread be resumed later. Working/waiting is still detected agent-
+// agnostically from pane content-diff.
+func HeadedCommand(k Kind, sessionID string) string {
+	switch k {
+	case Pi:
+		if sessionID != "" {
+			return "pi --session-id " + sessionID
+		}
+	case Claude:
+		if sessionID != "" {
+			return "claude --session-id " + sessionID
+		}
+	}
+	return string(k) // codex (bare), or no session id
+}
+
+// ResumeCommand returns the shell command that RELAUNCHES the agent on an
+// existing conversation (for `resume`), continuing where it left off.
+func ResumeCommand(k Kind, sessionID string) string {
+	switch k {
+	case Pi:
+		return "pi --session-id " + sessionID // --session-id resumes if it exists
+	case Claude:
+		return "claude --resume " + sessionID
+	case Codex:
+		return "codex resume " + sessionID
+	default:
+		return string(k)
+	}
+}

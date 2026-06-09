@@ -60,6 +60,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh thread:", err)
 			os.Exit(1)
 		}
+	case "resume": // top-level alias for `sesh thread resume`
+		if err := runThread(append([]string{"resume"}, os.Args[2:]...)); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh resume:", err)
+			os.Exit(1)
+		}
 	case "ticket":
 		if err := runTicket(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh ticket:", err)

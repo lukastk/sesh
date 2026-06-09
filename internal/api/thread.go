@@ -100,6 +100,12 @@ type DeleteThreadRequest struct {
 	ID string `json:"id"`
 }
 
+// ThreadResumeRequest is the body of POST /v1/threads/resume (revive a dead
+// headed thread).
+type ThreadResumeRequest struct {
+	ID string `json:"id"`
+}
+
 // PaneLocator is a resolved live pane for a thread.
 type PaneLocator struct {
 	Session string `json:"session"`

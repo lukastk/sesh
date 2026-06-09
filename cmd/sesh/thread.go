@@ -47,6 +47,8 @@ func runThread(args []string) error {
 		return threadArchive(cfg, rest)
 	case "delete":
 		return threadDelete(cfg, rest)
+	case "resume":
+		return threadResume(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
@@ -126,6 +128,34 @@ func threadDelete(cfg config.Config, args []string) error {
 		return err
 	}
 	fmt.Println("deleted", *id)
+	return nil
+}
+
+// threadResume revives a dead headed thread. Exposed both as `sesh thread resume`
+// and the top-level `sesh resume`.
+func threadResume(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	// Accept a positional id too (`sesh resume <id>`).
+	if *id == "" && fs.NArg() == 1 {
+		*id = fs.Arg(0)
+	}
+	if *id == "" {
+		return errors.New("resume: a thread id is required (--id or positional)")
+	}
+	c := client.New(cfg.SocketPath())
+	resp, err := c.ThreadResume(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Thread)
+	}
+	fmt.Printf("resumed %s (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
 	return nil
 }
 

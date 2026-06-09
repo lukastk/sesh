@@ -143,6 +143,42 @@ func (sb *Sandbox) newThread(t *testing.T, agent, name, cwd string) api.Thread {
 	return th
 }
 
+// waitThreadReady waits until an agent thread is genuinely ready for input:
+// its agent process is running, its TUI has actually RENDERED (a pre-init pane
+// is blank/static and would falsely read as idle), and activity has settled to
+// waiting. Returns the marked pane id. Sending before this is met loses
+// keystrokes — the agent is not yet listening.
+func (sb *Sandbox) waitThreadReady(t *testing.T, threadID, agent string) string {
+	t.Helper()
+	var pane string
+	ok := waitUntil(agentStartTimeout, func() bool {
+		p, pid, ok := sb.markedPane(t, threadID)
+		if !ok || !agentRunningUnder(pid, agent) {
+			return false
+		}
+		pane = p
+		cap, err := sb.rawTmux(t, "capture-pane", "-t", p, "-p")
+		if err != nil || nonBlankLines(cap) < 3 {
+			return false // TUI has not rendered yet
+		}
+		return sb.threadStatus(t, threadID).Activity == api.ActivityWaiting
+	})
+	if !ok {
+		t.Fatalf("%s thread never became ready for input", agent)
+	}
+	return pane
+}
+
+func nonBlankLines(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // threadStatus fetches a thread's live runtime status via sesh.
 func (sb *Sandbox) threadStatus(t *testing.T, id string) api.ThreadStatusResponse {
 	t.Helper()

@@ -61,6 +61,13 @@ type ThreadListResponse struct {
 	Threads []Thread `json:"threads"`
 }
 
+// ThreadSendRequest is the body of POST /v1/threads/send (headful send: deliver
+// a message into the thread's live pane and submit it).
+type ThreadSendRequest struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
 // PaneLocator is a resolved live pane for a thread.
 type PaneLocator struct {
 	Session string `json:"session"`

@@ -32,9 +32,29 @@ func runThread(args []string) error {
 		return threadPane(cfg, rest)
 	case "status":
 		return threadStatus(cfg, rest)
+	case "send":
+		return threadSend(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
+}
+
+func threadSend(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("send", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	text := fs.String("text", "", "message text (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || *text == "" {
+		return errors.New("thread send: --id and --text are required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadSend(context.Background(), *id, *text); err != nil {
+		return err
+	}
+	fmt.Println("sent", *id)
+	return nil
 }
 
 func threadStatus(cfg config.Config, args []string) error {

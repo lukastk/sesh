@@ -26,13 +26,48 @@ func init() {
 	}
 	matrix.RegisterTest("thread.list", matrix.AgentAgnostic, matrix.Local, testThreadList)
 
-	// thread.runtime-state: green for pi now (its turns are inducible cleanly with
-	// no startup prompt). claude/codex need startup-prompt handling before their
-	// turns can be induced in a test; their cells stay honestly Skip.
-	matrix.RegisterTest("thread.runtime-state", matrix.Pi, matrix.Local, testRuntimeStatePi)
+	// thread.runtime-state + thread.send.headful: the content-diff activity signal
+	// is agent-agnostic and reliable for claude and pi (both settle to waiting and
+	// begin a turn on send deterministically). codex stays honestly Skip: its TUI
+	// interposes update nags / approval prompts that make turn induction
+	// non-deterministic in a test, and a FLAKY green on the historically-buggy
+	// agent is exactly what this project forbids. codex needs dedicated
+	// startup-nag/approval handling before its turns can be induced reliably.
+	// Remote stays Skip until the mesh.
+	for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
+		a := a
+		matrix.RegisterTest("thread.runtime-state", a, matrix.Local,
+			func(t *testing.T) { testRuntimeState(t, string(a)) })
+		matrix.RegisterTest("thread.send.headful", a, matrix.Local,
+			func(t *testing.T) { testSendHeadful(t, string(a)) })
+	}
 }
 
-// testRuntimeStatePi exercises the two orthogonal runtime axes for a real pi
+// testSendHeadful asserts that `sesh thread send` actually delivers a message
+// into the agent's live pane: the observable proof is that the agent begins a
+// turn (activity flips to working) in response. A dead thread cannot be sent to.
+func testSendHeadful(t *testing.T, agent string) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, agent, "send", "/tmp")
+	sb.waitThreadReady(t, th.ID, agent)
+
+	if _, stderr, err := sb.Runner.Run(t, "thread", "send", "--id", th.ID, "--text",
+		"Write a detailed 150-word explanation of how HTTP request/response works"); err != nil {
+		t.Fatalf("thread send: %v\n%s", err, stderr)
+	}
+
+	// Observable effect: the message landed and the agent began a turn.
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+		t.Fatalf("agent never started working after send (message not delivered?)")
+	}
+}
+
+// testRuntimeState exercises the two orthogonal runtime axes for a real agent
 // thread, BOTH directions and their independence:
 //   - activity waiting <-> working, via a real turn (content-diff);
 //   - working is observed while DETACHED, proving activity is independent of
@@ -42,27 +77,16 @@ func init() {
 //
 // This is the flagship honesty cell — the region the v1 codex bug lived in — so
 // it asserts the real, observable transitions, never internal state.
-func testRuntimeStatePi(t *testing.T) {
+func testRuntimeState(t *testing.T, agent string) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
 
-	th := sb.newThread(t, "pi", "rt", "/tmp")
-	var pane string
-	if !waitUntil(agentStartTimeout, func() bool {
-		p, _, ok := sb.markedPane(t, th.ID)
-		pane = p
-		return ok && agentRunningUnder(mustPanePID(t, sb, th.ID), "pi")
-	}) {
-		t.Fatalf("pi agent never came up")
-	}
+	th := sb.newThread(t, agent, "rt", "/tmp")
+	pane := sb.waitThreadReady(t, th.ID, agent)
 
-	// Settle to idle: a freshly rendered TUI may animate briefly.
-	if !waitUntil(15*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWaiting }) {
-		t.Fatalf("thread never settled to waiting; got %s", sb.threadStatus(t, th.ID).Activity)
-	}
 	// Idle and nobody attached: waiting + detached, and needs-input is true even
 	// though detached (the orthogonality the design requires).
 	st := sb.threadStatus(t, th.ID)
@@ -101,16 +125,6 @@ func testRuntimeStatePi(t *testing.T) {
 	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityDead }) {
 		t.Errorf("activity never became dead after kill")
 	}
-}
-
-// mustPanePID returns the marked pane's pid, failing if absent.
-func mustPanePID(t *testing.T, sb *Sandbox, threadID string) int {
-	t.Helper()
-	_, pid, ok := sb.markedPane(t, threadID)
-	if !ok {
-		return 0
-	}
-	return pid
 }
 
 // agentStartTimeout is generous: a real agent (esp. node-wrapped codex) takes a

@@ -20,6 +20,44 @@ func (d *Daemon) routesThreads(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/kill", d.handleThreadKill)
 	mux.HandleFunc("GET /v1/threads/pane", d.handleThreadPane)
 	mux.HandleFunc("GET /v1/threads/status", d.handleThreadStatus)
+	mux.HandleFunc("POST /v1/threads/send", d.handleThreadSend)
+}
+
+// handleThreadSend delivers a message into a headed thread's LIVE pane (resolved
+// from the marker) and submits it. A thread with no live pane is dead — sending
+// is a loud error, not a silent no-op.
+func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
+	var req api.ThreadSendRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" || req.Text == "" {
+		writeError(w, http.StatusBadRequest, "thread send: id and text are required")
+		return
+	}
+	if _, err := d.store.GetThread(req.ID); err != nil {
+		if errors.Is(err, store.ErrThreadNotFound) {
+			writeError(w, http.StatusNotFound, "thread not found: "+req.ID)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	loc, found, err := d.tmux.FindPaneByThreadID(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
+		return
+	}
+	if err := d.tmux.SendText(loc.Pane, req.Text, true); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "sent": req.ID})
 }
 
 // handleThreadNew spawns a headed thread: a real agent in a real tmux session,
@@ -153,11 +191,17 @@ func (d *Daemon) handleThreadPane(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ResolvePaneResponse{Schema: api.SchemaVersion, Found: found, Pane: loc})
 }
 
-// activityWindow is how long the content-diff probe samples a pane. All three
-// agent TUIs animate a timer/spinner during a turn, so a working pane is never
-// byte-stable across this window (even during a silent tool-run); an idle pane
-// is byte-stable. The window trades a little status latency for that certainty.
-const activityWindow = 700 * time.Millisecond
+// The content-diff probe samples a pane several times and declares working only
+// when change is SUSTAINED, not a one-off. A working TUI animates a spinner/
+// timer continuously (many changes); an otherwise-idle TUI may still blip once
+// (a rotating hint, an MCP server finishing startup), which must NOT read as
+// working. Requiring a majority of intervals to change rejects the single blip
+// while still catching a real turn.
+const (
+	activitySamples       = 4                      // captures
+	activityInterval      = 380 * time.Millisecond // between captures (~1.14s total)
+	activityChangedNeeded = 2                      // of activitySamples-1 intervals
+)
 
 // handleThreadStatus resolves a thread's LIVE runtime state (never stored) as
 // two ORTHOGONAL axes (Phase 3b decision; see _dev/SPEC.md §3):
@@ -235,20 +279,29 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// paneChanging samples a pane's visible content across activityWindow and reports
-// whether it changed — the agent-agnostic "is the agent producing output / its
-// TUI animating" signal that distinguishes working from waiting.
+// paneChanging samples a pane's visible content several times and reports whether
+// it is SUSTAINEDLY changing — the agent-agnostic "the agent is producing output /
+// its TUI is animating a turn" signal that distinguishes working from waiting.
+// A single idle blip (one changed interval) reads as waiting; a real turn (its
+// spinner/output animating) changes a majority of intervals.
 func (d *Daemon) paneChanging(pane string) (bool, error) {
-	a, err := d.tmux.CapturePane(pane)
+	prev, err := d.tmux.CapturePane(pane)
 	if err != nil {
 		return false, err
 	}
-	time.Sleep(activityWindow)
-	b, err := d.tmux.CapturePane(pane)
-	if err != nil {
-		return false, err
+	changed := 0
+	for i := 1; i < activitySamples; i++ {
+		time.Sleep(activityInterval)
+		cur, err := d.tmux.CapturePane(pane)
+		if err != nil {
+			return false, err
+		}
+		if cur != prev {
+			changed++
+		}
+		prev = cur
 	}
-	return a != b, nil
+	return changed >= activityChangedNeeded, nil
 }
 
 // sanitizeName maps a thread name to a tmux-safe session suffix. tmux session

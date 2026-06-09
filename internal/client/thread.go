@@ -35,3 +35,8 @@ func (c *Client) ThreadStatus(ctx context.Context, id string) (api.ThreadStatusR
 	var out api.ThreadStatusResponse
 	return out, c.getJSON(ctx, "http://unix/v1/threads/status?id="+url.QueryEscape(id), &out)
 }
+
+// ThreadSend posts POST /v1/threads/send (headful send into the live pane).
+func (c *Client) ThreadSend(ctx context.Context, id, text string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/send", api.ThreadSendRequest{ID: id, Text: text}, nil)
+}

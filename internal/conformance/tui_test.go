@@ -23,6 +23,7 @@ var declaredTUIClaims = []string{
 	"grid-render-real-state",    // a row's glyph tracks its REAL activity, both directions
 	"grid-fanout-cross-machine", // the grid shows a peer's thread via the mesh
 	"navigation-cursor",         // key nav moves the selection over real rows
+	"mesh-render-offline",       // a downed peer renders OFFLINE, its threads still listed
 	"action-stop",               // the stop key really ends the runtime, keeps the record
 	"action-delete",             // the delete key really drops the record
 	"action-archive",            // the archive key really parks the thread
@@ -62,6 +63,7 @@ func init() {
 	registerTUIClaim("grid-render-real-state", claimGridRenderRealState)
 	registerTUIClaim("grid-fanout-cross-machine", claimGridFanout)
 	registerTUIClaim("navigation-cursor", claimNavigationCursor)
+	registerTUIClaim("mesh-render-offline", claimMeshRenderOffline)
 	registerTUIClaim("action-stop", claimActionStop)
 	registerTUIClaim("action-delete", claimActionDelete)
 	registerTUIClaim("action-archive", claimActionArchive)
@@ -101,10 +103,7 @@ func claimActionNav(t *testing.T) {
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_MASTER_SOCKET=" + master}
 
 	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv)
-	m, _ = render(t, m)
-	if _, ok := rowByName(m, "navme"); !ok {
-		t.Fatalf("peer thread not in the fan-out grid")
-	}
+	m, _ = renderUntilRow(t, m, "navme") // wait for the mesh sync to replicate it
 
 	// Enter -> nav. Asserts on the REAL servers:
 	if m = runKey(t, m, "enter"); m.LastErr() != nil {
@@ -174,10 +173,7 @@ func claimActionStop(t *testing.T) {
 	}
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	m, _ = render(t, m) // load the grid; single thread => cursor on it
-	if _, ok := rowByName(m, "stopme"); !ok {
-		t.Fatalf("thread not in the grid")
-	}
+	m, _ = renderUntilRow(t, m, "stopme") // single thread => cursor on it
 	if m = runKey(t, m, "x"); m.LastErr() != nil {
 		t.Fatalf("stop action errored: %v", m.LastErr())
 	}
@@ -208,10 +204,7 @@ func claimActionDelete(t *testing.T) {
 	th := sb.newHeadlessThread(t, "pi", "delme") // dead-by-construction (no runtime)
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	m, _ = render(t, m)
-	if _, ok := rowByName(m, "delme"); !ok {
-		t.Fatalf("thread not in the grid")
-	}
+	m, _ = renderUntilRow(t, m, "delme")
 	if m = runKey(t, m, "d"); m.LastErr() != nil {
 		t.Fatalf("delete action errored: %v", m.LastErr())
 	}
@@ -232,10 +225,7 @@ func claimActionArchive(t *testing.T) {
 	th := sb.newHeadlessThread(t, "pi", "parkme")
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	m, _ = render(t, m)
-	if _, ok := rowByName(m, "parkme"); !ok {
-		t.Fatalf("thread not in the grid")
-	}
+	m, _ = renderUntilRow(t, m, "parkme")
 	m = runKey(t, m, "a")
 
 	// Record kept but hidden from the active list (the daemon truth)...
@@ -245,11 +235,10 @@ func claimActionArchive(t *testing.T) {
 	if !hasThread(sb.listThreadsArchived(t), th.ID) {
 		t.Errorf("archived thread missing from the archived list (record not kept)")
 	}
-	// ...and gone from the rendered active grid.
-	m, _ = render(t, m)
-	if _, ok := rowByName(m, "parkme"); ok {
-		t.Errorf("archived thread still rendered in the active grid")
-	}
+	// ...and gone from the rendered active grid (after the maintainer re-reads the
+	// archived flag and the TUI filters it).
+	m = renderUntilGone(t, m, "parkme")
+	_ = m
 }
 
 // render runs the model's REAL fetch command against the daemon and renders the
@@ -289,11 +278,8 @@ func claimGridRenderRealState(t *testing.T) {
 	// DATA is real (from the daemon, not a fixture): a row with our real machine,
 	// name, and the independently-fetched activity. RENDER is faithful: the view
 	// line shows the glyph for that activity.
-	m, view := render(t, m)
-	row, ok := rowByName(m, "tuithread")
-	if !ok {
-		t.Fatalf("TUI did not render the thread row; view:\n%s", view)
-	}
+	m, row := renderUntilRow(t, m, "tuithread")
+	_, view := render(t, m)
 	if row.Machine != sb.Machine {
 		t.Errorf("row machine = %q, want the real %q (fixture?)", row.Machine, sb.Machine)
 	}
@@ -327,6 +313,50 @@ func rowByName(m tui.Model, name string) (api.ThreadRow, bool) {
 	return api.ThreadRow{}, false
 }
 
+// The TUI now reads the mesh, which is eventually-consistent: a just-created thread
+// appears within a maintainer tick (local) or a sync (peer), not instantly. So
+// claims poll the render rather than rendering once.
+
+func renderUntilRow(t *testing.T, m tui.Model, name string) (tui.Model, api.ThreadRow) {
+	t.Helper()
+	var got api.ThreadRow
+	if !waitUntil(20*time.Second, func() bool {
+		m, _ = render(t, m)
+		r, ok := rowByName(m, name)
+		if ok {
+			got = r
+		}
+		return ok
+	}) {
+		_, view := render(t, m)
+		t.Fatalf("row %q never appeared in the TUI; view:\n%s", name, view)
+	}
+	return m, got
+}
+
+func renderUntilCount(t *testing.T, m tui.Model, n int) tui.Model {
+	t.Helper()
+	if !waitUntil(20*time.Second, func() bool {
+		m, _ = render(t, m)
+		return len(m.Rows()) >= n
+	}) {
+		t.Fatalf("TUI never showed >= %d rows", n)
+	}
+	return m
+}
+
+func renderUntilGone(t *testing.T, m tui.Model, name string) tui.Model {
+	t.Helper()
+	if !waitUntil(20*time.Second, func() bool {
+		m, _ = render(t, m)
+		_, ok := rowByName(m, name)
+		return !ok
+	}) {
+		t.Fatalf("row %q never disappeared from the TUI", name)
+	}
+	return m
+}
+
 // claimGridFanout: the grid (--all-machines) renders a PEER's thread, fetched via
 // the mesh — proving cross-machine state is real, not local-only.
 func claimGridFanout(t *testing.T) {
@@ -345,17 +375,50 @@ func claimGridFanout(t *testing.T) {
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
 
 	m := tui.New(local.Home+"/daemon.sock", true) // all-machines
-	m, view := render(t, m)
-	row, ok := rowByName(m, "onpeer")
-	if !ok {
-		t.Fatalf("fan-out TUI did not render the peer thread %s; view:\n%s", there.ID, view)
-	}
+	// The peer thread appears once the mesh sync replicates it (eventually consistent).
+	m, row := renderUntilRow(t, m, "onpeer")
+	_ = there
 	// The row is the PEER's (real cross-machine data), and it is rendered.
 	if row.Machine != peer.Machine {
 		t.Errorf("peer row machine = %q, want %q", row.Machine, peer.Machine)
 	}
-	if rowLine(view, "onpeer") == "" {
+	if _, view := render(t, m); rowLine(view, "onpeer") == "" {
 		t.Errorf("peer thread not visible in the rendered view")
+	}
+}
+
+// claimMeshRenderOffline: the rendered mesh view reflects offline browsing — a
+// peer that goes down renders as OFFLINE, and its last-known threads stay listed
+// (not dropped). The TUI's whole point for a multi-machine rig.
+func claimMeshRenderOffline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+	bin := seshBin(t)
+	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+	peer.newHeadlessThread(t, "pi", "onpeer")
+
+	m := tui.New(local.Home+"/daemon.sock", true) // all-machines
+	m, _ = renderUntilRow(t, m, "onpeer")         // synced and rendered while up
+
+	// Take the peer down: the render must show it OFFLINE while STILL listing onpeer.
+	if _, stderr, err := peer.daemonRunner.Run(t, "daemon", "stop"); err != nil {
+		t.Fatalf("stop peer daemon: %v\n%s", err, stderr)
+	}
+	if !waitUntil(20*time.Second, func() bool {
+		mm, view := render(t, m)
+		m = mm
+		return strings.Contains(view, "OFFLINE") && rowLine(view, "onpeer") != ""
+	}) {
+		_, view := render(t, m)
+		t.Fatalf("TUI never rendered the downed peer as OFFLINE-with-threads; view:\n%s", view)
 	}
 }
 
@@ -370,10 +433,7 @@ func claimNavigationCursor(t *testing.T) {
 	b := sb.newHeadlessThread(t, "pi", "beta")
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	m, _ = render(t, m)
-	if len(m.Rows()) < 2 {
-		t.Fatalf("expected >=2 rows, got %d", len(m.Rows()))
-	}
+	m = renderUntilCount(t, m, 2)
 	first, _ := m.Selected()
 	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = nm.(tui.Model)

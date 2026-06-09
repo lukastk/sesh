@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,13 +37,14 @@ type Model struct {
 	binaryPath string
 	navEnv     []string
 
-	rows        []api.ThreadRow
-	unreachable []string
-	cursor      int
-	err         error
-	lastErr     error
-	width       int
-	height      int
+	rows      []api.ThreadRow
+	machines  []api.MachineView // per-machine freshness, for the staleness footer
+	fetchedAt int64             // unix time the current data was fetched (for staleness age)
+	cursor    int
+	err       error
+	lastErr   error
+	width     int
+	height    int
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -62,10 +64,12 @@ func (m Model) WithExec(binaryPath string, env []string) Model {
 	return m
 }
 
-// gridMsg carries a freshly-fetched grid.
-type gridMsg struct {
-	resp api.ThreadGridResponse
-	err  error
+// meshMsg carries a freshly-fetched mesh view, already flattened to rows.
+type meshMsg struct {
+	rows      []api.ThreadRow
+	machines  []api.MachineView
+	fetchedAt int64
+	err       error
 }
 
 type tickMsg time.Time
@@ -73,14 +77,41 @@ type tickMsg time.Time
 // Init kicks off the first fetch.
 func (m Model) Init() tea.Cmd { return m.fetch() }
 
-// fetch returns a command that polls the daemon grid (off the UI thread).
+// fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
+// offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
 	c, archived, all := m.client, m.archived, m.allMachines
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		resp, err := c.ThreadGrid(ctx, archived, all)
-		return gridMsg{resp: resp, err: err}
+		mesh, err := c.Mesh(ctx)
+		if err != nil {
+			return meshMsg{err: err}
+		}
+		var rows []api.ThreadRow
+		for _, mv := range mesh.Machines {
+			if !all && !mv.Self {
+				continue
+			}
+			for _, t := range mv.Threads {
+				if t.Archived && !archived {
+					continue
+				}
+				rows = append(rows, api.ThreadRow{Thread: t.Thread, Activity: t.Activity, Attachment: t.Attachment})
+			}
+		}
+		// Stable order (machine, then name, then id) so the cursor never jumps —
+		// the maintainer's snapshot map iteration is unordered.
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].Machine != rows[j].Machine {
+				return rows[i].Machine < rows[j].Machine
+			}
+			if rows[i].Name != rows[j].Name {
+				return rows[i].Name < rows[j].Name
+			}
+			return rows[i].ID < rows[j].ID
+		})
+		return meshMsg{rows: rows, machines: mesh.Machines, fetchedAt: time.Now().Unix()}
 	}
 }
 
@@ -95,13 +126,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
-	case gridMsg:
+	case meshMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
 		} else {
 			m.lastErr = nil
-			m.rows = msg.resp.Rows
-			m.unreachable = msg.resp.Unreachable
+			m.rows = msg.rows
+			m.machines = msg.machines
+			m.fetchedAt = msg.fetchedAt
 			if m.cursor >= len(m.rows) {
 				m.cursor = max(0, len(m.rows)-1)
 			}
@@ -289,8 +321,18 @@ func (m Model) View() string {
 			b.WriteString("  " + line + "\n")
 		}
 	}
-	for _, u := range m.unreachable {
-		b.WriteString(styleDim.Render("  ! peer "+u+" unreachable") + "\n")
+	// Per-machine freshness (offline browsing): show every peer's staleness, and
+	// flag any that are offline (their last-known threads are still listed above).
+	for _, mv := range m.machines {
+		if mv.Self {
+			continue
+		}
+		age := m.fetchedAt - mv.SyncedAtUnix
+		if mv.Reachable {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  %s · synced %ds ago", mv.Machine, age)) + "\n")
+		} else {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · last seen %ds ago", mv.Machine, age)) + "\n")
+		}
 	}
 	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · x stop · d delete · a archive · r refresh · q quit") + "\n")
 	return b.String()

@@ -6,7 +6,9 @@ suggestion: #1 (small) then #2 (medium).
 
 ---
 
-## 1. `nav --in-client`: enter a thread in the CURRENT tmux client (same-socket, no master)
+> **STATUS:** #1, #2, #3 are DONE (built + matrix-green). #4 (myrig integration) remains.
+
+## 1. ✅ DONE — `nav --in-client`: enter a thread in the CURRENT tmux client (same-socket, no master)
 
 **Want:** in `sesh tui`, pressing Enter on a thread that is on the LOCAL machine and on the
 tmux socket you're already attached to should just switch your current client to that
@@ -37,7 +39,7 @@ active session flipped (and assert a loud error when run outside a client / for 
 
 ---
 
-## 2. `thread headful`: promote a live HEADLESS thread to HEADFUL (and enter it)
+## 2. ✅ DONE — `thread headful`: promote a live HEADLESS thread to HEADFUL (and enter it)
 
 **Want:** select a headless thread in the TUI → Enter → it gets a real tmux pane (agent
 resumed, conversation intact) → you're dropped into it. Combined with #1, Enter on a headless

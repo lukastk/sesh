@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -68,7 +67,7 @@ func threadRename(cfg config.Config, args []string) error {
 	if *id == "" || *name == "" {
 		return errors.New("thread rename: --id and --name are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadRename(context.Background(), *id, *name); err != nil {
 		return err
 	}
@@ -88,7 +87,7 @@ func threadTag(cfg config.Config, args []string) error {
 	if *id == "" || (len(add) == 0 && len(remove) == 0) {
 		return errors.New("thread tag: --id and at least one --add/--remove required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadTag(context.Background(), *id, add, remove); err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func threadArchive(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread archive: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadArchive(context.Background(), *id, !*unarchive); err != nil {
 		return err
 	}
@@ -128,7 +127,7 @@ func threadDelete(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread delete: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadDelete(context.Background(), *id, *force); err != nil {
 		return err
 	}
@@ -152,7 +151,7 @@ func threadResume(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("resume: a thread id is required (--id or positional)")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadResume(context.Background(), *id)
 	if err != nil {
 		return err
@@ -172,7 +171,7 @@ func threadGrid(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadGrid(context.Background(), *archived, *allMachines)
 	if err != nil {
 		return err
@@ -201,7 +200,7 @@ func threadSnapshot(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	snap, err := c.Snapshot(context.Background())
 	if err != nil {
 		return err
@@ -244,7 +243,7 @@ func threadSendHeadless(cfg config.Config, args []string) error {
 	if *id == "" || *text == "" {
 		return errors.New("thread send-headless: --id and --text are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadSendHeadless(context.Background(), *id, *text); err != nil {
 		return err
 	}
@@ -262,7 +261,7 @@ func threadHeadlessReply(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread headless-reply: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadHeadlessReply(context.Background(), *id)
 	if err != nil {
 		return err
@@ -287,7 +286,7 @@ func threadSend(cfg config.Config, args []string) error {
 	if *id == "" || *text == "" {
 		return errors.New("thread send: --id and --text are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadSend(context.Background(), *id, *text); err != nil {
 		return err
 	}
@@ -305,7 +304,7 @@ func threadStatus(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread status: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadStatus(context.Background(), *id)
 	if err != nil {
 		return err
@@ -334,7 +333,7 @@ func threadNew(cfg config.Config, args []string) error {
 	if *agent == "" || *name == "" || *cwd == "" {
 		return errors.New("thread new: --agent, --name and --cwd are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless,
 	})
@@ -356,7 +355,7 @@ func threadList(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadList(context.Background(), *archived, *allMachines)
 	if err != nil {
 		return err
@@ -391,7 +390,7 @@ func threadStop(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread stop: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.ThreadStop(context.Background(), *id); err != nil {
 		return err
 	}
@@ -409,7 +408,7 @@ func threadPane(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("thread pane: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.ThreadPane(context.Background(), *id)
 	if err != nil {
 		return err

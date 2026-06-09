@@ -115,6 +115,16 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "api.tcp-auth",
+		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "api.tcp-parity",
+		Description: "the TCP API has FULL parity with the local one (same router): a remote client drives every layer — thread, ticket, tmux, mesh, snapshot — over TCP+token",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

@@ -45,7 +45,10 @@ func (c *Client) TmuxStageFile(ctx context.Context, name string, content []byte)
 }
 
 func (c *Client) getJSON(ctx context.Context, u string, out any) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := c.req(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -59,7 +62,10 @@ func (c *Client) postJSON(ctx context.Context, u string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
+	req, err := c.req(ctx, http.MethodPost, u, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {

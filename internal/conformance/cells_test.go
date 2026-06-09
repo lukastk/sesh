@@ -38,6 +38,8 @@ var skipReasons = map[string]string{
 	"thread.snapshot":       "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
 	"mesh.snapshot":         "GET /v1/mesh: L2 sync replicates a peer's snapshot into the local cache; merged view read locally",
 	"mesh.offline-listing":  "offline browsing: a downed peer's threads stay listed (reachable=false), and recover when it returns",
+	"api.tcp-auth":          "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
+	"api.tcp-parity":        "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",
 	"ticket.create":         "create a ticket",
 	"ticket.list-by-thread": "list tickets assigned to a thread",
 	"ticket.send-prompt":    "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",

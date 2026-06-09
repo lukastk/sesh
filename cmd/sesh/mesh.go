@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -21,7 +20,7 @@ func runMesh(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(config.Load().SocketPath())
+	c := daemonClient(config.Load())
 	mesh, err := c.Mesh(context.Background())
 	if err != nil {
 		return err

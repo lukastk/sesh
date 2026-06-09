@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/lukastk/sesh/internal/api"
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -56,7 +55,7 @@ func ticketCreate(cfg config.Config, args []string) error {
 	if *name == "" {
 		return errors.New("ticket create: --name is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TicketCreate(context.Background(), api.CreateTicketRequest{Name: *name, Description: *desc, Prompt: *prompt})
 	if err != nil {
 		return err
@@ -75,7 +74,7 @@ func ticketList(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TicketList(context.Background(), *thread)
 	if err != nil {
 		return err
@@ -107,7 +106,7 @@ func ticketSetStatus(cfg config.Config, args []string) error {
 	if *id == "" || *status == "" {
 		return errors.New("ticket set-status: --id and --status are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TicketSetStatus(context.Background(), api.SetStatusRequest{ID: *id, Status: *status, ThreadID: *thread})
 	if err != nil {
 		return err
@@ -128,7 +127,7 @@ func ticketSendPrompt(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("ticket send-prompt: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.TicketSendPrompt(context.Background(), *id); err != nil {
 		return err
 	}
@@ -146,7 +145,7 @@ func ticketNeedsInput(cfg config.Config, args []string) error {
 	if *id == "" {
 		return errors.New("ticket needs-input: --id is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TicketNeedsInput(context.Background(), *id)
 	if err != nil {
 		return err

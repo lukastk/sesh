@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/lukastk/sesh/internal/config"
@@ -29,6 +30,15 @@ type Daemon struct {
 	srv     *http.Server
 	ln      net.Listener
 	started time.Time
+
+	// headless turn tracking: a stateless-per-turn headless thread is "working"
+	// exactly while a turn process is in flight (this daemon spawned it). The last
+	// reply is kept for retrieval. In-memory: a daemon restart loses in-flight
+	// state, which is acceptable for the stateless model (the turn is orphaned but
+	// its reply lands on disk in the agent's session).
+	hlMu       sync.Mutex
+	hlInFlight map[string]bool
+	hlReply    map[string]string
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses
@@ -58,7 +68,13 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 
-	d := &Daemon{cfg: cfg, store: st, tmux: tmux.NewServer(cfg.TmuxSocket)}
+	d := &Daemon{
+		cfg:        cfg,
+		store:      st,
+		tmux:       tmux.NewServer(cfg.TmuxSocket),
+		hlInFlight: map[string]bool{},
+		hlReply:    map[string]string{},
+	}
 	d.srv = &http.Server{Handler: d.routes()}
 	return d, nil
 }

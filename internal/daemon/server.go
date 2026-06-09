@@ -21,6 +21,7 @@ func (d *Daemon) routes() http.Handler {
 	mux.HandleFunc("POST /v1/tmux/send-text", d.handleTmuxSendText)
 	mux.HandleFunc("POST /v1/tmux/stage-file", d.handleTmuxStageFile)
 	d.routesThreads(mux)
+	d.routesHeadless(mux)
 	d.routesTickets(mux)
 	return mux
 }

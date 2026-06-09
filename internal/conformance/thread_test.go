@@ -255,6 +255,11 @@ func testThreadResolvePane(t *testing.T, agent string, loc matrix.Locality) {
 	if resolved.Pane.Pane != markPane {
 		t.Errorf("resolved pane = %q, want marked pane %q", resolved.Pane.Pane, markPane)
 	}
+	// The resolved pane must be the CORRECT one — the pane actually running this
+	// agent (not merely a pane that happens to carry the marker).
+	if !waitUntil(agentStartTimeout, func() bool { return agentRunningUnder(resolved.Pane.PanePID, agent) }) {
+		t.Errorf("resolved pane (pid %d) is not running a real %q process", resolved.Pane.PanePID, agent)
+	}
 
 	// Move the agent pane to a new window; the @sesh-thread-id pane option
 	// travels with it, so resolution must still find the SAME pane id. (A window

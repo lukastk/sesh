@@ -12,6 +12,10 @@ type Thread struct {
 	Tags          []string `json:"tags"`
 	Headless      bool     `json:"headless"`
 	CreatedAtUnix int64    `json:"created_at_unix"`
+	// AgentSessionID is the agent's own conversation id (headless threads only).
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// HeadlessStarted is true once the first headless turn has run.
+	HeadlessStarted bool `json:"headless_started,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -99,3 +103,13 @@ type ThreadStatusResponse struct {
 // NeedsInput is the derived "the human is blocking the agent" view: the agent is
 // idle (waiting) regardless of whether anyone is currently attached.
 func (s ThreadStatusResponse) NeedsInput() bool { return s.Activity == ActivityWaiting }
+
+// HeadlessReplyResponse is returned by GET /v1/threads/headless-reply: whether a
+// turn is still in flight, and the last completed reply (if any).
+type HeadlessReplyResponse struct {
+	Schema    int    `json:"schema"`
+	ID        string `json:"id"`
+	Working   bool   `json:"working"`
+	HaveReply bool   `json:"have_reply"`
+	Reply     string `json:"reply,omitempty"`
+}

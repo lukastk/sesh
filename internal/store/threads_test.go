@@ -66,3 +66,23 @@ func TestDeleteMissingThread(t *testing.T) {
 		t.Fatalf("want ErrThreadNotFound, got %v", err)
 	}
 }
+
+func TestHeadlessSession(t *testing.T) {
+	s := openTestStore(t)
+	th := api.Thread{ID: "h1", Machine: "m", SessionName: "headless-h1", Cwd: "/x", AgentKind: "codex", Name: "h", Tags: []string{}, Headless: true}
+	if err := s.InsertThread(th); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, _ := s.GetThread("h1")
+	if !got.Headless || got.AgentSessionID != "" || got.HeadlessStarted {
+		t.Fatalf("fresh headless wrong: %+v", got)
+	}
+	// First turn discovers codex's session id and marks started.
+	if err := s.SetHeadlessSession("h1", "codex-sess-xyz"); err != nil {
+		t.Fatalf("set headless session: %v", err)
+	}
+	got, _ = s.GetThread("h1")
+	if got.AgentSessionID != "codex-sess-xyz" || !got.HeadlessStarted {
+		t.Fatalf("after first turn wrong: %+v", got)
+	}
+}

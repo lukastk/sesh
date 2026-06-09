@@ -40,3 +40,15 @@ func (c *Client) ThreadStatus(ctx context.Context, id string) (api.ThreadStatusR
 func (c *Client) ThreadSend(ctx context.Context, id, text string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/send", api.ThreadSendRequest{ID: id, Text: text}, nil)
 }
+
+// ThreadSendHeadless posts POST /v1/threads/send-headless (deliver a turn to a
+// headless thread; runs in the background).
+func (c *Client) ThreadSendHeadless(ctx context.Context, id, text string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text}, nil)
+}
+
+// ThreadHeadlessReply fetches GET /v1/threads/headless-reply?id=.
+func (c *Client) ThreadHeadlessReply(ctx context.Context, id string) (api.HeadlessReplyResponse, error) {
+	var out api.HeadlessReplyResponse
+	return out, c.getJSON(ctx, "http://unix/v1/threads/headless-reply?id="+url.QueryEscape(id), &out)
+}

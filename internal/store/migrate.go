@@ -37,6 +37,12 @@ var migrations = []string{
 		thread_id   TEXT,
 		created_at  INTEGER NOT NULL
 	);`,
+	// 4: headless thread bookkeeping. agent_session_id is the agent's own
+	// conversation id (sesh pre-assigns it for pi/claude; codex generates its
+	// own on the first turn). headless_started flags whether the first turn has
+	// run (first turn creates the session; later turns resume it).
+	`ALTER TABLE threads ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE threads ADD COLUMN headless_started INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

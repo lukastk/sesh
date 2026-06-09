@@ -84,7 +84,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Headless {
-		writeError(w, http.StatusNotImplemented, "NOT IMPLEMENTED: headless threads land in Phase 3b")
+		d.newHeadlessThread(w, kind, req)
 		return
 	}
 
@@ -250,6 +250,15 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id}
 
+	// Headless threads have no pane; activity comes from the in-flight turn
+	// registry, and attachment is meaningless (always detached).
+	if thread.Headless {
+		resp.Activity = d.headlessActivity(id)
+		resp.Attachment = api.Detached
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	loc, found, err := d.tmux.FindPaneByThreadID(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -303,6 +312,9 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 // waiting), the signal ticket needs-input depends on. Shared with the status
 // endpoint's logic.
 func (d *Daemon) resolveActivity(thread api.Thread) (api.Activity, error) {
+	if thread.Headless {
+		return d.headlessActivity(thread.ID), nil
+	}
 	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
 	if err != nil {
 		return "", err

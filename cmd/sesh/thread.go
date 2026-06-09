@@ -34,9 +34,56 @@ func runThread(args []string) error {
 		return threadStatus(cfg, rest)
 	case "send":
 		return threadSend(cfg, rest)
+	case "send-headless":
+		return threadSendHeadless(cfg, rest)
+	case "headless-reply":
+		return threadHeadlessReply(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
+}
+
+func threadSendHeadless(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("send-headless", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	text := fs.String("text", "", "turn text (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || *text == "" {
+		return errors.New("thread send-headless: --id and --text are required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadSendHeadless(context.Background(), *id, *text); err != nil {
+		return err
+	}
+	fmt.Println("turn started for", *id)
+	return nil
+}
+
+func threadHeadlessReply(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("headless-reply", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("thread headless-reply: --id is required")
+	}
+	c := client.New(cfg.SocketPath())
+	resp, err := c.ThreadHeadlessReply(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	fmt.Printf("working=%t have_reply=%t\n", resp.Working, resp.HaveReply)
+	if resp.HaveReply {
+		fmt.Println(resp.Reply)
+	}
+	return nil
 }
 
 func threadSend(cfg config.Config, args []string) error {

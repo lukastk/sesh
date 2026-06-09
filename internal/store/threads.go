@@ -23,10 +23,14 @@ func (s *Store) InsertThread(t api.Thread) error {
 	if t.Headless {
 		headless = 1
 	}
+	started := 0
+	if t.HeadlessStarted {
+		started = 1
+	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -37,7 +41,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -49,7 +53,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns all threads on this machine, newest first.
 func (s *Store) ListThreads() ([]api.Thread, error) {
 	rows, err := s.db.Query(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started
 		 FROM threads ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list threads: %w", err)
@@ -83,16 +87,34 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+// SetHeadlessSession records the agent session id and marks the headless thread
+// as started (after its first turn). codex discovers its id on the first turn;
+// pi/claude keep the pre-assigned one.
+func (s *Store) SetHeadlessSession(id, agentSessionID string) error {
+	res, err := s.db.Exec(
+		`UPDATE threads SET agent_session_id = ?, headless_started = 1 WHERE id = ?`,
+		agentSessionID, id)
+	if err != nil {
+		return fmt.Errorf("store: set headless session: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
 func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
-	var headless int
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix); err != nil {
+	var headless, started int
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started); err != nil {
 		return t, err
 	}
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
 		return t, fmt.Errorf("store: decode thread tags: %w", err)
 	}
 	t.Headless = headless == 1
+	t.HeadlessStarted = started == 1
 	return t, nil
 }

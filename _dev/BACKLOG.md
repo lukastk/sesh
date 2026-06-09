@@ -97,13 +97,13 @@ CLI boundary only (no shell-sourcing of sesh internals).
 
 **4a. ✅ DONE (mymain + macbook) — deploy sesh-v2 durably.** Both run `sesh-v2-daemon`
 under supervisor (autostart on reboot), API on tailscale:7878 + token, managed peers.json,
-native build (auto-signed). Verified: cross-machine mesh syncs over http. Caveats: macbook's
-myrig couldn't `git pull` (its per-machine `home/.env` has local secret edits), so macbook
-was deployed via scp'd rendered files — it WORKS but its myrig source is stale; for full
-reproducibility, resolve macbook's `home/.env` (commit/stash its local changes) then pull +
-run myrig normally. macstudio not yet deployed (needs SESH_V2_API_TOKEN in its ~/.env + a
-myrig run). `home/.env` is per-machine and must NOT be committed (reverted: 5fe6234).
-Original plan below.
+native build (auto-signed). Verified: cross-machine mesh syncs over http. `home/.env` is
+TRACKED + SHARED across machines (not per-machine — my initial revert was wrong); the
+`SESH_V2_API_TOKEN` is committed to it (reconciled via macbook's union merge a8c84ef; both
+machines now at a8c84ef, trees clean). macbook's first deploy used scp'd rendered files (its
+myrig was behind); its myrig is now up to date, so a normal `myrig` run reproduces it.
+macstudio not yet deployed (needs a `myrig` provision — it clones+builds+supervisors via
+mysetup.sh, and home-install distributes the shared token). Original plan below.
 
 **4a (original plan). Deploy sesh-v2 durably (make the manual bring-up reproducible/persistent).** Currently
 mymain↔macbook run hand-started daemons + a hand-written `~/.myrig/zshenv/sesh-v2.sh` wrapper

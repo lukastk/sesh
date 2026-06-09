@@ -424,6 +424,23 @@ func runCmd(cmd *exec.Cmd) (string, string, error) {
 	return stdout.String(), stderr.String(), err
 }
 
+// runSSH runs a command on localhost via a real ssh hop (shell-quoted), for
+// tests that need to exercise the remote side directly (e.g. curl a peer socket).
+func runSSH(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		parts = append(parts, shellQuote(a))
+	}
+	cmd := exec.Command("ssh",
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"localhost",
+		strings.Join(parts, " "),
+	)
+	return runCmd(cmd)
+}
+
 // ensureSSHLocalhost skips the test loudly (not silently) if passwordless ssh
 // localhost is unavailable, so a missing prerequisite never masquerades as a
 // green remote cell.

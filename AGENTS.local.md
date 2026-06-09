@@ -48,6 +48,11 @@ ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer 
 - **Parity is matrix-enforced**: every `.http` twin shares the ssh body (`meshTransport`
   param) and registers the peer with a **broken ssh dest** (`http-only.invalid`), so a green
   http cell PROVES HTTP carried it (a silent ssh fallback would fail). 106 cells total.
+- **Real-network proof**: `TestRealCrossHostHTTP` (crosshost_test.go) validates the http
+  transport over the REAL mymain↔macbook tailscale link (routing + fan-out + sync), partner
+  registered with a broken ssh dest + real api-addr. Verified green 2026-06-09 (mymain→
+  macbook, 5.4s) after installing the current darwin/arm64 binary on macbook. Same prereq
+  as `TestRealCrossHost` (re-install partner binary after schema changes).
 
 ### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
 `kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;

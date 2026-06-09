@@ -72,5 +72,14 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
   2. `$MYRIG_MACHINES` is a zsh assoc array (NOT exported), so run the test with it
      exported: `MYRIG_MACHINES="$MYRIG_MACHINES" go test ./internal/conformance -run
      TestRealCrossHost -v`. (Self-detection uses `$MYRIG_TARGETS`, which IS exported.)
-  Currently only ports = 22 are supported (macbook/mymain are 22); a non-22 partner skips
-  until `peers.Peer` grows a port field.
+  `peers.Peer` now has a `Port` field, so non-22 partners are supported.
+
+- **Real cross-host HTTP test (`TestRealCrossHostHTTP`)** is the symmetric real-network
+  proof for the **http transport** (the `127.0.0.1` `.http` cells exercise the code but
+  never cross a real network). Same wiring/pairing/prereq as `TestRealCrossHost`, but it
+  starts the partner's daemon with its TCP API on its tailscale interface, registers it
+  as an **http peer with a deliberately broken ssh dest**, and asserts routing + fan-out
+  + sync all cross the real network over HTTP (a silent ssh attempt would fail). Run:
+  `MYRIG_MACHINES="$MYRIG_MACHINES" go test ./internal/conformance -run
+  TestRealCrossHostHTTP -v`. It skips loudly if the partner binary is stale (no
+  `--api-addr`) — re-install after schema changes.

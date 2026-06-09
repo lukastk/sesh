@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -60,10 +61,167 @@ func init() {
 	registerTUIClaim("grid-render-real-state", claimGridRenderRealState)
 	registerTUIClaim("grid-fanout-cross-machine", claimGridFanout)
 	registerTUIClaim("navigation-cursor", claimNavigationCursor)
-	// Action claims need the TUI's in-app key handlers, which land next; loud Skip.
-	registerTUIClaim("action-kill", func(t *testing.T) { t.Skip("NOT IMPLEMENTED: TUI kill action") })
-	registerTUIClaim("action-archive", func(t *testing.T) { t.Skip("NOT IMPLEMENTED: TUI archive action") })
-	registerTUIClaim("action-nav", func(t *testing.T) { t.Skip("NOT IMPLEMENTED: TUI nav action") })
+	registerTUIClaim("action-kill", claimActionKill)
+	registerTUIClaim("action-archive", claimActionArchive)
+	registerTUIClaim("action-nav", claimActionNav)
+}
+
+// claimActionNav: the nav key really switches the tmux client to the selected
+// thread's session — across the real master/inner tmux nesting, over a real ssh
+// hop, via the nav primitive. Asserted on the real tmux servers.
+func claimActionNav(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	// The peer machine: a real daemon. Its tmux socket is the inner mytmux.
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+	th := peer.newThread(t, "pi", "navme", "/tmp") // session sesh_navme on the peer
+	peer.waitThreadReady(t, th.ID, "pi")
+
+	// A master tmux with a window for the peer machine, NOT currently focused.
+	master := "sesh-tuinavmaster-" + th.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", peer.Machine)
+	mustTmux(t, master, "select-window", "-t", "m:home")
+
+	// The local client machine: knows the peer (incl. its tmux socket) and the
+	// master socket. The TUI runs here.
+	bin := seshBin(t)
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_MASTER_SOCKET=" + master}
+
+	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv)
+	m, _ = render(t, m)
+	if _, ok := rowByName(m, "navme"); !ok {
+		t.Fatalf("peer thread not in the fan-out grid")
+	}
+
+	// Enter -> nav. Asserts on the REAL servers:
+	if m = runKey(t, m, "enter"); m.LastErr() != nil {
+		t.Fatalf("nav action errored: %v", m.LastErr())
+	}
+	// outer: the master switched to the peer's window.
+	if got := activeWindowOf(t, master); got != peer.Machine {
+		t.Errorf("master active window = %q, want %q (outer switch failed)", got, peer.Machine)
+	}
+	// inner: the peer's tmux now has a client on the thread's session (bare-shell
+	// kick, since nothing was attached).
+	if !waitUntil(5*time.Second, func() bool { return innerClientSession(t, peer.TmuxSocket) == "sesh_navme" }) {
+		t.Errorf("peer tmux client not on sesh_navme; got %q (inner switch failed)", innerClientSession(t, peer.TmuxSocket))
+	}
+}
+
+func mustTmux(t *testing.T, socket string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("tmux", append([]string{"-L", socket}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("tmux -L %s %v: %v\n%s", socket, args, err, out)
+	}
+}
+
+func activeWindowOf(t *testing.T, socket string) string {
+	t.Helper()
+	out, _ := exec.Command("tmux", "-L", socket, "list-windows", "-F", "#{?window_active,#{window_name},}").Output()
+	return strings.TrimSpace(string(out))
+}
+
+func innerClientSession(t *testing.T, socket string) string {
+	t.Helper()
+	out, _ := exec.Command("tmux", "-L", socket, "list-clients", "-F", "#{client_session}").Output()
+	return strings.TrimSpace(string(out))
+}
+
+// runKey drives a keypress, runs the command it produces (the real action), and
+// feeds the result back through Update — how a test exercises an in-app action end
+// to end. The returned model's LastErr() carries any action error.
+func runKey(t *testing.T, m tui.Model, key string) tui.Model {
+	t.Helper()
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+	m2 := nm.(tui.Model)
+	if cmd == nil {
+		return m2
+	}
+	nm2, _ := m2.Update(cmd())
+	return nm2.(tui.Model)
+}
+
+// claimActionKill: the kill key really ends the thread — daemon record gone AND
+// the real session + agent process dead (both directions).
+func claimActionKill(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newThread(t, "pi", "killme", "/tmp")
+	var pid int
+	if !waitUntil(agentStartTimeout, func() bool {
+		_, p, ok := sb.markedPane(t, th.ID)
+		pid = p
+		return ok && agentRunningUnder(p, "pi")
+	}) {
+		t.Fatalf("agent never came up")
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m, _ = render(t, m) // load the grid; single thread => cursor on it
+	if _, ok := rowByName(m, "killme"); !ok {
+		t.Fatalf("thread not in the grid")
+	}
+	if m = runKey(t, m, "x"); m.LastErr() != nil {
+		t.Fatalf("kill action errored: %v", m.LastErr())
+	}
+	// Observable effect: record gone, and the REAL runtime is dead.
+	if threadInList(t, sb, th.ID) {
+		t.Errorf("killed thread still in the daemon list")
+	}
+	if !waitUntil(10*time.Second, func() bool { return !pidAlive(pid) }) {
+		t.Errorf("kill action did not kill the agent process")
+	}
+	if !waitUntil(10*time.Second, func() bool {
+		_, err := sb.rawTmux(t, "has-session", "-t", "=sesh_killme")
+		return err != nil
+	}) {
+		t.Errorf("kill action did not kill the tmux session")
+	}
+}
+
+// claimActionArchive: the archive key really parks the thread (record kept, hidden
+// from the active grid).
+func claimActionArchive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "parkme")
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m, _ = render(t, m)
+	if _, ok := rowByName(m, "parkme"); !ok {
+		t.Fatalf("thread not in the grid")
+	}
+	m = runKey(t, m, "a")
+
+	// Record kept but hidden from the active list (the daemon truth)...
+	if hasThread(sb.listThreads(t), th.ID) {
+		t.Errorf("archived thread still in the active list")
+	}
+	if !hasThread(sb.listThreadsArchived(t), th.ID) {
+		t.Errorf("archived thread missing from the archived list (record not kept)")
+	}
+	// ...and gone from the rendered active grid.
+	m, _ = render(t, m)
+	if _, ok := rowByName(m, "parkme"); ok {
+		t.Errorf("archived thread still rendered in the active grid")
+	}
 }
 
 // render runs the model's REAL fetch command against the daemon and renders the

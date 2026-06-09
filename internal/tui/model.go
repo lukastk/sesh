@@ -9,6 +9,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -28,6 +30,12 @@ type Model struct {
 	allMachines bool
 	archived    bool
 
+	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
+	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
+	// running sesh binary; tests override both.
+	binaryPath string
+	navEnv     []string
+
 	rows        []api.ThreadRow
 	unreachable []string
 	cursor      int
@@ -39,7 +47,19 @@ type Model struct {
 
 // New builds a model talking to the daemon at socketPath.
 func New(socketPath string, allMachines bool) Model {
-	return Model{client: client.New(socketPath), allMachines: allMachines}
+	bin, err := os.Executable()
+	if err != nil {
+		bin = "sesh"
+	}
+	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin}
+}
+
+// WithExec overrides how the nav action execs sesh (binary path + extra env) —
+// used by tests so nav drives a sandbox's tmux/mesh config.
+func (m Model) WithExec(binaryPath string, env []string) Model {
+	m.binaryPath = binaryPath
+	m.navEnv = env
+	return m
 }
 
 // gridMsg carries a freshly-fetched grid.
@@ -89,11 +109,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 	case tickMsg:
 		return m, m.fetch()
+	case actionMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err
+		}
+		return m, m.fetch() // re-fetch so the grid reflects the mutation
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
+
+// actionMsg is the result of an in-app mutation.
+type actionMsg struct{ err error }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -109,8 +137,62 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		return m, m.fetch()
+	case "x":
+		return m, m.killSelected()
+	case "a":
+		return m, m.archiveSelected()
+	case "enter":
+		return m, m.navSelected()
 	}
 	return m, nil
+}
+
+// navSelected jumps to the selected thread's session by driving the `sesh tmux
+// nav` primitive (outer switch + inner switch-client + bare-shell kick). The TUI
+// emits a locator and shells out; it does not re-implement nav.
+func (m Model) navSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	bin, env := m.binaryPath, m.navEnv
+	target := row.Machine + ":" + row.SessionName
+	return func() tea.Msg {
+		cmd := exec.Command(bin, "tmux", "nav", "--to", target)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
+		}
+		return actionMsg{}
+	}
+}
+
+// killSelected ends the selected thread (agent + session) and drops its record.
+func (m Model) killSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return actionMsg{err: c.ThreadKill(ctx, row.ID)}
+	}
+}
+
+// archiveSelected parks the selected thread (record kept, hidden from the list).
+func (m Model) archiveSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return actionMsg{err: c.ThreadArchive(ctx, row.ID, true)}
+	}
 }
 
 // Selected returns the row under the cursor, if any.
@@ -123,6 +205,9 @@ func (m Model) Selected() (api.ThreadRow, bool) {
 
 // Rows exposes the current rows (for tests).
 func (m Model) Rows() []api.ThreadRow { return m.rows }
+
+// LastErr exposes the most recent fetch/action error (for tests).
+func (m Model) LastErr() error { return m.lastErr }
 
 func max(a, b int) int {
 	if a > b {
@@ -189,7 +274,7 @@ func (m Model) View() string {
 	for _, u := range m.unreachable {
 		b.WriteString(styleDim.Render("  ! peer "+u+" unreachable") + "\n")
 	}
-	b.WriteString(styleDim.Render("\n  ↑/↓ move · r refresh · q quit") + "\n")
+	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · x kill · a archive · r refresh · q quit") + "\n")
 	return b.String()
 }
 

@@ -14,6 +14,7 @@ func (d *Daemon) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", d.handleHealth)
 	mux.HandleFunc("GET /v1/status", d.handleStatus)
+	mux.HandleFunc("GET /v1/snapshot", d.handleSnapshot)
 	mux.HandleFunc("POST /v1/shutdown", d.handleShutdown)
 	mux.HandleFunc("GET /v1/tmux/info", d.handleTmuxInfo)
 	mux.HandleFunc("POST /v1/tmux/sessions", d.handleTmuxCreateSession)

@@ -170,6 +170,27 @@ type ThreadGridResponse struct {
 	Unreachable []string    `json:"unreachable,omitempty"`
 }
 
+// ThreadSnapshot is the unit of mesh replication: a thread record plus its live
+// state, self-contained so a client renders it with no extra round-trip. Produced
+// by the daemon's background state maintainer (never an on-demand probe). See
+// _dev/MESH.md.
+type ThreadSnapshot struct {
+	Thread
+	Activity       Activity   `json:"activity"`
+	Attachment     Attachment `json:"attachment"`
+	AgentRunning   bool       `json:"agent_running"`
+	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion
+}
+
+// MachineSnapshot is one machine's full live thread state, returned by
+// GET /v1/snapshot — a pure read of the maintained state.
+type MachineSnapshot struct {
+	Schema          int              `json:"schema"`
+	Machine         string           `json:"machine"`
+	GeneratedAtUnix int64            `json:"generated_at_unix"`
+	Threads         []ThreadSnapshot `json:"threads"`
+}
+
 // HeadlessReplyResponse is returned by GET /v1/threads/headless-reply: whether a
 // turn is still in flight, and the last completed reply (if any).
 type HeadlessReplyResponse struct {

@@ -99,6 +99,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.snapshot",
+		Description: "GET /v1/snapshot: each thread's live state from the background maintainer — an O(1) read (no on-demand probe), tracks waiting<->working (see _dev/MESH.md L1)",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

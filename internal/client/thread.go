@@ -58,6 +58,13 @@ func (c *Client) ThreadDelete(ctx context.Context, id string, force bool) error 
 	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id, Force: force}, nil)
 }
 
+// Snapshot fetches GET /v1/snapshot — this machine's threads with their live state,
+// served from the daemon's background maintainer (an O(1) read, never a probe).
+func (c *Client) Snapshot(ctx context.Context) (api.MachineSnapshot, error) {
+	var out api.MachineSnapshot
+	return out, c.getJSON(ctx, "http://unix/v1/snapshot", &out)
+}
+
 // ThreadGrid fetches GET /v1/threads/grid — every thread with live status.
 func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bool) (api.ThreadGridResponse, error) {
 	var out api.ThreadGridResponse

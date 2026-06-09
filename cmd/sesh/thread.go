@@ -51,6 +51,8 @@ func runThread(args []string) error {
 		return threadResume(cfg, rest)
 	case "grid":
 		return threadGrid(cfg, rest)
+	case "snapshot":
+		return threadSnapshot(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
@@ -189,6 +191,36 @@ func threadGrid(cfg config.Config, args []string) error {
 	}
 	for _, row := range resp.Rows {
 		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, row.Machine, row.AgentKind, row.Name, row.ID)
+	}
+	return nil
+}
+
+func threadSnapshot(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("snapshot", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit JSON (one row per line)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	c := client.New(cfg.SocketPath())
+	snap, err := c.Snapshot(context.Background())
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		for _, row := range snap.Threads {
+			if err := enc.Encode(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, row := range snap.Threads {
+		kind := "headed"
+		if row.Headless {
+			kind = "headless"
+		}
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, kind, row.AgentKind, row.Name, row.ID)
 	}
 	return nil
 }

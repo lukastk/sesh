@@ -35,6 +35,7 @@ var skipReasons = map[string]string{
 	"thread.archive":        "park a thread (hidden from active list, record kept)",
 	"thread.delete":         "drop a record without touching the runtime",
 	"thread.resume":         "revive a dead headed thread (recreate session + relaunch with --resume); conversation continuity verified for all three agents (claude needs a clean top-level env, guaranteed by daemon ScrubHarnessEnv)",
+	"thread.snapshot":       "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
 	"ticket.create":         "create a ticket",
 	"ticket.list-by-thread": "list tickets assigned to a thread",
 	"ticket.send-prompt":    "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",

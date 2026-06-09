@@ -1,5 +1,9 @@
 # sesh v2 — master-tmux (design)
 
+> **STATUS:** the sesh side (§2 `sesh master up|window|attach|down`) is **BUILT** in
+> `cmd/sesh/master.go`, with conformance cells `master.up` + `master.reconnect` green.
+> Remaining: the myrig collapse (§4 / BACKLOG #4b) and `nav --in-client` (BACKLOG #1).
+
 The cross-machine "cockpit": a single tmux server with one window per machine, each an
 auto-reconnecting attach into that machine's work server. `sesh tmux nav` jumps you across
 machines by driving it. **All of this infrastructure lives in sesh** — building the master,

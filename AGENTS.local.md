@@ -48,6 +48,16 @@ ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer 
 - **Parity is matrix-enforced**: every `.http` twin shares the ssh body (`meshTransport`
   param) and registers the peer with a **broken ssh dest** (`http-only.invalid`), so a green
   http cell PROVES HTTP carried it (a silent ssh fallback would fail). 106 cells total.
+### Master-tmux infrastructure in sesh (`sesh master`, built 2026-06-09)
+Per the corrected boundary directive (`_dev/MASTER.md`): ALL master-tmux infra is in sesh,
+not myrig. `cmd/sesh/master.go`: `master up [--machines] [--tmux-conf]` builds the master
+server (window per machine, name==machine, automatic-rename off); `master window <machine>`
+is a Go reconnect-supervisor (attaches into the machine's WORK server — local or
+`ssh -tt … tmux -L <work> attach` — and self-heals with backoff on drop); `master attach`
+(syscall.Exec tmux attach); `master down`. Conventions are sesh-internal (sesh builds AND
+drives the master). Cells `master.up` + `master.reconnect` (Remote, agnostic; ssh-localhost
+peer; reconnect asserts client count hits 0 before healing). myrig collapse = BACKLOG #4b.
+
 - **Real-network proof**: `TestRealCrossHostHTTP` (crosshost_test.go) validates the http
   transport over the REAL mymain↔macbook tailscale link (routing + fan-out + sync), partner
   registered with a broken ssh dest + real api-addr. Verified green 2026-06-09 (mymain→

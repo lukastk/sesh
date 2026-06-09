@@ -1,32 +1,33 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## Build status (as of the Phase 0–5 build)
+## Build status: ALL GREEN — 76 / 76 cells, 0 fail, 0 skip, 0 missing
 
-Matrix: **57 / 76 cells green**, 0 fail, 0 missing. `go test ./...` green.
-Run `go run ./cmd/sesh matrix grid` (after `go test ./internal/conformance`) to see it.
+`go test ./...` green. Run `go run ./cmd/sesh matrix grid` (after
+`go test ./internal/conformance`) to see the grid.
 
-Done (honest, real-agent / real-ssh): the matrix spine; daemon + SQLite/WAL; the
-tmux layer (local + remote via `--machine` routing); the thread layer local+remote
-(new.headed, kill, list, resolve-pane for all agents; runtime-state + send.headful
-for claude+pi); the ticket layer (create, list-by-thread, set-status, needs-input,
-send-prompt, ownership); api.http-json; daemon.mesh-read.
+Every feature is honest (real agent in a real tmux pane; remote = real `ssh
+localhost` hop). All 24 feature rows green across their axes:
+matrix spine; daemon + SQLite/WAL; tmux layer incl. **nav** (local + remote via
+`--machine` routing); thread layer local+remote — new.headed/kill/list/resolve-pane,
+runtime-state, send.headful, **new.headless + send.headless** — for all 3 agents;
+ticket layer (create/list-by-thread/set-status/needs-input/send-prompt/ownership);
+api.http-json; daemon.mesh-read.
 
-### Remaining 19 skips and WHY (all honest, none faked)
+### Things resolved that were once blockers
 
-- **codex × 6** (runtime-state L/R, send.headful L/R, send-prompt L/R): codex shows a
-  **"Do you trust the contents of this directory?"** prompt at spawn that eats the
-  first keystrokes. Trust is persisted per-directory in `~/.codex/config.toml`
-  (`[projects."<dir>"] trust_level="trusted"`). `--dangerously-bypass-approvals-and-sandbox`
-  does NOT skip it; a `-c projects."<dir>".trust_level=...` override didn't take. Pre-
-  trusting an ephemeral test dir would mean writing into the user's global codex
-  config — a hack. **Needs a real codex-trust integration decision** (e.g. sesh manages
-  a per-thread CODEX_HOME, or trusts the cwd at spawn). The detection mechanism itself
-  is agent-agnostic and works for codex once it's past the prompt.
-- **headless × 12** (thread.new.headless, thread.send.headless): the headless mechanism
-  (persistent child agent, no window, send-as-a-turn) is not built yet. Also pending:
-  the **pi-headless N/A** question (PLAN flags it as a candidate N/A — confirm with Lukas).
-- **tmux.nav × 1** (remote): the nav primitive (outer mymastertmux switch + inner
-  switch-client + detached-pane kick) — not built.
+- **codex trust**: codex shows a per-directory "trust this dir?" prompt that ate
+  input. Fixed by `agents.EnsureCodexTrust` — sesh writes `[projects."<dir>"]
+  trust_level="trusted"` into codex's `config.toml` at spawn; `CODEX_HOME`
+  (SESH_CODEX_HOME) lets tests isolate it with auth.json symlinked.
+- **activity probe**: codex's thinking-phase animates only a ~1s timer; probe now
+  EARLY-EXITS on working (fast) with a ~3s idle-confirm window.
+- **send timing**: codex drops input when text+Enter are back-to-back → 250ms settle
+  before Enter (tmux.SendText + test sendKeys).
+- **headless**: stateless-per-turn (Lukas's choice). A headless thread is a durable
+  conversation, no tmux window; a turn = `<agent> --print/exec --resume`; "working"
+  = a turn process is in flight (daemon in-memory registry). pi is NOT N/A — it has
+  `--print --session-id`. codex's session id is parsed from `codex exec --json`
+  (thread.started) on the first turn.
 
 ## Key decisions baked in
 

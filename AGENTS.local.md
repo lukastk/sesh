@@ -2,10 +2,28 @@
 
 ## Build status: ALL GREEN
 
-Feature matrix: **93 cells, 93 green, 0 skip, 0 n/a**. Separate **TUI conformance
-track: 7/7 claims green** + structural import rule + completeness gate. Plus
-**`TestRealCrossHost`** (real network ssh hop mymain↔macbook, all 3 agents) — green,
-env-gated/skip-able. `go test ./...` is green.
+Feature matrix: **100 cells, all green** (on branch `mesh-replicated-state`). Separate
+**TUI conformance track: 8/8 claims green** (+ `mesh-render-offline`) + structural
+import rule + completeness gate. Plus **`TestRealCrossHost`** (real network ssh hop
+mymain↔macbook, all 3 agents) — env-gated/skip-able. `go test ./...` green.
+
+### Mesh / live cross-machine state (branch mesh-replicated-state) — the killer feature
+Design in `_dev/MESH.md`. Three decoupled loops:
+- **L1 maintainer** (`internal/daemon/maintainer.go`): per-daemon background rolling
+  probe → every local thread's live state is O(1) to read (`/v1/snapshot`, `thread.snapshot`).
+  Grid reads it (`d.maint.stateOf`).
+- **L2 mesh sync** (`internal/daemon/meshsync.go`): pulls each peer's snapshot over
+  multiplexed ssh into a SQLite cache (`peer_snapshots`, migration 6); `/v1/mesh` serves
+  the merged view locally (`mesh.snapshot`, `mesh.offline-listing`). Offline peer →
+  reachable=0, last-known retained.
+- **L3 TUI**: `sesh tui`/`sesh mesh` render the merged view with per-machine staleness.
+- **Phase C — network API** (`internal/daemon/apiserver.go`): `SESH_API_ADDR` exposes the
+  SAME full router over TCP behind a bearer token (`SESH_API_TOKEN`); refuses to run
+  exposed without a token. Client is transport-agnostic (`client.NewRemote`); CLI targets
+  a remote daemon via `SESH_REMOTE`. Parity by construction + tested (`api.tcp-auth`,
+  `api.tcp-parity`). For mobile: bind to the tailscale interface; a phone hits `/v1/mesh`.
+- `peers.Peer` has a `Port` field (`peer add --port`) → non-22 machines reachable
+  (`SSHArgs()` at every ssh site).
 
 ### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
 `kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;

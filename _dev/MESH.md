@@ -245,5 +245,11 @@ merged snapshot incl. a stale/offline machine), reality-anchored as today.
    green. (No mesh, no transport — immediate local win.)
 2. **Phase B** — L2 sync + `peer_snapshots` cache + `/v1/mesh`; multiplexed ssh; repoint
    `tui --all-machines`; `mesh.*` cells green. **This is the killer feature.**
-3. **Phase C** — tailscale TCP listener + token auth (+ optional hub) for mobile. Gated on
-   the security decision; separable.
+3. **Phase C** — tailscale TCP listener + token auth (+ optional hub) for mobile.
+   ✅ **DONE.** `SESH_API_ADDR` exposes the IDENTICAL full router over TCP behind a
+   bearer token (`SESH_API_TOKEN`/`_FILE`); the unix socket stays token-free. Refuses
+   to run exposed without a token. The client is transport-agnostic (`NewRemote`), and
+   the CLI targets a remote daemon via `SESH_REMOTE`. Parity is by construction (same
+   router) and tested across every layer (`api.tcp-auth`, `api.tcp-parity`). No
+   separate hub is needed: a phone pointed at an always-on node's `/v1/mesh` over TCP
+   gets the whole rig. Bind to the tailscale interface for tailnet-only reach.

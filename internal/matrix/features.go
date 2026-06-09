@@ -106,12 +106,22 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "mesh.snapshot",
-		Description: "GET /v1/mesh: the background sync (L2) replicates each peer's snapshot into the local cache; the merged view is read locally with a peer's threads + live state",
+		Description: "GET /v1/mesh over the SSH transport: the background sync (L2) replicates each peer's snapshot into the local cache; the merged view is read locally with a peer's threads + live state",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.snapshot.http",
+		Description: "mesh.snapshot's SSH↔HTTP parity twin: the SAME replication, but the peer is reached over its TCP API (HTTP transport) instead of ssh-exec — proves the http sync path works, not just ssh",
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
 		ID:          "mesh.offline-listing",
-		Description: "offline browsing: a peer going down keeps its last-known threads listed (reachable=false, retained from cache), and a recovered peer refreshes to reachable",
+		Description: "offline browsing (SSH transport): a peer going down keeps its last-known threads listed (reachable=false, retained from cache), and a recovered peer refreshes to reachable",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.offline-listing.http",
+		Description: "mesh.offline-listing's SSH↔HTTP parity twin: same offline-browsing guarantee with the peer reached over its TCP API — a downed HTTP peer stays listed and recovers",
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{

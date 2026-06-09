@@ -149,15 +149,36 @@ resolution, no consensus**. Display comes from the cache; every *mutation* (`nav
 `--machine` path), which is authoritative. Acting on an offline thread fails loudly. The
 cache is strictly a display optimization.
 
-### Transport: multiplexed ssh now, tailscale TCP later
+### Transport: explicit per-peer — ssh (default) or http (opt-in)
 
-Phase B uses the **ssh transport that already exists** (the `--machine` mesh) but turns on
-**ssh connection multiplexing** for the sync's ssh-exec calls:
-`-o ControlMaster=auto -o ControlPath=<run-dir>/ssh-%r@%h:%p -o ControlPersist=60s`. The
-first connection to a peer sets up a master; subsequent ~1s fetches reuse it (~10ms instead
-of a ~200ms handshake). Near-HTTP performance with **no new listener, no new auth, no new
-network exposure** — it is just ssh. (Phase C adds the TCP transport; the snapshot schema
-is identical, so nothing is wasted.)
+The sync transport is chosen **per peer**, explicitly, by `peers.Peer.Transport()`:
+
+- **ssh (default, always available).** ssh-exec of the peer's `thread snapshot --json`,
+  with **connection multiplexing** (`-o ControlMaster=auto -o ControlPath=<dir>/%C -o
+  ControlPersist=60s`): the first connection sets up a master, subsequent ~1s fetches
+  reuse it (~10ms, not a ~200ms handshake). No new listener, no new auth, no new exposure.
+  Works to any ssh-reachable host (off-tailnet, NAT, locked-down boxes), and is the only
+  way to bootstrap a not-yet-running daemon.
+- **http (opt-in, when the peer has an `ApiAddr`).** `client.NewRemote(ApiAddr, token)`
+  calls the peer daemon's `GET /v1/snapshot` directly over its TCP API — no remote process
+  spawn, it hits the peer's already-running maintainer from memory (~1–5ms). The HTTP
+  client is reused across ticks so keep-alive holds the connection. Configured with `peer
+  add --api-addr <host:port> --api-token[-file]`.
+
+**No automatic fallback.** A peer with an `ApiAddr` is reached over http, and an http
+failure is a LOUD error (marks the peer unreachable) — never a silent ssh downgrade. A
+silent downgrade would mask a broken http path, the exact `--machine X` anti-pattern this
+project exists to kill. The transport is a per-peer decision, deterministic and auditable.
+
+**Parity is enforced by the matrix.** `mesh.snapshot` / `mesh.offline-listing` (ssh) each
+have an `.http` twin running the SAME assertions over the http transport — and the http
+cells register the peer with a deliberately-**broken ssh destination**, so a green http
+cell PROVES the snapshot was pulled over HTTP, not ssh-by-accident. The grid can only go
+all-green if BOTH transports replicate correctly; neither can silently rot.
+
+> Routing (`--machine` mutations) over http is the next stage; it is a separate code path
+> (`routeToMachine`) and ships with its own parity cells. Bootstrap/`stage-file`/`nav` stay
+> ssh by design.
 
 ---
 

@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,9 +11,69 @@ import (
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
+// meshTransport is the daemon↔daemon transport a mesh cell exercises. The SAME test
+// body runs over BOTH (ssh and http) as DISTINCT matrix cells (feature-name suffix),
+// so the grid enforces SSH↔HTTP parity: it can only go all-green if the peer's
+// snapshot replicates correctly over EACH transport — neither can silently rot.
+type meshTransport struct {
+	name   string // "ssh" | "http"
+	suffix string // "" for ssh (the baseline cell), ".http" for http
+}
+
+var meshTransports = []meshTransport{
+	{name: "ssh", suffix: ""},
+	{name: "http", suffix: ".http"},
+}
+
 func init() {
-	matrix.RegisterTest("mesh.snapshot", matrix.AgentAgnostic, matrix.Remote, testMeshSnapshot)
-	matrix.RegisterTest("mesh.offline-listing", matrix.AgentAgnostic, matrix.Remote, testMeshOfflineListing)
+	for _, tr := range meshTransports {
+		tr := tr
+		matrix.RegisterTest("mesh.snapshot"+tr.suffix, matrix.AgentAgnostic, matrix.Remote,
+			func(t *testing.T) { testMeshSnapshot(t, tr) })
+		matrix.RegisterTest("mesh.offline-listing"+tr.suffix, matrix.AgentAgnostic, matrix.Remote,
+			func(t *testing.T) { testMeshOfflineListing(t, tr) })
+	}
+}
+
+// setupMeshPair starts a local daemon + a peer daemon and registers the peer with
+// `local` over tr's transport. For ssh it is a plain `peer add`; for http the peer
+// daemon is started with its TCP API exposed and registered with --api-addr/--api-token,
+// so `local`'s mesh sync pulls the peer's snapshot over HTTP, not ssh. Returns a
+// client to the LOCAL daemon (which serves the merged /v1/mesh) and the peer sandbox.
+func setupMeshPair(t *testing.T, tr meshTransport) (peer *Sandbox, local *client.Client) {
+	t.Helper()
+	ensureSSHLocalhost(t)
+	localSB := newSandbox(t, matrix.Local)
+	localSB.startDaemon(t)
+
+	// HONESTY: for the http transport the peer's ssh destination is deliberately
+	// BROKEN (an unresolvable .invalid host). The mesh sync's only network call is
+	// fetchPeerSnapshot, which for an http peer must go over the TCP API — so if the
+	// code ever silently fell back to ssh, ssh would fail and the cell would go red.
+	// A green http cell therefore PROVES the snapshot was pulled over HTTP, not ssh.
+	sshDest := "localhost"
+	var extraAdd []string
+	switch tr.name {
+	case "http":
+		addr := freePort(t)
+		token := fmt.Sprintf("mesh-token-%d", time.Now().UnixNano())
+		peer = newSandbox(t, matrix.Local, withAPI(addr, token))
+		extraAdd = []string{"--api-addr", addr, "--api-token", token}
+		sshDest = "http-only.invalid" // ssh here cannot connect — only HTTP can carry the sync
+	case "ssh":
+		peer = newSandbox(t, matrix.Local)
+	default:
+		t.Fatalf("unknown mesh transport %q", tr.name)
+	}
+	peer.startDaemon(t)
+
+	bin := seshBin(t)
+	add := []string{"peer", "add", "--machine", peer.Machine, "--ssh", sshDest, "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket}
+	add = append(add, extraAdd...)
+	if _, stderr, err := localSB.Runner.Run(t, add...); err != nil {
+		t.Fatalf("peer add (%s): %v\n%s", tr.name, err, stderr)
+	}
+	return peer, client.New(localSB.Home + "/daemon.sock")
 }
 
 // peerView returns the merged-mesh view for machine, if present.
@@ -43,21 +104,12 @@ func hasThreadID(mv api.MachineView, id string) bool {
 // goes down, the mesh KEEPS its last-known threads (marked reachable=false) rather
 // than dropping them; when the peer returns, it refreshes to reachable. Asserted on
 // the real daemons over a real ssh hop.
-func testMeshOfflineListing(t *testing.T) {
+func testMeshOfflineListing(t *testing.T, tr meshTransport) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	ensureSSHLocalhost(t)
-	local := newSandbox(t, matrix.Local)
-	local.startDaemon(t)
-	peer := newSandbox(t, matrix.Local)
-	peer.startDaemon(t)
-	bin := seshBin(t)
-	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
-		t.Fatalf("peer add: %v\n%s", err, stderr)
-	}
+	peer, c := setupMeshPair(t, tr)
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
-	c := client.New(local.Home + "/daemon.sock")
 
 	// First, the peer is reachable and its thread is synced.
 	if !waitUntil(15*time.Second, func() bool {
@@ -98,22 +150,13 @@ func testMeshOfflineListing(t *testing.T) {
 // background sync REPLICATES a peer's snapshot into its cache over a real ssh hop,
 // so the merged GET /v1/mesh — read LOCALLY, no per-query ssh — shows the peer's
 // thread with its live state, attributed to the peer, marked reachable.
-func testMeshSnapshot(t *testing.T) {
+func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	ensureSSHLocalhost(t)
-	local := newSandbox(t, matrix.Local)
-	local.startDaemon(t)
-	peer := newSandbox(t, matrix.Local)
-	peer.startDaemon(t)
-	bin := seshBin(t)
-	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
-		t.Fatalf("peer add: %v\n%s", err, stderr)
-	}
+	peer, c := setupMeshPair(t, tr)
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
 
-	c := client.New(local.Home + "/daemon.sock")
 	var peerView api.MachineView
 	var row api.ThreadSnapshot
 	if !waitUntil(15*time.Second, func() bool {
@@ -148,11 +191,12 @@ func testMeshSnapshot(t *testing.T) {
 		t.Errorf("peer thread mis-attributed: machine=%q name=%q", row.Machine, row.Name)
 	}
 
-	// The local machine itself is in the merged view, marked self.
+	// The local machine itself is in the merged view, marked self (and is NOT the
+	// peer — the self entry is the querying daemon).
 	mesh, _ := c.Mesh(context.Background())
 	var haveSelf bool
 	for _, mv := range mesh.Machines {
-		if mv.Machine == local.Machine && mv.Self {
+		if mv.Self && mv.Machine != peer.Machine {
 			haveSelf = true
 		}
 	}

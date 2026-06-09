@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/peers"
 )
 
@@ -29,10 +30,16 @@ type meshSync struct {
 	started bool
 	stop    chan struct{}
 	done    chan struct{}
+
+	// Reused HTTP clients for peers on the http transport, keyed by addr+token, so
+	// the ~1s sync keeps connections alive across ticks (the whole point of HTTP
+	// over ssh-exec: hit the peer's running daemon, don't reconnect every tick).
+	cmu     sync.Mutex
+	clients map[string]*client.Client
 }
 
 func newMeshSync(d *Daemon) *meshSync {
-	return &meshSync{d: d, stop: make(chan struct{}), done: make(chan struct{})}
+	return &meshSync{d: d, stop: make(chan struct{}), done: make(chan struct{}), clients: map[string]*client.Client{}}
 }
 
 func (s *meshSync) start() {
@@ -119,13 +126,53 @@ func (s *meshSync) tick() {
 	}
 }
 
-// fetchPeerSnapshot pulls a peer's maintained snapshot over a real ssh hop (with
-// connection multiplexing so a 1s cadence reuses one persistent connection). The
-// peer's `thread snapshot --json` is an O(1) read of ITS maintainer.
+// fetchPeerSnapshot pulls a peer's maintained snapshot over the peer's CONFIGURED
+// transport (peers.Peer.Transport): http for a peer with a TCP API, ssh otherwise.
+// Either way the result is the peer's MachineSnapshot threads — an O(1) read of ITS
+// maintainer. A transport failure is returned LOUDLY (the caller marks the peer
+// unreachable); there is no silent ssh fallback for an http peer.
 func (s *meshSync) fetchPeerSnapshot(p peers.Peer) ([]api.ThreadSnapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
 	defer cancel()
+	if p.Transport() == "http" {
+		return s.fetchPeerSnapshotHTTP(ctx, p)
+	}
+	return s.fetchPeerSnapshotSSH(ctx, p)
+}
 
+// fetchPeerSnapshotHTTP talks directly to the peer daemon's TCP API (GET
+// /v1/snapshot with a bearer token) — no remote process spawn, hits the peer's
+// already-running maintainer from memory.
+func (s *meshSync) fetchPeerSnapshotHTTP(ctx context.Context, p peers.Peer) ([]api.ThreadSnapshot, error) {
+	token, err := p.ResolveAPIToken()
+	if err != nil {
+		return nil, err
+	}
+	snap, err := s.remoteClient(p.ApiAddr, token).Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return snap.Threads, nil
+}
+
+// remoteClient returns a reused HTTP client for (addr, token), so keep-alive holds
+// the TCP connection across the 1s sync ticks.
+func (s *meshSync) remoteClient(addr, token string) *client.Client {
+	key := addr + "\x00" + token
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	c, ok := s.clients[key]
+	if !ok {
+		c = client.NewRemote(addr, token)
+		s.clients[key] = c
+	}
+	return c
+}
+
+// fetchPeerSnapshotSSH pulls a peer's snapshot over a real ssh hop (with connection
+// multiplexing so a 1s cadence reuses one persistent connection). The peer's
+// `thread snapshot --json` is an O(1) read of ITS maintainer.
+func (s *meshSync) fetchPeerSnapshotSSH(ctx context.Context, p peers.Peer) ([]api.ThreadSnapshot, error) {
 	remote := strings.Join([]string{
 		"env",
 		"SESH_HOME=" + shQuote(p.Home),

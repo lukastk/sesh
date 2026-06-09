@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config is the resolved environment for one sesh daemon/CLI invocation.
@@ -31,6 +32,17 @@ type Config struct {
 	// — sesh writes per-cwd trust there and injects CODEX_HOME into the pane. Empty
 	// = codex's default ~/.codex. Tests point this at an isolated dir.
 	CodexHome string
+	// APIAddr, when set, makes the daemon ALSO listen on this TCP address (e.g. a
+	// tailscale-bound "100.x.x.x:7373"), serving the full HTTP+JSON API for remote
+	// clients (mobile/Obsidian). Empty = unix socket only. APIToken is the bearer
+	// token required on the TCP listener; it MUST be set if APIAddr is (the daemon
+	// refuses to expose an unauthenticated network API).
+	APIAddr  string
+	APIToken string
+	// RemoteAddr/RemoteToken, when set, make the CLI/TUI target a REMOTE daemon's
+	// TCP API (SESH_REMOTE + SESH_API_TOKEN) instead of the local unix socket.
+	RemoteAddr  string
+	RemoteToken string
 }
 
 // Load resolves config from the environment:
@@ -77,7 +89,24 @@ func Load() Config {
 		MasterSocket: masterSocket,
 		TicketOwner:  os.Getenv("SESH_TICKET_OWNER"),
 		CodexHome:    os.Getenv("SESH_CODEX_HOME"),
+		APIAddr:      os.Getenv("SESH_API_ADDR"),
+		APIToken:     resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		RemoteAddr:   os.Getenv("SESH_REMOTE"),
+		RemoteToken:  resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
 	}
+}
+
+// resolveToken returns the token from the literal value, else read from file.
+func resolveToken(literal, file string) string {
+	if literal != "" {
+		return literal
+	}
+	if file != "" {
+		if b, err := os.ReadFile(file); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
 }
 
 // EnsureHome creates the home directory if missing.

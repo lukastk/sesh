@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -89,7 +88,9 @@ func tmuxNav(cfg config.Config, args []string) error {
 		return fmt.Errorf("nav: peer %q has no tmux socket registered (see `sesh peer add --tmux-socket`)", machine)
 	}
 	script := tmux.InnerSwitchScript(peer.TmuxSocket, session)
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", peer.SSH, script).CombinedOutput()
+	navArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	navArgs = append(navArgs, peer.SSH, script)
+	out, err := exec.Command("ssh", navArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("nav inner switch on %s: %v: %s", machine, err, out)
 	}
@@ -126,7 +127,7 @@ func tmuxInfo(cfg config.Config, args []string) error {
 	}
 	// Cross-machine `tmux info --machine X` is handled by the global router in
 	// main (it ssh-routes to X, which runs `tmux info` against its own daemon).
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TmuxInfo(context.Background(), *session)
 	if err != nil {
 		return err
@@ -153,7 +154,7 @@ func tmuxCreateSession(cfg config.Config, args []string) error {
 	if *name == "" {
 		return errors.New("create-session: --name is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TmuxCreateSession(context.Background(), api.CreateSessionRequest{Name: *name, Dir: *dir, Env: env.m})
 	if err != nil {
 		return err
@@ -172,7 +173,7 @@ func tmuxCreatePane(cfg config.Config, args []string) error {
 	if *target == "" {
 		return errors.New("create-pane: --target is required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TmuxCreatePane(context.Background(), api.CreatePaneRequest{Target: *target, Dir: *dir})
 	if err != nil {
 		return err
@@ -192,7 +193,7 @@ func tmuxSendText(cfg config.Config, args []string) error {
 	if *target == "" || *text == "" {
 		return errors.New("send-text: --target and --text are required")
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	return c.TmuxSendText(context.Background(), api.SendTextRequest{Target: *target, Text: *text, Enter: *enter})
 }
 
@@ -238,7 +239,7 @@ func tmuxStageFile(cfg config.Config, args []string) error {
 		return stageFileRemote(cfg, *to, staged, content)
 	}
 
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	resp, err := c.TmuxStageFile(context.Background(), staged, content)
 	if err != nil {
 		return err

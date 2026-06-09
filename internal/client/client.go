@@ -7,25 +7,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 )
 
-// Client talks to one daemon over its unix domain socket.
+// Client talks to one daemon over its HTTP+JSON surface — a LOCAL unix socket
+// (New) or a REMOTE TCP address with a bearer token (NewRemote). Every method is
+// transport-agnostic: it works identically over either, which is what gives the
+// network API full parity with the local one.
 type Client struct {
-	http   *http.Client
-	socket string
+	http  *http.Client
+	base  string // replaces the "http://unix" placeholder in request URLs
+	token string // bearer token for the remote (TCP) transport; empty for unix
 }
 
-// New builds a client for the daemon listening on socketPath.
+// New builds a client for the local daemon on socketPath (unix socket, no token).
 func New(socketPath string) *Client {
 	return &Client{
-		socket: socketPath,
+		base: "http://unix",
 		http: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 					var d net.Dialer
@@ -36,9 +42,35 @@ func New(socketPath string) *Client {
 	}
 }
 
+// NewRemote builds a client for a daemon's TCP API at addr ("host:port"),
+// authenticating with token. Same methods, same surface — just over the network.
+func NewRemote(addr, token string) *Client {
+	return &Client{
+		base:  "http://" + addr,
+		token: token,
+		http:  &http.Client{Timeout: 15 * time.Second},
+	}
+}
+
+// req builds a request with the base host substituted and the bearer token
+// attached (for the remote transport).
+func (c *Client) req(ctx context.Context, method, u string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, strings.Replace(u, "http://unix", c.base, 1), body)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return req, nil
+}
+
 // Health returns nil if the daemon answers GET /v1/health.
 func (c *Client) Health(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/health", nil)
+	req, err := c.req(ctx, http.MethodGet, "http://unix/v1/health", nil)
+	if err != nil {
+		return err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -53,7 +85,10 @@ func (c *Client) Health(ctx context.Context) error {
 // Status fetches GET /v1/status.
 func (c *Client) Status(ctx context.Context) (api.StatusResponse, error) {
 	var out api.StatusResponse
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/status", nil)
+	req, err := c.req(ctx, http.MethodGet, "http://unix/v1/status", nil)
+	if err != nil {
+		return out, err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return out, err
@@ -68,7 +103,10 @@ func (c *Client) Status(ctx context.Context) (api.StatusResponse, error) {
 
 // Shutdown requests POST /v1/shutdown.
 func (c *Client) Shutdown(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/shutdown", nil)
+	req, err := c.req(ctx, http.MethodPost, "http://unix/v1/shutdown", nil)
+	if err != nil {
+		return err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err

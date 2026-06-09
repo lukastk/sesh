@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os/exec"
@@ -57,8 +58,14 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolveRow computes a thread's live activity + attachment.
+// resolveRow returns a thread's live activity + attachment. Fast path: the
+// background maintainer's O(1) maintained state (so the whole grid is a memory
+// read, not N concurrent ~3s probes). Fallback: an on-demand resolve for a thread
+// the maintainer has not ticked yet (just created) — correctness without a tick.
 func (d *Daemon) resolveRow(th api.Thread) api.ThreadRow {
+	if snap, ok := d.maint.stateOf(th.ID); ok {
+		return api.ThreadRow{Thread: th, Activity: snap.Activity, Attachment: snap.Attachment}
+	}
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached}
 	if th.Headless {
 		row.Activity = d.headlessActivity(th.ID)
@@ -96,7 +103,22 @@ func (d *Daemon) fanOutGrid(includeArchived bool) ([]api.ThreadRow, []string) {
 	return rows, unreachable
 }
 
+// fetchPeerGrid asks a peer's daemon for its live-status grid over the peer's
+// EXPLICIT transport (http via its TCP API, else a real ssh hop).
 func fetchPeerGrid(p peers.Peer, includeArchived bool) ([]api.ThreadRow, error) {
+	if p.Transport() == "http" {
+		c, err := peerRemoteClient(p)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
+		defer cancel()
+		resp, err := c.ThreadGrid(ctx, includeArchived, false)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Rows, nil
+	}
 	args := []string{
 		"env", "SESH_HOME=" + shQuote(p.Home), "SESH_MACHINE=" + shQuote(p.Machine),
 		shQuote(p.Binary), "thread", "grid", "--json",
@@ -104,8 +126,9 @@ func fetchPeerGrid(p peers.Peer, includeArchived bool) ([]api.ThreadRow, error) 
 	if includeArchived {
 		args = append(args, "--archived")
 	}
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", p.SSH, strings.Join(args, " "))
-	out, err := cmd.Output()
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
+	out, err := exec.Command("ssh", sshArgs...).Output()
 	if err != nil {
 		return nil, err
 	}

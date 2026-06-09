@@ -46,6 +46,15 @@ var migrations = []string{
 	// 5: archive — a parked-but-keepable state, hidden from the active list but
 	// distinct from dead (runtime gone) and deleted (record gone).
 	`ALTER TABLE threads ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;`,
+	// 6: the mesh cache — one row per PEER machine holding its last-synced snapshot
+	// (payload = JSON array of ThreadSnapshot), so the cross-machine list is read
+	// locally and survives a peer going offline (reachable=0, payload retained).
+	`CREATE TABLE IF NOT EXISTS peer_snapshots (
+		machine        TEXT PRIMARY KEY,
+		synced_at_unix INTEGER NOT NULL,
+		reachable      INTEGER NOT NULL,
+		payload        TEXT NOT NULL
+	);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

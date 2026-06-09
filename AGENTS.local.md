@@ -2,10 +2,52 @@
 
 ## Build status: ALL GREEN
 
-Feature matrix: **93 cells, 93 green, 0 skip, 0 n/a**. Separate **TUI conformance
-track: 7/7 claims green** + structural import rule + completeness gate. Plus
-**`TestRealCrossHost`** (real network ssh hop mymain↔macbook, all 3 agents) — green,
-env-gated/skip-able. `go test ./...` is green.
+Feature matrix: **100 cells, all green** (on branch `mesh-replicated-state`). Separate
+**TUI conformance track: 8/8 claims green** (+ `mesh-render-offline`) + structural
+import rule + completeness gate. Plus **`TestRealCrossHost`** (real network ssh hop
+mymain↔macbook, all 3 agents) — env-gated/skip-able. `go test ./...` green.
+
+### Mesh / live cross-machine state (branch mesh-replicated-state) — the killer feature
+Design in `_dev/MESH.md`. Three decoupled loops:
+- **L1 maintainer** (`internal/daemon/maintainer.go`): per-daemon background rolling
+  probe → every local thread's live state is O(1) to read (`/v1/snapshot`, `thread.snapshot`).
+  Grid reads it (`d.maint.stateOf`).
+- **L2 mesh sync** (`internal/daemon/meshsync.go`): pulls each peer's snapshot over
+  multiplexed ssh into a SQLite cache (`peer_snapshots`, migration 6); `/v1/mesh` serves
+  the merged view locally (`mesh.snapshot`, `mesh.offline-listing`). Offline peer →
+  reachable=0, last-known retained.
+- **L3 TUI**: `sesh tui`/`sesh mesh` render the merged view with per-machine staleness.
+- **Phase C — network API** (`internal/daemon/apiserver.go`): `SESH_API_ADDR` exposes the
+  SAME full router over TCP behind a bearer token (`SESH_API_TOKEN`); refuses to run
+  exposed without a token. Client is transport-agnostic (`client.NewRemote`); CLI targets
+  a remote daemon via `SESH_REMOTE`. Parity by construction + tested (`api.tcp-auth`,
+  `api.tcp-parity`). For mobile: bind to the tailscale interface; a phone hits `/v1/mesh`.
+- `peers.Peer` has a `Port` field (`peer add --port`) → non-22 machines reachable
+  (`SSHArgs()` at every ssh site).
+
+### Hybrid daemon↔daemon transport (Stages 1+2+3 DONE: SYNC + ROUTING + live FAN-OUT over http)
+The transport is EXPLICIT per peer (`peers.Peer.Transport()` → "http" if it has an
+`ApiAddr`, else "ssh"), NOT an automatic fallback — an http failure is loud, never a silent
+ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer into http;
+`peer list` shows the transport. ssh stays the default + bootstrap/admin transport.
+- **Stage 1 — sync**: `fetchPeerSnapshot` branches in `internal/daemon/meshsync.go`
+  (`fetchPeerSnapshotHTTP` reuses a per-peer `client.NewRemote` for keep-alive across the
+  1s ticks). Cells `mesh.snapshot`(.http), `mesh.offline-listing`(.http).
+- **Stage 2 — routing**: `cmd/sesh/route.go routeMachine(cfg, machine, rest) (handled,err)`
+  — http peer + `httpRoutable(rest)` ⇒ set `SESH_REMOTE`/`SESH_API_TOKEN`, return
+  handled=false → `main` drops `--machine` and dispatches locally (daemonClient hits the
+  peer's API). ssh peer / carve-out ⇒ `routeToMachineSSH`, handled=true. Ticket-owner
+  auto-routing (`cmd/sesh/ticket.go`) uses the same path (reloads cfg after the http
+  branch; does NOT re-enter the owner check → no loop). **Carve-outs stay ssh** (`httpRoutable`
+  returns false): `daemon` lifecycle, `tmux nav`, `tmux stage-file`. Cells `route.parity`(.http).
+- **Stage 3 — live fan-out**: `internal/daemon/{fanout,grid}.go fetchPeerThreads/
+  fetchPeerGrid` branch on `Transport()` (http → `peerRemoteClient(p).ThreadList/ThreadGrid`).
+  So `thread list --all-machines` / `thread grid --all-machines` reach an http peer over
+  its API. An http-only peer is now first-class on EVERY cross-machine path. Cells
+  `thread.list-all`(.http), `thread.grid`(.http).
+- **Parity is matrix-enforced**: every `.http` twin shares the ssh body (`meshTransport`
+  param) and registers the peer with a **broken ssh dest** (`http-only.invalid`), so a green
+  http cell PROVES HTTP carried it (a silent ssh fallback would fail). 106 cells total.
 
 ### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
 `kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;

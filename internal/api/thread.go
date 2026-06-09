@@ -170,6 +170,47 @@ type ThreadGridResponse struct {
 	Unreachable []string    `json:"unreachable,omitempty"`
 }
 
+// ThreadSnapshot is the unit of mesh replication: a thread record plus its live
+// state, self-contained so a client renders it with no extra round-trip. Produced
+// by the daemon's background state maintainer (never an on-demand probe). See
+// _dev/MESH.md.
+type ThreadSnapshot struct {
+	Thread
+	Activity       Activity   `json:"activity"`
+	Attachment     Attachment `json:"attachment"`
+	AgentRunning   bool       `json:"agent_running"`
+	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion
+}
+
+// MachineSnapshot is one machine's full live thread state, returned by
+// GET /v1/snapshot — a pure read of the maintained state.
+type MachineSnapshot struct {
+	Schema          int              `json:"schema"`
+	Machine         string           `json:"machine"`
+	GeneratedAtUnix int64            `json:"generated_at_unix"`
+	Threads         []ThreadSnapshot `json:"threads"`
+}
+
+// MachineView is one machine's slice of the merged mesh view: its threads plus how
+// fresh they are. Self is always fresh; a peer carries the cache's last-sync time
+// and whether the most recent sync attempt reached it (offline → reachable=false,
+// last-known threads retained).
+type MachineView struct {
+	Machine      string           `json:"machine"`
+	Self         bool             `json:"self"`
+	Reachable    bool             `json:"reachable"`
+	SyncedAtUnix int64            `json:"synced_at_unix"`
+	Threads      []ThreadSnapshot `json:"threads"`
+}
+
+// MeshSnapshot is the merged cross-machine view returned by GET /v1/mesh: this
+// machine's live snapshot plus every peer's cached snapshot. Read locally (O(1)),
+// offline-capable. See _dev/MESH.md.
+type MeshSnapshot struct {
+	Schema   int           `json:"schema"`
+	Machines []MachineView `json:"machines"`
+}
+
 // HeadlessReplyResponse is returned by GET /v1/threads/headless-reply: whether a
 // turn is still in flight, and the last completed reply (if any).
 type HeadlessReplyResponse struct {

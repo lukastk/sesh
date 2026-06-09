@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/daemon"
 )
@@ -67,7 +66,7 @@ func daemonStart(cfg config.Config) error {
 	if err := cfg.EnsureHome(); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.Health(context.Background()); err == nil {
 		return fmt.Errorf("daemon already running on %s", cfg.SocketPath())
 	}
@@ -107,7 +106,7 @@ func daemonStart(cfg config.Config) error {
 }
 
 func daemonStop(cfg config.Config) error {
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	if err := c.Health(context.Background()); err != nil {
 		return fmt.Errorf("no daemon running on %s", cfg.SocketPath())
 	}
@@ -131,7 +130,7 @@ func daemonStatus(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(cfg.SocketPath())
+	c := daemonClient(cfg)
 	st, err := c.Status(context.Background())
 	if err != nil {
 		return fmt.Errorf("no daemon running on %s (%w)", cfg.SocketPath(), err)

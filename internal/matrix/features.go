@@ -90,13 +90,69 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.list-all",
-		Description: "daemon-side mesh fan-out: GET /v1/threads?all-machines aggregates this machine + every peer",
+		Description: "daemon-side mesh fan-out (ssh transport): GET /v1/threads?all-machines aggregates this machine + every peer",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "thread.list-all.http",
+		Description: "thread.list-all's SSH↔HTTP twin: the live fan-out reaches the peer over its TCP API (http transport) instead of ssh-exec",
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
 		ID:          "thread.grid",
-		Description: "live status grid: every thread with its real activity/attachment, concurrently; mesh fan-out for remote (the TUI's data source)",
+		Description: "live status grid: every thread with its real activity/attachment, concurrently; remote = mesh fan-out over ssh (the TUI's data source)",
 		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.grid.http",
+		Description: "thread.grid's SSH↔HTTP twin (remote only): the live fan-out grid reaches the peer over its TCP API (http transport)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "thread.snapshot",
+		Description: "GET /v1/snapshot: each thread's live state from the background maintainer — an O(1) read (no on-demand probe), tracks waiting<->working (see _dev/MESH.md L1)",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "mesh.snapshot",
+		Description: "GET /v1/mesh over the SSH transport: the background sync (L2) replicates each peer's snapshot into the local cache; the merged view is read locally with a peer's threads + live state",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.snapshot.http",
+		Description: "mesh.snapshot's SSH↔HTTP parity twin: the SAME replication, but the peer is reached over its TCP API (HTTP transport) instead of ssh-exec — proves the http sync path works, not just ssh",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.offline-listing",
+		Description: "offline browsing (SSH transport): a peer going down keeps its last-known threads listed (reachable=false, retained from cache), and a recovered peer refreshes to reachable",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.offline-listing.http",
+		Description: "mesh.offline-listing's SSH↔HTTP parity twin: same offline-browsing guarantee with the peer reached over its TCP API — a downed HTTP peer stays listed and recovers",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "route.parity",
+		Description: "`--machine` routing over the SSH transport: representative client-only ops (thread/ticket/tmux) routed to a peer land on the peer's daemon (carve-outs daemon-lifecycle/nav/stage-file stay ssh by design)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "route.parity.http",
+		Description: "route.parity's SSH↔HTTP twin: the SAME routed ops carried over the peer's TCP API (HTTP transport) instead of ssh-exec — proves `--machine` routing has http parity, not just ssh",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "api.tcp-auth",
+		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "api.tcp-parity",
+		Description: "the TCP API has FULL parity with the local one (same router): a remote client drives every layer — thread, ticket, tmux, mesh, snapshot — over TCP+token",
+		Localities:  []Locality{Local},
 	})
 	Register(Feature{
 		ID:          "thread.resolve-pane",

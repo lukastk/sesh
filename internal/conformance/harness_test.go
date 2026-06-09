@@ -87,14 +87,37 @@ type Sandbox struct {
 	TmuxSocket   string
 	Runner       Runner
 	daemonRunner Runner
+
+	// APIAddr/APIToken are set when the sandbox's daemon was started with its TCP
+	// API exposed (withAPI) — so a test can register it as an http-transport peer.
+	APIAddr  string
+	APIToken string
+}
+
+// sandboxConfig collects newSandbox options.
+type sandboxConfig struct {
+	apiAddr  string
+	apiToken string
+}
+
+type sandboxOpt func(*sandboxConfig)
+
+// withAPI starts the sandbox's daemon with its TCP API exposed on addr behind
+// token — i.e. reachable over the HTTP transport, not just ssh.
+func withAPI(addr, token string) sandboxOpt {
+	return func(c *sandboxConfig) { c.apiAddr = addr; c.apiToken = token }
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
 // dir cleaned up with the test; the runner is local (exec) or remote (ssh
 // localhost) accordingly. Each sandbox gets its OWN tmux socket so cells never
 // touch the user's real sessions and never collide with each other.
-func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
+func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox {
 	t.Helper()
+	var sc sandboxConfig
+	for _, o := range opts {
+		o(&sc)
+	}
 	bin := seshBin(t)
 	home := t.TempDir()
 	stamp := time.Now().UnixNano()
@@ -113,14 +136,18 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 		// Isolated codex home so sesh's per-cwd trust writes (which suppress
 		// codex's directory-trust prompt) never touch the user's real ~/.codex.
 		// auth is symlinked so codex stays authenticated.
-		"SESH_CODEX_HOME": setupCodexHome(t, home),
+		"SESH_CODEX_HOME": setupCodexHome(t),
+	}
+	if sc.apiAddr != "" {
+		env["SESH_API_ADDR"] = sc.apiAddr
+		env["SESH_API_TOKEN"] = sc.apiToken
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 
 	var sb *Sandbox
 	switch loc {
 	case matrix.Local:
-		sb = &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: peerDaemon, daemonRunner: peerDaemon}
+		sb = &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: peerDaemon, daemonRunner: peerDaemon, APIAddr: sc.apiAddr, APIToken: sc.apiToken}
 	case matrix.Remote:
 		// A separate local client machine that reaches the peer via `--machine`.
 		ensureSSHLocalhost(t)
@@ -181,16 +208,30 @@ func newSSHSandbox(t *testing.T) *Sandbox {
 	return sb
 }
 
-// setupCodexHome makes an isolated CODEX_HOME under base with the user's codex
-// auth symlinked in, so codex stays authenticated but sesh's trust writes are
-// sandboxed. Skips the symlink if the user has no codex auth (codex cells then
-// fail loudly rather than silently, which is correct).
-func setupCodexHome(t *testing.T, base string) string {
+// setupCodexHome makes an isolated CODEX_HOME with the user's codex auth symlinked
+// in, so codex stays authenticated but sesh's trust writes are sandboxed. Skips the
+// symlink if the user has no codex auth (codex cells then fail loudly rather than
+// silently, which is correct).
+//
+// It is deliberately NOT a subdir of the sandbox's t.TempDir: codex spawns
+// background children (plugin clones) that keep writing into CODEX_HOME/.tmp as the
+// test ends, which races t.TempDir's automatic RemoveAll ("directory not empty").
+// Instead it is its own dir with a RETRYING cleanup, registered before the sandbox
+// teardown so it runs AFTER the daemon/tmux (and thus codex) are killed.
+func setupCodexHome(t *testing.T) string {
 	t.Helper()
-	ch := filepath.Join(base, "codex-home")
-	if err := os.MkdirAll(ch, 0o700); err != nil {
+	ch, err := os.MkdirTemp("", "sesh-codex-home-")
+	if err != nil {
 		t.Fatalf("setup codex home: %v", err)
 	}
+	t.Cleanup(func() {
+		for i := 0; i < 20; i++ {
+			if os.RemoveAll(ch) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond) // a codex child is still writing; retry
+		}
+	})
 	if uh, err := os.UserHomeDir(); err == nil {
 		realAuth := filepath.Join(uh, ".codex", "auth.json")
 		if _, err := os.Stat(realAuth); err == nil {

@@ -102,6 +102,26 @@ func (s *Server) ClientCount(session string) (int, error) {
 	return len(strings.Split(out, "\n")), nil
 }
 
+// AttachedSessions returns the set of session names that have at least one client
+// attached — one list-clients call for the WHOLE server (the state maintainer's
+// per-tick attachment probe, instead of one ClientCount per thread).
+func (s *Server) AttachedSessions() (map[string]bool, error) {
+	out, err := s.run("list-clients", "-F", "#{client_session}")
+	if err != nil {
+		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "error connecting") {
+			return map[string]bool{}, nil
+		}
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			set[line] = true
+		}
+	}
+	return set, nil
+}
+
 // SessionAttached reports whether a client is attached to the session. It uses
 // list-sessions and matches the name exactly in Go: display-message -t with the
 // "=" exact-match prefix silently returns empty (the prefix is not honored

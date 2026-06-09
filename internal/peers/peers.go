@@ -10,15 +10,71 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
-// Peer is how to reach one remote machine's daemon.
+// Peer is how to reach one remote machine's daemon. Two transports:
+//   - ssh (always available): ssh into the machine and run sesh against its own
+//     SESH_HOME, hitting that machine's daemon over its unix socket.
+//   - http (opt-in, when ApiAddr is set): talk DIRECTLY to the peer's daemon's TCP
+//     API over the network, hitting its already-running process (no remote fork).
+//
+// The transport is EXPLICIT per peer (Transport()), never an automatic fallback: a
+// peer with an ApiAddr uses http and an http failure is a LOUD error, not a silent
+// ssh downgrade (a silent downgrade would mask a broken path — the v1 `--machine X`
+// anti-pattern). ssh remains the bootstrap/admin transport regardless.
 type Peer struct {
 	Machine    string `json:"machine"`               // the remote machine's identity (SESH_MACHINE)
 	SSH        string `json:"ssh"`                   // ssh destination, e.g. user@host or localhost
+	Port       string `json:"port,omitempty"`        // ssh port (empty = default 22)
 	Home       string `json:"home"`                  // the remote SESH_HOME (locates its daemon socket)
 	Binary     string `json:"binary"`                // path to the sesh binary on the remote machine
 	TmuxSocket string `json:"tmux_socket,omitempty"` // the remote mytmux socket NAME (for tmux nav)
+
+	// HTTP transport (opt-in). ApiAddr set => this peer is reached over its TCP API.
+	ApiAddr      string `json:"api_addr,omitempty"`       // the peer daemon's TCP API addr (host:port)
+	ApiToken     string `json:"api_token,omitempty"`      // bearer token literal (plaintext on disk — prefer the file)
+	ApiTokenFile string `json:"api_token_file,omitempty"` // path to a file holding the bearer token (preferred)
+}
+
+// Transport reports how this peer is reached: "http" if it has a TCP API configured
+// (ApiAddr), else "ssh". This is the single explicit decision point — no fallback.
+func (p Peer) Transport() string {
+	if p.ApiAddr != "" {
+		return "http"
+	}
+	return "ssh"
+}
+
+// ResolveAPIToken returns the bearer token for this peer's HTTP API — the literal
+// ApiToken or the contents of ApiTokenFile. It is LOUD: a peer with an ApiAddr but
+// no resolvable token is an error, never a silent unauthenticated attempt.
+func (p Peer) ResolveAPIToken() (string, error) {
+	if p.ApiToken != "" {
+		return p.ApiToken, nil
+	}
+	if p.ApiTokenFile != "" {
+		b, err := os.ReadFile(p.ApiTokenFile)
+		if err != nil {
+			return "", fmt.Errorf("peers: %s: read api_token_file: %w", p.Machine, err)
+		}
+		tok := strings.TrimSpace(string(b))
+		if tok == "" {
+			return "", fmt.Errorf("peers: %s: api_token_file %q is empty", p.Machine, p.ApiTokenFile)
+		}
+		return tok, nil
+	}
+	return "", fmt.Errorf("peers: %s has api_addr but no api_token/api_token_file", p.Machine)
+}
+
+// SSHArgs returns the ssh option args for reaching this peer (the port, if
+// non-default), to be placed before the destination in an `ssh` invocation. Every
+// ssh-to-peer call site MUST include these so non-22 machines are reachable.
+func (p Peer) SSHArgs() []string {
+	if p.Port != "" && p.Port != "22" {
+		return []string{"-p", p.Port}
+	}
+	return nil
 }
 
 // Registry is the set of known peers, keyed by machine.

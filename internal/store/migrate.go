@@ -25,6 +25,18 @@ var migrations = []string{
 		created_at   INTEGER NOT NULL,
 		UNIQUE (session_name)
 	);`,
+	// 3: tickets. A ticket projects a lifecycle onto a thread; it may be bound to
+	// at most one thread (a thread may have many tickets). needs-input is NOT
+	// stored — it is derived from the bound thread's live activity.
+	`CREATE TABLE IF NOT EXISTS tickets (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		prompt      TEXT NOT NULL DEFAULT '',
+		status      TEXT NOT NULL,
+		thread_id   TEXT,
+		created_at  INTEGER NOT NULL
+	);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

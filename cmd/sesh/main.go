@@ -60,6 +60,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh thread:", err)
 			os.Exit(1)
 		}
+	case "ticket":
+		if err := runTicket(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh ticket:", err)
+			os.Exit(1)
+		}
 	case "peer":
 		if err := runPeer(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh peer:", err)
@@ -83,6 +88,7 @@ commands:
   daemon    per-machine daemon (run | start | stop | status)
   tmux      tmux layer (current | info | create-session | create-pane | send-text | stage-file)
   thread    thread layer (new | list | kill | pane | status)
+  ticket    ticket layer (create | list | set-status | needs-input)
   peer      mesh registry (add | list)
   matrix    report the feature-matrix state (grid | skips)
 

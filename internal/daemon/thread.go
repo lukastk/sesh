@@ -279,6 +279,31 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// resolveActivity computes just the activity axis for a thread (dead/working/
+// waiting), the signal ticket needs-input depends on. Shared with the status
+// endpoint's logic.
+func (d *Daemon) resolveActivity(thread api.Thread) (api.Activity, error) {
+	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return api.ActivityDead, nil
+	}
+	agent, running := tmux.AgentUnderPane(loc.PanePID)
+	if !(running && agent.Kind == thread.AgentKind) {
+		return api.ActivityDead, nil
+	}
+	working, err := d.paneChanging(loc.Pane)
+	if err != nil {
+		return "", err
+	}
+	if working {
+		return api.ActivityWorking, nil
+	}
+	return api.ActivityWaiting, nil
+}
+
 // paneChanging samples a pane's visible content several times and reports whether
 // it is SUSTAINEDLY changing — the agent-agnostic "the agent is producing output /
 // its TUI is animating a turn" signal that distinguishes working from waiting.

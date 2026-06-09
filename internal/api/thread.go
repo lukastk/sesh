@@ -119,6 +119,12 @@ type ThreadResumeRequest struct {
 	ID string `json:"id"`
 }
 
+// ThreadHeadfulRequest is the body of POST /v1/threads/headful (promote a live
+// headless thread into a headed tmux pane, resuming its conversation).
+type ThreadHeadfulRequest struct {
+	ID string `json:"id"`
+}
+
 // PaneLocator is a resolved live pane for a thread.
 type PaneLocator struct {
 	Session string `json:"session"`

@@ -48,6 +48,8 @@ func runThread(args []string) error {
 		return threadDelete(cfg, rest)
 	case "resume":
 		return threadResume(cfg, rest)
+	case "headful":
+		return threadHeadful(cfg, rest)
 	case "grid":
 		return threadGrid(cfg, rest)
 	case "snapshot":
@@ -160,6 +162,34 @@ func threadResume(cfg config.Config, args []string) error {
 		return emitJSON(resp.Thread)
 	}
 	fmt.Printf("resumed %s (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
+	return nil
+}
+
+// threadHeadful promotes a live headless thread into a headed tmux pane (resuming its
+// conversation). A turn in flight is rejected (409); a codex thread with no first turn
+// yet is an explicit N/A.
+func threadHeadful(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("headful", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" && fs.NArg() == 1 {
+		*id = fs.Arg(0)
+	}
+	if *id == "" {
+		return errors.New("headful: a thread id is required (--id or positional)")
+	}
+	c := daemonClient(cfg)
+	resp, err := c.ThreadHeadful(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Thread)
+	}
+	fmt.Printf("promoted %s to headed (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
 	return nil
 }
 

@@ -36,6 +36,8 @@ var skipReasons = map[string]string{
 	"thread.tag":                "add/remove tags",
 	"thread.archive":            "park a thread (hidden from active list, record kept)",
 	"thread.delete":             "drop a record without touching the runtime",
+	"thread.headful":            "promote a live headless thread into a headed pane (resume the conversation); codex-before-first-turn is N/A (separate test)",
+	"thread.headful-busy":       "promoting a headless thread mid-turn is rejected with a conflict",
 	"thread.resume":             "revive a dead headed thread (recreate session + relaunch with --resume); conversation continuity verified for all three agents (claude needs a clean top-level env, guaranteed by daemon ScrubHarnessEnv)",
 	"thread.snapshot":           "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
 	"mesh.snapshot":             "GET /v1/mesh: L2 sync replicates a peer's snapshot into the local cache (ssh transport); merged view read locally",

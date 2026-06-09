@@ -95,6 +95,13 @@ func (c *Client) ThreadResume(ctx context.Context, id string) (api.ThreadRespons
 	return out, c.postJSON(ctx, "http://unix/v1/threads/resume", api.ThreadResumeRequest{ID: id}, &out)
 }
 
+// ThreadHeadful posts POST /v1/threads/headful (promote a live headless thread into a
+// headed tmux pane).
+func (c *Client) ThreadHeadful(ctx context.Context, id string) (api.ThreadResponse, error) {
+	var out api.ThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/headful", api.ThreadHeadfulRequest{ID: id}, &out)
+}
+
 // ThreadPane fetches GET /v1/threads/pane?id= (thread.resolve-pane).
 func (c *Client) ThreadPane(ctx context.Context, id string) (api.ResolvePaneResponse, error) {
 	var out api.ResolvePaneResponse

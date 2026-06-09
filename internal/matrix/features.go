@@ -145,6 +145,17 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "thread.headful",
+		Description: "promote a LIVE headless thread into a headed tmux pane (resume the conversation) — a real agent lands in a real pane, the record flips to headed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.headful-busy",
+		Description: "promoting a headless thread mid-turn (a turn in flight) is rejected with a conflict — never spawn a pane that forks the conversation",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-in-client",
 		Description: "`tmux nav --in-client`: inside the work socket's tmux, navigating to a LOCAL session switches THIS client in place (no master); errors loudly for a remote target or off the work socket",
 		Localities:  []Locality{Local},

@@ -141,6 +141,19 @@ func (s *Store) SetThreadAgentSession(id, agentSessionID string) error {
 	return s.updateThread(`UPDATE threads SET agent_session_id = ? WHERE id = ?`, agentSessionID, id)
 }
 
+// SetThreadHeaded flips a headless thread to headed and gives it a real tmux session
+// name (used by `thread headful` promotion).
+func (s *Store) SetThreadHeaded(id, sessionName string) error {
+	res, err := s.db.Exec(`UPDATE threads SET headless = 0, session_name = ? WHERE id = ?`, sessionName, id)
+	if err != nil {
+		return fmt.Errorf("store: set thread headed: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
 func (s *Store) updateThread(query string, arg any, id string) error {
 	res, err := s.db.Exec(query, arg, id)
 	if err != nil {

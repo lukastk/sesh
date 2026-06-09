@@ -57,6 +57,11 @@ is a Go reconnect-supervisor (attaches into the machine's WORK server — local 
 (syscall.Exec tmux attach); `master down`. Conventions are sesh-internal (sesh builds AND
 drives the master). Cells `master.up` + `master.reconnect` (Remote, agnostic; ssh-localhost
 peer; reconnect asserts client count hits 0 before healing). myrig collapse = BACKLOG #4b.
+**Validated LIVE** 2026-06-09 on mymain↔macbook: `master up` built both windows, supervisors
+attached, `tmux nav` jumped between machines over it. GOTCHA: drive the live deployment via
+the `seshv2` wrapper or zsh PREFIX-assignments (`SESH_X=v sesh-v2 …`) — NOT `env $E sesh-v2`,
+because zsh does NOT word-split `$E`, so the whole string becomes one bogus assignment and
+sesh silently falls back to DEFAULT sockets (`mymastertmux`/default home → no peers).
 
 - **Real-network proof**: `TestRealCrossHostHTTP` (crosshost_test.go) validates the http
   transport over the REAL mymain↔macbook tailscale link (routing + fan-out + sync), partner

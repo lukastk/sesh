@@ -25,20 +25,24 @@ Design in `_dev/MESH.md`. Three decoupled loops:
 - `peers.Peer` has a `Port` field (`peer add --port`) → non-22 machines reachable
   (`SSHArgs()` at every ssh site).
 
-### Hybrid daemon↔daemon transport (Stage 1 done: mesh SYNC over http)
-The mesh-sync transport is EXPLICIT per peer (`peers.Peer.Transport()` → "http" if it has
-an `ApiAddr`, else "ssh"), NOT an automatic fallback — an http failure is loud (peer
-marked unreachable), never a silent ssh downgrade. `peer add --api-addr <host:port>
---api-token[-file]` opts a peer into http; `fetchPeerSnapshot` branches in
-`internal/daemon/meshsync.go` (`fetchPeerSnapshotHTTP` reuses a per-peer `client.NewRemote`
-for keep-alive across the 1s ticks). ssh stays the default + bootstrap/admin transport.
-- **Parity is matrix-enforced**: `mesh.snapshot`/`mesh.offline-listing` (ssh) each have an
-  `.http` twin (same test body, `meshTransport` param in `mesh_test.go`). The http cells
-  register the peer with a **broken ssh dest** (`http-only.invalid`), so a green http cell
-  PROVES HTTP carried the sync (a silent ssh fallback would fail). 4 mesh cells, all green.
-- **Stage 2 (TODO)**: `--machine` ROUTING over http (`cmd/sesh/route.go routeToMachine` →
-  use `client.NewRemote` for client-only commands when the peer has an `ApiAddr`);
-  stage-file/nav/daemon-lifecycle stay ssh by design; its own parity cells.
+### Hybrid daemon↔daemon transport (Stages 1+2 DONE: mesh SYNC + --machine ROUTING over http)
+The transport is EXPLICIT per peer (`peers.Peer.Transport()` → "http" if it has an
+`ApiAddr`, else "ssh"), NOT an automatic fallback — an http failure is loud, never a silent
+ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer into http;
+`peer list` shows the transport. ssh stays the default + bootstrap/admin transport.
+- **Stage 1 — sync**: `fetchPeerSnapshot` branches in `internal/daemon/meshsync.go`
+  (`fetchPeerSnapshotHTTP` reuses a per-peer `client.NewRemote` for keep-alive across the
+  1s ticks). Cells `mesh.snapshot`(.http), `mesh.offline-listing`(.http).
+- **Stage 2 — routing**: `cmd/sesh/route.go routeMachine(cfg, machine, rest) (handled,err)`
+  — http peer + `httpRoutable(rest)` ⇒ set `SESH_REMOTE`/`SESH_API_TOKEN`, return
+  handled=false → `main` drops `--machine` and dispatches locally (daemonClient hits the
+  peer's API). ssh peer / carve-out ⇒ `routeToMachineSSH`, handled=true. Ticket-owner
+  auto-routing (`cmd/sesh/ticket.go`) uses the same path (reloads cfg after the http
+  branch; does NOT re-enter the owner check → no loop). **Carve-outs stay ssh** (`httpRoutable`
+  returns false): `daemon` lifecycle, `tmux nav`, `tmux stage-file`. Cells `route.parity`(.http).
+- **Parity is matrix-enforced**: every `.http` twin shares the ssh body (`meshTransport`
+  param) and registers the peer with a **broken ssh dest** (`http-only.invalid`), so a green
+  http cell PROVES HTTP carried it (a silent ssh fallback would fail). 104 cells total.
 
 ### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
 `kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;

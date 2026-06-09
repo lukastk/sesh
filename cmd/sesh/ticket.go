@@ -20,10 +20,19 @@ func runTicket(args []string) error {
 	cfg := config.Load()
 
 	// Single-writer ownership: tickets live on one canonical owner machine. If an
-	// owner is configured and it is not us, route the whole ticket command there
-	// (over a real ssh hop) — writes go to the owner, never silently local.
+	// owner is configured and it is not us, route the whole ticket command there over
+	// the owner peer's explicit transport — writes go to the owner, never silently
+	// local. ssh => ran remotely (done); http => SESH_REMOTE now points at the owner's
+	// API, so reload cfg and dispatch locally against it (do NOT re-enter this check).
 	if cfg.TicketOwner != "" && cfg.TicketOwner != cfg.Machine {
-		return routeToMachine(cfg, cfg.TicketOwner, append([]string{"ticket"}, args...))
+		handled, err := routeMachine(cfg, cfg.TicketOwner, append([]string{"ticket"}, args...))
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+		cfg = config.Load() // picks up SESH_REMOTE → daemonClient targets the owner
 	}
 
 	sub, rest := args[0], args[1:]

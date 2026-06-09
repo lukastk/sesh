@@ -40,6 +40,8 @@ var skipReasons = map[string]string{
 	"mesh.snapshot.http":        "L2 sync replicates a peer's snapshot over the peer's TCP API (http transport) — SSH↔HTTP parity twin",
 	"mesh.offline-listing":      "offline browsing (ssh transport): a downed peer's threads stay listed (reachable=false), and recover when it returns",
 	"mesh.offline-listing.http": "offline browsing over the http transport — SSH↔HTTP parity twin",
+	"route.parity":              "--machine routing over ssh: thread/ticket/tmux ops land on the peer's daemon",
+	"route.parity.http":         "--machine routing over the peer's TCP API (http) — SSH↔HTTP routing parity twin",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
 	"api.tcp-parity":            "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",
 	"ticket.create":             "create a ticket",

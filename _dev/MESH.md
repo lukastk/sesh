@@ -176,9 +176,15 @@ cells register the peer with a deliberately-**broken ssh destination**, so a gre
 cell PROVES the snapshot was pulled over HTTP, not ssh-by-accident. The grid can only go
 all-green if BOTH transports replicate correctly; neither can silently rot.
 
-> Routing (`--machine` mutations) over http is the next stage; it is a separate code path
-> (`routeToMachine`) and ships with its own parity cells. Bootstrap/`stage-file`/`nav` stay
-> ssh by design.
+**Routing (`--machine`) over http — DONE (Stage 2).** The same per-peer transport governs
+`--machine` routing: for an http peer, a client-only command points THIS process at the
+peer's TCP API (`SESH_REMOTE`/`SESH_API_TOKEN` set in `routeMachine`, then local dispatch
+via `daemonClient`) instead of ssh-exec'ing the CLI on the peer; ticket-owner auto-routing
+uses the same path. **Carve-outs stay ssh by design** (`httpRoutable`): daemon lifecycle
+(can't reach a not-yet-running daemon over its own API), `tmux nav` (outer+inner switch),
+`tmux stage-file` (pipes local bytes). Parity is matrix-enforced by `route.parity` (ssh) +
+`route.parity.http`, same body, http peer registered with a broken ssh dest so a green
+http cell proves the command routed over HTTP.
 
 ---
 

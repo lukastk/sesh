@@ -125,6 +125,16 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "route.parity",
+		Description: "`--machine` routing over the SSH transport: representative client-only ops (thread/ticket/tmux) routed to a peer land on the peer's daemon (carve-outs daemon-lifecycle/nav/stage-file stay ssh by design)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "route.parity.http",
+		Description: "route.parity's SSH↔HTTP twin: the SAME routed ops carried over the peer's TCP API (HTTP transport) instead of ssh-exec — proves `--machine` routing has http parity, not just ssh",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "api.tcp-auth",
 		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
 		Localities:  []Locality{Local},

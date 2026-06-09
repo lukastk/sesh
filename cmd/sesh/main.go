@@ -19,22 +19,29 @@ func main() {
 		os.Exit(2)
 	}
 
-	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X
-	// is a remote peer, forward the whole command there via a real ssh hop. Local-
-	// only meta commands (`peer`, `matrix`, help) are excluded — their own args may
-	// legitimately contain `--machine` (e.g. `peer add --machine Q`).
+	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X is
+	// a remote peer, forward the command there over the peer's EXPLICIT transport —
+	// ssh (a real ssh hop) or http (the peer's TCP API). Local-only meta commands
+	// (`peer`, `matrix`, help) are excluded — their own args may legitimately contain
+	// `--machine` (e.g. `peer add --machine Q`).
 	if routableSubcommand(os.Args[1]) {
 		machine, rest := extractMachineFlag(os.Args[1:])
 		if machine != "" {
 			cfg := config.Load()
 			if machine != cfg.Machine {
-				if err := routeToMachine(cfg, machine, rest); err != nil {
+				// handled=true: ran remotely over ssh (done). handled=false: pointed
+				// this process at the peer's TCP API (SESH_REMOTE now set) — continue
+				// local dispatch, where daemonClient reaches the peer.
+				handled, err := routeMachine(cfg, machine, rest)
+				if err != nil {
 					fmt.Fprintln(os.Stderr, "sesh:", err)
 					os.Exit(1)
 				}
-				return
+				if handled {
+					return
+				}
 			}
-			// machine == self: drop the flag and run locally.
+			// machine == self, or http-routed: drop the flag and run locally.
 			os.Args = append([]string{os.Args[0]}, rest...)
 		}
 	}

@@ -171,6 +171,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "master.holding",
+		Description: "a master window for a machine with NO live threads falls back to a holding 'scratch' shell session (attaches + stays a work-server client) instead of looping on 'no sessions'",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "api.tcp-auth",
 		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
 		Localities:  []Locality{Local},

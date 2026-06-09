@@ -189,13 +189,25 @@ func masterWindow(cfg config.Config, args []string) error {
 	}
 }
 
+// workAttach builds a shell command that attaches into the work server on `socket`,
+// first creating a holding "scratch" session (a $HOME shell) if the server has none.
+// So a master window for a machine with NO live threads shows a usable shell instead
+// of looping on "no sessions" — and it stays a client of the work server, so nav can
+// switch it into a thread the instant one appears. `attach` (no -t) still prefers the
+// most-recently-used real thread over the placeholder.
+func workAttach(socket string) string {
+	return fmt.Sprintf(
+		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || tmux -L %[1]s new-session -d -s scratch -c "$HOME"; exec tmux -L %[1]s attach`,
+		socket)
+}
+
 // masterAttachCommand returns a factory that builds the attach process for a machine:
-// a local `tmux attach` for self, or `ssh -t … tmux -L <work> attach` for a peer
-// (work socket from the peer registry).
+// locally (self) or over `ssh -t` (a peer; work socket from the peer registry). Both
+// go through workAttach so an empty work server falls back to a holding shell.
 func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, error) {
 	if machine == cfg.Machine {
 		return func() *exec.Cmd {
-			c := exec.Command("tmux", "-L", cfg.TmuxSocket, "attach")
+			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket))
 			c.Env = tmuxCleanEnv()
 			return c
 		}, nil
@@ -211,7 +223,7 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	if peer.TmuxSocket == "" {
 		return nil, fmt.Errorf("master window: peer %q has no tmux socket (see `sesh peer add --tmux-socket`)", machine)
 	}
-	remote := "env -u TMUX tmux -L " + shellQuote(peer.TmuxSocket) + " attach"
+	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket))
 	sshArgs := append([]string{"-tt", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, remote)
 	return func() *exec.Cmd {

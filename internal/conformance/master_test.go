@@ -14,6 +14,45 @@ func init() {
 	// window ssh-attaches into the peer's work server). ssh-localhost stands in.
 	matrix.RegisterTest("master.up", matrix.AgentAgnostic, matrix.Remote, testMasterUp)
 	matrix.RegisterTest("master.reconnect", matrix.AgentAgnostic, matrix.Remote, testMasterReconnect)
+	matrix.RegisterTest("master.holding", matrix.AgentAgnostic, matrix.Local, testMasterHolding)
+}
+
+// testMasterHolding: a master window for a machine with NO live threads falls back to
+// a holding "scratch" shell session in the work server (so the window attaches and
+// stays a work-server client, instead of looping on "no sessions").
+func testMasterHolding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	self := newSandbox(t, matrix.Local)
+	self.startDaemon(t)
+	// No threads => the work server has no sessions.
+	if _, stderr, err := self.Runner.Run(t, "master", "up", "--machines", self.Machine); err != nil {
+		t.Fatalf("master up: %v\n%s", err, stderr)
+	}
+	t.Cleanup(func() { self.Runner.Run(t, "master", "down") }) //nolint:errcheck
+	// The window attaches anyway (to the holding session) — a real client appears...
+	if !waitUntil(15*time.Second, func() bool { return tmuxClientCount(self.TmuxSocket) >= 1 }) {
+		t.Errorf("master window never attached to an EMPTY work server (no holding fallback)")
+	}
+	// ...and the holding 'scratch' session was created.
+	if !strSliceHas(masterSessionNamesOn(self.TmuxSocket), "scratch") {
+		t.Errorf("no holding 'scratch' session on the empty work server")
+	}
+}
+
+func masterSessionNamesOn(socket string) []string {
+	out, err := exec.Command("tmux", "-L", socket, "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			names = append(names, l)
+		}
+	}
+	return names
 }
 
 // setupMasterPair starts a self daemon + a peer daemon (ssh-localhost), registers the

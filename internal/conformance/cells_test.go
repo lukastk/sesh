@@ -49,6 +49,7 @@ var skipReasons = map[string]string{
 	"tmux.nav-in-client":        "nav --in-client switches the current client to a local session (no master); loud on remote target / off-socket",
 	"master.up":                 "sesh master up builds a window per machine, each attached into that machine's work server (peer over ssh)",
 	"master.reconnect":          "the per-window supervisor re-establishes a dropped attach (local + ssh-localhost peer)",
+	"master.holding":            "an empty work server's master window falls back to a holding 'scratch' shell, not a 'no sessions' loop",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
 	"api.tcp-parity":            "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",
 	"ticket.create":             "create a ticket",

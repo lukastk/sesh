@@ -88,6 +88,35 @@ machine's work socket) + `master.reconnect` (kill an attach → supervisor re-es
 real processes, ssh-localhost for "remote". **See `_dev/MASTER.md` for the full spec** (incl.
 the function-by-function disposition of myrig's `master-tmux.sh`). Effort: medium-large.
 
+## 4. myrig integration (cross-repo: `~/mysetup/myrig`) — NOT in this repo's code
+
+Tracked here for completeness; the work lands in the myrig repo, talking to sesh over the
+CLI boundary only (no shell-sourcing of sesh internals).
+
+**4a. Deploy sesh-v2 durably (make the manual bring-up reproducible/persistent).** Currently
+mymain↔macbook run hand-started daemons + a hand-written `~/.myrig/zshenv/sesh-v2.sh` wrapper
++ a manually-built master. Replace with:
+- `setup/installs/sesh-v2/` — build+copy the binary per-arch (separate repo `sesh-v2.git`, so
+  build-and-scp, NOT `go install` — its module path resolves to the OLD repo).
+- a supervisor program (mirror `^sesh^sesh-daemon.ini.jinja`) running `sesh-v2 daemon run`
+  with `SESH_API_ADDR={{tailscale}}:7878`, token from `~/.env`, isolated `SESH_HOME`.
+- `home/.sesh-v2/peers.json.jinja` templated from `config.toml` (each peer `--api-addr` +
+  token + ssh fallback).
+- `SESH_V2_API_TOKEN` in `~/.env` (already manual; formalize).
+- `home/.myrig/zshenv/sesh-v2.sh.jinja` — the wrapper (replaces the manual file; per-machine
+  `SESH_MACHINE`, sets `SESH_TMUX_SOCKET`/`SESH_MASTER_SOCKET`, tui defaults to
+  `--all-machines`). **Remove the manual `~/.myrig/zshenv/sesh-v2.sh` on mymain+macbook** so
+  the managed one isn't shadowed.
+
+**4b. Collapse myrig's master-tmux to config + aliases (and DELETE the old orchestration).**
+Per `_dev/MASTER.md §4–5`, once `sesh master` (#3) exists: keep only the `.tmux` conf
+(prefix/keybindings/look) + thin `mms-*` aliases → `sesh master …` + fzf pickers
+(`fzf | sesh tmux nav`) + clipboard wrappers. **Delete**: the SSH poller, all `~/.cache/mms/*`
+caches, `_mms_machine_reachable`, nav history, flagged-cycle, `_mms_run_on_machine`, and the
+`mms-machine-session-loop` reconnect loop (superseded by `sesh master window`). `master-tmux.sh`
+goes ~1,205 → ~150–250 lines. (Parallel to v1 for now; converge onto the canonical socket +
+single master once v2 retires v1.)
+
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →
 #2 promote then #1 enter; anything cross-machine → the master-tmux nav path.

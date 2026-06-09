@@ -70,6 +70,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh ticket:", err)
 			os.Exit(1)
 		}
+	case "tui":
+		if err := runTUI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh tui:", err)
+			os.Exit(1)
+		}
 	case "peer":
 		if err := runPeer(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh peer:", err)

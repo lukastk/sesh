@@ -16,9 +16,17 @@ import (
 // runTicket implements `sesh ticket <create|list|set-status|needs-input>`.
 func runTicket(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh ticket <create|list|set-status|needs-input>")
+		return errors.New("usage: sesh ticket <create|list|set-status|needs-input|send-prompt>")
 	}
 	cfg := config.Load()
+
+	// Single-writer ownership: tickets live on one canonical owner machine. If an
+	// owner is configured and it is not us, route the whole ticket command there
+	// (over a real ssh hop) — writes go to the owner, never silently local.
+	if cfg.TicketOwner != "" && cfg.TicketOwner != cfg.Machine {
+		return routeToMachine(cfg, cfg.TicketOwner, append([]string{"ticket"}, args...))
+	}
+
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "create":

@@ -29,6 +29,68 @@ func init() {
 				func(t *testing.T) { testTicketSendPrompt(t, string(a), loc) })
 		}
 	}
+	matrix.RegisterTest("ticket.ownership", matrix.AgentAgnostic, matrix.Remote, testTicketOwnership)
+}
+
+// testTicketOwnership asserts the single-writer ownership model: a NON-owner
+// machine's ticket write routes (over a real ssh hop) to the canonical owner, so
+// the record lands on the OWNER's store — not silently locally. This is the
+// kill-the-vault-sync-race property of the design.
+func testTicketOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	owner := newSandbox(t, matrix.Local) // the canonical always-on owner machine
+	owner.startDaemon(t)
+
+	bin := seshBin(t)
+	clientHome := t.TempDir()
+	client := &localRunner{bin: bin, env: map[string]string{
+		"SESH_HOME":         clientHome,
+		"SESH_MACHINE":      "client-nonowner",
+		"SESH_TICKET_OWNER": owner.Machine, // writes belong to the owner
+	}}
+	if _, stderr, err := client.Run(t, "peer", "add", "--machine", owner.Machine, "--ssh", "localhost", "--home", owner.Home, "--binary", bin); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+
+	// Create a ticket from the NON-owner; it must route to the owner.
+	stdout, stderr, err := client.Run(t, "ticket", "create", "--name", "owned by canonical node", "--json")
+	if err != nil {
+		t.Fatalf("client ticket create: %v\n%s", err, stderr)
+	}
+	var created api.Ticket
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("decode created ticket: %v\nraw: %s", err, stdout)
+	}
+
+	// The write landed on the OWNER's store (single writer).
+	found := false
+	for _, tk := range owner.allTickets(t) {
+		if tk.ID == created.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ticket %s created by a non-owner did NOT land on the owner's store", created.ID)
+	}
+
+	// A read from the non-owner routes to the owner and sees the same record
+	// (the non-owner holds no divergent local copy).
+	var clientSees bool
+	stdout, _, err = client.Run(t, "ticket", "list", "--json")
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+			if strings.Contains(line, created.ID) {
+				clientSees = true
+			}
+		}
+	}
+	if !clientSees {
+		t.Errorf("non-owner read did not route to the owner / see the ticket")
+	}
 }
 
 // testTicketSendPrompt asserts a ticket's prompt is delivered to its bound

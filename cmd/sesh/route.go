@@ -61,7 +61,15 @@ func routeToMachine(cfg config.Config, machine string, rest []string) error {
 		return fmt.Errorf("unknown machine %q: no peer registered (see `sesh peer add`)", machine)
 	}
 
-	remote := []string{"env", "SESH_HOME=" + shellQuote(peer.Home), shellQuote(peer.Binary)}
+	// Forward SESH_HOME and the peer's own SESH_MACHINE so the remote command
+	// runs against the peer's daemon AND knows its own identity (so it won't
+	// recursively re-route, e.g. ticket-owner auto-routing).
+	remote := []string{
+		"env",
+		"SESH_HOME=" + shellQuote(peer.Home),
+		"SESH_MACHINE=" + shellQuote(peer.Machine),
+		shellQuote(peer.Binary),
+	}
 	for _, a := range rest {
 		remote = append(remote, shellQuote(a))
 	}

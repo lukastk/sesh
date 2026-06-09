@@ -19,6 +19,10 @@ type Config struct {
 	// on. Per the spec this is just a regular tmux server; the name carries no
 	// semantics. Default "mytmux"; overridable so tests use an isolated server.
 	TmuxSocket string
+	// TicketOwner is the canonical always-on machine that owns the ticket store
+	// (the single writer). When set and not this machine, ticket commands route
+	// to the owner. Empty = this machine owns its own tickets (no mesh).
+	TicketOwner string
 }
 
 // Load resolves config from the environment:
@@ -53,7 +57,12 @@ func Load() Config {
 		socket = "mytmux"
 	}
 
-	return Config{Home: home, Machine: machine, TmuxSocket: socket}
+	return Config{
+		Home:        home,
+		Machine:     machine,
+		TmuxSocket:  socket,
+		TicketOwner: os.Getenv("SESH_TICKET_OWNER"),
+	}
 }
 
 // EnsureHome creates the home directory if missing.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,36 @@ import (
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 )
+
+// stageFileRemote stages content onto a remote machine by piping the BYTES over
+// ssh to the peer running `tmux stage-file --stdin` (the file is on this machine,
+// so we cannot just route the path). The peer's printed staged path is relayed.
+func stageFileRemote(cfg config.Config, machine, name string, content []byte) error {
+	reg, err := peers.Load(cfg.PeersPath())
+	if err != nil {
+		return err
+	}
+	peer, ok := reg.Get(machine)
+	if !ok {
+		return fmt.Errorf("unknown machine %q: no peer registered (see `sesh peer add`)", machine)
+	}
+	remote := strings.Join([]string{
+		"env",
+		"SESH_HOME=" + shellQuote(peer.Home),
+		"SESH_MACHINE=" + shellQuote(peer.Machine),
+		shellQuote(peer.Binary),
+		"tmux", "stage-file", "--to", shellQuote(peer.Machine), "--stdin", "--name", shellQuote(name),
+	}, " ")
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", peer.SSH, remote)
+	cmd.Stdin = bytes.NewReader(content)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("remote stage-file: %w", err)
+	}
+	fmt.Print(string(out))
+	return nil
+}
 
 // routableSubcommand reports whether `--machine` routing applies to this
 // subcommand. Local-only meta commands are excluded.

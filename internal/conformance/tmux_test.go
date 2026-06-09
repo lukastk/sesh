@@ -18,9 +18,10 @@ func init() {
 	// peer daemon over a real ssh hop, Phase 4). stage-file stays Local until
 	// remote file transfer lands; tmux.nav is its own Phase 4 cell.
 	matrix.RegisterTest("tmux.current", matrix.AgentAgnostic, matrix.Local, testTmuxCurrent)
-	matrix.RegisterTest("tmux.stage-file", matrix.AgentAgnostic, matrix.Local, testTmuxStageFile)
 	for _, loc := range matrix.AllLocalities {
 		loc := loc
+		matrix.RegisterTest("tmux.stage-file", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxStageFile(t, loc) })
 		matrix.RegisterTest("tmux.info", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTmuxInfo(t, loc) })
 		matrix.RegisterTest("tmux.create-session", matrix.AgentAgnostic, loc,
@@ -230,12 +231,10 @@ func testTmuxSendText(t *testing.T, loc matrix.Locality) {
 
 // testTmuxStageFile stages a local file via sesh and asserts the bytes really
 // landed at the returned path.
-func testTmuxStageFile(t *testing.T) {
+func testTmuxStageFile(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	sb := newSandbox(t, matrix.Local)
-	sb.startDaemon(t)
 
 	src := filepath.Join(t.TempDir(), "image.png")
 	content := []byte("\x89PNG fake bytes \x00\x01\x02 staged")
@@ -243,7 +242,31 @@ func testTmuxStageFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := sb.Runner.Run(t, "tmux", "stage-file", "--to", sb.Machine, src)
+	// The file always lives on the CLIENT; stage-file must deliver it onto the
+	// target machine. Local: --to self. Remote: --to a peer, bytes piped over ssh
+	// (stage-file uses --to + a byte pipe, not the generic --machine router).
+	var runner Runner
+	var target string
+	switch loc {
+	case matrix.Local:
+		sb := newSandbox(t, matrix.Local)
+		sb.startDaemon(t)
+		runner, target = sb.Runner, sb.Machine
+	case matrix.Remote:
+		ensureSSHLocalhost(t)
+		peer := newSandbox(t, matrix.Local) // the machine the file is staged ONTO
+		peer.startDaemon(t)
+		bin := seshBin(t)
+		client := &localRunner{bin: bin, env: map[string]string{
+			"SESH_HOME": t.TempDir(), "SESH_MACHINE": "stage-client",
+		}}
+		if _, stderr, err := client.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
+			t.Fatalf("peer add: %v\n%s", err, stderr)
+		}
+		runner, target = client, peer.Machine
+	}
+
+	stdout, stderr, err := runner.Run(t, "tmux", "stage-file", "--to", target, src)
 	if err != nil {
 		t.Fatalf("stage-file: %v\n%s", err, stderr)
 	}
@@ -251,6 +274,8 @@ func testTmuxStageFile(t *testing.T) {
 	if staged == "" {
 		t.Fatal("stage-file printed no path")
 	}
+	// The staged path is on the target machine's filesystem (same box here), so
+	// the bytes that actually landed are readable and must match.
 	got, err := os.ReadFile(staged)
 	if err != nil {
 		t.Fatalf("read staged file %q: %v", staged, err)

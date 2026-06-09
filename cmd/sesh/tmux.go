@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -145,25 +146,47 @@ func tmuxSendText(cfg config.Config, args []string) error {
 func tmuxStageFile(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("stage-file", flag.ContinueOnError)
 	to := fs.String("to", "", "machine to stage onto (required)")
+	stdin := fs.Bool("stdin", false, "read the file bytes from stdin (used internally for remote staging)")
+	name := fs.String("name", "", "staged file name (required with --stdin)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *to == "" {
 		return errors.New("stage-file: --to <machine> is required")
 	}
-	if fs.NArg() != 1 {
-		return errors.New("stage-file: exactly one local file path required")
+
+	// Resolve the bytes + the staged name, from stdin or a local file path.
+	var content []byte
+	var staged string
+	if *stdin {
+		if *name == "" {
+			return errors.New("stage-file --stdin: --name is required")
+		}
+		var err error
+		if content, err = io.ReadAll(os.Stdin); err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		staged = *name
+	} else {
+		if fs.NArg() != 1 {
+			return errors.New("stage-file: exactly one local file path required")
+		}
+		path := fs.Arg(0)
+		var err error
+		if content, err = os.ReadFile(path); err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		staged = baseName(path)
 	}
+
+	// Remote target: the file is on THIS machine, so route the BYTES (not the
+	// path) — pipe them over ssh to the peer running stage-file --stdin.
 	if *to != cfg.Machine {
-		return fmt.Errorf("NOT IMPLEMENTED: staging onto remote machine %q lands with the mesh (Phase 4)", *to)
+		return stageFileRemote(cfg, *to, staged, content)
 	}
-	path := fs.Arg(0)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
+
 	c := client.New(cfg.SocketPath())
-	resp, err := c.TmuxStageFile(context.Background(), baseName(path), content)
+	resp, err := c.TmuxStageFile(context.Background(), staged, content)
 	if err != nil {
 		return err
 	}

@@ -95,7 +95,17 @@ the function-by-function disposition of myrig's `master-tmux.sh`). Effort: mediu
 Tracked here for completeness; the work lands in the myrig repo, talking to sesh over the
 CLI boundary only (no shell-sourcing of sesh internals).
 
-**4a. Deploy sesh-v2 durably (make the manual bring-up reproducible/persistent).** Currently
+**4a. ✅ DONE (mymain + macbook) — deploy sesh-v2 durably.** Both run `sesh-v2-daemon`
+under supervisor (autostart on reboot), API on tailscale:7878 + token, managed peers.json,
+native build (auto-signed). Verified: cross-machine mesh syncs over http. Caveats: macbook's
+myrig couldn't `git pull` (its per-machine `home/.env` has local secret edits), so macbook
+was deployed via scp'd rendered files — it WORKS but its myrig source is stale; for full
+reproducibility, resolve macbook's `home/.env` (commit/stash its local changes) then pull +
+run myrig normally. macstudio not yet deployed (needs SESH_V2_API_TOKEN in its ~/.env + a
+myrig run). `home/.env` is per-machine and must NOT be committed (reverted: 5fe6234).
+Original plan below.
+
+**4a (original plan). Deploy sesh-v2 durably (make the manual bring-up reproducible/persistent).** Currently
 mymain↔macbook run hand-started daemons + a hand-written `~/.myrig/zshenv/sesh-v2.sh` wrapper
 + a manually-built master. Replace with:
 - `setup/installs/sesh-v2/` — build+copy the binary per-arch (separate repo `sesh-v2.git`, so

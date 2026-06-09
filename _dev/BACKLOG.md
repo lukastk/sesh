@@ -75,6 +75,19 @@ before-first-turn = justified N/A.
 
 ---
 
+## 3. `sesh master`: master-tmux infrastructure in Go (full design in `_dev/MASTER.md`)
+
+Move ALL master-tmux infrastructure into sesh — building the master server, the per-window
+ssh-attach, and the reconnect/self-heal loop — as `sesh master up [--machines …] [--tmux-conf]`
+/ `sesh master window <machine>` (a Go supervisor, not a shell loop) / `sesh master attach` /
+`sesh master down`, machines sourced from the daemon peers. myrig collapses to a tmux conf +
+thin `mms-*` aliases/pickers/clipboard wrappers (no orchestration, no shell-sourcing — CLI
+boundary only). Conventions (window-name == machine, window attached to the work socket)
+become sesh-internal. Conformance: `master.up` (windows built + genuinely attached to each
+machine's work socket) + `master.reconnect` (kill an attach → supervisor re-establishes),
+real processes, ssh-localhost for "remote". **See `_dev/MASTER.md` for the full spec** (incl.
+the function-by-function disposition of myrig's `master-tmux.sh`). Effort: medium-large.
+
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →
 #2 promote then #1 enter; anything cross-machine → the master-tmux nav path.

@@ -138,7 +138,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m, m.fetch()
 	case "x":
-		return m, m.killSelected()
+		return m, m.stopSelected()
+	case "d":
+		return m, m.deleteSelected()
 	case "a":
 		return m, m.archiveSelected()
 	case "enter":
@@ -167,8 +169,9 @@ func (m Model) navSelected() tea.Cmd {
 	}
 }
 
-// killSelected ends the selected thread (agent + session) and drops its record.
-func (m Model) killSelected() tea.Cmd {
+// stopSelected ends the selected thread's runtime (agent + session) but keeps
+// the record (it becomes a dead, resumable thread).
+func (m Model) stopSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
@@ -177,7 +180,22 @@ func (m Model) killSelected() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return actionMsg{err: c.ThreadKill(ctx, row.ID)}
+		return actionMsg{err: c.ThreadStop(ctx, row.ID)}
+	}
+}
+
+// deleteSelected drops the selected thread's record. The daemon refuses a live
+// thread (orphan guard); stop it first. Surfaced as an error in lastErr.
+func (m Model) deleteSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return actionMsg{err: c.ThreadDelete(ctx, row.ID, false)}
 	}
 }
 
@@ -274,7 +292,7 @@ func (m Model) View() string {
 	for _, u := range m.unreachable {
 		b.WriteString(styleDim.Render("  ! peer "+u+" unreachable") + "\n")
 	}
-	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · x kill · a archive · r refresh · q quit") + "\n")
+	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · x stop · d delete · a archive · r refresh · q quit") + "\n")
 	return b.String()
 }
 

@@ -23,8 +23,8 @@ func init() {
 			a := a
 			matrix.RegisterTest("thread.new.headed", a, loc,
 				func(t *testing.T) { testThreadNewHeaded(t, string(a), loc) })
-			matrix.RegisterTest("thread.kill", a, loc,
-				func(t *testing.T) { testThreadKill(t, string(a), loc) })
+			matrix.RegisterTest("thread.stop", a, loc,
+				func(t *testing.T) { testThreadStop(t, string(a), loc) })
 			matrix.RegisterTest("thread.resolve-pane", a, loc,
 				func(t *testing.T) { testThreadResolvePane(t, string(a), loc) })
 		}
@@ -184,17 +184,19 @@ func testThreadNewHeaded(t *testing.T, agent string, loc matrix.Locality) {
 	}
 }
 
-// testThreadKill asserts both directions: the agent is genuinely alive after
-// spawn, and genuinely dead (process gone, session gone, record gone) after
-// kill — the symmetry the v1 one-directional codex check lacked.
-func testThreadKill(t *testing.T, agent string, loc matrix.Locality) {
+// testThreadStop asserts both directions AND the keep-record distinction: the
+// agent is genuinely alive after spawn, and after `stop` the RUNTIME is genuinely
+// dead (process gone, session gone) — but the RECORD is KEPT (still listed, now
+// dead/resumable). The symmetry the v1 one-directional codex check lacked, plus
+// the stop/delete split (stop ends the runtime; delete drops the record).
+func testThreadStop(t *testing.T, agent string, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
 	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
-	th := sb.newThread(t, agent, "killme", "/tmp")
+	th := sb.newThread(t, agent, "stopme", "/tmp")
 
 	// Alive direction: a real agent of the right kind is genuinely running under
 	// the marked pane (this wait IS the alive assertion).
@@ -204,27 +206,30 @@ func testThreadKill(t *testing.T, agent string, loc matrix.Locality) {
 		panePID = pid
 		return ok && agentRunningUnder(pid, agent)
 	}) {
-		t.Fatalf("agent never came up alive for kill test")
+		t.Fatalf("agent never came up alive for stop test")
 	}
 
-	if _, stderr, err := sb.Runner.Run(t, "thread", "kill", "--id", th.ID); err != nil {
-		t.Fatalf("thread kill: %v\n%s", err, stderr)
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", th.ID); err != nil {
+		t.Fatalf("thread stop: %v\n%s", err, stderr)
 	}
 
-	// Dead direction: pane process actually exits and the session is gone.
+	// Runtime-dead direction: pane process actually exits and the session is gone.
 	if !waitUntil(10*time.Second, func() bool { return !pidAlive(panePID) }) {
-		t.Errorf("pane pid %d still alive after kill", panePID)
+		t.Errorf("pane pid %d still alive after stop", panePID)
 	}
 	if !waitUntil(10*time.Second, func() bool {
-		_, err := sb.rawTmux(t, "has-session", "-t", "=sesh_killme")
+		_, err := sb.rawTmux(t, "has-session", "-t", "=sesh_stopme")
 		return err != nil
 	}) {
-		t.Errorf("session sesh_killme still exists after kill")
+		t.Errorf("session sesh_stopme still exists after stop")
 	}
 
-	// Record gone.
-	if threadInList(t, sb, th.ID) {
-		t.Errorf("killed thread %s still appears in list", th.ID)
+	// Keep-record: the thread is STILL listed (unlike kill/delete) and reports dead.
+	if !threadInList(t, sb, th.ID) {
+		t.Errorf("stopped thread %s dropped from the list (stop must keep the record)", th.ID)
+	}
+	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityDead {
+		t.Errorf("stopped thread activity = %q, want dead", got)
 	}
 }
 
@@ -306,12 +311,17 @@ func testThreadList(t *testing.T, loc matrix.Locality) {
 		}
 	}
 
-	if _, stderr, err := sb.Runner.Run(t, "thread", "kill", "--id", a.ID); err != nil {
-		t.Fatalf("kill: %v\n%s", err, stderr)
+	// Remove a from the list: stop its runtime, then delete the record (what `kill`
+	// used to do in one shot).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", a.ID); err != nil {
+		t.Fatalf("stop: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", a.ID); err != nil {
+		t.Fatalf("delete: %v\n%s", err, stderr)
 	}
 	after := sb.listThreads(t)
 	if hasThread(after, a.ID) {
-		t.Errorf("killed thread still listed")
+		t.Errorf("deleted thread still listed")
 	}
 	if !hasThread(after, b.ID) {
 		t.Errorf("surviving thread missing from list")

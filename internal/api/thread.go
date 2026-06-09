@@ -98,10 +98,19 @@ type ArchiveThreadRequest struct {
 	Archived bool   `json:"archived"`
 }
 
-// DeleteThreadRequest is the body of POST /v1/threads/delete (drop the record
-// only; the runtime is left untouched).
-type DeleteThreadRequest struct {
+// StopThreadRequest is the body of POST /v1/threads/stop (end the runtime —
+// agent + tmux session — but KEEP the record, which becomes a dead, resumable
+// thread).
+type StopThreadRequest struct {
 	ID string `json:"id"`
+}
+
+// DeleteThreadRequest is the body of POST /v1/threads/delete (drop the record).
+// Delete refuses a thread whose runtime is still LIVE unless Force is set —
+// deleting a live thread orphans its agent (record gone, process still running).
+type DeleteThreadRequest struct {
+	ID    string `json:"id"`
+	Force bool   `json:"force"`
 }
 
 // ThreadResumeRequest is the body of POST /v1/threads/resume (revive a dead

@@ -24,7 +24,7 @@ var skipReasons = map[string]string{
 	"tmux.send-text":        "paste/send text into a pane",
 	"thread.new.headed":     "spawn headed thread in a real tmux pane",
 	"thread.new.headless":   "spawn headless thread (stateless-per-turn)",
-	"thread.kill":           "kill a thread",
+	"thread.stop":           "end a thread's runtime but keep the record (dead, resumable)",
 	"thread.send.headful":   "send into live pane (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",
 	"thread.send.headless":  "send as a turn (stateless-per-turn)",
 	"thread.list":           "mesh-replicated cross-machine list",

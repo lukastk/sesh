@@ -47,9 +47,15 @@ func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) er
 	return c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived}, nil)
 }
 
-// ThreadDelete posts POST /v1/threads/delete (drop the record only).
-func (c *Client) ThreadDelete(ctx context.Context, id string) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id}, nil)
+// ThreadStop posts POST /v1/threads/stop (end the runtime, keep the record).
+func (c *Client) ThreadStop(ctx context.Context, id string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/stop", api.StopThreadRequest{ID: id}, nil)
+}
+
+// ThreadDelete posts POST /v1/threads/delete (drop the record). force drops a
+// live thread's record anyway (orphaning its agent).
+func (c *Client) ThreadDelete(ctx context.Context, id string, force bool) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id, Force: force}, nil)
 }
 
 // ThreadGrid fetches GET /v1/threads/grid — every thread with live status.
@@ -73,11 +79,6 @@ func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bo
 func (c *Client) ThreadResume(ctx context.Context, id string) (api.ThreadResponse, error) {
 	var out api.ThreadResponse
 	return out, c.postJSON(ctx, "http://unix/v1/threads/resume", api.ThreadResumeRequest{ID: id}, &out)
-}
-
-// ThreadKill posts POST /v1/threads/kill?id=.
-func (c *Client) ThreadKill(ctx context.Context, id string) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/kill?id="+url.QueryEscape(id), struct{}{}, nil)
 }
 
 // ThreadPane fetches GET /v1/threads/pane?id= (thread.resolve-pane).

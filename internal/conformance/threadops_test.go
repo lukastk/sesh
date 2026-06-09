@@ -92,7 +92,8 @@ func testThreadArchive(t *testing.T, loc matrix.Locality) {
 }
 
 // testThreadDelete proves delete drops the RECORD but leaves the runtime
-// untouched — the distinction from kill.
+// untouched — the distinction from stop — AND that the live-thread orphan guard
+// refuses a plain delete (you must stop first, or --force).
 func testThreadDelete(t *testing.T, loc matrix.Locality) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -110,8 +111,18 @@ func testThreadDelete(t *testing.T, loc matrix.Locality) {
 		t.Fatalf("agent never came up")
 	}
 
-	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", th.ID); err != nil {
-		t.Fatalf("delete: %v\n%s", err, stderr)
+	// Orphan guard: a plain delete of a LIVE thread is refused (and leaves both
+	// record and runtime intact).
+	if _, _, err := sb.Runner.Run(t, "thread", "delete", "--id", th.ID); err == nil {
+		t.Errorf("delete of a live thread should be refused without --force")
+	}
+	if !hasThread(sb.listThreads(t), th.ID) {
+		t.Errorf("refused delete still dropped the record")
+	}
+
+	// --force drops the record of a live thread (deliberately orphaning the agent).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", th.ID, "--force"); err != nil {
+		t.Fatalf("delete --force: %v\n%s", err, stderr)
 	}
 	// Record is gone...
 	if hasThread(sb.listThreads(t), th.ID) {

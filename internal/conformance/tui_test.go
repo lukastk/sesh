@@ -23,7 +23,8 @@ var declaredTUIClaims = []string{
 	"grid-render-real-state",    // a row's glyph tracks its REAL activity, both directions
 	"grid-fanout-cross-machine", // the grid shows a peer's thread via the mesh
 	"navigation-cursor",         // key nav moves the selection over real rows
-	"action-kill",               // the kill key really removes the thread (daemon + runtime)
+	"action-stop",               // the stop key really ends the runtime, keeps the record
+	"action-delete",             // the delete key really drops the record
 	"action-archive",            // the archive key really parks the thread
 	"action-nav",                // the nav key really switches the tmux client
 }
@@ -61,7 +62,8 @@ func init() {
 	registerTUIClaim("grid-render-real-state", claimGridRenderRealState)
 	registerTUIClaim("grid-fanout-cross-machine", claimGridFanout)
 	registerTUIClaim("navigation-cursor", claimNavigationCursor)
-	registerTUIClaim("action-kill", claimActionKill)
+	registerTUIClaim("action-stop", claimActionStop)
+	registerTUIClaim("action-delete", claimActionDelete)
 	registerTUIClaim("action-archive", claimActionArchive)
 	registerTUIClaim("action-nav", claimActionNav)
 }
@@ -152,15 +154,16 @@ func runKey(t *testing.T, m tui.Model, key string) tui.Model {
 	return nm2.(tui.Model)
 }
 
-// claimActionKill: the kill key really ends the thread — daemon record gone AND
-// the real session + agent process dead (both directions).
-func claimActionKill(t *testing.T) {
+// claimActionStop: the stop key really ends the runtime (real session + agent
+// process dead) but KEEPS the record (still listed, now dead) — the stop/delete
+// split, observed on the real daemon + tmux server.
+func claimActionStop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
-	th := sb.newThread(t, "pi", "killme", "/tmp")
+	th := sb.newThread(t, "pi", "stopme", "/tmp")
 	var pid int
 	if !waitUntil(agentStartTimeout, func() bool {
 		_, p, ok := sb.markedPane(t, th.ID)
@@ -172,24 +175,49 @@ func claimActionKill(t *testing.T) {
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	m, _ = render(t, m) // load the grid; single thread => cursor on it
-	if _, ok := rowByName(m, "killme"); !ok {
+	if _, ok := rowByName(m, "stopme"); !ok {
 		t.Fatalf("thread not in the grid")
 	}
 	if m = runKey(t, m, "x"); m.LastErr() != nil {
-		t.Fatalf("kill action errored: %v", m.LastErr())
+		t.Fatalf("stop action errored: %v", m.LastErr())
 	}
-	// Observable effect: record gone, and the REAL runtime is dead.
-	if threadInList(t, sb, th.ID) {
-		t.Errorf("killed thread still in the daemon list")
-	}
+	// The REAL runtime is dead...
 	if !waitUntil(10*time.Second, func() bool { return !pidAlive(pid) }) {
-		t.Errorf("kill action did not kill the agent process")
+		t.Errorf("stop action did not kill the agent process")
 	}
 	if !waitUntil(10*time.Second, func() bool {
-		_, err := sb.rawTmux(t, "has-session", "-t", "=sesh_killme")
+		_, err := sb.rawTmux(t, "has-session", "-t", "=sesh_stopme")
 		return err != nil
 	}) {
-		t.Errorf("kill action did not kill the tmux session")
+		t.Errorf("stop action did not kill the tmux session")
+	}
+	// ...but the record is KEPT (dead, resumable) — unlike delete.
+	if !threadInList(t, sb, th.ID) {
+		t.Errorf("stop dropped the record (should keep it)")
+	}
+}
+
+// claimActionDelete: the delete key really drops the record. (The daemon's orphan
+// guard refuses a live delete, so we stop first — the realistic flow.)
+func claimActionDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "delme") // dead-by-construction (no runtime)
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m, _ = render(t, m)
+	if _, ok := rowByName(m, "delme"); !ok {
+		t.Fatalf("thread not in the grid")
+	}
+	if m = runKey(t, m, "d"); m.LastErr() != nil {
+		t.Fatalf("delete action errored: %v", m.LastErr())
+	}
+	// Observable effect: the record is gone from the daemon.
+	if threadInList(t, sb, th.ID) {
+		t.Errorf("delete did not drop the record")
 	}
 }
 

@@ -66,8 +66,8 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
-		ID:          "thread.kill",
-		Description: "kill a thread",
+		ID:          "thread.stop",
+		Description: "end a thread's runtime (agent + session) but KEEP the record (dead, resumable)",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

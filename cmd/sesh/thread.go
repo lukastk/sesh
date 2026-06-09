@@ -18,7 +18,7 @@ import (
 // the local daemon (this machine is the thread's owner).
 func runThread(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh thread <new|list|kill|pane>")
+		return errors.New("usage: sesh thread <new|list|stop|delete|pane>")
 	}
 	cfg := config.Load()
 	sub, rest := args[0], args[1:]
@@ -27,8 +27,8 @@ func runThread(args []string) error {
 		return threadNew(cfg, rest)
 	case "list":
 		return threadList(cfg, rest)
-	case "kill":
-		return threadKill(cfg, rest)
+	case "stop":
+		return threadStop(cfg, rest)
 	case "pane":
 		return threadPane(cfg, rest)
 	case "status":
@@ -119,6 +119,7 @@ func threadArchive(cfg config.Config, args []string) error {
 func threadDelete(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
+	force := fs.Bool("force", false, "delete even if the runtime is live (orphans the agent)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -126,7 +127,7 @@ func threadDelete(cfg config.Config, args []string) error {
 		return errors.New("thread delete: --id is required")
 	}
 	c := client.New(cfg.SocketPath())
-	if err := c.ThreadDelete(context.Background(), *id); err != nil {
+	if err := c.ThreadDelete(context.Background(), *id, *force); err != nil {
 		return err
 	}
 	fmt.Println("deleted", *id)
@@ -346,20 +347,23 @@ func threadList(cfg config.Config, args []string) error {
 	return nil
 }
 
-func threadKill(cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("kill", flag.ContinueOnError)
+// threadStop ends a thread's runtime (agent + tmux session) but keeps the record,
+// which becomes a dead, resumable thread. (The old `kill` was stop + delete;
+// compose them in a wrapper if you want that.)
+func threadStop(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *id == "" {
-		return errors.New("thread kill: --id is required")
+		return errors.New("thread stop: --id is required")
 	}
 	c := client.New(cfg.SocketPath())
-	if err := c.ThreadKill(context.Background(), *id); err != nil {
+	if err := c.ThreadStop(context.Background(), *id); err != nil {
 		return err
 	}
-	fmt.Println("killed", *id)
+	fmt.Println("stopped", *id)
 	return nil
 }
 

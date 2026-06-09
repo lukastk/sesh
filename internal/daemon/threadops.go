@@ -12,7 +12,37 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/rename", d.handleThreadRename)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
+	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
 	mux.HandleFunc("POST /v1/threads/delete", d.handleThreadDelete)
+}
+
+// handleThreadStop ends the thread's runtime — kills its tmux session (which
+// kills the agent) — but KEEPS the record, which becomes a normal dead thread
+// (resumable via `resume`). This is the runtime half of the old `kill`; dropping
+// the record is a separate `delete`. Stopping a thread whose session is already
+// gone is not an error (the runtime was already down) — it is idempotent.
+func (d *Daemon) handleThreadStop(w http.ResponseWriter, r *http.Request) {
+	var req api.StopThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "stop: id is required")
+		return
+	}
+	thread, err := d.store.GetThread(req.ID)
+	if err != nil {
+		d.threadOpErr(w, err)
+		return
+	}
+	if d.tmux.HasSession(thread.SessionName) {
+		if err := d.tmux.KillSession(thread.SessionName); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "stopped": req.ID})
 }
 
 func (d *Daemon) handleThreadRename(w http.ResponseWriter, r *http.Request) {
@@ -89,8 +119,10 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleThreadDelete drops the record only — the runtime (agent + tmux session)
-// is deliberately left untouched (unlike kill). It is for forgetting a record,
-// usually an already-dead one.
+// is left untouched. It is for forgetting a record, usually an already-dead one.
+// Deleting a thread whose runtime is still LIVE orphans its agent (record gone,
+// process still running), so delete refuses a live thread unless Force is set —
+// the natural order is `stop` then `delete` (which is what `kill` was).
 func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	var req api.DeleteThreadRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -100,6 +132,21 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	if req.ID == "" {
 		writeError(w, http.StatusBadRequest, "delete: id is required")
 		return
+	}
+	thread, err := d.store.GetThread(req.ID)
+	if err != nil {
+		d.threadOpErr(w, err)
+		return
+	}
+	if !req.Force {
+		if _, live, err := d.tmux.FindPaneByThreadID(req.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if live {
+			writeError(w, http.StatusConflict,
+				"delete: thread "+thread.SessionName+" is live (agent running); run `stop` first, or delete --force to drop the record and orphan the agent")
+			return
+		}
 	}
 	if err := d.store.DeleteThread(req.ID); err != nil {
 		d.threadOpErr(w, err)

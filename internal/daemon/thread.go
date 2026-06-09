@@ -17,7 +17,6 @@ import (
 func (d *Daemon) routesThreads(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads", d.handleThreadNew)
 	mux.HandleFunc("GET /v1/threads", d.handleThreadList)
-	mux.HandleFunc("POST /v1/threads/kill", d.handleThreadKill)
 	mux.HandleFunc("GET /v1/threads/pane", d.handleThreadPane)
 	mux.HandleFunc("GET /v1/threads/status", d.handleThreadStatus)
 	mux.HandleFunc("POST /v1/threads/send", d.handleThreadSend)
@@ -164,37 +163,6 @@ func (d *Daemon) handleThreadList(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Threads = threads
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// handleThreadKill terminates the thread: kill its tmux session (which kills the
-// agent) and delete the record. Killing a session that no longer exists is not
-// an error — the runtime was already gone — but a missing record is.
-func (d *Daemon) handleThreadKill(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "thread kill: id is required")
-		return
-	}
-	thread, err := d.store.GetThread(id)
-	if err != nil {
-		if errors.Is(err, store.ErrThreadNotFound) {
-			writeError(w, http.StatusNotFound, "thread not found: "+id)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if d.tmux.HasSession(thread.SessionName) {
-		if err := d.tmux.KillSession(thread.SessionName); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if err := d.store.DeleteThread(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "killed": id})
 }
 
 func (d *Daemon) handleThreadPane(w http.ResponseWriter, r *http.Request) {

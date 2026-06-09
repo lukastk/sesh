@@ -1,38 +1,59 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## Build status (post-ops + TUI)
+## Build status: ALL GREEN
 
-Feature matrix: **93 cells, 91 green, 2 skip** (the 2 skips = `thread.resume/claude/{local,remote}`,
-pending Lukas's decision — see below). Plus a separate **TUI conformance track: 6/6
-claims green** + structural import rule + completeness gate. `go test ./...` green
-except the 2 honest claude-resume skips.
+Feature matrix: **93 cells, 93 green, 0 skip, 0 n/a**. Separate **TUI conformance
+track: 7/7 claims green** + structural import rule + completeness gate. Plus
+**`TestRealCrossHost`** (real network ssh hop mymain↔macbook, all 3 agents) — green,
+env-gated/skip-able. `go test ./...` is green.
 
-### Features added after the first all-green (ops phase + TUI)
-- Lifecycle ops (matrix): **rename, tag, archive** (park, record kept), **delete**
-  (drop record, leave runtime — distinct from kill), **resume** (revive a dead headed
-  thread: recreate session + relaunch with `--resume`; pi+codex green w/ continuity).
-- **thread.list-all** (`?all-machines`) + **thread.grid** (`?with-status`, concurrent)
-  — daemon-side mesh fan-out; the TUI's data source.
-- **TUI** (`sesh tui`, Bubble Tea): live grid (glyphs from runtime-state), poll-first,
-  `--all-machines` fan-out; actions x kill / a archive / enter nav. Thin client over
-  `internal/client` only (import rule enforced by a test). Tests drive the real Model
-  against a real daemon and assert reality-anchored, never golden blobs.
+### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
+`kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;
+the composite belongs in myrig). Two axes:
+- **runtime**: `stop` (end agent + tmux session, keep record → dead/resumable) ↔ `resume`.
+- **record**: exists until `delete`; `archive`/`unarchive` toggle visibility.
+- `delete` refuses a LIVE thread unless `--force` (else it orphans the agent).
+- Matrix: `thread.stop` (6 agent cells), `thread.delete` (guard + force), `thread.resume`
+  (all 3 agents, continuity). TUI: `x` stop, `d` delete, `a` archive, enter nav.
 
-### OPEN: thread.resume for claude (2 skip cells, needs Lukas decision)
-Interactive (headed) claude buffers its transcript in memory and flushes a resumable
-session only on a GRACEFUL exit. A hard-killed headed claude session leaves only an
-`ai-title` (124 bytes) on disk (verified) — `claude --resume <id>` then says "No
-conversation found". pi/codex persist INCREMENTALLY so they resume fine. Recommended:
-mark claude-resume a justified N/A. (claude's headed turns DO run + persist-on-exit;
-the other claude cells are honest.)
+### RESOLVED: the claude-resume saga was an ENV LEAK (not a claude limitation)
+When the daemon is started from inside an agent session (autonomous build / the
+conformance suite under Claude Code), it inherited `CLAUDECODE=1` / `IN_CLAUDE_CODE` /
+`CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_*`. Those leak into the spawned claude, which then
+behaves as a NESTED session and stops persisting its transcript to `~/.claude/projects`
+— so `claude --resume` reports "No conversation found". Old sesh never hit this (its
+daemon runs normally, not under a claude agent). **Fix:** `agents.ScrubHarnessEnv()` at
+the top of `daemon.New()` unsets those markers (verified: propagates daemon→tmux→pane;
+hard-killed claude then resumes with full continuity). My earlier "claude buffers until
+graceful exit" theory was WRONG — it was the env leak masquerading as that. Verified by
+driving real claude in tmux via the `tui-tmux-testing` skill.
 
 codex resume edge: a codex thread killed BEFORE its first turn has no minted id →
 explicit N/A error (TestCodexResumeBeforeFirstTurnIsNA), never faked.
 
-## Build status: ALL GREEN — 76 / 76 cells, 0 fail, 0 skip, 0 missing (original matrix)
+### mesh + cross-host
+- `--machine` routing (real ssh hop), `thread.list-all` (`?all-machines`) + `thread.grid`
+  (`?with-status`, concurrent) daemon-side fan-out (offline peers → `unreachable`, not
+  dropped). TUI is a thin client over `internal/client` only.
+- `TestRealCrossHost`: real-host spawn validation. PREREQ (manual): v2 at
+  `~/.local/bin/sesh-v2` on both paired machines; run with `MYRIG_MACHINES` exported (it's
+  a zsh assoc array). See AGENTS.md "Test environment notes".
 
-`go test ./...` green. Run `go run ./cmd/sesh matrix grid` (after
-`go test ./internal/conformance`) to see the grid.
+### Test isolation (the user runs LIVE old sesh here)
+Every sandbox isolates `SESH_HOME` / `SESH_TMUX_SOCKET` / `SESH_MASTER_SOCKET` /
+`SESH_CODEX_HOME`; `sandboxEnv` strips inherited `SESH_*`. Never leave a socket/home at
+its default in a test.
+
+### Known follow-ups (not blocking)
+- `peers.Peer` has no port field → non-22 machines (android-main:8022) are skipped by
+  the cross-host test. Add a Port field + `ssh -p` to support them.
+- Mesh list is LIVE fan-out only; SPEC hints at replicated/cached listing for offline
+  browsing — not built.
+
+## Reference: foundational decisions & gotchas (from the original 76-cell build)
+
+Run `go run ./cmd/sesh matrix grid` (after `go test ./internal/conformance`) to see the
+rendered grid.
 
 Every feature is honest (real agent in a real tmux pane; remote = real `ssh
 localhost` hop). All 24 feature rows green across their axes:

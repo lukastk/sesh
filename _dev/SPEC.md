@@ -53,7 +53,7 @@ daemon/API     per-machine; single-writer-per-record + read replicas; HTTP+JSON 
 - **No session persistence; records persist, runtime is re-derived.** This split is load-bearing, so state it plainly:
   - **Thread *records* persist** — they live in the daemon's SQLite store and survive reboots.
   - **Only the tmux *runtime* is ephemeral** — when a machine reboots, every tmux session disappears, and that is expected. The runtime (session/window/pane, liveness) is never stored; it is always re-derived live.
-  - **A record whose session is gone is reported `dead`, and is NEVER auto-deleted.** Pointing at a vanished session is not an error — it is just a dead thread, which can be `resume`d (revived on demand, §3) or explicitly dropped. Garbage-collecting dead records is always a deliberate user action (`delete`/`kill`), never automatic.
+  - **A record whose session is gone is reported `dead`, and is NEVER auto-deleted.** Pointing at a vanished session is not an error — it is just a dead thread, which can be `resume`d (revived on demand, §3) or explicitly dropped. Garbage-collecting dead records is always a deliberate user action (`stop` then `delete`), never automatic.
 
 ### Commands (the contracts)
 
@@ -107,14 +107,25 @@ Runtime-resolved (not stored): `pane`, `runtime_state`, liveness.
 
 start (headed/headless), send a message (headful → live pane; headless → a turn), list, **rename**, **tag**, and the lifecycle verbs that act on the *record* and/or the *runtime*:
 
+These are **orthogonal primitives** over two independent axes — the *record*
+(exists until `delete`) and the *runtime* (`stop` ↔ `resume`). `kill` is NOT a
+primitive here: it is the composite `stop && delete`, which belongs in a myrig
+wrapper, not in sesh (mechanism, not UX).
+
 | verb | record | runtime (agent + tmux session) | use |
 |---|---|---|---|
-| **kill** | dropped | ended | be done with it entirely |
-| **delete** | dropped | left untouched | forget a (usually already-dead) record without killing anything |
+| **stop** | kept (becomes `dead`) | ended | free the agent/pane now, keep the thread to `resume` later |
+| **delete** | dropped | left untouched (refuses a LIVE thread unless `--force` — deleting a live thread orphans its agent) | forget a (usually already-dead) record |
 | **archive** | kept, hidden from the active list | untouched | park it — a keepable state, distinct from `dead` and from `deleted` |
 | **resume** | kept | **revived**: recreate the tmux session and relaunch the agent with `--resume <agent_session_id>` so the conversation continues | bring a dead **headed** thread back on demand |
 
-`resume` applies to headed threads. A **codex** thread that died *before its first turn* has no `agent_session_id` (codex cannot pre-assign one), so it legitimately cannot be resumed — this is a justified **N/A** edge, surfaced as an explicit error, never faked.
+`resume` applies to headed threads and works after *any* death (each agent persists
+its conversation incrementally) — **provided the daemon spawns the agent as a clean,
+top-level session**: it scrubs inherited agent-harness env (`CLAUDECODE`,
+`CLAUDE_CODE_*`, …) so a spawned claude does not behave as a nested session and stop
+persisting its transcript. A **codex** thread that died *before its first turn* has no
+`agent_session_id` (codex cannot pre-assign one), so it legitimately cannot be resumed
+— a justified **N/A** edge, surfaced as an explicit error, never faked.
 
 As v1, mutations route to the owning machine's daemon (single writer), which executes locally; the TUI/CLI reach remote machines via `--machine` routing.
 

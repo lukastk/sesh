@@ -105,6 +105,16 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "mesh.snapshot",
+		Description: "GET /v1/mesh: the background sync (L2) replicates each peer's snapshot into the local cache; the merged view is read locally with a peer's threads + live state",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "mesh.offline-listing",
+		Description: "offline browsing: a peer going down keeps its last-known threads listed (reachable=false, retained from cache), and a recovered peer refreshes to reachable",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

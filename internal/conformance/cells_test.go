@@ -36,6 +36,8 @@ var skipReasons = map[string]string{
 	"thread.delete":         "drop a record without touching the runtime",
 	"thread.resume":         "revive a dead headed thread (recreate session + relaunch with --resume); conversation continuity verified for all three agents (claude needs a clean top-level env, guaranteed by daemon ScrubHarnessEnv)",
 	"thread.snapshot":       "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
+	"mesh.snapshot":         "GET /v1/mesh: L2 sync replicates a peer's snapshot into the local cache; merged view read locally",
+	"mesh.offline-listing":  "offline browsing: a downed peer's threads stay listed (reachable=false), and recover when it returns",
 	"ticket.create":         "create a ticket",
 	"ticket.list-by-thread": "list tickets assigned to a thread",
 	"ticket.send-prompt":    "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",

@@ -44,6 +44,9 @@ type Daemon struct {
 	// maint is the L1 state maintainer: it keeps every local thread's live state
 	// continuously fresh so reads are O(1) (see _dev/MESH.md).
 	maint *maintainer
+	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
+	// the cross-machine view (GET /v1/mesh) is a local read.
+	mesh *meshSync
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses
@@ -88,6 +91,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		hlReply:    map[string]string{},
 	}
 	d.maint = newMaintainer(d)
+	d.mesh = newMeshSync(d)
 	d.srv = &http.Server{Handler: d.routes()}
 	return d, nil
 }
@@ -102,6 +106,7 @@ func (d *Daemon) Serve() error {
 	d.ln = ln
 	d.started = time.Now()
 	d.maint.start() // begin keeping local thread state fresh in the background
+	d.mesh.start()  // begin syncing peers' snapshots into the local cache
 
 	if err := os.WriteFile(d.cfg.PIDPath(), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600); err != nil {
 		ln.Close()
@@ -127,6 +132,7 @@ func (d *Daemon) Serve() error {
 // once. On-disk markers (pid/socket) are removed by Serve's deferred cleanup, in
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	d.mesh.stopAndWait()
 	d.maint.stopAndWait()
 	srvErr := d.srv.Shutdown(ctx)
 	storeErr := d.store.Close()

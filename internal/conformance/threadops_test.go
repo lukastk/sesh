@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lukastk/sesh/internal/matrix"
 )
@@ -120,7 +121,12 @@ func testThreadDelete(t *testing.T, loc matrix.Locality) {
 	if _, err := sb.rawTmux(t, "has-session", "-t", "=sesh_deleteme"); err != nil {
 		t.Errorf("delete killed the tmux session (should leave runtime untouched)")
 	}
-	if !pidAlive(pid) || !agentRunningUnder(pid, "pi") {
+	// pidAlive (signal-0) is the reliable "process still alive" probe; the ps-based
+	// agent re-check gets a short retry window (it can flake under full-suite load).
+	if !pidAlive(pid) {
+		t.Errorf("delete killed the pane process (should leave runtime untouched)")
+	}
+	if !waitUntil(5*time.Second, func() bool { return agentRunningUnder(pid, "pi") }) {
 		t.Errorf("delete killed the agent process (should leave runtime untouched)")
 	}
 	// Clean up the orphaned session ourselves.

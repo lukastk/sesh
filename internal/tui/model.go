@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -37,6 +38,12 @@ type Model struct {
 	binaryPath string
 	navEnv     []string
 
+	// machine + tmuxSocket: this client's own identity + work socket, so Enter can use
+	// in-client nav (no master) for a LOCAL thread when the TUI is running inside that
+	// work socket's tmux. Empty (the test/default) => always use the master nav path.
+	machine    string
+	tmuxSocket string
+
 	rows      []api.ThreadRow
 	machines  []api.MachineView // per-machine freshness, for the staleness footer
 	fetchedAt int64             // unix time the current data was fetched (for staleness age)
@@ -61,6 +68,14 @@ func New(socketPath string, allMachines bool) Model {
 func (m Model) WithExec(binaryPath string, env []string) Model {
 	m.binaryPath = binaryPath
 	m.navEnv = env
+	return m
+}
+
+// WithLocal sets this client's own machine + work socket, enabling in-client nav for
+// a local thread when the TUI is inside that work socket's tmux.
+func (m Model) WithLocal(machine, tmuxSocket string) Model {
+	m.machine = machine
+	m.tmuxSocket = tmuxSocket
 	return m
 }
 
@@ -191,14 +206,30 @@ func (m Model) navSelected() tea.Cmd {
 	}
 	bin, env := m.binaryPath, m.navEnv
 	target := row.Machine + ":" + row.SessionName
+	// A LOCAL thread, when we're inside its work socket's tmux, switches in the current
+	// client (no master). Otherwise: the full master nav path.
+	useInClient := m.machine != "" && row.Machine == m.machine && inWorkSocketTmux(m.tmuxSocket)
 	return func() tea.Msg {
-		cmd := exec.Command(bin, "tmux", "nav", "--to", target)
+		args := []string{"tmux", "nav", "--to", target}
+		if useInClient {
+			args = append(args, "--in-client")
+		}
+		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
 		return actionMsg{}
 	}
+}
+
+// inWorkSocketTmux reports whether $TMUX shows we're a client on tmux socket `name`.
+func inWorkSocketTmux(name string) bool {
+	t := os.Getenv("TMUX")
+	if t == "" || name == "" {
+		return false
+	}
+	return filepath.Base(strings.SplitN(t, ",", 2)[0]) == name
 }
 
 // stopSelected ends the selected thread's runtime (agent + session) but keeps

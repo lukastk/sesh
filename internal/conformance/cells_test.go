@@ -44,6 +44,7 @@ var skipReasons = map[string]string{
 	"mesh.offline-listing.http": "offline browsing over the http transport — SSH↔HTTP parity twin",
 	"route.parity":              "--machine routing over ssh: thread/ticket/tmux ops land on the peer's daemon",
 	"route.parity.http":         "--machine routing over the peer's TCP API (http) — SSH↔HTTP routing parity twin",
+	"tmux.nav-in-client":        "nav --in-client switches the current client to a local session (no master); loud on remote target / off-socket",
 	"master.up":                 "sesh master up builds a window per machine, each attached into that machine's work server (peer over ssh)",
 	"master.reconnect":          "the per-window supervisor re-establishes a dropped attach (local + ssh-localhost peer)",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",

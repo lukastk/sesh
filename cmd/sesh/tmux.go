@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -53,12 +54,35 @@ func runTmux(args []string) error {
 func tmuxNav(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("nav", flag.ContinueOnError)
 	to := fs.String("to", "", "target as <machine>:<session> (required)")
+	inClient := fs.Bool("in-client", false, "switch the CURRENT tmux client to the target (local target on the current work socket only; no master)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	machine, session, ok := strings.Cut(*to, ":")
 	if !ok || machine == "" || session == "" {
 		return errors.New("nav: --to must be <machine>:<session>")
+	}
+
+	// In-client nav: skip the master entirely and just switch THIS tmux client to the
+	// target session — for a LOCAL target on the work socket we're already attached to.
+	// Loud (never a silent no-op): errors if the target isn't local, or if we aren't in
+	// a tmux client on that work socket.
+	if *inClient {
+		if machine != cfg.Machine {
+			return fmt.Errorf("nav --in-client: target %q is not this machine (%q) — --in-client is local-only", machine, cfg.Machine)
+		}
+		t := os.Getenv("TMUX")
+		if t == "" {
+			return errors.New("nav --in-client: not inside a tmux client")
+		}
+		if sock := filepath.Base(strings.SplitN(t, ",", 2)[0]); sock != cfg.TmuxSocket {
+			return fmt.Errorf("nav --in-client: current client is on tmux socket %q, not the work socket %q", sock, cfg.TmuxSocket)
+		}
+		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session)
+		if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
+			return fmt.Errorf("nav --in-client: switch-client: %v: %s", err, out)
+		}
+		return nil
 	}
 
 	// (1) Outer: switch the mymastertmux client to machine M's window.

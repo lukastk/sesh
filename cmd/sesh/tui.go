@@ -18,7 +18,7 @@ func runTUI(args []string) error {
 		return err
 	}
 	cfg := config.Load()
-	m := tui.New(cfg.SocketPath(), *allMachines)
+	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err

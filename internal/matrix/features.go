@@ -145,6 +145,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-in-client",
+		Description: "`tmux nav --in-client`: inside the work socket's tmux, navigating to a LOCAL session switches THIS client in place (no master); errors loudly for a remote target or off the work socket",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "master.up",
 		Description: "`sesh master up` builds the cross-machine cockpit: one window per machine (name == machine), each GENUINELY attached into that machine's work server (peer over a real ssh hop)",
 		Localities:  []Locality{Remote},

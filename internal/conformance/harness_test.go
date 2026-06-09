@@ -100,11 +100,16 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 	stamp := time.Now().UnixNano()
 	machine := fmt.Sprintf("sb-%s-%d", loc, stamp)
 	socket := fmt.Sprintf("sesh-test-%s-%d", loc, stamp)
+	masterSocket := fmt.Sprintf("sesh-test-master-%s-%d", loc, stamp)
 
 	env := map[string]string{
 		"SESH_HOME":        home,
 		"SESH_MACHINE":     machine,
 		"SESH_TMUX_SOCKET": socket,
+		// Isolate the master socket too: its default is the user's live
+		// "mymastertmux". No non-nav test touches it, but a clash would corrupt the
+		// user's real master view, so we never leave it at the default.
+		"SESH_MASTER_SOCKET": masterSocket,
 		// Isolated codex home so sesh's per-cwd trust writes (which suppress
 		// codex's directory-trust prompt) never touch the user's real ~/.codex.
 		// auth is symlinked so codex stays authenticated.
@@ -121,7 +126,11 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 		ensureSSHLocalhost(t)
 		clientHome := t.TempDir()
 		clientMachine := fmt.Sprintf("client-%d", stamp)
-		clientEnv := map[string]string{"SESH_HOME": clientHome, "SESH_MACHINE": clientMachine}
+		clientEnv := map[string]string{
+			"SESH_HOME":          clientHome,
+			"SESH_MACHINE":       clientMachine,
+			"SESH_MASTER_SOCKET": fmt.Sprintf("sesh-test-cmaster-%d", stamp),
+		}
 		// Register the peer with the client (exercises `sesh peer add`).
 		client := &localRunner{bin: bin, env: clientEnv}
 		if _, stderr, err := client.Run(t, "peer", "add", "--machine", machine, "--ssh", "localhost", "--home", home, "--binary", bin); err != nil {
@@ -139,8 +148,9 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 	// Always tear down the daemon AND the tmux server at the end of the test,
 	// regardless of where the test bailed — a leak would pollute later cells.
 	t.Cleanup(func() {
-		sb.daemonRunner.Run(t, "daemon", "stop")                //nolint:errcheck — best-effort
-		exec.Command("tmux", "-L", socket, "kill-server").Run() //nolint:errcheck — best-effort
+		sb.daemonRunner.Run(t, "daemon", "stop")                      //nolint:errcheck — best-effort
+		exec.Command("tmux", "-L", socket, "kill-server").Run()       //nolint:errcheck — best-effort
+		exec.Command("tmux", "-L", masterSocket, "kill-server").Run() //nolint:errcheck — best-effort
 	})
 	return sb
 }
@@ -156,7 +166,12 @@ func newSSHSandbox(t *testing.T) *Sandbox {
 	stamp := time.Now().UnixNano()
 	machine := fmt.Sprintf("sb-ssh-%d", stamp)
 	socket := fmt.Sprintf("sesh-test-ssh-%d", stamp)
-	env := map[string]string{"SESH_HOME": home, "SESH_MACHINE": machine, "SESH_TMUX_SOCKET": socket}
+	env := map[string]string{
+		"SESH_HOME":          home,
+		"SESH_MACHINE":       machine,
+		"SESH_TMUX_SOCKET":   socket,
+		"SESH_MASTER_SOCKET": fmt.Sprintf("sesh-test-master-ssh-%d", stamp),
+	}
 	r := &sshRunner{bin: bin, env: env}
 	sb := &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: r, daemonRunner: r}
 	t.Cleanup(func() {
@@ -362,6 +377,25 @@ func (sb *Sandbox) rawTmux(t *testing.T, args ...string) (string, error) {
 	return string(out), err
 }
 
+// sandboxEnv builds a child env from the current process's, but with every
+// inherited SESH_* variable STRIPPED before the sandbox's own values are applied.
+// The user may be running the test from a shell that has its real sesh env set
+// (they run the live old sesh); nothing of theirs must leak into a test process.
+func sandboxEnv(extra map[string]string) []string {
+	var out []string
+	for _, e := range os.Environ() {
+		name, _, _ := strings.Cut(e, "=")
+		if strings.HasPrefix(name, "SESH_") {
+			continue // never inherit the user's sesh config/sockets
+		}
+		out = append(out, e)
+	}
+	for k, v := range extra {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 type localRunner struct {
 	bin string
 	env map[string]string
@@ -372,10 +406,7 @@ func (l *localRunner) Locality() matrix.Locality { return matrix.Local }
 func (l *localRunner) Run(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command(l.bin, args...)
-	cmd.Env = os.Environ()
-	for k, v := range l.env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = sandboxEnv(l.env)
 	return runCmd(cmd)
 }
 
@@ -395,10 +426,7 @@ func (r *routingRunner) Locality() matrix.Locality { return matrix.Remote }
 func (r *routingRunner) Run(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command(r.bin, append(args, "--machine", r.peerMachine)...)
-	cmd.Env = os.Environ()
-	for k, v := range r.env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = sandboxEnv(r.env)
 	return runCmd(cmd)
 }
 

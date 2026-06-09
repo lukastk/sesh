@@ -21,6 +21,38 @@ func init() {
 			func(t *testing.T) { testTicketListByThread(t, loc) })
 		matrix.RegisterTest("ticket.needs-input", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTicketNeedsInput(t, loc) })
+		// ticket.send-prompt touches the agent send path; green for claude+pi
+		// (codex turn induction is non-deterministic — see thread.send.headful).
+		for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
+			a := a
+			matrix.RegisterTest("ticket.send-prompt", a, loc,
+				func(t *testing.T) { testTicketSendPrompt(t, string(a), loc) })
+		}
+	}
+}
+
+// testTicketSendPrompt asserts a ticket's prompt is delivered to its bound
+// thread: after send-prompt, the agent begins a turn (activity -> working).
+func testTicketSendPrompt(t *testing.T, agent string, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, agent, "sp", "/tmp")
+	sb.waitThreadReady(t, th.ID, agent)
+
+	id := sb.ticketCreate(t, "do the thing", "Write a detailed 150-word explanation of how HTTPS works")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "send-prompt", "--id", id); err != nil {
+		t.Fatalf("send-prompt: %v\n%s", err, stderr)
+	}
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+		t.Fatalf("agent never started a turn after send-prompt (prompt not delivered?)")
 	}
 }
 

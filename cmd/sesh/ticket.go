@@ -29,6 +29,8 @@ func runTicket(args []string) error {
 		return ticketSetStatus(cfg, rest)
 	case "needs-input":
 		return ticketNeedsInput(cfg, rest)
+	case "send-prompt":
+		return ticketSendPrompt(cfg, rest)
 	default:
 		return fmt.Errorf("unknown ticket subcommand %q", sub)
 	}
@@ -106,6 +108,23 @@ func ticketSetStatus(cfg config.Config, args []string) error {
 		return emitJSON(resp.Ticket)
 	}
 	fmt.Printf("%s -> %s\n", resp.Ticket.ID, resp.Ticket.Status)
+	return nil
+}
+
+func ticketSendPrompt(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("send-prompt", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket send-prompt: --id is required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.TicketSendPrompt(context.Background(), *id); err != nil {
+		return err
+	}
+	fmt.Println("sent prompt for", *id)
 	return nil
 }
 

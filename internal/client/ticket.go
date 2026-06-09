@@ -34,3 +34,8 @@ func (c *Client) TicketNeedsInput(ctx context.Context, id string) (api.TicketNee
 	var out api.TicketNeedsInput
 	return out, c.getJSON(ctx, "http://unix/v1/tickets/needs-input?id="+url.QueryEscape(id), &out)
 }
+
+// TicketSendPrompt posts POST /v1/tickets/send-prompt.
+func (c *Client) TicketSendPrompt(ctx context.Context, id string) error {
+	return c.postJSON(ctx, "http://unix/v1/tickets/send-prompt", map[string]string{"id": id}, nil)
+}

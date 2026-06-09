@@ -16,6 +16,56 @@ func (d *Daemon) routesTickets(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/tickets", d.handleTicketList)
 	mux.HandleFunc("POST /v1/tickets/status", d.handleTicketSetStatus)
 	mux.HandleFunc("GET /v1/tickets/needs-input", d.handleTicketNeedsInput)
+	mux.HandleFunc("POST /v1/tickets/send-prompt", d.handleTicketSendPrompt)
+}
+
+// handleTicketSendPrompt delivers a ticket's prompt to its bound thread's live
+// pane (ticket.send-prompt). The ticket must be bound and have a prompt; the
+// thread must have a live pane. sesh does NOT track "was the prompt sent" — that
+// state does not exist (SPEC §4); this just performs the delivery cleanly.
+func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "ticket send-prompt: id is required")
+		return
+	}
+	ticket, err := d.store.GetTicket(req.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrTicketNotFound) {
+			writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if ticket.ThreadID == "" {
+		writeError(w, http.StatusConflict, "ticket is not bound to a thread")
+		return
+	}
+	if ticket.Prompt == "" {
+		writeError(w, http.StatusBadRequest, "ticket has no prompt to send")
+		return
+	}
+	loc, found, err := d.tmux.FindPaneByThreadID(ticket.ThreadID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusConflict, "bound thread has no live pane (dead); cannot send prompt")
+		return
+	}
+	if err := d.tmux.SendText(loc.Pane, ticket.Prompt, true); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "sent": req.ID})
 }
 
 func (d *Daemon) handleTicketCreate(w http.ResponseWriter, r *http.Request) {

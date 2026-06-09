@@ -3,7 +3,44 @@
 // thread lifecycle (tmux, storage, routing) lives in the daemon.
 package agents
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+// harnessEnvMarkers are the exact env vars a coding-agent harness sets on ITS
+// OWN process to mark "I am a running agent session". CLAUDE_CODE_*-prefixed
+// vars are scrubbed too (see ScrubHarnessEnv).
+var harnessEnvMarkers = map[string]bool{
+	"CLAUDECODE":     true,
+	"IN_CLAUDE_CODE": true,
+	"AI_AGENT":       true,
+	"CLAUDE_EFFORT":  true,
+}
+
+// ScrubHarnessEnv removes coding-agent-harness session markers (CLAUDECODE=1,
+// IN_CLAUDE_CODE=1, CLAUDE_CODE_SESSION_ID=…, CLAUDE_CODE_ENTRYPOINT=…, AI_AGENT=…
+// and every CLAUDE_CODE_* var) from THIS process's environment.
+//
+// Why this matters and why it is loud-bug territory: the sesh daemon may be
+// started from inside an agent session (e.g. an autonomous build, or the
+// conformance suite running under Claude Code). Those markers are inherited by
+// every process the daemon spawns. A claude launched while CLAUDECODE=1 /
+// CLAUDE_CODE_SESSION_ID=… are set behaves as a NESTED session and STOPS
+// persisting its transcript to ~/.claude/projects — which silently breaks
+// `resume` (claude --resume reports "No conversation found"). The daemon must
+// present a clean, top-level environment to the agents it spawns, regardless of
+// what started it. Auth/config vars (ANTHROPIC_*, CLAUDE_CONFIG_DIR, CODEX_HOME,
+// SESH_*) are deliberately left untouched.
+func ScrubHarnessEnv() {
+	for _, e := range os.Environ() {
+		name, _, _ := strings.Cut(e, "=")
+		if harnessEnvMarkers[name] || strings.HasPrefix(name, "CLAUDE_CODE_") {
+			os.Unsetenv(name)
+		}
+	}
+}
 
 // Kind is a coding-agent kind.
 type Kind string

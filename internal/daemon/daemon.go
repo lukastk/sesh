@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -45,6 +46,13 @@ type Daemon struct {
 // to start if a live daemon already owns the socket — two writers on one store
 // is exactly the kind of silent corruption sesh must avoid.
 func New(cfg config.Config) (*Daemon, error) {
+	// The daemon must spawn agents as clean, TOP-LEVEL sessions. If it was started
+	// from inside an agent harness (e.g. under Claude Code, or by the conformance
+	// suite), inherited markers like CLAUDECODE=1 / CLAUDE_CODE_SESSION_ID make a
+	// spawned claude behave as a nested session and silently stop persisting its
+	// transcript — which breaks `resume`. Scrub them before anything is spawned.
+	agents.ScrubHarnessEnv()
+
 	if err := cfg.EnsureHome(); err != nil {
 		return nil, fmt.Errorf("daemon: ensure home: %w", err)
 	}

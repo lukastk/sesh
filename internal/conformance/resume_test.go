@@ -10,14 +10,16 @@ import (
 )
 
 func init() {
-	// Resume works for agents that persist their conversation INCREMENTALLY (pi,
-	// codex): a hard-killed session is resumable. claude buffers the transcript in
-	// memory and flushes it only on a graceful exit — a hard-killed headed claude
-	// session leaves only a title on disk, so it cannot be resumed. claude resume
-	// is therefore Skip pending a decision (see cells_test.go reason).
+	// Resume works for all three agents: each persists its conversation
+	// incrementally, so a hard-killed session is resumable by relaunching with
+	// --resume. (claude only persists when launched as a clean, top-level session;
+	// the daemon guarantees that via agents.ScrubHarnessEnv — see daemon.New. The
+	// long-standing "claude can't resume" symptom was that scrub missing, which let
+	// CLAUDECODE/CLAUDE_CODE_* leak into the spawned claude and suppress its
+	// transcript persistence.)
 	for _, loc := range matrix.AllLocalities {
 		loc := loc
-		for _, a := range []matrix.Agent{matrix.Codex, matrix.Pi} {
+		for _, a := range matrix.AllAgents {
 			a := a
 			matrix.RegisterTest("thread.resume", a, loc,
 				func(t *testing.T) { testThreadResume(t, string(a), loc) })

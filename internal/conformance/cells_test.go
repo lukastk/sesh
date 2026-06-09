@@ -34,7 +34,7 @@ var skipReasons = map[string]string{
 	"thread.tag":            "add/remove tags",
 	"thread.archive":        "park a thread (hidden from active list, record kept)",
 	"thread.delete":         "drop a record without touching the runtime",
-	"thread.resume":         "revive a dead headed thread; claude blocked — interactive claude buffers its transcript and flushes only on graceful exit, so a hard-killed claude session leaves only a title and is not resumable (pending Lukas decision)",
+	"thread.resume":         "revive a dead headed thread (recreate session + relaunch with --resume); conversation continuity verified for all three agents (claude needs a clean top-level env, guaranteed by daemon ScrubHarnessEnv)",
 	"ticket.create":         "create a ticket",
 	"ticket.list-by-thread": "list tickets assigned to a thread",
 	"ticket.send-prompt":    "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",

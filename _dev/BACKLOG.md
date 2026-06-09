@@ -134,6 +134,32 @@ caches, `_mms_machine_reachable`, nav history, flagged-cycle, `_mms_run_on_machi
 goes ~1,205 → ~150–250 lines. (Parallel to v1 for now; converge onto the canonical socket +
 single master once v2 retires v1.)
 
+## 5. Per-server tmux config for the WORK server (`SESH_TMUX_CONF` + `peer --tmux-conf`)
+
+Generalize the master's `--tmux-conf` (`-f`, already built) to the WORK server, so sesh's
+tmux can carry the sesh-specific UI (the per-thread status bar) while the user's REGULAR
+tmux (default `~/.tmux.conf`) does not. Motivation (Lukas): post v1→v2 migration, the
+thread-status bar (`status-format[0]` → `sesh-current-status`) should live ONLY in sesh's
+work tmux, not in plain tmux — separate confs is the clean seam. (Today the work server
+loads the default `~/.tmux.conf`, which is why base's `status 2` second line shows up as a
+gray bar on the `sesh-v2` socket.)
+
+Design:
+- `SESH_TMUX_CONF=<path>` (config): the work tmux server's config. When set, the work
+  server is started with `tmux -f <path>` instead of the default `~/.tmux.conf`.
+- `peers.Peer.TmuxConf` (`peer add --tmux-conf <path>`): the peer's work-conf path, so the
+  master's REMOTE window creates/attaches the peer's work server with ITS conf (parallel to
+  how `tmux_socket` is per-peer).
+- Apply at server-start (whoever starts it): `internal/tmux.Server` gains an optional conf
+  and prepends `-f <conf>` (harmless once the server is running — tmux ignores `-f` when
+  connecting). The daemon passes `cfg.TmuxConf` when creating thread sessions; `master.go`
+  `workAttach` passes the conf (local: `cfg.TmuxConf`; remote: `peer.TmuxConf`).
+- Caveat (same as the master): `-f` REPLACES base, so the supplied work conf must `source`
+  the user's base bits it wants (keybindings, etc.) + add the sesh status line, or be
+  self-contained. myrig owns the conf file; sesh just loads the path it's given.
+- Conformance: a cell asserting the work server loaded the given conf (set a sentinel option
+  in a test conf, assert it via raw `tmux show -g` on the work socket). Effort: medium.
+
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →
 #2 promote then #1 enter; anything cross-machine → the master-tmux nav path.

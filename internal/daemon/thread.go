@@ -11,6 +11,7 @@ import (
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/store"
+	"github.com/lukastk/sesh/internal/tmux"
 )
 
 func (d *Daemon) routesThreads(mux *http.ServeMux) {
@@ -18,6 +19,7 @@ func (d *Daemon) routesThreads(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/threads", d.handleThreadList)
 	mux.HandleFunc("POST /v1/threads/kill", d.handleThreadKill)
 	mux.HandleFunc("GET /v1/threads/pane", d.handleThreadPane)
+	mux.HandleFunc("GET /v1/threads/status", d.handleThreadStatus)
 }
 
 // handleThreadNew spawns a headed thread: a real agent in a real tmux session,
@@ -149,6 +151,104 @@ func (d *Daemon) handleThreadPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ResolvePaneResponse{Schema: api.SchemaVersion, Found: found, Pane: loc})
+}
+
+// activityWindow is how long the content-diff probe samples a pane. All three
+// agent TUIs animate a timer/spinner during a turn, so a working pane is never
+// byte-stable across this window (even during a silent tool-run); an idle pane
+// is byte-stable. The window trades a little status latency for that certainty.
+const activityWindow = 700 * time.Millisecond
+
+// handleThreadStatus resolves a thread's LIVE runtime state (never stored) as
+// two ORTHOGONAL axes (Phase 3b decision; see _dev/SPEC.md §3):
+//
+//   - Activity   {working|waiting|dead}: dead = no live agent under a marked
+//     pane; otherwise working/waiting from a pane content-diff probe.
+//   - Attachment {attached|detached}: from `tmux list-clients`.
+//
+// They are independent: a detached agent can still be working, and an idle agent
+// still needs input whether or not anyone is attached.
+func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "thread status: id is required")
+		return
+	}
+	thread, err := d.store.GetThread(id)
+	if err != nil {
+		if errors.Is(err, store.ErrThreadNotFound) {
+			writeError(w, http.StatusNotFound, "thread not found: "+id)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id}
+
+	loc, found, err := d.tmux.FindPaneByThreadID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		// No marked live pane: dead and (necessarily) detached.
+		resp.Activity = api.ActivityDead
+		resp.Attachment = api.Detached
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp.Pane = loc.Pane
+
+	// Attachment axis (independent of activity).
+	clients, err := d.tmux.ClientCount(loc.Session)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Clients = clients
+	resp.Attachment = api.Detached
+	if clients > 0 {
+		resp.Attachment = api.Attached
+	}
+
+	// Activity axis.
+	agent, running := tmux.AgentUnderPane(loc.PanePID)
+	resp.AgentRunning = running && agent.Kind == thread.AgentKind
+	if !resp.AgentRunning {
+		// A marked pane but no live agent of the right kind: the agent exited.
+		// dead — needs a restart.
+		resp.Activity = api.ActivityDead
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	working, err := d.paneChanging(loc.Pane)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if working {
+		resp.Activity = api.ActivityWorking
+	} else {
+		resp.Activity = api.ActivityWaiting
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// paneChanging samples a pane's visible content across activityWindow and reports
+// whether it changed — the agent-agnostic "is the agent producing output / its
+// TUI animating" signal that distinguishes working from waiting.
+func (d *Daemon) paneChanging(pane string) (bool, error) {
+	a, err := d.tmux.CapturePane(pane)
+	if err != nil {
+		return false, err
+	}
+	time.Sleep(activityWindow)
+	b, err := d.tmux.CapturePane(pane)
+	if err != nil {
+		return false, err
+	}
+	return a != b, nil
 }
 
 // sanitizeName maps a thread name to a tmux-safe session suffix. tmux session

@@ -30,9 +30,37 @@ func runThread(args []string) error {
 		return threadKill(cfg, rest)
 	case "pane":
 		return threadPane(cfg, rest)
+	case "status":
+		return threadStatus(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
+}
+
+func threadStatus(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("thread status: --id is required")
+	}
+	c := client.New(cfg.SocketPath())
+	resp, err := c.ThreadStatus(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	fmt.Printf("activity:      %s\n", resp.Activity)
+	fmt.Printf("attachment:    %s (%d clients)\n", resp.Attachment, resp.Clients)
+	fmt.Printf("agent_running: %t\n", resp.AgentRunning)
+	fmt.Printf("needs_input:   %t\n", resp.NeedsInput())
+	fmt.Printf("pane:          %s\n", resp.Pane)
+	return nil
 }
 
 func threadNew(cfg config.Config, args []string) error {

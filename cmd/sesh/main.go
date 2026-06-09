@@ -54,7 +54,7 @@ usage: sesh <command> [args]
 commands:
   daemon    per-machine daemon (run | start | stop | status)
   tmux      tmux layer (current | info | create-session | create-pane | send-text | stage-file)
-  thread    thread layer (new | list | kill | pane)
+  thread    thread layer (new | list | kill | pane | status)
   matrix    report the feature-matrix state (grid | skips)
 
 (more commands land as the development plan progresses)`)

@@ -85,7 +85,11 @@ Rule of thumb: any time a myrig function would need to *know something sesh know
 - A **headed** thread (agent runs in a visible pane) has its pane **resolved at runtime, never stored**. At spawn, the pane is stamped with a marker — a tmux **pane user-option `@sesh-thread-id`** (invisible, survives pane moves/resizes, queryable in one `tmux list-panes -F` pass). Resolution = look up the pane bearing the thread's id. This same marker lets `sesh tmux current` answer "which thread am I in."
 - A **headless** thread (persistent child agent, no window) also lives in a session, just unattached.
 - The thread carries an **`agent_kind`**: `claude | codex | pi`.
-- A **runtime-state** enum, resolved by polling (never stored as truth): `working | waiting | dead | detached`. This is the same signal the TUI needs for status glyphs, and it is what makes the derived ticket states work (§4).
+- **Runtime state is two *orthogonal* axes**, resolved by polling (never stored as truth) — *revised in Phase 3b after finding the original single enum conflated independent signals*:
+  - **`activity` = `working | waiting | dead`.** `dead` = no live agent process under the thread's marked pane (process/pane liveness). `working`/`waiting` come from a **pane content-diff probe**: sample the pane's visible bytes across a short window; a pane that changes is mid-turn (`working`), a byte-stable pane is idle (`waiting`). This is **agent-agnostic** and observable. It is reliable because all three agent TUIs animate a live timer/spinner while a turn runs, so the pane is never byte-stable while working — even during a silent tool-run. (The earlier transcript-marker idea fails here: pi batch-writes its JSONL only at turn *end*, so a headed TUI turn is never observably "busy" that way. A per-agent transcript path is kept noted only as a *future fallback* for any agent later found to have genuinely non-animating silent turns.)
+  - **`attachment` = `attached | detached`**, from `tmux list-clients`: is anyone currently viewing the session.
+  - The axes are **independent**: a `detached` agent can still be `working`, and an idle agent still needs input whether or not it is being watched. Crucially, **ticket `needs-input` (§4) derives from `activity == waiting` *regardless of attachment*** — a not-currently-viewed idle agent still needs input; you just are not looking at it.
+  - This is the same signal the TUI needs for status glyphs. The `working/waiting` distinction is the v1 codex-detection failure region; its test asserts both directions of the real transition (and that `working` is detected while `detached`).
 - At spawn, **`SESH_THREAD_ID` is injected into the pane environment** so an agent can identify itself (`sesh ticket list --thread $SESH_THREAD_ID`).
 
 ### Stored schema (persistent)
@@ -110,7 +114,7 @@ start (headed/headless), kill, send a message (headful: into the live pane; head
   - `ready` — prompt final; deployable; unattached.
   - `active` — attached to a thread.
   - `done` — terminal (the agent may set this).
-- **`needs-input` is not a stored state — it is a derived view:** `status == active AND thread.runtime_state == waiting`. (A `dead` thread on an undone ticket is "needs-restart", not "needs-input" — that's why the runtime enum distinguishes `waiting` from `dead`.)
+- **`needs-input` is not a stored state — it is a derived view:** `status == active AND thread.activity == waiting` (the `activity` axis of §3, **regardless of `attachment`** — a detached idle agent still needs input). (A `dead` thread on an undone ticket is "needs-restart", not "needs-input" — that's why the `activity` axis distinguishes `waiting` from `dead`.)
 
 ### Responsibilities split
 

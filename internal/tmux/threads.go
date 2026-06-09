@@ -76,11 +76,49 @@ func (s *Server) SessionFirstPane(session string) (string, error) {
 	return fields[0], nil
 }
 
-// SessionAttached reports whether a client is attached to the session.
-func (s *Server) SessionAttached(session string) (bool, error) {
-	out, err := s.run("display-message", "-p", "-t", "="+session, "-F", "#{session_attached}")
+// CapturePane returns the visible text of a pane (capture-pane -p). Used by the
+// content-diff activity probe: a pane whose bytes change over a short window is
+// mid-turn (working); a byte-stable pane is idle (waiting).
+func (s *Server) CapturePane(pane string) (string, error) {
+	return s.run("capture-pane", "-t", pane, "-p")
+}
+
+// ClientCount returns how many tmux clients are attached to a session — the
+// attached/detached signal. Uses list-clients (the canonical source) rather than
+// session_attached.
+func (s *Server) ClientCount(session string) (int, error) {
+	out, err := s.run("list-clients", "-t", "="+session, "-F", "#{client_name}")
 	if err != nil {
+		// list-clients errors if the session is gone; that is zero clients.
+		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "can't find") {
+			return 0, nil
+		}
+		return 0, err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return 0, nil
+	}
+	return len(strings.Split(out, "\n")), nil
+}
+
+// SessionAttached reports whether a client is attached to the session. It uses
+// list-sessions and matches the name exactly in Go: display-message -t with the
+// "=" exact-match prefix silently returns empty (the prefix is not honored
+// there), which would mask a real attachment as detached.
+func (s *Server) SessionAttached(session string) (bool, error) {
+	out, err := s.run("list-sessions", "-F", "#{session_name}\t#{session_attached}")
+	if err != nil {
+		if strings.Contains(err.Error(), "no server running") {
+			return false, nil
+		}
 		return false, err
 	}
-	return strings.TrimSpace(out) == "1", nil
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		name, attached, ok := strings.Cut(line, "\t")
+		if ok && name == session {
+			return strings.TrimSpace(attached) == "1", nil
+		}
+	}
+	return false, nil // session not found => nothing attached
 }

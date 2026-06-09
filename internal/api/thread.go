@@ -14,14 +14,31 @@ type Thread struct {
 	CreatedAtUnix int64    `json:"created_at_unix"`
 }
 
-// RuntimeState is the live, polled (never stored) thread state.
-type RuntimeState string
+// The live runtime state of a thread is two ORTHOGONAL axes, each from a
+// distinct signal (per the Phase 3b design decision; see _dev/SPEC.md §3):
+//
+//   - Activity   from pane content-diff (working/waiting) + pane liveness (dead)
+//   - Attachment from `tmux list-clients`
+//
+// They are orthogonal because a detached agent can still be working, and a
+// not-currently-viewed idle agent still needs input. ticket needs-input is
+// derived from Activity == waiting REGARDLESS of attachment.
+
+// Activity is whether the agent is mid-turn, idle, or gone.
+type Activity string
 
 const (
-	StateWorking  RuntimeState = "working"  // agent attached and mid-turn
-	StateWaiting  RuntimeState = "waiting"  // agent live and idle (awaiting input)
-	StateDetached RuntimeState = "detached" // live pane exists but no client attached
-	StateDead     RuntimeState = "dead"     // no live pane bears the thread's marker
+	ActivityWorking Activity = "working" // the pane is actively changing (mid-turn)
+	ActivityWaiting Activity = "waiting" // the pane is byte-stable (idle, awaiting input)
+	ActivityDead    Activity = "dead"    // no live agent process under a marked pane
+)
+
+// Attachment is whether any tmux client is attached to the thread's session.
+type Attachment string
+
+const (
+	Attached Attachment = "attached"
+	Detached Attachment = "detached"
 )
 
 // NewThreadRequest is the body of POST /v1/threads.
@@ -60,12 +77,18 @@ type ResolvePaneResponse struct {
 	Pane   PaneLocator `json:"pane,omitempty"`
 }
 
-// ThreadStatusResponse is the live runtime status of a thread.
+// ThreadStatusResponse is the live runtime status of a thread: the two
+// orthogonal axes plus the raw signals they derive from.
 type ThreadStatusResponse struct {
-	Schema       int          `json:"schema"`
-	ID           string       `json:"id"`
-	State        RuntimeState `json:"state"`
-	Attached     bool         `json:"attached"`
-	AgentRunning bool         `json:"agent_running"`
-	Pane         string       `json:"pane,omitempty"`
+	Schema       int        `json:"schema"`
+	ID           string     `json:"id"`
+	Activity     Activity   `json:"activity"`
+	Attachment   Attachment `json:"attachment"`
+	AgentRunning bool       `json:"agent_running"`
+	Clients      int        `json:"clients"`
+	Pane         string     `json:"pane,omitempty"`
 }
+
+// NeedsInput is the derived "the human is blocking the agent" view: the agent is
+// idle (waiting) regardless of whether anyone is currently attached.
+func (s ThreadStatusResponse) NeedsInput() bool { return s.Activity == ActivityWaiting }

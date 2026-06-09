@@ -143,6 +143,45 @@ func (sb *Sandbox) newThread(t *testing.T, agent, name, cwd string) api.Thread {
 	return th
 }
 
+// threadStatus fetches a thread's live runtime status via sesh.
+func (sb *Sandbox) threadStatus(t *testing.T, id string) api.ThreadStatusResponse {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "status", "--id", id, "--json")
+	if err != nil {
+		t.Fatalf("thread status: %v\n%s", err, stderr)
+	}
+	var st api.ThreadStatusResponse
+	if err := json.Unmarshal([]byte(stdout), &st); err != nil {
+		t.Fatalf("decode thread status: %v\nraw: %s", err, stdout)
+	}
+	return st
+}
+
+// sendKeys types text into a pane and presses Enter, directly via tmux (the
+// "world" action of a user typing — independent of sesh's own send feature).
+func (sb *Sandbox) sendKeys(t *testing.T, pane, text string) {
+	t.Helper()
+	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "-l", text); err != nil {
+		t.Fatalf("send-keys text: %v\n%s", err, out)
+	}
+	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "Enter"); err != nil {
+		t.Fatalf("send-keys enter: %v\n%s", err, out)
+	}
+}
+
+// attachViewer attaches a real tmux client to session (so its attachment axis
+// flips to attached). The viewer is a second session whose command attaches to
+// the target with $TMUX cleared (nested attach). Torn down with the test.
+func (sb *Sandbox) attachViewer(t *testing.T, session string) {
+	t.Helper()
+	viewer := "viewer_" + session
+	cmd := "env -u TMUX tmux -L " + sb.TmuxSocket + " attach -t " + session
+	if out, err := sb.rawTmux(t, "new-session", "-d", "-s", viewer, cmd); err != nil {
+		t.Fatalf("attach viewer: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { sb.rawTmux(t, "kill-session", "-t", "="+viewer) }) //nolint:errcheck
+}
+
 // markedPane returns the (pane id, pane pid) of the pane bearing threadID's
 // @sesh-thread-id marker, read directly from tmux (independent of sesh). ok is
 // false if no such pane exists.

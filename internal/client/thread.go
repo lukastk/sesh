@@ -29,3 +29,9 @@ func (c *Client) ThreadPane(ctx context.Context, id string) (api.ResolvePaneResp
 	var out api.ResolvePaneResponse
 	return out, c.getJSON(ctx, "http://unix/v1/threads/pane?id="+url.QueryEscape(id), &out)
 }
+
+// ThreadStatus fetches GET /v1/threads/status?id= (thread.runtime-state).
+func (c *Client) ThreadStatus(ctx context.Context, id string) (api.ThreadStatusResponse, error) {
+	var out api.ThreadStatusResponse
+	return out, c.getJSON(ctx, "http://unix/v1/threads/status?id="+url.QueryEscape(id), &out)
+}

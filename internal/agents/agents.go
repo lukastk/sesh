@@ -39,6 +39,9 @@ func ParseKind(s string) (Kind, error) {
 // HeadedCommand returns the shell command that launches the agent interactively
 // in a tmux pane. The bare binary opens each agent's TUI; the binary is resolved
 // from PATH on the target machine.
-func HeadedCommand(k Kind) string {
-	return string(k)
-}
+//
+// (Working/waiting is detected agent-agnostically from pane content-diff, so no
+// per-agent transcript wiring is needed at spawn. A transcript fallback is noted
+// in _dev/SPEC.md §3 for any agent later found to have non-animating silent
+// turns.)
+func HeadedCommand(k Kind) string { return string(k) }

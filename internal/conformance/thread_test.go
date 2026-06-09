@@ -25,6 +25,92 @@ func init() {
 			func(t *testing.T) { testThreadResolvePane(t, string(a)) })
 	}
 	matrix.RegisterTest("thread.list", matrix.AgentAgnostic, matrix.Local, testThreadList)
+
+	// thread.runtime-state: green for pi now (its turns are inducible cleanly with
+	// no startup prompt). claude/codex need startup-prompt handling before their
+	// turns can be induced in a test; their cells stay honestly Skip.
+	matrix.RegisterTest("thread.runtime-state", matrix.Pi, matrix.Local, testRuntimeStatePi)
+}
+
+// testRuntimeStatePi exercises the two orthogonal runtime axes for a real pi
+// thread, BOTH directions and their independence:
+//   - activity waiting <-> working, via a real turn (content-diff);
+//   - working is observed while DETACHED, proving activity is independent of
+//     attachment;
+//   - the attachment axis flips when a client attaches;
+//   - activity dead once the session is killed.
+//
+// This is the flagship honesty cell — the region the v1 codex bug lived in — so
+// it asserts the real, observable transitions, never internal state.
+func testRuntimeStatePi(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, "pi", "rt", "/tmp")
+	var pane string
+	if !waitUntil(agentStartTimeout, func() bool {
+		p, _, ok := sb.markedPane(t, th.ID)
+		pane = p
+		return ok && agentRunningUnder(mustPanePID(t, sb, th.ID), "pi")
+	}) {
+		t.Fatalf("pi agent never came up")
+	}
+
+	// Settle to idle: a freshly rendered TUI may animate briefly.
+	if !waitUntil(15*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWaiting }) {
+		t.Fatalf("thread never settled to waiting; got %s", sb.threadStatus(t, th.ID).Activity)
+	}
+	// Idle and nobody attached: waiting + detached, and needs-input is true even
+	// though detached (the orthogonality the design requires).
+	st := sb.threadStatus(t, th.ID)
+	if st.Attachment != api.Detached {
+		t.Errorf("fresh thread attachment = %s, want detached", st.Attachment)
+	}
+	if !st.NeedsInput() {
+		t.Errorf("idle detached thread should report needs-input")
+	}
+
+	// Send a real turn WHILE DETACHED; activity must flip to working (pane
+	// animates with no client attached).
+	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS resolution works")
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+		t.Fatalf("activity never became working after a turn (detached)")
+	}
+	if got := sb.threadStatus(t, th.ID); got.Attachment != api.Detached {
+		t.Errorf("expected still detached while working, got %s", got.Attachment)
+	}
+
+	// Turn completes -> back to waiting (the other direction).
+	if !waitUntil(60*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWaiting }) {
+		t.Fatalf("activity never returned to waiting after the turn")
+	}
+
+	// Attachment axis: attach a client -> attached, activity unaffected (waiting).
+	sb.attachViewer(t, "sesh_rt")
+	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Attachment == api.Attached }) {
+		t.Errorf("attachment never became attached after a client attached")
+	}
+
+	// Kill the session -> activity dead.
+	if out, err := sb.rawTmux(t, "kill-session", "-t", "=sesh_rt"); err != nil {
+		t.Fatalf("kill-session: %v\n%s", err, out)
+	}
+	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityDead }) {
+		t.Errorf("activity never became dead after kill")
+	}
+}
+
+// mustPanePID returns the marked pane's pid, failing if absent.
+func mustPanePID(t *testing.T, sb *Sandbox, threadID string) int {
+	t.Helper()
+	_, pid, ok := sb.markedPane(t, threadID)
+	if !ok {
+		return 0
+	}
+	return pid
 }
 
 // agentStartTimeout is generous: a real agent (esp. node-wrapped codex) takes a

@@ -196,6 +196,19 @@ func (d *Daemon) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d.maint.snapshot())
 }
 
+// stateOf returns the maintained snapshot for one thread, if the maintainer has
+// computed it yet (it ticks every ~300ms; a just-created thread may be absent for
+// one tick, in which case callers fall back to an on-demand resolve).
+func (m *maintainer) stateOf(id string) (api.ThreadSnapshot, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	st, ok := m.st[id]
+	if !ok {
+		return api.ThreadSnapshot{}, false
+	}
+	return st.snap, true
+}
+
 // snapshot returns this machine's current maintained state (an O(1) read).
 func (m *maintainer) snapshot() api.MachineSnapshot {
 	m.mu.RLock()

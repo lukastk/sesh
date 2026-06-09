@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os/exec"
@@ -102,7 +103,22 @@ func (d *Daemon) fanOutGrid(includeArchived bool) ([]api.ThreadRow, []string) {
 	return rows, unreachable
 }
 
+// fetchPeerGrid asks a peer's daemon for its live-status grid over the peer's
+// EXPLICIT transport (http via its TCP API, else a real ssh hop).
 func fetchPeerGrid(p peers.Peer, includeArchived bool) ([]api.ThreadRow, error) {
+	if p.Transport() == "http" {
+		c, err := peerRemoteClient(p)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
+		defer cancel()
+		resp, err := c.ThreadGrid(ctx, includeArchived, false)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Rows, nil
+	}
 	args := []string{
 		"env", "SESH_HOME=" + shQuote(p.Home), "SESH_MACHINE=" + shQuote(p.Machine),
 		shQuote(p.Binary), "thread", "grid", "--json",

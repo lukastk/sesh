@@ -25,7 +25,7 @@ Design in `_dev/MESH.md`. Three decoupled loops:
 - `peers.Peer` has a `Port` field (`peer add --port`) → non-22 machines reachable
   (`SSHArgs()` at every ssh site).
 
-### Hybrid daemon↔daemon transport (Stages 1+2 DONE: mesh SYNC + --machine ROUTING over http)
+### Hybrid daemon↔daemon transport (Stages 1+2+3 DONE: SYNC + ROUTING + live FAN-OUT over http)
 The transport is EXPLICIT per peer (`peers.Peer.Transport()` → "http" if it has an
 `ApiAddr`, else "ssh"), NOT an automatic fallback — an http failure is loud, never a silent
 ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer into http;
@@ -40,9 +40,14 @@ ssh downgrade. `peer add --api-addr <host:port> --api-token[-file]` opts a peer 
   auto-routing (`cmd/sesh/ticket.go`) uses the same path (reloads cfg after the http
   branch; does NOT re-enter the owner check → no loop). **Carve-outs stay ssh** (`httpRoutable`
   returns false): `daemon` lifecycle, `tmux nav`, `tmux stage-file`. Cells `route.parity`(.http).
+- **Stage 3 — live fan-out**: `internal/daemon/{fanout,grid}.go fetchPeerThreads/
+  fetchPeerGrid` branch on `Transport()` (http → `peerRemoteClient(p).ThreadList/ThreadGrid`).
+  So `thread list --all-machines` / `thread grid --all-machines` reach an http peer over
+  its API. An http-only peer is now first-class on EVERY cross-machine path. Cells
+  `thread.list-all`(.http), `thread.grid`(.http).
 - **Parity is matrix-enforced**: every `.http` twin shares the ssh body (`meshTransport`
   param) and registers the peer with a **broken ssh dest** (`http-only.invalid`), so a green
-  http cell PROVES HTTP carried it (a silent ssh fallback would fail). 104 cells total.
+  http cell PROVES HTTP carried it (a silent ssh fallback would fail). 106 cells total.
 
 ### Lifecycle verbs (post-refactor): orthogonal primitives, no `kill`
 `kill` was split into `stop` + `delete` (it was the non-atomic composite `stop && delete`;

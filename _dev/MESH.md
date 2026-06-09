@@ -176,6 +176,13 @@ cells register the peer with a deliberately-**broken ssh destination**, so a gre
 cell PROVES the snapshot was pulled over HTTP, not ssh-by-accident. The grid can only go
 all-green if BOTH transports replicate correctly; neither can silently rot.
 
+**Live fan-out over http — DONE (Stage 3).** The daemon-side live cross-machine queries
+(`GET /v1/threads?all-machines`, `GET /v1/threads/grid?all-machines`, in
+`internal/daemon/{fanout,grid}.go`) also honour the per-peer transport: an http peer is
+fetched via its TCP API (`client.ThreadList`/`ThreadGrid`) instead of ssh-exec. So an
+http-only peer is now first-class on EVERY cross-machine path — sync, routing, AND live
+fan-out. Parity: `thread.list-all`(.http), `thread.grid`(.http).
+
 **Routing (`--machine`) over http — DONE (Stage 2).** The same per-peer transport governs
 `--machine` routing: for an http peer, a client-only command points THIS process at the
 peer's TCP API (`SESH_REMOTE`/`SESH_API_TOKEN` set in `routeMachine`, then local dispatch

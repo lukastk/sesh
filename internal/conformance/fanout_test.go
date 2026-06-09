@@ -2,37 +2,68 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
 func init() {
-	matrix.RegisterTest("thread.list-all", matrix.AgentAgnostic, matrix.Remote, testThreadListAll)
+	for _, tr := range meshTransports {
+		tr := tr
+		matrix.RegisterTest("thread.list-all"+tr.suffix, matrix.AgentAgnostic, matrix.Remote,
+			func(t *testing.T) { testThreadListAll(t, tr) })
+	}
 }
 
-// testThreadListAll asserts the daemon-side mesh fan-out: a local daemon, asked
-// for ?all-machines, aggregates its OWN threads with every reachable PEER's (each
-// stamped with its real owning machine) over a real ssh hop. Both machines'
-// threads must appear, attributed correctly — not just the local ones.
-func testThreadListAll(t *testing.T) {
+// setupFanoutPair starts a local daemon (the one that fans out) and a peer daemon,
+// and registers the peer with `local` over tr's transport. For http the peer's TCP
+// API is exposed and it is registered with --api-addr/--api-token AND a deliberately
+// BROKEN ssh dest, so a green http cell PROVES the live fan-out reached the peer over
+// HTTP (a silent ssh attempt would fail). Returns (local, peer).
+func setupFanoutPair(t *testing.T, tr meshTransport) (local, peer *Sandbox) {
+	t.Helper()
+	ensureSSHLocalhost(t)
+	bin := seshBin(t)
+	local = newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+
+	sshDest := "localhost"
+	var extraAdd []string
+	switch tr.name {
+	case "http":
+		addr := freePort(t)
+		token := fmt.Sprintf("fan-token-%d", time.Now().UnixNano())
+		peer = newSandbox(t, matrix.Local, withAPI(addr, token))
+		extraAdd = []string{"--api-addr", addr, "--api-token", token}
+		sshDest = "http-only.invalid"
+	case "ssh":
+		peer = newSandbox(t, matrix.Local)
+	default:
+		t.Fatalf("unknown transport %q", tr.name)
+	}
+	peer.startDaemon(t)
+
+	add := []string{"peer", "add", "--machine", peer.Machine, "--ssh", sshDest, "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket}
+	add = append(add, extraAdd...)
+	if _, stderr, err := local.Runner.Run(t, add...); err != nil {
+		t.Fatalf("peer add (%s): %v\n%s", tr.name, err, stderr)
+	}
+	return local, peer
+}
+
+// testThreadListAll asserts the daemon-side mesh fan-out: a local daemon, asked for
+// ?all-machines, aggregates its OWN threads with every reachable PEER's (each stamped
+// with its real owning machine) over the peer's transport (ssh or http). Both
+// machines' threads must appear, attributed correctly — not just the local ones.
+func testThreadListAll(t *testing.T, tr meshTransport) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	ensureSSHLocalhost(t)
-
-	local := newSandbox(t, matrix.Local) // the machine that fans out
-	local.startDaemon(t)
-	peer := newSandbox(t, matrix.Local) // a second real machine with its own daemon
-	peer.startDaemon(t)
-
-	// Register the peer with the local daemon's mesh registry.
-	bin := seshBin(t)
-	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
-		t.Fatalf("peer add: %v\n%s", err, stderr)
-	}
+	local, peer := setupFanoutPair(t, tr)
 
 	// One thread on each machine (cheap headless records).
 	here := local.newHeadlessThread(t, "pi", "onlocal")

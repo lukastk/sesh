@@ -90,13 +90,23 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.list-all",
-		Description: "daemon-side mesh fan-out: GET /v1/threads?all-machines aggregates this machine + every peer",
+		Description: "daemon-side mesh fan-out (ssh transport): GET /v1/threads?all-machines aggregates this machine + every peer",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "thread.list-all.http",
+		Description: "thread.list-all's SSH↔HTTP twin: the live fan-out reaches the peer over its TCP API (http transport) instead of ssh-exec",
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
 		ID:          "thread.grid",
-		Description: "live status grid: every thread with its real activity/attachment, concurrently; mesh fan-out for remote (the TUI's data source)",
+		Description: "live status grid: every thread with its real activity/attachment, concurrently; remote = mesh fan-out over ssh (the TUI's data source)",
 		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.grid.http",
+		Description: "thread.grid's SSH↔HTTP twin (remote only): the live fan-out grid reaches the peer over its TCP API (http transport)",
+		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
 		ID:          "thread.snapshot",

@@ -28,6 +28,8 @@ var skipReasons = map[string]string{
 	"thread.send.headful":       "send into live pane (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",
 	"thread.send.headless":      "send as a turn (stateless-per-turn)",
 	"thread.list":               "mesh-replicated cross-machine list",
+	"thread.list-all.http":      "live fan-out (thread list --all-machines) over the peer's TCP API — SSH↔HTTP parity twin",
+	"thread.grid.http":          "live fan-out grid over the peer's TCP API — SSH↔HTTP parity twin",
 	"thread.resolve-pane":       "resolve pane via @sesh-thread-id marker",
 	"thread.runtime-state":      "activity+attachment axes (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",
 	"thread.rename":             "rename a thread record",

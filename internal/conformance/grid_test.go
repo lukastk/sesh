@@ -11,63 +11,59 @@ import (
 )
 
 func init() {
-	for _, loc := range matrix.AllLocalities {
-		loc := loc
-		matrix.RegisterTest("thread.grid", matrix.AgentAgnostic, loc,
-			func(t *testing.T) { testThreadGrid(t, loc) })
+	// Local grid (no fan-out).
+	matrix.RegisterTest("thread.grid", matrix.AgentAgnostic, matrix.Local, testThreadGridLocal)
+	// Remote grid (mesh fan-out) over BOTH transports — thread.grid (ssh) and
+	// thread.grid.http run the same body, enforcing SSH↔HTTP fan-out parity.
+	for _, tr := range meshTransports {
+		tr := tr
+		matrix.RegisterTest("thread.grid"+tr.suffix, matrix.AgentAgnostic, matrix.Remote,
+			func(t *testing.T) { testThreadGridRemote(t, tr) })
 	}
 }
 
-// testThreadGrid asserts the live-status grid reflects REAL thread state — the
-// data the TUI renders. Local: a thread's row tracks waiting -> working across a
-// real turn. Remote: the mesh fan-out includes a PEER's thread, with its real
-// status and owning machine.
-func testThreadGrid(t *testing.T, loc matrix.Locality) {
+// testThreadGridLocal asserts the local live-status grid reflects REAL thread state:
+// a thread's row tracks waiting -> working across a real turn (the data the TUI renders).
+func testThreadGridLocal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newThread(t, "pi", "g", "/tmp")
+	pane := sb.waitThreadReady(t, th.ID, "pi")
 
-	switch loc {
-	case matrix.Local:
-		sb := newSandbox(t, matrix.Local)
-		sb.startDaemon(t)
-		th := sb.newThread(t, "pi", "g", "/tmp")
-		pane := sb.waitThreadReady(t, th.ID, "pi")
+	// Idle -> the row says waiting.
+	if got := gridRow(t, sb, false, th.ID).Activity; got != api.ActivityWaiting {
+		t.Errorf("idle thread grid activity = %s, want waiting", got)
+	}
+	// Real turn -> the row flips to working (the grid tracks reality).
+	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS works")
+	if !waitUntil(30*time.Second, func() bool { return gridRow(t, sb, false, th.ID).Activity == api.ActivityWorking }) {
+		t.Errorf("grid row never became working during a real turn")
+	}
+}
 
-		// Idle -> the row says waiting.
-		if got := gridRow(t, sb, false, th.ID).Activity; got != api.ActivityWaiting {
-			t.Errorf("idle thread grid activity = %s, want waiting", got)
-		}
-		// Real turn -> the row flips to working (the grid tracks reality).
-		sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS works")
-		if !waitUntil(30*time.Second, func() bool { return gridRow(t, sb, false, th.ID).Activity == api.ActivityWorking }) {
-			t.Errorf("grid row never became working during a real turn")
-		}
-
-	case matrix.Remote:
-		ensureSSHLocalhost(t)
-		local := newSandbox(t, matrix.Local)
-		local.startDaemon(t)
-		peer := newSandbox(t, matrix.Local)
-		peer.startDaemon(t)
-		bin := seshBin(t)
-		if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
-			t.Fatalf("peer add: %v\n%s", err, stderr)
-		}
-		// A thread on the PEER, settled to waiting.
-		th := peer.newThread(t, "pi", "g", "/tmp")
-		peer.waitThreadReady(t, th.ID, "pi")
-		// The local daemon's fan-out grid includes it, with its real status + machine.
-		row := gridRow(t, local, true, th.ID)
-		if row.ID == "" {
-			t.Fatalf("fan-out grid missing the peer's thread")
-		}
-		if row.Machine != peer.Machine {
-			t.Errorf("peer row machine = %q, want %q", row.Machine, peer.Machine)
-		}
-		if row.Activity != api.ActivityWaiting {
-			t.Errorf("peer row activity = %s, want waiting", row.Activity)
-		}
+// testThreadGridRemote asserts the mesh fan-out grid includes a PEER's thread with
+// its real status and owning machine, fetched over the peer's transport (ssh or http).
+func testThreadGridRemote(t *testing.T, tr meshTransport) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	local, peer := setupFanoutPair(t, tr)
+	// A thread on the PEER, settled to waiting.
+	th := peer.newThread(t, "pi", "g", "/tmp")
+	peer.waitThreadReady(t, th.ID, "pi")
+	// The local daemon's fan-out grid includes it, with its real status + machine.
+	row := gridRow(t, local, true, th.ID)
+	if row.ID == "" {
+		t.Fatalf("fan-out grid missing the peer's thread over %s", tr.name)
+	}
+	if row.Machine != peer.Machine {
+		t.Errorf("peer row machine = %q, want %q", row.Machine, peer.Machine)
+	}
+	if row.Activity != api.ActivityWaiting {
+		t.Errorf("peer row activity = %s, want waiting", row.Activity)
 	}
 }
 

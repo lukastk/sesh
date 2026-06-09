@@ -68,7 +68,7 @@ func tmuxCleanEnv() []string {
 func masterUp(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	machinesFlag := fs.String("machines", "", "comma-separated machines (default: self + all peers; 'self' allowed)")
-	tmuxConf := fs.String("tmux-conf", "", "tmux config file to apply to the master server (myrig's look/keybindings)")
+	tmuxConf := fs.String("tmux-conf", "", "tmux config file for the master server, loaded via -f INSTEAD of ~/.tmux.conf (myrig's self-contained look/keybindings)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -88,10 +88,20 @@ func masterUp(cfg config.Config, args []string) error {
 		return err
 	}
 
+	// Start the master server with `-f` so it does NOT inherit the user's base
+	// ~/.tmux.conf — base's app-specific settings (e.g. `status 2`) would otherwise
+	// leak in as stray status lines. The look is entirely the (myrig-owned, self-
+	// contained) --tmux-conf's job; with none, /dev/null gives a clean bare master.
+	// `-f` only takes effect on the FIRST command (which starts the server).
+	conf := "/dev/null"
+	if *tmuxConf != "" {
+		conf = *tmuxConf
+	}
+
 	for i, m := range machines {
 		winCmd := fmt.Sprintf("%s master window %s", shellQuote(self), shellQuote(m))
 		if i == 0 {
-			if out, err := mtmux(cfg, "new-session", "-d", "-s", masterSession, "-n", m, winCmd); err != nil {
+			if out, err := mtmux(cfg, "-f", conf, "new-session", "-d", "-s", masterSession, "-n", m, winCmd); err != nil {
 				return fmt.Errorf("master up: new-session: %v: %s", err, out)
 			}
 			// Lock window names so nav's select-window-by-name stays valid.
@@ -101,11 +111,6 @@ func masterUp(cfg config.Config, args []string) error {
 			if out, err := mtmux(cfg, "new-window", "-t", masterSession+":", "-n", m, winCmd); err != nil {
 				return fmt.Errorf("master up: new-window %s: %v: %s", m, err, out)
 			}
-		}
-	}
-	if *tmuxConf != "" {
-		if out, err := mtmux(cfg, "source-file", *tmuxConf); err != nil {
-			return fmt.Errorf("master up: source-file %s: %v: %s", *tmuxConf, err, out)
 		}
 	}
 	fmt.Printf("master up on %q: %s\n", cfg.MasterSocket, strings.Join(machines, ", "))

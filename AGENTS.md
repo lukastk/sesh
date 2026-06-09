@@ -49,3 +49,28 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
 2. Build the feature registry + matrix harness *first* (it is the spine — see `_dev/PLAN.md` Phase 0), so every subsequent feature lands as a visible burndown from yellow to green.
 3. Implement features per the PLAN's sequencing. Each feature: register it → write its matrix tests (they start as `Skip`/red) → implement until green honestly.
 4. Keep the rendered matrix current; when you stop, report the grid state (greens / reds / skips) truthfully in your summary.
+
+---
+
+## Test environment notes
+
+- **Lukas runs the LIVE old sesh on these machines.** The conformance suite MUST never
+  touch it: every test isolates `SESH_HOME`, `SESH_TMUX_SOCKET`, `SESH_MASTER_SOCKET`,
+  and `SESH_CODEX_HOME`, and strips any inherited `SESH_*` from the test process env
+  (`sandboxEnv` in the harness). Never leave a socket/home at its default in a test.
+
+- **Real cross-host test (`TestRealCrossHost`)** validates genuine multi-machine spawn
+  over a real network ssh hop (the one thing the `ssh localhost` matrix cells cannot
+  stand in for). Pairing: `mymain ↔ macbook` (from `$MYRIG_MACHINES`). It self-gates and
+  **skips with a warning** when it can't run. **Prerequisite (manual, by design — the
+  test does NOT ship the binary):**
+  1. Install the v2 binary on BOTH paired machines at `~/.local/bin/sesh-v2`, built for
+     that machine's GOOS/GOARCH (e.g. from mymain: `GOOS=darwin GOARCH=arm64 go build -o
+     /tmp/sesh-v2 ./cmd/sesh && scp /tmp/sesh-v2 lukas@macbook:.local/bin/sesh-v2`).
+     **Re-install after any wire/API-schema change** — the local side uses the freshly
+     built binary and the partner uses its installed one; they must be compatible.
+  2. `$MYRIG_MACHINES` is a zsh assoc array (NOT exported), so run the test with it
+     exported: `MYRIG_MACHINES="$MYRIG_MACHINES" go test ./internal/conformance -run
+     TestRealCrossHost -v`. (Self-detection uses `$MYRIG_TARGETS`, which IS exported.)
+  Currently only ports = 22 are supported (macbook/mymain are 22); a non-22 partner skips
+  until `peers.Peer` grows a port field.

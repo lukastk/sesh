@@ -1,0 +1,216 @@
+package conformance
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/lukastk/sesh/internal/api"
+)
+
+// TestRealCrossHost is the one thing the ssh-localhost matrix cells cannot stand
+// in for: a GENUINELY separate physical host. It runs the agent-spawn path against
+// the partner machine over a real network ssh hop — from mymain it targets macbook
+// and vice versa (the pairing in $MYRIG_MACHINES). It is environment-gated and
+// SKIPS WITH A WARNING when it can't run (not on mymain/macbook, $MYRIG_MACHINES
+// unset, partner unreachable, or v2 sesh not installed on the partner).
+//
+// PREREQUISITE (manual, not automated — see AGENTS.md): the v2 sesh binary must be
+// installed on the partner at ~/.local/bin/sesh-v2 (built for the partner's
+// GOOS/GOARCH). The test never ships the binary; it assumes it is present.
+//
+// Isolation: it runs an isolated daemon on the partner (own SESH_HOME, tmux socket,
+// master socket, CODEX_HOME) under /tmp, and tears it all down — it never touches
+// the partner's live old sesh.
+func TestRealCrossHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	// Self-detection uses $MYRIG_TARGETS, which IS exported (unlike the
+	// $MYRIG_MACHINES zsh assoc array): this machine's name is its own active target.
+	self := crossHostSelf()
+	if self == "" {
+		t.Skip("NOT RUN: cross-host test runs on mymain/macbook only (neither is an active myrig target here)")
+	}
+	partnerName := crossHostPartner[self]
+
+	// The partner's ssh dest comes from $MYRIG_MACHINES, which is a zsh assoc array
+	// and NOT exported by default — run with it exported (see AGENTS.md).
+	machines := myrigMachines()
+	if len(machines) == 0 {
+		t.Skipf("NOT RUN: $MYRIG_MACHINES not visible to the test (it's a zsh assoc array, not exported). Run:\n" +
+			"  MYRIG_MACHINES=\"$MYRIG_MACHINES\" go test ./internal/conformance -run TestRealCrossHost -v")
+	}
+	partner, found := machineByName(machines, partnerName)
+	if !found {
+		t.Skipf("WARNING NOT RUN: partner %q not in $MYRIG_MACHINES", partnerName)
+	}
+	if partner.port != "22" {
+		t.Skipf("WARNING NOT RUN: partner %q uses ssh port %s; --machine routing supports the default port only (add a Port field to peers.Peer to fix)", partnerName, partner.port)
+	}
+
+	bin := seshBin(t)
+
+	// Preflight: reachable, v2 sesh present, and discover the partner's $HOME.
+	rhomeBase, rbin, err := crossHostPreflight(partner.dest)
+	if err != nil {
+		t.Skipf("WARNING NOT RUN: partner %q unusable for cross-host test: %v\n  (install v2 sesh at ~/.local/bin/sesh-v2 on %s — see AGENTS.md)", partnerName, err, partnerName)
+	}
+
+	stamp := time.Now().UnixNano()
+	rhome := fmt.Sprintf("%s/sesh-xhost-%d", rhomeBase, stamp)
+	rcodex := fmt.Sprintf("%s/sesh-xhost-codex-%d", rhomeBase, stamp)
+	rsock := fmt.Sprintf("sesh-xhost-%d", stamp)
+	rmaster := fmt.Sprintf("sesh-xhost-master-%d", stamp)
+	remoteEnv := strings.Join([]string{
+		"env",
+		"SESH_HOME=" + rhome,
+		"SESH_MACHINE=" + partnerName,
+		"SESH_TMUX_SOCKET=" + rsock,
+		"SESH_MASTER_SOCKET=" + rmaster,
+		"SESH_CODEX_HOME=" + rcodex,
+		rbin,
+	}, " ")
+
+	// Start an isolated daemon on the partner (codex auth symlinked so codex stays
+	// authenticated while its trust writes stay sandboxed).
+	setup := fmt.Sprintf("mkdir -p %s && ln -sf $HOME/.codex/auth.json %s/auth.json; %s daemon start", rcodex, rcodex, remoteEnv)
+	if out, err := crossHostSSH(partner.dest, setup); err != nil {
+		t.Fatalf("start remote daemon on %s: %v\n%s", partnerName, err, out)
+	}
+	t.Cleanup(func() {
+		crossHostSSH(partner.dest, fmt.Sprintf("%s daemon stop >/dev/null 2>&1; tmux -L %s kill-server 2>/dev/null; rm -rf %s %s", remoteEnv, rsock, rhome, rcodex)) //nolint:errcheck
+	})
+
+	// Local client: its own isolated home (holds peers.json); identity = self.
+	clientHome := t.TempDir()
+	clientEnv := map[string]string{"SESH_HOME": clientHome, "SESH_MACHINE": self}
+	runLocal := func(args ...string) (string, string, error) {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = sandboxEnv(clientEnv)
+		return runCmd(cmd)
+	}
+
+	if _, stderr, err := runLocal("peer", "add", "--machine", partnerName, "--ssh", partner.dest, "--home", rhome, "--binary", rbin, "--tmux-socket", rsock); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+
+	routedActivity := func(id string) api.Activity {
+		stdout, _, err := runLocal("thread", "status", "--id", id, "--machine", partnerName, "--json")
+		if err != nil {
+			return "ERR"
+		}
+		var st api.ThreadStatusResponse
+		if json.Unmarshal([]byte(strings.TrimSpace(stdout)), &st) != nil {
+			return "ERR"
+		}
+		return st.Activity
+	}
+
+	// For each agent: spawn on the partner, prove it's genuinely alive THERE (a
+	// routed status that resolves a live pane can only come from the partner's
+	// daemon — there is no local daemon in this test), then stop + delete.
+	for _, agent := range []string{"claude", "codex", "pi"} {
+		agent := agent
+		t.Run(agent, func(t *testing.T) {
+			name := "xh-" + agent
+			stdout, stderr, err := runLocal("thread", "new", "--machine", partnerName, "--agent", agent, "--name", name, "--cwd", "/tmp")
+			if err != nil {
+				t.Fatalf("remote spawn %s: %v\n%s", agent, err, stderr)
+			}
+			id := strings.TrimSpace(stdout)
+			t.Cleanup(func() {
+				runLocal("thread", "stop", "--id", id, "--machine", partnerName)   //nolint:errcheck
+				runLocal("thread", "delete", "--id", id, "--machine", partnerName) //nolint:errcheck
+			})
+
+			// Alive ON the partner.
+			if !waitUntil(45*time.Second, func() bool { return routedActivity(id) == api.ActivityWaiting }) {
+				t.Fatalf("%s thread never became alive on %s (activity=%s)", agent, partnerName, routedActivity(id))
+			}
+
+			// Stop ends the runtime on the partner; the routed status flips to dead.
+			if _, stderr, err := runLocal("thread", "stop", "--id", id, "--machine", partnerName); err != nil {
+				t.Fatalf("remote stop: %v\n%s", err, stderr)
+			}
+			if !waitUntil(15*time.Second, func() bool { return routedActivity(id) == api.ActivityDead }) {
+				t.Errorf("%s thread still alive on %s after stop", agent, partnerName)
+			}
+		})
+	}
+}
+
+// crossHostPartner is the fixed pairing: each machine's cross-host target.
+var crossHostPartner = map[string]string{"mymain": "macbook", "macbook": "mymain"}
+
+type myrigMachineSpec struct {
+	name string // the machine name (host part of user@host:port)
+	dest string // ssh destination user@host
+	port string
+}
+
+// myrigMachines parses $MYRIG_MACHINES ("user@host:port user@host:port ...").
+func myrigMachines() []myrigMachineSpec {
+	var out []myrigMachineSpec
+	for _, tok := range strings.Fields(os.Getenv("MYRIG_MACHINES")) {
+		userHost, port, _ := strings.Cut(tok, ":")
+		_, host, ok := strings.Cut(userHost, "@")
+		if !ok || host == "" {
+			continue
+		}
+		if port == "" {
+			port = "22"
+		}
+		out = append(out, myrigMachineSpec{name: host, dest: userHost, port: port})
+	}
+	return out
+}
+
+// crossHostSelf returns this machine's name if it is one of the cross-host pair,
+// detected via myrig's "the local machine's name is its own active target"
+// convention ($MYRIG_TARGETS — which is exported, unlike $MYRIG_MACHINES).
+func crossHostSelf() string {
+	targets := map[string]bool{}
+	for _, t := range strings.Split(os.Getenv("MYRIG_TARGETS"), ",") {
+		targets[strings.TrimSpace(t)] = true
+	}
+	for name := range crossHostPartner {
+		if targets[name] {
+			return name
+		}
+	}
+	return ""
+}
+
+func machineByName(machines []myrigMachineSpec, name string) (myrigMachineSpec, bool) {
+	for _, m := range machines {
+		if m.name == name {
+			return m, true
+		}
+	}
+	return myrigMachineSpec{}, false
+}
+
+// crossHostPreflight checks the partner is reachable and has v2 sesh, returning
+// (partner $HOME, absolute sesh-v2 path).
+func crossHostPreflight(dest string) (home, bin string, err error) {
+	out, err := crossHostSSH(dest, `printf '%s\n' "$HOME"; test -x "$HOME/.local/bin/sesh-v2" && echo HAVE_V2 || echo NO_V2`)
+	if err != nil {
+		return "", "", fmt.Errorf("ssh failed: %v (%s)", err, strings.TrimSpace(out))
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 || lines[len(lines)-1] != "HAVE_V2" {
+		return "", "", fmt.Errorf("sesh-v2 not found at ~/.local/bin/sesh-v2")
+	}
+	home = strings.TrimSpace(lines[0])
+	return home, home + "/.local/bin/sesh-v2", nil
+}
+
+func crossHostSSH(dest, remoteCmd string) (string, error) {
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no", dest, remoteCmd).CombinedOutput()
+	return string(out), err
+}

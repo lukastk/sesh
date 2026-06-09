@@ -49,14 +49,11 @@ func TestRealCrossHost(t *testing.T) {
 	if !found {
 		t.Skipf("WARNING NOT RUN: partner %q not in $MYRIG_MACHINES", partnerName)
 	}
-	if partner.port != "22" {
-		t.Skipf("WARNING NOT RUN: partner %q uses ssh port %s; --machine routing supports the default port only (add a Port field to peers.Peer to fix)", partnerName, partner.port)
-	}
 
 	bin := seshBin(t)
 
 	// Preflight: reachable, v2 sesh present, and discover the partner's $HOME.
-	rhomeBase, rbin, err := crossHostPreflight(partner.dest)
+	rhomeBase, rbin, err := crossHostPreflight(partner.dest, partner.port)
 	if err != nil {
 		t.Skipf("WARNING NOT RUN: partner %q unusable for cross-host test: %v\n  (install v2 sesh at ~/.local/bin/sesh-v2 on %s — see AGENTS.md)", partnerName, err, partnerName)
 	}
@@ -79,11 +76,11 @@ func TestRealCrossHost(t *testing.T) {
 	// Start an isolated daemon on the partner (codex auth symlinked so codex stays
 	// authenticated while its trust writes stay sandboxed).
 	setup := fmt.Sprintf("mkdir -p %s && ln -sf $HOME/.codex/auth.json %s/auth.json; %s daemon start", rcodex, rcodex, remoteEnv)
-	if out, err := crossHostSSH(partner.dest, setup); err != nil {
+	if out, err := crossHostSSH(partner.dest, partner.port, setup); err != nil {
 		t.Fatalf("start remote daemon on %s: %v\n%s", partnerName, err, out)
 	}
 	t.Cleanup(func() {
-		crossHostSSH(partner.dest, fmt.Sprintf("%s daemon stop >/dev/null 2>&1; tmux -L %s kill-server 2>/dev/null; rm -rf %s %s", remoteEnv, rsock, rhome, rcodex)) //nolint:errcheck
+		crossHostSSH(partner.dest, partner.port, fmt.Sprintf("%s daemon stop >/dev/null 2>&1; tmux -L %s kill-server 2>/dev/null; rm -rf %s %s", remoteEnv, rsock, rhome, rcodex)) //nolint:errcheck
 	})
 
 	// Local client: its own isolated home (holds peers.json); identity = self.
@@ -95,7 +92,7 @@ func TestRealCrossHost(t *testing.T) {
 		return runCmd(cmd)
 	}
 
-	if _, stderr, err := runLocal("peer", "add", "--machine", partnerName, "--ssh", partner.dest, "--home", rhome, "--binary", rbin, "--tmux-socket", rsock); err != nil {
+	if _, stderr, err := runLocal("peer", "add", "--machine", partnerName, "--ssh", partner.dest, "--port", partner.port, "--home", rhome, "--binary", rbin, "--tmux-socket", rsock); err != nil {
 		t.Fatalf("peer add: %v\n%s", err, stderr)
 	}
 
@@ -197,8 +194,8 @@ func machineByName(machines []myrigMachineSpec, name string) (myrigMachineSpec, 
 
 // crossHostPreflight checks the partner is reachable and has v2 sesh, returning
 // (partner $HOME, absolute sesh-v2 path).
-func crossHostPreflight(dest string) (home, bin string, err error) {
-	out, err := crossHostSSH(dest, `printf '%s\n' "$HOME"; test -x "$HOME/.local/bin/sesh-v2" && echo HAVE_V2 || echo NO_V2`)
+func crossHostPreflight(dest, port string) (home, bin string, err error) {
+	out, err := crossHostSSH(dest, port, `printf '%s\n' "$HOME"; test -x "$HOME/.local/bin/sesh-v2" && echo HAVE_V2 || echo NO_V2`)
 	if err != nil {
 		return "", "", fmt.Errorf("ssh failed: %v (%s)", err, strings.TrimSpace(out))
 	}
@@ -210,7 +207,12 @@ func crossHostPreflight(dest string) (home, bin string, err error) {
 	return home, home + "/.local/bin/sesh-v2", nil
 }
 
-func crossHostSSH(dest, remoteCmd string) (string, error) {
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no", dest, remoteCmd).CombinedOutput()
+func crossHostSSH(dest, port, remoteCmd string) (string, error) {
+	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"}
+	if port != "" && port != "22" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, dest, remoteCmd)
+	out, err := exec.Command("ssh", args...).CombinedOutput()
 	return string(out), err
 }

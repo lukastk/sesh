@@ -89,7 +89,9 @@ func tmuxNav(cfg config.Config, args []string) error {
 		return fmt.Errorf("nav: peer %q has no tmux socket registered (see `sesh peer add --tmux-socket`)", machine)
 	}
 	script := tmux.InnerSwitchScript(peer.TmuxSocket, session)
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", peer.SSH, script).CombinedOutput()
+	navArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	navArgs = append(navArgs, peer.SSH, script)
+	out, err := exec.Command("ssh", navArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("nav inner switch on %s: %v: %s", machine, err, out)
 	}

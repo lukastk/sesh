@@ -110,8 +110,9 @@ func fetchPeerGrid(p peers.Peer, includeArchived bool) ([]api.ThreadRow, error) 
 	if includeArchived {
 		args = append(args, "--archived")
 	}
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", p.SSH, strings.Join(args, " "))
-	out, err := cmd.Output()
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
+	out, err := exec.Command("ssh", sshArgs...).Output()
 	if err != nil {
 		return nil, err
 	}

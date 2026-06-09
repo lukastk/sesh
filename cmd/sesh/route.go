@@ -30,7 +30,9 @@ func stageFileRemote(cfg config.Config, machine, name string, content []byte) er
 		shellQuote(peer.Binary),
 		"tmux", "stage-file", "--to", shellQuote(peer.Machine), "--stdin", "--name", shellQuote(name),
 	}, " ")
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", peer.SSH, remote)
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	sshArgs = append(sshArgs, peer.SSH, remote)
+	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdin = bytes.NewReader(content)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
@@ -104,12 +106,8 @@ func routeToMachine(cfg config.Config, machine string, rest []string) error {
 	for _, a := range rest {
 		remote = append(remote, shellQuote(a))
 	}
-	sshArgs := []string{
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=no",
-		peer.SSH,
-		strings.Join(remote, " "),
-	}
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	sshArgs = append(sshArgs, peer.SSH, strings.Join(remote, " "))
 	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

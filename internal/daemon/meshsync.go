@@ -134,7 +134,8 @@ func (s *meshSync) fetchPeerSnapshot(p peers.Peer) ([]api.ThreadSnapshot, error)
 		"thread", "snapshot", "--json",
 	}, " ")
 
-	args := append(sshMultiplexArgs(), p.SSH, remote)
+	args := append(sshMultiplexArgs(), p.SSHArgs()...)
+	args = append(args, p.SSH, remote)
 	out, err := exec.CommandContext(ctx, "ssh", args...).Output()
 	if err != nil {
 		return nil, err

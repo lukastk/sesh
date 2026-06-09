@@ -16,9 +16,20 @@ import (
 type Peer struct {
 	Machine    string `json:"machine"`               // the remote machine's identity (SESH_MACHINE)
 	SSH        string `json:"ssh"`                   // ssh destination, e.g. user@host or localhost
+	Port       string `json:"port,omitempty"`        // ssh port (empty = default 22)
 	Home       string `json:"home"`                  // the remote SESH_HOME (locates its daemon socket)
 	Binary     string `json:"binary"`                // path to the sesh binary on the remote machine
 	TmuxSocket string `json:"tmux_socket,omitempty"` // the remote mytmux socket NAME (for tmux nav)
+}
+
+// SSHArgs returns the ssh option args for reaching this peer (the port, if
+// non-default), to be placed before the destination in an `ssh` invocation. Every
+// ssh-to-peer call site MUST include these so non-22 machines are reachable.
+func (p Peer) SSHArgs() []string {
+	if p.Port != "" && p.Port != "22" {
+		return []string{"-p", p.Port}
+	}
+	return nil
 }
 
 // Registry is the set of known peers, keyed by machine.

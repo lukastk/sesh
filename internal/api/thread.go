@@ -66,6 +66,10 @@ type ThreadResponse struct {
 type ThreadListResponse struct {
 	Schema  int      `json:"schema"`
 	Threads []Thread `json:"threads"`
+	// Unreachable lists peer machines that could not be reached during an
+	// all-machines fan-out (offline peers are an expected state, not an error —
+	// but they are reported, never silently dropped).
+	Unreachable []string `json:"unreachable,omitempty"`
 }
 
 // ThreadSendRequest is the body of POST /v1/threads/send (headful send: deliver

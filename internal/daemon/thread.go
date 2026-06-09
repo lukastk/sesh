@@ -154,10 +154,16 @@ func (d *Daemon) handleThreadList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	resp := api.ThreadListResponse{Schema: api.SchemaVersion}
+	if r.URL.Query().Get("all-machines") == "1" {
+		// Mesh fan-out: this machine's threads + every reachable peer's.
+		threads, resp.Unreachable = d.fanOutThreads(threads, includeArchived)
+	}
 	if threads == nil {
 		threads = []api.Thread{}
 	}
-	writeJSON(w, http.StatusOK, api.ThreadListResponse{Schema: api.SchemaVersion, Threads: threads})
+	resp.Threads = threads
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleThreadKill terminates the thread: kill its tmux session (which kills the

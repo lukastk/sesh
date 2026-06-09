@@ -89,6 +89,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.list-all",
+		Description: "daemon-side mesh fan-out: GET /v1/threads?all-machines aggregates this machine + every peer",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

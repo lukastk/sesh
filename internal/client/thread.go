@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"net/url"
+	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
 )
@@ -13,12 +14,20 @@ func (c *Client) ThreadNew(ctx context.Context, req api.NewThreadRequest) (api.T
 	return out, c.postJSON(ctx, "http://unix/v1/threads", req, &out)
 }
 
-// ThreadList fetches GET /v1/threads. includeArchived also returns parked threads.
-func (c *Client) ThreadList(ctx context.Context, includeArchived bool) (api.ThreadListResponse, error) {
+// ThreadList fetches GET /v1/threads. includeArchived also returns parked
+// threads; allMachines fans out across the mesh (this machine + every peer).
+func (c *Client) ThreadList(ctx context.Context, includeArchived, allMachines bool) (api.ThreadListResponse, error) {
 	var out api.ThreadListResponse
-	u := "http://unix/v1/threads"
+	q := []string{}
 	if includeArchived {
-		u += "?archived=1"
+		q = append(q, "archived=1")
+	}
+	if allMachines {
+		q = append(q, "all-machines=1")
+	}
+	u := "http://unix/v1/threads"
+	if len(q) > 0 {
+		u += "?" + strings.Join(q, "&")
 	}
 	return out, c.getJSON(ctx, u, &out)
 }

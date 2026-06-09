@@ -286,13 +286,17 @@ func threadList(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit JSON")
 	archived := fs.Bool("archived", false, "include archived (parked) threads")
+	allMachines := fs.Bool("all-machines", false, "fan out across the mesh (this machine + peers)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	c := client.New(cfg.SocketPath())
-	resp, err := c.ThreadList(context.Background(), *archived)
+	resp, err := c.ThreadList(context.Background(), *archived, *allMachines)
 	if err != nil {
 		return err
+	}
+	for _, m := range resp.Unreachable {
+		fmt.Fprintf(os.Stderr, "warning: peer %s unreachable\n", m)
 	}
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)

@@ -14,10 +14,11 @@ import (
 
 // Peer is how to reach one remote machine's daemon.
 type Peer struct {
-	Machine string `json:"machine"` // the remote machine's identity (SESH_MACHINE)
-	SSH     string `json:"ssh"`     // ssh destination, e.g. user@host or localhost
-	Home    string `json:"home"`    // the remote SESH_HOME (locates its daemon socket)
-	Binary  string `json:"binary"`  // path to the sesh binary on the remote machine
+	Machine    string `json:"machine"`               // the remote machine's identity (SESH_MACHINE)
+	SSH        string `json:"ssh"`                   // ssh destination, e.g. user@host or localhost
+	Home       string `json:"home"`                  // the remote SESH_HOME (locates its daemon socket)
+	Binary     string `json:"binary"`                // path to the sesh binary on the remote machine
+	TmuxSocket string `json:"tmux_socket,omitempty"` // the remote mytmux socket NAME (for tmux nav)
 }
 
 // Registry is the set of known peers, keyed by machine.

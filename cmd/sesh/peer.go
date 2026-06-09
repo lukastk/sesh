@@ -31,6 +31,7 @@ func peerAdd(cfg config.Config, args []string) error {
 	ssh := fs.String("ssh", "", "ssh destination, e.g. user@host (required)")
 	home := fs.String("home", "", "remote SESH_HOME (required)")
 	binary := fs.String("binary", "sesh", "path to sesh on the remote machine")
+	tmuxSocket := fs.String("tmux-socket", "", "remote mytmux socket name (for tmux nav)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func peerAdd(cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := reg.Add(peers.Peer{Machine: *machine, SSH: *ssh, Home: *home, Binary: *binary}); err != nil {
+	if err := reg.Add(peers.Peer{Machine: *machine, SSH: *ssh, Home: *home, Binary: *binary, TmuxSocket: *tmuxSocket}); err != nil {
 		return err
 	}
 	if err := reg.Save(cfg.PeersPath()); err != nil {

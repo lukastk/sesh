@@ -2,7 +2,9 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ func init() {
 	// peer daemon over a real ssh hop, Phase 4). stage-file stays Local until
 	// remote file transfer lands; tmux.nav is its own Phase 4 cell.
 	matrix.RegisterTest("tmux.current", matrix.AgentAgnostic, matrix.Local, testTmuxCurrent)
+	matrix.RegisterTest("tmux.nav", matrix.AgentAgnostic, matrix.Remote, testTmuxNav)
 	for _, loc := range matrix.AllLocalities {
 		loc := loc
 		matrix.RegisterTest("tmux.stage-file", matrix.AgentAgnostic, loc,
@@ -282,6 +285,94 @@ func testTmuxStageFile(t *testing.T, loc matrix.Locality) {
 	}
 	if string(got) != string(content) {
 		t.Errorf("staged content mismatch:\n got %q\nwant %q", got, content)
+	}
+}
+
+// testTmuxNav exercises the nav primitive — the fiddliest operation in the
+// system — across a REAL master/inner tmux nesting reached over a real ssh hop:
+//   - the OUTER mymastertmux client switches to machine M's window;
+//   - M's INNER mytmux client is driven (over ssh) to switch-client to the
+//     target session;
+//   - the detached "bare-shell kick": when no client is attached to switch, a
+//     client is attached to the target so a client exists.
+//
+// Both directions are asserted on the real servers (active window; client
+// session), never on sesh's own report.
+func testTmuxNav(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	stamp := time.Now().UnixNano()
+	master := fmt.Sprintf("sesh-navmaster-%d", stamp)
+	inner := fmt.Sprintf("sesh-navinner-%d", stamp) // machine M's mytmux
+	t.Cleanup(func() {
+		exec.Command("tmux", "-L", master, "kill-server").Run() //nolint:errcheck
+		exec.Command("tmux", "-L", inner, "kill-server").Run()  //nolint:errcheck
+	})
+
+	rawSrv := func(socket string, args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", socket}, args...)...).CombinedOutput()
+		return string(out), err
+	}
+	mustSrv := func(socket string, args ...string) {
+		t.Helper()
+		if out, err := rawSrv(socket, args...); err != nil {
+			t.Fatalf("tmux -L %s %v: %v\n%s", socket, args, err, out)
+		}
+	}
+
+	// Inner (machine M's mytmux): two sessions; start with a client attached to a.
+	mustSrv(inner, "new-session", "-d", "-s", "a")
+	mustSrv(inner, "new-session", "-d", "-s", "b")
+	mustSrv(inner, "new-session", "-d", "-s", "viewer", "env -u TMUX tmux -L "+inner+" attach -t a")
+	// Master (mymastertmux): a window per machine; start NOT on M's window.
+	mustSrv(master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustSrv(master, "new-window", "-t", "master", "-n", "M")
+	mustSrv(master, "select-window", "-t", "master:home")
+
+	bin := seshBin(t)
+	caller := &localRunner{bin: bin, env: map[string]string{
+		"SESH_HOME":          t.TempDir(),
+		"SESH_MACHINE":       "navcaller",
+		"SESH_MASTER_SOCKET": master,
+	}}
+	if _, stderr, err := caller.Run(t, "peer", "add", "--machine", "M", "--ssh", "localhost", "--home", "/tmp", "--tmux-socket", inner); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+
+	activeWindow := func() string {
+		out, _ := rawSrv(master, "list-windows", "-F", "#{?window_active,#{window_name},}")
+		return strings.TrimSpace(out)
+	}
+	innerClient := func() string {
+		out, _ := rawSrv(inner, "list-clients", "-F", "#{client_session}")
+		return strings.TrimSpace(out)
+	}
+
+	// --- nav with an attached client: outer switches to M, inner client moves to b.
+	if _, stderr, err := caller.Run(t, "tmux", "nav", "--to", "M:b"); err != nil {
+		t.Fatalf("nav --to M:b: %v\n%s", err, stderr)
+	}
+	if got := activeWindow(); got != "M" {
+		t.Errorf("master active window = %q, want M (outer switch failed)", got)
+	}
+	if !waitUntil(3*time.Second, func() bool { return innerClient() == "b" }) {
+		t.Errorf("inner client session = %q, want b (inner switch failed)", innerClient())
+	}
+
+	// --- detached bare-shell kick: with NO client attached, nav must create one
+	// on the target session.
+	mustSrv(inner, "kill-session", "-t", "viewer")
+	if !waitUntil(3*time.Second, func() bool { return innerClient() == "" }) {
+		t.Fatalf("precondition: expected no inner client after killing the viewer")
+	}
+	if _, stderr, err := caller.Run(t, "tmux", "nav", "--to", "M:a"); err != nil {
+		t.Fatalf("nav --to M:a (kick): %v\n%s", err, stderr)
+	}
+	if !waitUntil(4*time.Second, func() bool { return innerClient() == "a" }) {
+		t.Errorf("after kick: inner client = %q, want a (bare-shell kick failed)", innerClient())
 	}
 }
 

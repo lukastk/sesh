@@ -19,6 +19,10 @@ type Config struct {
 	// on. Per the spec this is just a regular tmux server; the name carries no
 	// semantics. Default "mytmux"; overridable so tests use an isolated server.
 	TmuxSocket string
+	// MasterSocket is the "mymastertmux" socket — the master view with one window
+	// per machine. `tmux nav` switches the outer client there. Default
+	// "mymastertmux".
+	MasterSocket string
 	// TicketOwner is the canonical always-on machine that owns the ticket store
 	// (the single writer). When set and not this machine, ticket commands route
 	// to the owner. Empty = this machine owns its own tickets (no mesh).
@@ -61,12 +65,18 @@ func Load() Config {
 		socket = "mytmux"
 	}
 
+	masterSocket := os.Getenv("SESH_MASTER_SOCKET")
+	if masterSocket == "" {
+		masterSocket = "mymastertmux"
+	}
+
 	return Config{
-		Home:        home,
-		Machine:     machine,
-		TmuxSocket:  socket,
-		TicketOwner: os.Getenv("SESH_TICKET_OWNER"),
-		CodexHome:   os.Getenv("SESH_CODEX_HOME"),
+		Home:         home,
+		Machine:      machine,
+		TmuxSocket:   socket,
+		MasterSocket: masterSocket,
+		TicketOwner:  os.Getenv("SESH_TICKET_OWNER"),
+		CodexHome:    os.Getenv("SESH_CODEX_HOME"),
 	}
 }
 

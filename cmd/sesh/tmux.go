@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
+	"github.com/lukastk/sesh/internal/peers"
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
@@ -38,9 +40,60 @@ func runTmux(args []string) error {
 		return tmuxSendText(cfg, rest)
 	case "stage-file":
 		return tmuxStageFile(cfg, rest)
+	case "nav":
+		return tmuxNav(cfg, rest)
 	default:
 		return fmt.Errorf("unknown tmux subcommand %q", sub)
 	}
+}
+
+// tmuxNav implements `sesh tmux nav --to <machine>:<session>` — the nav
+// primitive. From the mymastertmux client it (1) switches the OUTER client to
+// machine M's window, then (2) drives M's INNER mytmux to switch-client to the
+// target session (over ssh for a remote M), with the detached "bare-shell kick".
+func tmuxNav(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("nav", flag.ContinueOnError)
+	to := fs.String("to", "", "target as <machine>:<session> (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	machine, session, ok := strings.Cut(*to, ":")
+	if !ok || machine == "" || session == "" {
+		return errors.New("nav: --to must be <machine>:<session>")
+	}
+
+	// (1) Outer: switch the mymastertmux client to machine M's window.
+	master := tmux.NewServer(cfg.MasterSocket)
+	if err := master.SelectWindow(machine); err != nil {
+		return fmt.Errorf("nav outer select (window %q on %s): %w", machine, cfg.MasterSocket, err)
+	}
+
+	// (2) Inner: switch M's mytmux client to the target session.
+	if machine == cfg.Machine {
+		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session)
+		out, err := exec.Command("sh", "-c", script).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("nav inner switch (local): %v: %s", err, out)
+		}
+		return nil
+	}
+	reg, err := peers.Load(cfg.PeersPath())
+	if err != nil {
+		return err
+	}
+	peer, ok := reg.Get(machine)
+	if !ok {
+		return fmt.Errorf("nav: unknown machine %q (no peer registered)", machine)
+	}
+	if peer.TmuxSocket == "" {
+		return fmt.Errorf("nav: peer %q has no tmux socket registered (see `sesh peer add --tmux-socket`)", machine)
+	}
+	script := tmux.InnerSwitchScript(peer.TmuxSocket, session)
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", peer.SSH, script).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("nav inner switch on %s: %v: %s", machine, err, out)
+	}
+	return nil
 }
 
 func tmuxCurrent(cfg config.Config, args []string) error {

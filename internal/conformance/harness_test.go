@@ -85,6 +85,7 @@ type Sandbox struct {
 	Home         string
 	Machine      string
 	TmuxSocket   string
+	MasterSocket string
 	Runner       Runner
 	daemonRunner Runner
 
@@ -147,7 +148,7 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	var sb *Sandbox
 	switch loc {
 	case matrix.Local:
-		sb = &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, Runner: peerDaemon, daemonRunner: peerDaemon, APIAddr: sc.apiAddr, APIToken: sc.apiToken}
+		sb = &Sandbox{Home: home, Machine: machine, TmuxSocket: socket, MasterSocket: masterSocket, Runner: peerDaemon, daemonRunner: peerDaemon, APIAddr: sc.apiAddr, APIToken: sc.apiToken}
 	case matrix.Remote:
 		// A separate local client machine that reaches the peer via `--machine`.
 		ensureSSHLocalhost(t)

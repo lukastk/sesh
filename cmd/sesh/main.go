@@ -87,6 +87,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh mesh:", err)
 			os.Exit(1)
 		}
+	case "master":
+		if err := runMaster(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh master:", err)
+			os.Exit(1)
+		}
 	case "peer":
 		if err := runPeer(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh peer:", err)
@@ -111,6 +116,9 @@ commands:
   tmux      tmux layer (current|info|create-session|create-pane|send-text|stage-file|nav)
   thread    thread layer (new|list|stop|delete|resume|rename|tag|archive|pane|status|send|send-headless|headless-reply)
   ticket    ticket layer (create | list | set-status | needs-input | send-prompt)
+  tui       cross-machine TUI (--all-machines)
+  mesh      print the merged cross-machine view
+  master    master-tmux cockpit (up | window | attach | down)
   peer      mesh registry (add | list)
   matrix    report the feature-matrix state (grid | skips)
 

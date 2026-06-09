@@ -47,7 +47,7 @@ func stageFileRemote(cfg config.Config, machine, name string, content []byte) er
 // subcommand. Local-only meta commands are excluded.
 func routableSubcommand(sub string) bool {
 	switch sub {
-	case "peer", "matrix", "help", "-h", "--help":
+	case "peer", "matrix", "master", "help", "-h", "--help":
 		return false
 	default:
 		return true

@@ -145,6 +145,16 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "master.up",
+		Description: "`sesh master up` builds the cross-machine cockpit: one window per machine (name == machine), each GENUINELY attached into that machine's work server (peer over a real ssh hop)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "master.reconnect",
+		Description: "the per-window supervisor self-heals: after the attach is dropped, it re-establishes — for both the local window and the ssh-localhost peer window (drop observed before heal)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "api.tcp-auth",
 		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
 		Localities:  []Locality{Local},

@@ -357,6 +357,44 @@ func threadInList(t *testing.T, sb *Sandbox, id string) bool {
 	return hasThread(sb.listThreads(t), id)
 }
 
+// threadFromList returns the thread record with id from the active list.
+func (sb *Sandbox) threadFromList(t *testing.T, id string) api.Thread {
+	t.Helper()
+	for _, th := range sb.listThreads(t) {
+		if th.ID == id {
+			return th
+		}
+	}
+	for _, th := range sb.listThreadsArchived(t) {
+		if th.ID == id {
+			return th
+		}
+	}
+	t.Fatalf("thread %s not found", id)
+	return api.Thread{}
+}
+
+// listThreadsArchived lists threads including archived ones.
+func (sb *Sandbox) listThreadsArchived(t *testing.T) []api.Thread {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "list", "--archived", "--json")
+	if err != nil {
+		t.Fatalf("thread list --archived: %v\n%s", err, stderr)
+	}
+	var out []api.Thread
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var th api.Thread
+		if err := json.Unmarshal([]byte(line), &th); err != nil {
+			t.Fatalf("decode thread line %q: %v", line, err)
+		}
+		out = append(out, th)
+	}
+	return out
+}
+
 func hasThread(threads []api.Thread, id string) bool {
 	for _, th := range threads {
 		if th.ID == id {

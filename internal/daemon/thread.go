@@ -154,7 +154,8 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleThreadList(w http.ResponseWriter, r *http.Request) {
-	threads, err := d.store.ListThreads()
+	includeArchived := r.URL.Query().Get("archived") == "1"
+	threads, err := d.store.ListThreads(includeArchived)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

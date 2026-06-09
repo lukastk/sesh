@@ -43,6 +43,9 @@ var migrations = []string{
 	// run (first turn creates the session; later turns resume it).
 	`ALTER TABLE threads ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT '';`,
 	`ALTER TABLE threads ADD COLUMN headless_started INTEGER NOT NULL DEFAULT 0;`,
+	// 5: archive — a parked-but-keepable state, hidden from the active list but
+	// distinct from dead (runtime gone) and deleted (record gone).
+	`ALTER TABLE threads ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

@@ -13,10 +13,34 @@ func (c *Client) ThreadNew(ctx context.Context, req api.NewThreadRequest) (api.T
 	return out, c.postJSON(ctx, "http://unix/v1/threads", req, &out)
 }
 
-// ThreadList fetches GET /v1/threads.
-func (c *Client) ThreadList(ctx context.Context) (api.ThreadListResponse, error) {
+// ThreadList fetches GET /v1/threads. includeArchived also returns parked threads.
+func (c *Client) ThreadList(ctx context.Context, includeArchived bool) (api.ThreadListResponse, error) {
 	var out api.ThreadListResponse
-	return out, c.getJSON(ctx, "http://unix/v1/threads", &out)
+	u := "http://unix/v1/threads"
+	if includeArchived {
+		u += "?archived=1"
+	}
+	return out, c.getJSON(ctx, u, &out)
+}
+
+// ThreadRename posts POST /v1/threads/rename.
+func (c *Client) ThreadRename(ctx context.Context, id, name string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/rename", api.RenameThreadRequest{ID: id, Name: name}, nil)
+}
+
+// ThreadTag posts POST /v1/threads/tag.
+func (c *Client) ThreadTag(ctx context.Context, id string, add, remove []string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/tag", api.TagThreadRequest{ID: id, Add: add, Remove: remove}, nil)
+}
+
+// ThreadArchive posts POST /v1/threads/archive.
+func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived}, nil)
+}
+
+// ThreadDelete posts POST /v1/threads/delete (drop the record only).
+func (c *Client) ThreadDelete(ctx context.Context, id string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id}, nil)
 }
 
 // ThreadKill posts POST /v1/threads/kill?id=.

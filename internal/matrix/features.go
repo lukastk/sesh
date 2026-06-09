@@ -100,6 +100,32 @@ func init() {
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
+	Register(Feature{
+		ID:          "thread.rename",
+		Description: "rename a thread (record only)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.tag",
+		Description: "add/remove tags on a thread",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.archive",
+		Description: "archive/unarchive — park a thread, hidden from the active list, record kept",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.delete",
+		Description: "drop a record without touching the runtime (unlike kill)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.resume",
+		Description: "revive a dead headed thread: recreate session + relaunch agent with --resume",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
 
 	// ---- ticket layer ----
 	Register(Feature{

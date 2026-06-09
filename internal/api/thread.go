@@ -12,10 +12,13 @@ type Thread struct {
 	Tags          []string `json:"tags"`
 	Headless      bool     `json:"headless"`
 	CreatedAtUnix int64    `json:"created_at_unix"`
-	// AgentSessionID is the agent's own conversation id (headless threads only).
+	// AgentSessionID is the agent's own conversation id (captured at/after spawn;
+	// what makes resume possible).
 	AgentSessionID string `json:"agent_session_id,omitempty"`
 	// HeadlessStarted is true once the first headless turn has run.
 	HeadlessStarted bool `json:"headless_started,omitempty"`
+	// Archived hides the thread from the active list (record kept).
+	Archived bool `json:"archived,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -70,6 +73,31 @@ type ThreadListResponse struct {
 type ThreadSendRequest struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+}
+
+// RenameThreadRequest is the body of POST /v1/threads/rename.
+type RenameThreadRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// TagThreadRequest is the body of POST /v1/threads/tag: add and/or remove tags.
+type TagThreadRequest struct {
+	ID     string   `json:"id"`
+	Add    []string `json:"add,omitempty"`
+	Remove []string `json:"remove,omitempty"`
+}
+
+// ArchiveThreadRequest is the body of POST /v1/threads/archive.
+type ArchiveThreadRequest struct {
+	ID       string `json:"id"`
+	Archived bool   `json:"archived"`
+}
+
+// DeleteThreadRequest is the body of POST /v1/threads/delete (drop the record
+// only; the runtime is left untouched).
+type DeleteThreadRequest struct {
+	ID string `json:"id"`
 }
 
 // PaneLocator is a resolved live pane for a thread.

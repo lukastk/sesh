@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/client"
@@ -38,9 +39,103 @@ func runThread(args []string) error {
 		return threadSendHeadless(cfg, rest)
 	case "headless-reply":
 		return threadHeadlessReply(cfg, rest)
+	case "rename":
+		return threadRename(cfg, rest)
+	case "tag":
+		return threadTag(cfg, rest)
+	case "archive":
+		return threadArchive(cfg, rest)
+	case "delete":
+		return threadDelete(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
+}
+
+func threadRename(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("rename", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	name := fs.String("name", "", "new name (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || *name == "" {
+		return errors.New("thread rename: --id and --name are required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadRename(context.Background(), *id, *name); err != nil {
+		return err
+	}
+	fmt.Printf("renamed %s -> %s\n", *id, *name)
+	return nil
+}
+
+func threadTag(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("tag", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	var add, remove multiFlag
+	fs.Var(&add, "add", "tag to add (repeatable)")
+	fs.Var(&remove, "remove", "tag to remove (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || (len(add) == 0 && len(remove) == 0) {
+		return errors.New("thread tag: --id and at least one --add/--remove required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadTag(context.Background(), *id, add, remove); err != nil {
+		return err
+	}
+	fmt.Println("tagged", *id)
+	return nil
+}
+
+func threadArchive(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	unarchive := fs.Bool("unarchive", false, "unarchive instead")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("thread archive: --id is required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadArchive(context.Background(), *id, !*unarchive); err != nil {
+		return err
+	}
+	if *unarchive {
+		fmt.Println("unarchived", *id)
+	} else {
+		fmt.Println("archived", *id)
+	}
+	return nil
+}
+
+func threadDelete(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("thread delete: --id is required")
+	}
+	c := client.New(cfg.SocketPath())
+	if err := c.ThreadDelete(context.Background(), *id); err != nil {
+		return err
+	}
+	fmt.Println("deleted", *id)
+	return nil
+}
+
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
 }
 
 func threadSendHeadless(cfg config.Config, args []string) error {
@@ -160,11 +255,12 @@ func threadNew(cfg config.Config, args []string) error {
 func threadList(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit JSON")
+	archived := fs.Bool("archived", false, "include archived (parked) threads")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	c := client.New(cfg.SocketPath())
-	resp, err := c.ThreadList(context.Background())
+	resp, err := c.ThreadList(context.Background(), *archived)
 	if err != nil {
 		return err
 	}

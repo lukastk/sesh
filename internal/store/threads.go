@@ -41,7 +41,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -50,11 +50,16 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 	return t, err
 }
 
-// ListThreads returns all threads on this machine, newest first.
-func (s *Store) ListThreads() ([]api.Thread, error) {
-	rows, err := s.db.Query(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started
-		 FROM threads ORDER BY created_at DESC, id`)
+// ListThreads returns this machine's threads, newest first. Archived threads are
+// excluded unless includeArchived is set (the active list hides them).
+func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived
+		 FROM threads`
+	if !includeArchived {
+		q += ` WHERE archived = 0`
+	}
+	q += ` ORDER BY created_at DESC, id`
+	rows, err := s.db.Query(q)
 	if err != nil {
 		return nil, fmt.Errorf("store: list threads: %w", err)
 	}
@@ -104,13 +109,58 @@ func (s *Store) SetHeadlessSession(id, agentSessionID string) error {
 	return nil
 }
 
+// RenameThread updates a thread's display name.
+func (s *Store) RenameThread(id, name string) error {
+	return s.updateThread(`UPDATE threads SET name = ? WHERE id = ?`, name, id)
+}
+
+// SetThreadTags replaces a thread's tag set.
+func (s *Store) SetThreadTags(id string, tags []string) error {
+	if tags == nil {
+		tags = []string{}
+	}
+	b, err := json.Marshal(tags)
+	if err != nil {
+		return err
+	}
+	return s.updateThread(`UPDATE threads SET tags = ? WHERE id = ?`, string(b), id)
+}
+
+// SetThreadArchived parks/unparks a thread (record kept).
+func (s *Store) SetThreadArchived(id string, archived bool) error {
+	v := 0
+	if archived {
+		v = 1
+	}
+	return s.updateThread(`UPDATE threads SET archived = ? WHERE id = ?`, v, id)
+}
+
+// SetThreadAgentSession records a headed thread's captured agent session id (used
+// by resume; for codex it is discovered after the first turn).
+func (s *Store) SetThreadAgentSession(id, agentSessionID string) error {
+	return s.updateThread(`UPDATE threads SET agent_session_id = ? WHERE id = ?`, agentSessionID, id)
+}
+
+func (s *Store) updateThread(query string, arg any, id string) error {
+	res, err := s.db.Exec(query, arg, id)
+	if err != nil {
+		return fmt.Errorf("store: update thread: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
 func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
-	var headless, started int
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started); err != nil {
+	var headless, started, archived int
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived); err != nil {
 		return t, err
 	}
+	t.Archived = archived == 1
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
 		return t, fmt.Errorf("store: decode thread tags: %w", err)
 	}

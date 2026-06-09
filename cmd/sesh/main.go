@@ -87,7 +87,7 @@ usage: sesh <command> [args]
 commands:
   daemon    per-machine daemon (run | start | stop | status)
   tmux      tmux layer (current|info|create-session|create-pane|send-text|stage-file|nav)
-  thread    thread layer (new|list|kill|pane|status|send|send-headless|headless-reply)
+  thread    thread layer (new|list|kill|delete|rename|tag|archive|pane|status|send|send-headless|headless-reply)
   ticket    ticket layer (create | list | set-status | needs-input | send-prompt)
   peer      mesh registry (add | list)
   matrix    report the feature-matrix state (grid | skips)

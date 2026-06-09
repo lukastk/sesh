@@ -1,0 +1,128 @@
+package conformance
+
+import (
+	"testing"
+
+	"github.com/lukastk/sesh/internal/matrix"
+)
+
+func init() {
+	// Lifecycle ops on the record (agent-agnostic; tested via cheap headless pi
+	// threads, except delete which uses a live headed thread to prove it leaves
+	// the runtime untouched). Both localities (Remote = --machine routing).
+	for _, loc := range matrix.AllLocalities {
+		loc := loc
+		matrix.RegisterTest("thread.rename", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadRename(t, loc) })
+		matrix.RegisterTest("thread.tag", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadTag(t, loc) })
+		matrix.RegisterTest("thread.archive", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadArchive(t, loc) })
+		matrix.RegisterTest("thread.delete", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadDelete(t, loc) })
+	}
+}
+
+func testThreadRename(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "before")
+
+	if _, stderr, err := sb.Runner.Run(t, "thread", "rename", "--id", th.ID, "--name", "after"); err != nil {
+		t.Fatalf("rename: %v\n%s", err, stderr)
+	}
+	if got := sb.threadFromList(t, th.ID).Name; got != "after" {
+		t.Errorf("name = %q, want after", got)
+	}
+}
+
+func testThreadTag(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "tagme")
+
+	if _, stderr, err := sb.Runner.Run(t, "thread", "tag", "--id", th.ID, "--add", "urgent", "--add", "wip"); err != nil {
+		t.Fatalf("tag add: %v\n%s", err, stderr)
+	}
+	tags := sb.threadFromList(t, th.ID).Tags
+	if !contains(tags, "urgent") || !contains(tags, "wip") {
+		t.Fatalf("after add, tags = %v", tags)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "tag", "--id", th.ID, "--remove", "wip"); err != nil {
+		t.Fatalf("tag remove: %v\n%s", err, stderr)
+	}
+	tags = sb.threadFromList(t, th.ID).Tags
+	if contains(tags, "wip") || !contains(tags, "urgent") {
+		t.Errorf("after remove, tags = %v (want [urgent])", tags)
+	}
+}
+
+func testThreadArchive(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "park")
+
+	// archive hides it from the active list but keeps the record.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+		t.Fatalf("archive: %v\n%s", err, stderr)
+	}
+	if hasThread(sb.listThreads(t), th.ID) {
+		t.Errorf("archived thread still in the active list")
+	}
+	if !hasThread(sb.listThreadsArchived(t), th.ID) {
+		t.Errorf("archived thread missing from the archived list (record was not kept)")
+	}
+	// unarchive restores it to the active list.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID, "--unarchive"); err != nil {
+		t.Fatalf("unarchive: %v\n%s", err, stderr)
+	}
+	if !hasThread(sb.listThreads(t), th.ID) {
+		t.Errorf("unarchived thread not back in the active list")
+	}
+}
+
+// testThreadDelete proves delete drops the RECORD but leaves the runtime
+// untouched — the distinction from kill.
+func testThreadDelete(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, "pi", "deleteme", "/tmp") // a live HEADED thread
+	var pid int
+	if !waitUntil(agentStartTimeout, func() bool {
+		_, p, ok := sb.markedPane(t, th.ID)
+		pid = p
+		return ok && agentRunningUnder(p, "pi")
+	}) {
+		t.Fatalf("agent never came up")
+	}
+
+	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", th.ID); err != nil {
+		t.Fatalf("delete: %v\n%s", err, stderr)
+	}
+	// Record is gone...
+	if hasThread(sb.listThreads(t), th.ID) {
+		t.Errorf("deleted thread still listed")
+	}
+	// ...but the runtime is untouched (session + agent still alive) — unlike kill.
+	if _, err := sb.rawTmux(t, "has-session", "-t", "=sesh_deleteme"); err != nil {
+		t.Errorf("delete killed the tmux session (should leave runtime untouched)")
+	}
+	if !pidAlive(pid) || !agentRunningUnder(pid, "pi") {
+		t.Errorf("delete killed the agent process (should leave runtime untouched)")
+	}
+	// Clean up the orphaned session ourselves.
+	sb.rawTmux(t, "kill-session", "-t", "=sesh_deleteme") //nolint:errcheck
+}

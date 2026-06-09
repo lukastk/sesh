@@ -35,7 +35,7 @@ func TestThreadCRUD(t *testing.T) {
 		t.Fatalf("round trip wrong: %+v", got)
 	}
 
-	list, err := s.ListThreads()
+	list, err := s.ListThreads(false)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v len=%d", err, len(list))
 	}
@@ -84,5 +84,39 @@ func TestHeadlessSession(t *testing.T) {
 	got, _ = s.GetThread("h1")
 	if got.AgentSessionID != "codex-sess-xyz" || !got.HeadlessStarted {
 		t.Fatalf("after first turn wrong: %+v", got)
+	}
+}
+
+func TestThreadOpsRenameTagArchive(t *testing.T) {
+	s := openTestStore(t)
+	th := api.Thread{ID: "o1", Machine: "m", SessionName: "s1", Cwd: "/x", AgentKind: "pi", Name: "old", Tags: []string{}}
+	if err := s.InsertThread(th); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameThread("o1", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadTags("o1", []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetThread("o1")
+	if got.Name != "new" || len(got.Tags) != 2 {
+		t.Fatalf("rename/tag wrong: %+v", got)
+	}
+
+	// archive hides from the active list but keeps the record.
+	if err := s.SetThreadArchived("o1", true); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := s.ListThreads(false)
+	all, _ := s.ListThreads(true)
+	if len(active) != 0 || len(all) != 1 {
+		t.Fatalf("archive filter wrong: active=%d all=%d", len(active), len(all))
+	}
+	if err := s.SetThreadArchived("o1", false); err != nil {
+		t.Fatal(err)
+	}
+	if active, _ := s.ListThreads(false); len(active) != 1 {
+		t.Fatalf("unarchive failed: active=%d", len(active))
 	}
 }

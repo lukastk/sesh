@@ -97,7 +97,12 @@ CLI boundary only (no shell-sourcing of sesh internals).
 mymain↔macbook run hand-started daemons + a hand-written `~/.myrig/zshenv/sesh-v2.sh` wrapper
 + a manually-built master. Replace with:
 - `setup/installs/sesh-v2/` — build+copy the binary per-arch (separate repo `sesh-v2.git`, so
-  build-and-scp, NOT `go install` — its module path resolves to the OLD repo).
+  build-and-scp, NOT `go install` — its module path resolves to the OLD repo). **macOS/Apple
+  Silicon gotcha:** a cross-compiled (Linux→darwin/arm64) binary scp'd OVER an
+  existing/running one invalidates its code signature → the kernel SIGKILLs every invocation
+  (exit 137, no output). The install MUST, on the Mac, `codesign --force --sign - <bin>` after
+  copy (or `rm` then copy for a fresh inode, or build natively). Verified the hard way
+  2026-06-09.
 - a supervisor program (mirror `^sesh^sesh-daemon.ini.jinja`) running `sesh-v2 daemon run`
   with `SESH_API_ADDR={{tailscale}}:7878`, token from `~/.env`, isolated `SESH_HOME`.
 - `home/.sesh-v2/peers.json.jinja` templated from `config.toml` (each peer `--api-addr` +

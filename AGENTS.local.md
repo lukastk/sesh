@@ -62,6 +62,11 @@ attached, `tmux nav` jumped between machines over it. GOTCHA: drive the live dep
 the `seshv2` wrapper or zsh PREFIX-assignments (`SESH_X=v sesh-v2 …`) — NOT `env $E sesh-v2`,
 because zsh does NOT word-split `$E`, so the whole string becomes one bogus assignment and
 sesh silently falls back to DEFAULT sockets (`mymastertmux`/default home → no peers).
+GOTCHA 2 (macOS deploy): scp'ing a cross-compiled darwin/arm64 binary OVER an existing/running
+one invalidates its code signature on Apple Silicon → kernel SIGKILLs every invocation (exit
+137, NO output — looks like "nothing happens"). Fix: `codesign --force --sign - <bin>` on the
+Mac after copy (or rm+recopy / native build). The running daemon keeps working (loaded in
+memory pre-overwrite), masking it. This must be in the myrig deploy step (BACKLOG #4a).
 
 - **Real-network proof**: `TestRealCrossHostHTTP` (crosshost_test.go) validates the http
   transport over the REAL mymain↔macbook tailscale link (routing + fan-out + sync), partner

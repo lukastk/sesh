@@ -1,6 +1,35 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## Build status: ALL GREEN — 76 / 76 cells, 0 fail, 0 skip, 0 missing
+## Build status (post-ops + TUI)
+
+Feature matrix: **93 cells, 91 green, 2 skip** (the 2 skips = `thread.resume/claude/{local,remote}`,
+pending Lukas's decision — see below). Plus a separate **TUI conformance track: 6/6
+claims green** + structural import rule + completeness gate. `go test ./...` green
+except the 2 honest claude-resume skips.
+
+### Features added after the first all-green (ops phase + TUI)
+- Lifecycle ops (matrix): **rename, tag, archive** (park, record kept), **delete**
+  (drop record, leave runtime — distinct from kill), **resume** (revive a dead headed
+  thread: recreate session + relaunch with `--resume`; pi+codex green w/ continuity).
+- **thread.list-all** (`?all-machines`) + **thread.grid** (`?with-status`, concurrent)
+  — daemon-side mesh fan-out; the TUI's data source.
+- **TUI** (`sesh tui`, Bubble Tea): live grid (glyphs from runtime-state), poll-first,
+  `--all-machines` fan-out; actions x kill / a archive / enter nav. Thin client over
+  `internal/client` only (import rule enforced by a test). Tests drive the real Model
+  against a real daemon and assert reality-anchored, never golden blobs.
+
+### OPEN: thread.resume for claude (2 skip cells, needs Lukas decision)
+Interactive (headed) claude buffers its transcript in memory and flushes a resumable
+session only on a GRACEFUL exit. A hard-killed headed claude session leaves only an
+`ai-title` (124 bytes) on disk (verified) — `claude --resume <id>` then says "No
+conversation found". pi/codex persist INCREMENTALLY so they resume fine. Recommended:
+mark claude-resume a justified N/A. (claude's headed turns DO run + persist-on-exit;
+the other claude cells are honest.)
+
+codex resume edge: a codex thread killed BEFORE its first turn has no minted id →
+explicit N/A error (TestCodexResumeBeforeFirstTurnIsNA), never faked.
+
+## Build status: ALL GREEN — 76 / 76 cells, 0 fail, 0 skip, 0 missing (original matrix)
 
 `go test ./...` green. Run `go run ./cmd/sesh matrix grid` (after
 `go test ./internal/conformance`) to see the grid.

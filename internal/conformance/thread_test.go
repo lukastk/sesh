@@ -33,16 +33,12 @@ func init() {
 	}
 
 	// thread.runtime-state + thread.send.headful: the content-diff activity signal
-	// is agent-agnostic and reliable for claude and pi (both settle to waiting and
-	// begin a turn on send deterministically). codex stays honestly Skip: its TUI
-	// interposes update nags / approval prompts that make turn induction
-	// non-deterministic in a test, and a FLAKY green on the historically-buggy
-	// agent is exactly what this project forbids. codex needs dedicated
-	// startup-nag/approval handling before its turns can be induced reliably.
-	// Remote stays Skip until the mesh.
+	// is agent-agnostic. All three agents now spawn deterministically — codex's
+	// per-directory trust prompt (which used to eat input) is pre-granted by sesh
+	// at spawn (see agents.EnsureCodexTrust). Both localities.
 	for _, loc := range matrix.AllLocalities {
 		loc := loc
-		for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
+		for _, a := range matrix.AllAgents {
 			a := a
 			matrix.RegisterTest("thread.runtime-state", a, loc,
 				func(t *testing.T) { testRuntimeState(t, string(a), loc) })

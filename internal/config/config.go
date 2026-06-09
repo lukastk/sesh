@@ -23,6 +23,10 @@ type Config struct {
 	// (the single writer). When set and not this machine, ticket commands route
 	// to the owner. Empty = this machine owns its own tickets (no mesh).
 	TicketOwner string
+	// CodexHome overrides codex's home dir (CODEX_HOME) for spawned codex threads
+	// — sesh writes per-cwd trust there and injects CODEX_HOME into the pane. Empty
+	// = codex's default ~/.codex. Tests point this at an isolated dir.
+	CodexHome string
 }
 
 // Load resolves config from the environment:
@@ -62,6 +66,7 @@ func Load() Config {
 		Machine:     machine,
 		TmuxSocket:  socket,
 		TicketOwner: os.Getenv("SESH_TICKET_OWNER"),
+		CodexHome:   os.Getenv("SESH_CODEX_HOME"),
 	}
 }
 

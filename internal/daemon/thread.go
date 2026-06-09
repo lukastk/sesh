@@ -96,6 +96,25 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	env := map[string]string{agents.EnvThreadID: id}
+
+	// codex: pre-trust the cwd so its directory-trust prompt does not appear (and
+	// eat input) at spawn; inject CODEX_HOME so the trust we wrote is the one it
+	// reads.
+	if kind == agents.Codex {
+		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := agents.EnsureCodexTrust(codexHome, req.Cwd); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if d.cfg.CodexHome != "" {
+			env["CODEX_HOME"] = d.cfg.CodexHome
+		}
+	}
+
 	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind)); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -191,16 +210,17 @@ func (d *Daemon) handleThreadPane(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ResolvePaneResponse{Schema: api.SchemaVersion, Found: found, Pane: loc})
 }
 
-// The content-diff probe samples a pane several times and declares working only
-// when change is SUSTAINED, not a one-off. A working TUI animates a spinner/
-// timer continuously (many changes); an otherwise-idle TUI may still blip once
-// (a rotating hint, an MCP server finishing startup), which must NOT read as
-// working. Requiring a majority of intervals to change rejects the single blip
-// while still catching a real turn.
+// The content-diff probe samples a pane repeatedly and declares working when
+// change is SUSTAINED (>= activityChangedNeeded intervals), not a one-off. It
+// early-exits the instant it has enough changes, so detecting a busy agent is
+// fast; only confirming IDLE runs the full window. The window is long enough to
+// catch the slowest working animation (codex's ~1s "thinking" timer), while
+// requiring >1 change still rejects a single idle blip (a rotating hint, an MCP
+// server finishing startup). When settled, all three agent TUIs are byte-stable.
 const (
-	activitySamples       = 4                      // captures
-	activityInterval      = 380 * time.Millisecond // between captures (~1.14s total)
-	activityChangedNeeded = 2                      // of activitySamples-1 intervals
+	activityMaxSamples    = 10                     // up to ~3s of confirming idle
+	activityInterval      = 300 * time.Millisecond //
+	activityChangedNeeded = 2                      // changed intervals => working
 )
 
 // handleThreadStatus resolves a thread's LIVE runtime state (never stored) as
@@ -315,7 +335,7 @@ func (d *Daemon) paneChanging(pane string) (bool, error) {
 		return false, err
 	}
 	changed := 0
-	for i := 1; i < activitySamples; i++ {
+	for i := 0; i < activityMaxSamples; i++ {
 		time.Sleep(activityInterval)
 		cur, err := d.tmux.CapturePane(pane)
 		if err != nil {
@@ -323,10 +343,13 @@ func (d *Daemon) paneChanging(pane string) (bool, error) {
 		}
 		if cur != prev {
 			changed++
+			if changed >= activityChangedNeeded {
+				return true, nil // early exit: a busy agent is detected fast
+			}
 		}
 		prev = cur
 	}
-	return changed >= activityChangedNeeded, nil
+	return false, nil
 }
 
 // sanitizeName maps a thread name to a tmux-safe session suffix. tmux session

@@ -21,9 +21,9 @@ func init() {
 			func(t *testing.T) { testTicketListByThread(t, loc) })
 		matrix.RegisterTest("ticket.needs-input", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTicketNeedsInput(t, loc) })
-		// ticket.send-prompt touches the agent send path; green for claude+pi
-		// (codex turn induction is non-deterministic — see thread.send.headful).
-		for _, a := range []matrix.Agent{matrix.Claude, matrix.Pi} {
+		// ticket.send-prompt touches the agent send path; all three agents now
+		// spawn deterministically (codex cwd pre-trusted at spawn).
+		for _, a := range matrix.AllAgents {
 			a := a
 			matrix.RegisterTest("ticket.send-prompt", a, loc,
 				func(t *testing.T) { testTicketSendPrompt(t, string(a), loc) })

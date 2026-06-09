@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // HasSession reports whether a session by this name exists.
@@ -52,6 +53,11 @@ func (s *Server) CreatePane(target, dir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// sendEnterDelay gives a TUI a moment to register typed text before the Enter
+// that submits it. Without it, some agents (codex) drop the input entirely — a
+// human never types and hits Enter in the same instant either.
+const sendEnterDelay = 250 * time.Millisecond
+
 // SendText sends literal text to target's pane. If enter is true, a trailing
 // Enter key is sent after (so it submits).
 func (s *Server) SendText(target, text string, enter bool) error {
@@ -62,6 +68,7 @@ func (s *Server) SendText(target, text string, enter bool) error {
 		return err
 	}
 	if enter {
+		time.Sleep(sendEnterDelay)
 		if _, err := s.run("send-keys", "-t", target, "Enter"); err != nil {
 			return err
 		}

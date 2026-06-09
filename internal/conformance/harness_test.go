@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,6 +105,10 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 		"SESH_HOME":        home,
 		"SESH_MACHINE":     machine,
 		"SESH_TMUX_SOCKET": socket,
+		// Isolated codex home so sesh's per-cwd trust writes (which suppress
+		// codex's directory-trust prompt) never touch the user's real ~/.codex.
+		// auth is symlinked so codex stays authenticated.
+		"SESH_CODEX_HOME": setupCodexHome(t, home),
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 
@@ -159,6 +164,25 @@ func newSSHSandbox(t *testing.T) *Sandbox {
 		exec.Command("tmux", "-L", socket, "kill-server").Run() //nolint:errcheck
 	})
 	return sb
+}
+
+// setupCodexHome makes an isolated CODEX_HOME under base with the user's codex
+// auth symlinked in, so codex stays authenticated but sesh's trust writes are
+// sandboxed. Skips the symlink if the user has no codex auth (codex cells then
+// fail loudly rather than silently, which is correct).
+func setupCodexHome(t *testing.T, base string) string {
+	t.Helper()
+	ch := filepath.Join(base, "codex-home")
+	if err := os.MkdirAll(ch, 0o700); err != nil {
+		t.Fatalf("setup codex home: %v", err)
+	}
+	if uh, err := os.UserHomeDir(); err == nil {
+		realAuth := filepath.Join(uh, ".codex", "auth.json")
+		if _, err := os.Stat(realAuth); err == nil {
+			os.Symlink(realAuth, filepath.Join(ch, "auth.json")) //nolint:errcheck
+		}
+	}
+	return ch
 }
 
 // startDaemon starts the sandbox's (target machine's) daemon directly and fails
@@ -242,6 +266,7 @@ func (sb *Sandbox) sendKeys(t *testing.T, pane, text string) {
 	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "-l", text); err != nil {
 		t.Fatalf("send-keys text: %v\n%s", err, out)
 	}
+	time.Sleep(250 * time.Millisecond) // let the TUI register the text before Enter (codex drops it otherwise)
 	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "Enter"); err != nil {
 		t.Fatalf("send-keys enter: %v\n%s", err, out)
 	}

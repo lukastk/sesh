@@ -125,4 +125,13 @@ keybindings snippet as docs — never runtime infrastructure.)
 Open detail: when a machine's work server has no sessions yet, `attach` fails — the supervisor
 retries with backoff until one exists (or optionally holds a placeholder shell). Decide during
 build; cover with a cell either way.
+
+Open detail (found live 2026-06-09): `master up` creates the master server with no `-f`, so it
+LOADS the user's base `~/.tmux.conf`. If that base sets app-specific options (Lukas's sets
+`status 2` for a second "sesh-current-status" line), the master inherits them — the empty
+second status line renders as a stray gray bar between the nested status bars. Fix options:
+(a) `master up` starts the server with `-f <minimal>` (or the passed `--tmux-conf`) so it does
+NOT inherit base quirks — cleanest, keeps "look" fully in myrig's conf; (b) sesh forces
+`status on` as part of the structural minimum. Leaning (a). Until then: `--tmux-conf` (which
+sets `status on`) fixes it, or `tmux -L <master> set -g status on`.
 ```

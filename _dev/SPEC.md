@@ -50,7 +50,10 @@ daemon/API     per-machine; single-writer-per-record + read replicas; HTTP+JSON 
 - On each machine, the agent/thread tmux server runs on socket **`mytmux`** (renamed from v1's `mysystem`). `mytmux` is *just a regular tmux server* — it carries no semantics of its own; sesh imposes meaning, not the socket name.
 - A separate socket **`mymastertmux`** can be started on any one machine. It holds the "master" view: **one window per machine**, each window SSH'd into that machine's `mytmux` server (exactly as the current master-tmux does). This is a *view*, not a registry.
 - The full address of any running process is **`(machine, socket, session, window, pane)`**.
-- **No session persistence.** When a machine reboots, all tmux sessions disappear, and that's fine. Thread *records* persist; their runtime (the session) is always re-derived. A thread record pointing at a session that no longer exists is not an error — it's a dead thread.
+- **No session persistence; records persist, runtime is re-derived.** This split is load-bearing, so state it plainly:
+  - **Thread *records* persist** — they live in the daemon's SQLite store and survive reboots.
+  - **Only the tmux *runtime* is ephemeral** — when a machine reboots, every tmux session disappears, and that is expected. The runtime (session/window/pane, liveness) is never stored; it is always re-derived live.
+  - **A record whose session is gone is reported `dead`, and is NEVER auto-deleted.** Pointing at a vanished session is not an error — it is just a dead thread, which can be `resume`d (revived on demand, §3) or explicitly dropped. Garbage-collecting dead records is always a deliberate user action (`delete`/`kill`), never automatic.
 
 ### Commands (the contracts)
 
@@ -94,12 +97,26 @@ Rule of thumb: any time a myrig function would need to *know something sesh know
 
 ### Stored schema (persistent)
 
-`thread { id, machine, session_name, cwd, agent_kind, name, tags[] }`
+`thread { id, machine, session_name, cwd, agent_kind, name, tags[], archived, agent_session_id }`
 Runtime-resolved (not stored): `pane`, `runtime_state`, liveness.
+
+- **`agent_session_id`** is the agent's *own* conversation id, captured at/after spawn (pi/claude are launched with a sesh-assigned id; codex mints its own on the first turn and is discovered after). It is what makes `resume` possible.
+- **The record is the durable thing; it persists in SQLite and is never auto-deleted** (see §2). A record outliving its tmux session is a `dead` thread, not garbage.
 
 ### Operations
 
-start (headed/headless), kill, send a message (headful: into the live pane; headless: as a turn), list, rename, tag. As v1, mutations route to the owning machine's daemon (single writer), which executes locally.
+start (headed/headless), send a message (headful → live pane; headless → a turn), list, **rename**, **tag**, and the lifecycle verbs that act on the *record* and/or the *runtime*:
+
+| verb | record | runtime (agent + tmux session) | use |
+|---|---|---|---|
+| **kill** | dropped | ended | be done with it entirely |
+| **delete** | dropped | left untouched | forget a (usually already-dead) record without killing anything |
+| **archive** | kept, hidden from the active list | untouched | park it — a keepable state, distinct from `dead` and from `deleted` |
+| **resume** | kept | **revived**: recreate the tmux session and relaunch the agent with `--resume <agent_session_id>` so the conversation continues | bring a dead **headed** thread back on demand |
+
+`resume` applies to headed threads. A **codex** thread that died *before its first turn* has no `agent_session_id` (codex cannot pre-assign one), so it legitimately cannot be resumed — this is a justified **N/A** edge, surfaced as an explicit error, never faked.
+
+As v1, mutations route to the owning machine's daemon (single writer), which executes locally; the TUI/CLI reach remote machines via `--machine` routing.
 
 ---
 

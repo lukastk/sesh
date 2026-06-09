@@ -52,6 +52,23 @@ func (c *Client) ThreadDelete(ctx context.Context, id string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id}, nil)
 }
 
+// ThreadGrid fetches GET /v1/threads/grid — every thread with live status.
+func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bool) (api.ThreadGridResponse, error) {
+	var out api.ThreadGridResponse
+	q := []string{}
+	if includeArchived {
+		q = append(q, "archived=1")
+	}
+	if allMachines {
+		q = append(q, "all-machines=1")
+	}
+	u := "http://unix/v1/threads/grid"
+	if len(q) > 0 {
+		u += "?" + strings.Join(q, "&")
+	}
+	return out, c.getJSON(ctx, u, &out)
+}
+
 // ThreadResume posts POST /v1/threads/resume (revive a dead headed thread).
 func (c *Client) ThreadResume(ctx context.Context, id string) (api.ThreadResponse, error) {
 	var out api.ThreadResponse

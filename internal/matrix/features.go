@@ -94,6 +94,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "thread.grid",
+		Description: "live status grid: every thread with its real activity/attachment, concurrently; mesh fan-out for remote (the TUI's data source)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

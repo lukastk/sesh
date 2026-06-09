@@ -23,6 +23,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesThreads(mux)
 	d.routesThreadOps(mux)
 	d.routesResume(mux)
+	d.routesGrid(mux)
 	d.routesHeadless(mux)
 	d.routesTickets(mux)
 	return mux

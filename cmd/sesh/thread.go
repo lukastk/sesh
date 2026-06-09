@@ -49,6 +49,8 @@ func runThread(args []string) error {
 		return threadDelete(cfg, rest)
 	case "resume":
 		return threadResume(cfg, rest)
+	case "grid":
+		return threadGrid(cfg, rest)
 	default:
 		return fmt.Errorf("unknown thread subcommand %q", sub)
 	}
@@ -156,6 +158,37 @@ func threadResume(cfg config.Config, args []string) error {
 		return emitJSON(resp.Thread)
 	}
 	fmt.Printf("resumed %s (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
+	return nil
+}
+
+func threadGrid(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("grid", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit JSON (one row per line)")
+	archived := fs.Bool("archived", false, "include archived threads")
+	allMachines := fs.Bool("all-machines", false, "fan out across the mesh")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	c := client.New(cfg.SocketPath())
+	resp, err := c.ThreadGrid(context.Background(), *archived, *allMachines)
+	if err != nil {
+		return err
+	}
+	for _, m := range resp.Unreachable {
+		fmt.Fprintf(os.Stderr, "warning: peer %s unreachable\n", m)
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		for _, row := range resp.Rows {
+			if err := enc.Encode(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, row := range resp.Rows {
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, row.Machine, row.AgentKind, row.Name, row.ID)
+	}
 	return nil
 }
 

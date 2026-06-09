@@ -142,6 +142,25 @@ type ThreadStatusResponse struct {
 // idle (waiting) regardless of whether anyone is currently attached.
 func (s ThreadStatusResponse) NeedsInput() bool { return s.Activity == ActivityWaiting }
 
+// ThreadRow is a thread plus its live runtime status — the unit the TUI grid
+// renders. The status is computed live (never stored).
+type ThreadRow struct {
+	Thread
+	Activity   Activity   `json:"activity"`
+	Attachment Attachment `json:"attachment"`
+}
+
+// NeedsInput is the derived needs-input view for a row (activity == waiting).
+func (r ThreadRow) NeedsInput() bool { return r.Activity == ActivityWaiting }
+
+// ThreadGridResponse is returned by GET /v1/threads/grid: every thread with its
+// live status, optionally fanned out across the mesh.
+type ThreadGridResponse struct {
+	Schema      int         `json:"schema"`
+	Rows        []ThreadRow `json:"rows"`
+	Unreachable []string    `json:"unreachable,omitempty"`
+}
+
 // HeadlessReplyResponse is returned by GET /v1/threads/headless-reply: whether a
 // turn is still in flight, and the last completed reply (if any).
 type HeadlessReplyResponse struct {

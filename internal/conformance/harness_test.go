@@ -113,7 +113,7 @@ func newSandbox(t *testing.T, loc matrix.Locality) *Sandbox {
 		// Isolated codex home so sesh's per-cwd trust writes (which suppress
 		// codex's directory-trust prompt) never touch the user's real ~/.codex.
 		// auth is symlinked so codex stays authenticated.
-		"SESH_CODEX_HOME": setupCodexHome(t, home),
+		"SESH_CODEX_HOME": setupCodexHome(t),
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 
@@ -181,16 +181,30 @@ func newSSHSandbox(t *testing.T) *Sandbox {
 	return sb
 }
 
-// setupCodexHome makes an isolated CODEX_HOME under base with the user's codex
-// auth symlinked in, so codex stays authenticated but sesh's trust writes are
-// sandboxed. Skips the symlink if the user has no codex auth (codex cells then
-// fail loudly rather than silently, which is correct).
-func setupCodexHome(t *testing.T, base string) string {
+// setupCodexHome makes an isolated CODEX_HOME with the user's codex auth symlinked
+// in, so codex stays authenticated but sesh's trust writes are sandboxed. Skips the
+// symlink if the user has no codex auth (codex cells then fail loudly rather than
+// silently, which is correct).
+//
+// It is deliberately NOT a subdir of the sandbox's t.TempDir: codex spawns
+// background children (plugin clones) that keep writing into CODEX_HOME/.tmp as the
+// test ends, which races t.TempDir's automatic RemoveAll ("directory not empty").
+// Instead it is its own dir with a RETRYING cleanup, registered before the sandbox
+// teardown so it runs AFTER the daemon/tmux (and thus codex) are killed.
+func setupCodexHome(t *testing.T) string {
 	t.Helper()
-	ch := filepath.Join(base, "codex-home")
-	if err := os.MkdirAll(ch, 0o700); err != nil {
+	ch, err := os.MkdirTemp("", "sesh-codex-home-")
+	if err != nil {
 		t.Fatalf("setup codex home: %v", err)
 	}
+	t.Cleanup(func() {
+		for i := 0; i < 20; i++ {
+			if os.RemoveAll(ch) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond) // a codex child is still writing; retry
+		}
+	})
 	if uh, err := os.UserHomeDir(); err == nil {
 		realAuth := filepath.Join(uh, ".codex", "auth.json")
 		if _, err := os.Stat(realAuth); err == nil {

@@ -57,13 +57,18 @@ UNCOMMITTED in `~/mysetup/myrig` (Lukas reviews/commits/provisions; never commit
   `tmux.master.conf` (sources base, prefix C-a, status-left=#W, status on + re-source
   windows-format, s/a→tui popup, K=kill-window, P=clipboard paste, unbinds
   A/S/Tab/R/</>/,/./o/O/L/c; mms-on-machine pick-machine popups NOT ported — thin by design).
-- **`sesh-v2.sh.jinja`** grew: `mms2-start [--no-attach]` (master up --tmux-conf + attach),
-  `mms2-attach`, `mms2-kill`, `sst2`, `seshv2-current-status` (pane→thread via env-injected
+- **`sesh-v2.sh.jinja`** grew (naming per Lukas: **`mt-*` = master-tmux cockpit commands**,
+  `seshv2-*` = sesh-side helpers): `mt-start [--no-attach]` (master up --tmux-conf + attach),
+  `mt-attach`, `mt-kill`, `sst2`, `seshv2-current-status` (pane→thread via env-injected
   `TMUX=<sock>, TMUX_PANE=<pane>` + `tmux current --json`, fields via `thread list --json
   --archived` + jq), `seshv2-archive-here` (toggle), clipboard cluster
-  (`_seshv2_clip_get_image/text` copied from v1 so v1 deletion can't break it;
-  `seshv2-send-clipboard <machine>` → `tmux stage-file --to`; `_seshv2_send_clipboard_and_paste`
-  → master window name = machine → send-keys staged path into the master pane).
+  (`_mt_clip_get_image/text` + `mt-set-clipboard` copied from v1 so v1 deletion can't break
+  it; `mt-send-clipboard <machine>` → `tmux stage-file --to`; `_mt_send_clipboard_and_paste`
+  → master window name = machine → send-keys staged path into the master pane;
+  `mt-copy-to-master [--to <machine>] <file>` → ssh-target + remote `mt-set-clipboard` —
+  v1's no-`--to` auto-detect of attached masters relied on marker files written by
+  mms-remote-entrypoint, which the v2 Go supervisor doesn't write, so no-`--to` is an fzf
+  picker over $MYRIG_MACHINES instead; my_alias groups `-g mt` / `-g sesh2`).
 - **Wiring**: supervisor ini adds `SESH_TMUX_CONF=~/.sesh-v2/myrig/tmux.work.conf`;
   peers.json.jinja adds per-peer `"tmux_conf"` (peer's OWN home path).
 VERIFIED LIVE on mymain: both confs load on isolated sockets (bindings + format asserted);
@@ -71,10 +76,12 @@ status line + tag + archive-toggle round-trip on a real claude thread (created�
 `stage-file --to macbook` landed + read back over the real mesh. NOT testable here:
 clipboard grab (headless box, no X) — straight port of working v1 code.
 ACTIVATION (after Lukas commits + provisions): daemon restart picks up SESH_TMUX_CONF; then
-`tmux -L sesh-v2 kill-server` (work conf applies at server START) + `mms2-kill && mms2-start`.
+`tmux -L sesh-v2 kill-server` (work conf applies at server START) + `mt-kill && mt-start`.
 Known gaps (flagged, not blocking): no per-window reconnect after prefix+K (master up is
 loudly non-idempotent — needs `master window add` or idempotent up, a sesh change);
-no v2 `mms-copy-to-master` (depended on v1 client marker files); no nav history (L unbound).
+`mt-copy-to-master` has no attached-master auto-detect (needs sesh support: the master
+window supervisor registering its origin machine with the remote daemon — backlog
+candidate); no nav history (L unbound).
 
 ### Mesh / live cross-machine state (branch mesh-replicated-state) — the killer feature
 Design in `_dev/MESH.md`. Three decoupled loops:

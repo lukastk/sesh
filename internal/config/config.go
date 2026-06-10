@@ -28,6 +28,12 @@ type Config struct {
 	// starts with — so sesh's tmux can carry its own UI (e.g. the per-thread status
 	// bar) separate from the user's default ~/.tmux.conf. Empty = tmux default.
 	TmuxConf string
+	// MasterSelfheal (default ON) runs the daemon's cockpit-convergence loop: while
+	// a master server is up, every machine that is CONNECTED (self + mesh-reachable
+	// peers) gets a window — a killed window comes back, and a newly-reachable
+	// machine gains one. SESH_MASTER_SELFHEAL=off disables it (test isolation for
+	// the manual `master ensure` cell; production leaves it on).
+	MasterSelfheal bool
 	// TicketOwner is the canonical always-on machine that owns the ticket store
 	// (the single writer). When set and not this machine, ticket commands route
 	// to the owner. Empty = this machine owns its own tickets (no mesh).
@@ -92,12 +98,19 @@ func Load() Config {
 		TmuxSocket:   socket,
 		MasterSocket: masterSocket,
 		TmuxConf:     os.Getenv("SESH_TMUX_CONF"),
-		TicketOwner:  os.Getenv("SESH_TICKET_OWNER"),
-		CodexHome:    os.Getenv("SESH_CODEX_HOME"),
-		APIAddr:      os.Getenv("SESH_API_ADDR"),
-		APIToken:     resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
-		RemoteAddr:   os.Getenv("SESH_REMOTE"),
-		RemoteToken:  resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		MasterSelfheal: func() bool {
+			switch os.Getenv("SESH_MASTER_SELFHEAL") {
+			case "off", "0", "false":
+				return false
+			}
+			return true
+		}(),
+		TicketOwner: os.Getenv("SESH_TICKET_OWNER"),
+		CodexHome:   os.Getenv("SESH_CODEX_HOME"),
+		APIAddr:     os.Getenv("SESH_API_ADDR"),
+		APIToken:    resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		RemoteAddr:  os.Getenv("SESH_REMOTE"),
+		RemoteToken: resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
 	}
 }
 

@@ -186,6 +186,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "master.selfheal",
+		Description: "the daemon's cockpit-convergence loop keeps one window per CONNECTED machine: a killed window comes back by itself (real ssh re-attach), an unreachable machine never gets a window forced, and a deliberately downed master stays down",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "master.ensure",
 		Description: "`sesh master ensure` converges the master to one-window-per-machine: recreates ONLY missing machine windows (the prefix+K recovery) with a REAL re-attach, never touches existing windows, no-ops when complete, and builds the whole master when down",
 		Localities:  []Locality{Remote},

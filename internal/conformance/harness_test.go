@@ -97,9 +97,10 @@ type Sandbox struct {
 
 // sandboxConfig collects newSandbox options.
 type sandboxConfig struct {
-	apiAddr  string
-	apiToken string
-	tmuxConf string
+	apiAddr     string
+	apiToken    string
+	tmuxConf    string
+	selfhealOff bool
 }
 
 type sandboxOpt func(*sandboxConfig)
@@ -114,6 +115,13 @@ func withAPI(addr, token string) sandboxOpt {
 // tmux server it spawns sessions on sources that `-f` config.
 func withTmuxConf(path string) sandboxOpt {
 	return func(c *sandboxConfig) { c.tmuxConf = path }
+}
+
+// withSelfhealOff starts the sandbox's daemon with the master self-heal loop
+// disabled — ONLY for cells that test the MANUAL `master ensure` command, whose
+// kill-window-then-ensure sequencing the background healer would race.
+func withSelfhealOff() sandboxOpt {
+	return func(c *sandboxConfig) { c.selfhealOff = true }
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
@@ -152,6 +160,9 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	}
 	if sc.tmuxConf != "" {
 		env["SESH_TMUX_CONF"] = sc.tmuxConf
+	}
+	if sc.selfhealOff {
+		env["SESH_MASTER_SELFHEAL"] = "off"
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 

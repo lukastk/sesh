@@ -23,7 +23,9 @@ func testMasterEnsure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	self, peer := setupMasterPair(t)
+	// Self-heal off: this cell tests the MANUAL command; the background healer
+	// would race the kill-window-then-ensure sequencing (it has its own cell).
+	self, peer := setupMasterPair(t, withSelfhealOff())
 	if _, stderr, err := self.Runner.Run(t, "master", "up", "--machines", self.Machine+","+peer.Machine); err != nil {
 		t.Fatalf("master up: %v\n%s", err, stderr)
 	}

@@ -7,7 +7,9 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -272,28 +274,45 @@ func (m Model) navSelected() tea.Cmd {
 	useInClient := local && onWorkSocket(m.tmux, m.tmuxSocket)
 	return func() tea.Msg {
 		sessionName := row.SessionName
-		// Headless or dead => no live session to enter. Promote/resume first (local only).
+		// Headless or dead => no live session to enter. Promote/resume first: on the
+		// local daemon directly, or ROUTED to the owning machine (`--machine`, the
+		// same mesh routing the CLI uses) for a remote thread — then enter.
 		if row.Headless || row.Activity == api.ActivityDead {
 			verb := "resume"
 			if row.Headless {
 				verb = "promote"
 			}
-			if !local {
-				return actionMsg{err: fmt.Errorf("%q is on %s — %s it there first (cross-machine %s isn't supported from here)", row.Name, row.Machine, verb, verb)}
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			var resp api.ThreadResponse
-			var err error
-			if row.Headless {
-				resp, err = m.client.ThreadHeadful(ctx, row.ID)
+			if local {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				var resp api.ThreadResponse
+				var err error
+				if row.Headless {
+					resp, err = m.client.ThreadHeadful(ctx, row.ID)
+				} else {
+					resp, err = m.client.ThreadResume(ctx, row.ID)
+				}
+				if err != nil {
+					return actionMsg{err: fmt.Errorf("%s %q: %w", verb, row.Name, err)}
+				}
+				sessionName = resp.Thread.SessionName
 			} else {
-				resp, err = m.client.ThreadResume(ctx, row.ID)
+				sub := "resume"
+				if row.Headless {
+					sub = "headful"
+				}
+				cmd := exec.Command(bin, "thread", sub, "--id", row.ID, "--machine", row.Machine)
+				cmd.Env = append(os.Environ(), env...)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return actionMsg{err: fmt.Errorf("%s %q on %s: %v: %s", verb, row.Name, row.Machine, err, strings.TrimSpace(string(out)))}
+				}
+				// Promotion/resume can mint the session name — re-resolve it on the owner.
+				lout, err := routedSessionName(bin, env, row.Machine, row.ID)
+				if err != nil {
+					return actionMsg{err: fmt.Errorf("%s %q: re-resolve session: %w", verb, row.Name, err)}
+				}
+				sessionName = lout
 			}
-			if err != nil {
-				return actionMsg{err: fmt.Errorf("%s %q: %w", verb, row.Name, err)}
-			}
-			sessionName = resp.Thread.SessionName
 		}
 		if sessionName == "" {
 			return actionMsg{err: fmt.Errorf("enter %q: thread has no session", row.Name)}
@@ -320,6 +339,32 @@ func (m Model) navSelected() tea.Cmd {
 		}
 		return navDoneMsg{}
 	}
+}
+
+// routedSessionName fetches a thread's session name from its owning machine via the
+// routed CLI (`thread list --json --machine M`) — used after a routed promote/resume,
+// which can mint the session name on the owner.
+func routedSessionName(bin string, env []string, machine, id string) (string, error) {
+	cmd := exec.Command(bin, "thread", "list", "--json", "--archived", "--machine", machine)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for dec.More() {
+		var th api.Thread
+		if err := dec.Decode(&th); err != nil {
+			return "", err
+		}
+		if th.ID == id {
+			if th.SessionName == "" {
+				return "", fmt.Errorf("thread %s has no session name on %s", id, machine)
+			}
+			return th.SessionName, nil
+		}
+	}
+	return "", fmt.Errorf("thread %s not found on %s", id, machine)
 }
 
 // onWorkSocket reports whether the $TMUX value `tmux` shows we're a client on tmux

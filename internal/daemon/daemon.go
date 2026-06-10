@@ -47,6 +47,9 @@ type Daemon struct {
 	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
 	// the cross-machine view (GET /v1/mesh) is a local read.
 	mesh *meshSync
+	// mmaint converges the master cockpit (one window per connected machine);
+	// nil when SESH_MASTER_SELFHEAL=off.
+	mmaint *masterMaint
 
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
@@ -97,6 +100,9 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
+	if cfg.MasterSelfheal {
+		d.mmaint = newMasterMaint(d)
+	}
 	d.srv = &http.Server{Handler: d.routes()}
 	return d, nil
 }
@@ -112,10 +118,16 @@ func (d *Daemon) Serve() error {
 	d.started = time.Now()
 	d.maint.start() // begin keeping local thread state fresh in the background
 	d.mesh.start()  // begin syncing peers' snapshots into the local cache
+	if d.mmaint != nil {
+		d.mmaint.start() // converge the master cockpit to one window per connected machine
+	}
 
 	// Optional network API (remote clients / mobile). A bind failure is fatal — do
 	// not silently fall back to unix-only when the user asked to expose the API.
 	if err := d.startAPI(); err != nil {
+		if d.mmaint != nil {
+			d.mmaint.stopAndWait()
+		}
 		d.mesh.stopAndWait()
 		d.maint.stopAndWait()
 		ln.Close()
@@ -147,6 +159,9 @@ func (d *Daemon) Serve() error {
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopAPI(ctx)
+	if d.mmaint != nil {
+		d.mmaint.stopAndWait()
+	}
 	d.mesh.stopAndWait()
 	d.maint.stopAndWait()
 	srvErr := d.srv.Shutdown(ctx)

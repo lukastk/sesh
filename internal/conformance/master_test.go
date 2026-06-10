@@ -58,10 +58,10 @@ func masterSessionNamesOn(socket string) []string {
 // setupMasterPair starts a self daemon + a peer daemon (ssh-localhost), registers the
 // peer (with its work socket, for the master attach), and puts a real headed thread on
 // each so each work server has a session to attach into. Returns (self, peer).
-func setupMasterPair(t *testing.T) (self, peer *Sandbox) {
+func setupMasterPair(t *testing.T, selfOpts ...sandboxOpt) (self, peer *Sandbox) {
 	t.Helper()
 	ensureSSHLocalhost(t)
-	self = newSandbox(t, matrix.Local)
+	self = newSandbox(t, matrix.Local, selfOpts...)
 	self.startDaemon(t)
 	peer = newSandbox(t, matrix.Local)
 	peer.startDaemon(t)

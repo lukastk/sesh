@@ -83,6 +83,11 @@ type Model struct {
 	uuidPopup bool
 	note      string
 
+	// columns is the visible column set (validated names; see columns.go).
+	// userHome powers the CWD column's ~-relative display.
+	columns  []string
+	userHome string
+
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
 	// running sesh binary; tests override both.
@@ -127,7 +132,9 @@ func New(socketPath string, allMachines bool) Model {
 	if err != nil {
 		bin = "sesh"
 	}
-	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin, tmux: os.Getenv("TMUX")}
+	home, _ := os.UserHomeDir()
+	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
+		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home}
 }
 
 // WithTmux overrides the captured $TMUX value (tests set it to drive the Enter path
@@ -686,30 +693,19 @@ func (m Model) View() string {
 		}
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s█", label, m.promptRow.Name, string(m.promptInput))) + "\n")
 	}
-	idHdr, idFmt := "", "%.0s"
-	if m.showID {
-		idHdr, idFmt = fmt.Sprintf("%-9s", "ID"), "%-9s"
-	}
-	b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s %-12s "+idFmt+"%-7s %-8s %-4s %-20s %s", "HB", "MACHINE", idHdr, "AGENT", "HEAD", "BUSY", "NAME", "TAGS")) + "\n")
+	cols := m.activeColumns()
+	widths := m.colWidths(cols)
+	b.WriteString(styleHeader.Render("  HB  "+m.renderHeader(cols, widths)) + "\n")
 
 	if len(m.rows) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
 	}
 	for i, row := range m.rows {
-		tags := ""
-		if len(row.Tags) > 0 {
-			tags = "[" + strings.Join(row.Tags, ",") + "]"
-		}
 		att := " "
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		id := row.ID
-		if len(id) > 8 {
-			id = id[:8]
-		}
-		line := fmt.Sprintf("%s%s%s %-12s "+idFmt+"%-7s %-8s %-4s %-20s %s",
-			HeadGlyph(row), BusyGlyph(row), att, trunc(row.Machine, 12), id, trunc(row.AgentKind, 7), string(row.Head), string(row.Busy), trunc(row.Name, 20), tags)
+		line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row)
 		if i == m.cursor {
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {

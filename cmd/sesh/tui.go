@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,11 +21,29 @@ func runTUI(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	allMachines := fs.Bool("all-machines", false, "show threads from every machine in the mesh")
 	cursor := fs.Bool("cursor", false, "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)")
+	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	cfg := config.Load()
-	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket)
+	// Column set precedence: --columns flag > [tui] columns config > built-in
+	// default. Unknown names are loud at every level.
+	tcfg, err := config.LoadTUI(cfg.Home)
+	if err != nil {
+		return err
+	}
+	var wantCols []string
+	switch {
+	case *columnsFlag != "":
+		wantCols = strings.Split(*columnsFlag, ",")
+	case tcfg != nil && len(tcfg.Columns) > 0:
+		wantCols = tcfg.Columns
+	}
+	cols, err := tui.ResolveColumns(wantCols)
+	if err != nil {
+		return fmt.Errorf("tui columns: %w", err)
+	}
+	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols)
 	if *cursor {
 		// Which pane was the user on? From a popup the only honest carrier is the
 		// binding's $SESH_TUI_PANE (the popup's own $TMUX_PANE is the popup); from a

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/config"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lukastk/sesh/internal/matrix"
@@ -28,6 +30,7 @@ func init() {
 	registerTUIClaim("id-toggle", claimIDToggle)
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
 	registerTUIClaim("uuid-popup-copy", claimUUIDPopupCopy)
+	registerTUIClaim("columns-config", claimColumnsConfig)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -223,8 +226,12 @@ func claimCursorWrap(t *testing.T) {
 	sb.newHeadlessThread(t, "pi", "zzz-last")
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	m, _ = renderUntilRow(t, m, "zzz-last")
-	if len(m.Rows()) != 2 {
+	// Wait for BOTH rows (waiting on one races the maintainer's publish of the
+	// other — an early lesson: this exact race flaked as a one-off twice).
+	if !waitUntil(25*time.Second, func() bool {
+		m, _ = render(t, m)
+		return len(m.Rows()) == 2
+	}) {
 		t.Fatalf("want 2 rows, got %d", len(m.Rows()))
 	}
 	if m.Cursor() != 0 {
@@ -344,4 +351,67 @@ func claimUUIDPopupCopy(t *testing.T) {
 	if strings.Contains(m.View(), "c to copy") {
 		t.Errorf("popup did not close on a non-c key")
 	}
+}
+
+// claimColumnsConfig: the column system against a REAL daemon — the default
+// set hides HEAD/BUSY text (glyphs carry state), a [tui] columns config default
+// is honored end-to-end (ResolveColumns over the loaded config), an override
+// set renders exactly those columns, and full-width NAME shows a long real
+// name untruncated.
+func claimColumnsConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	longName := "a-very-long-thread-name-for-column-sizing"
+	th := sb.newHeadlessThread(t, "pi", longName)
+
+	// Default set: HEAD/BUSY text columns absent, NAME full-width (untruncated).
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m, view := renderUntilRowView(t, m, longName)
+	if strings.Contains(view, "HEAD") || strings.Contains(view, "BUSY") {
+		t.Errorf("default view shows HEAD/BUSY text columns:\n%s", view)
+	}
+	if !strings.Contains(view, longName) {
+		t.Errorf("full-width NAME truncated the real name:\n%s", view)
+	}
+
+	// A [tui] columns config default flows through LoadTUI -> ResolveColumns.
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"),
+		[]byte("[tui]\ncolumns = [\"name\", \"head\", \"busy\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tcfg, err := config.LoadTUI(sb.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err := tui.ResolveColumns(tcfg.Columns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols)
+	m2, view2 := renderUntilRowView(t, m2, longName)
+	if !strings.Contains(view2, "HEAD") || !strings.Contains(view2, "BUSY") {
+		t.Errorf("configured HEAD/BUSY columns not rendered:\n%s", view2)
+	}
+	if strings.Contains(view2, "MACHINE") {
+		t.Errorf("non-configured MACHINE column rendered:\n%s", view2)
+	}
+	if !strings.Contains(rowLine(view2, longName), "headful") && !strings.Contains(rowLine(view2, longName), "headless") {
+		t.Errorf("HEAD column cell missing the real axis value: %q", rowLine(view2, longName))
+	}
+
+	// Unknown names stay loud.
+	if _, err := tui.ResolveColumns([]string{"nope"}); err == nil {
+		t.Errorf("unknown column resolved silently")
+	}
+	_ = th
+}
+
+// renderUntilRowView is renderUntilRow but also returns the final rendered view.
+func renderUntilRowView(t *testing.T, m tui.Model, name string) (tui.Model, string) {
+	t.Helper()
+	m, _ = renderUntilRow(t, m, name)
+	return m, m.View()
 }

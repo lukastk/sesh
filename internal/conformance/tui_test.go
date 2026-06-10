@@ -43,6 +43,7 @@ var declaredTUIClaims = []string{
 	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
 	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
+	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME never truncates
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

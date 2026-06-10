@@ -12,7 +12,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 
 ## Checklist (dependency order)
 
-- [ ] **A1** TUI column system + `[tui]` config defaults
+- [x] **A1** TUI column system + `[tui]` config defaults
 - [ ] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
 - [ ] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
 - [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
@@ -57,6 +57,15 @@ TAGS (+CWD once A2 lands). HEAD/BUSY available, off by default. Rule columns
 arrive with A4's predicates.
 **Verify:** TUI claims: column defaults render, flag/config overrides render,
 unknown name loud. Unit tests for layout.
+**SHIPPED 2026-06-10** — research note: v1's colSpec registry + the full-width
+(size-to-longest-cell, never truncate) vs fixed (truncate) split ported; v1's
+dyn/anchor machinery deferred to A4 with the predicates it imports; seg
+rendering + h-scroll deferred to A3 (match highlighting). v2 default set
+machine/agent/name/cwd/tags (HEAD/BUSY/ID off per Lukas; `i` joins ID). CWD
+column ~-relative until A2. `--columns` flag > `[tui] columns` > default, loud
+at every level. claims: columns-config; units in columns_test.go. BONUS FIX:
+default SESH_HOME was ~/.sesh (the LIVE v1 home — a bare v2 invocation read
+v1's config/store!) → now ~/.sesh-v2.
 
 ### A2. `[[cwd_label]]` rules + CWD column + `sesh cwd-label`
 **Why:** the CWD column should show transformed, readable paths.

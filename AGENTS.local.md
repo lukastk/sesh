@@ -1,5 +1,46 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)
+tmux CANNOT map a popup pty, a pane pty, or a piped subprocess back to the attached
+client that triggered it. `display-message -p '#{client_name}'` from any such context
+is an AMBIENT pick — arbitrary under multiple clients (observed: it moved a master
+supervisor's attach instead of the presser; it matched the presser in clean
+experiments only by activity-luck, which is why the old cells passed). Also (tmux
+3.5a): `display-popup` does NOT format-expand its shell-command OR -e values; the ONLY
+expansion carrying the pressing client is a BINDING's own format context — i.e.
+`run-shell "tmux display-popup -c '#{client_name}' -E '... SESH_NAV_CLIENT=#{client_name} ...'"`.
+Hence the carrier contract (sesh commit on top of caa59fd): `nav --in-client` resolves
+the client as (1) --client, (2) $SESH_NAV_CLIENT (baked in by the myrig popup
+bindings), (3) $TMUX_PANE's session iff it has EXACTLY ONE client, else LOUD ERROR —
+never an ambient guess; the switch is a Go-side `switch-client -c`. The TUI gets the
+client via runTUI←$SESH_NAV_CLIENT→WithClient→`--client`. Master-path nav targets the
+marker client (master-client.<origin> = "<tty> <pid>" written by each master window's
+attach, liveness-checked by name+pid). Cells: tmux.nav-in-client(-multi) test the full
+contract incl. carrier-less-ambiguous = loud + nobody moves; tmux.nav-master-multi;
+TUI claims action-nav-quits + action-nav-in-client. `sesh master watchers` = live
+markers ("who watches me") → mt-copy-to-master auto-detect.
+
+### Live full-feature drive 2026-06-10 (tui-tmux-testing rig, both machines) — ALL PASS
+Work server: status line; TUI enter on alive/dead(resume)/headless(promote) — presser
+switches, supervisors untouched, popup closes; picker a/A (+type-filter); Tab archive
+toggle (was passing LITERAL #{pane_id} — display-popup no-expansion — fixed via
+run-shell); t; guarded K. Master: a/A picker + s TUI (master path: window flip + ONLY
+the origin's marker client moves, verified mymain→macbook AND on macbook's own master
+= the original user repro); t; P (loud clipboard error stays 3s); native n/p/w; K
+disconnect. Plain shell: mt-enter-session→attach, sst2 Enter→attach, mt-attach.
+mt-copy-to-master --to self short-circuit (loud xclip/no-display on headless) +
+no-flag auto-detect offered exactly the live watchers. NOT tested (user instruction):
+actual clipboard writes on macbook. Test-harness lessons: keys racing a slow popup
+stack a second popup (overlapping navs — chaos); a tmux client whose session is
+killed with detach-on-destroy=on RECONNECTS via the supervisor (plain attach → most
+recent session); in zsh, ALWAYS quote `-t "=name"` (unquoted =word does PATH lookup).
+
+### macbook residual state (pending, not blocking)
+Its WORK server predates the conf wiring (3 live user threads — q/test/mac-shell — not
+mine to kill): new work conf + bindings were `source-file`d onto the RUNNING server
+(status line + carrier bindings live), but a true `-f` start applies only on its next
+cycle. macstudio: still no v2 (master windows exclude it via --machines).
+
 ## Build status: ALL GREEN
 
 Feature matrix: **120 cells** (added `master.*`, `tmux.work-conf`, `tmux.nav-in-client-multi`,

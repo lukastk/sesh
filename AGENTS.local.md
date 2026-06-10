@@ -100,6 +100,18 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
+### Configurable SESSION NAMING (2026-06-10, per Lukas; deployed)
+`[[session_name]]` rules in `<SESH_HOME>/config.toml` (NEW file — sesh mechanism, myrig
+owns the policy at `home/.sesh-v2/config.toml`): first-match cwd regex (matched
+~-relative, portable) → template over named groups + {tid8}/{tid}/{name}/{cwd};
+output sanitized for tmux (':' '.' → '_'; spaces/slashes/<> ARE valid session names —
+verified). Applied at headed spawn + revival minting; no match → default sesh_<name>.
+LOUD: broken file/regex/placeholder/empty refuses the daemon or spawn. Lukas's rules:
+box root `{boxname} <{boxid}> ({tid8})`, box subdir `{boxname}/{rel} <…>`, mysetup
+`mysetup/{rel} ({tid8})`, else `{path} ({tid8})`. Cell `thread.session-name` (Local) +
+unit tests; live-verified all four rules on mymain. Daemon restart needed after config
+edits. Dep added: BurntSushi/toml.
+
 ### macbook residual state (pending, not blocking)
 Its WORK server predates the conf wiring (3 live user threads — q/test/mac-shell — not
 mine to kill): new work conf + bindings were `source-file`d onto the RUNNING server

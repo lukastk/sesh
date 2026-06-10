@@ -42,6 +42,8 @@ func runThread(args []string) error {
 		return threadRename(cfg, rest)
 	case "info":
 		return runInfo(cfg, rest)
+	case "notify":
+		return threadNotify(cfg, rest)
 	case "reparent":
 		return threadReparent(cfg, rest)
 	case "tag":
@@ -541,5 +543,33 @@ func threadReparent(cfg config.Config, args []string) error {
 	} else {
 		fmt.Printf("%s -> child of %s\n", rid, newParent)
 	}
+	return nil
+}
+
+// threadNotify toggles a thread's notification gate (--on | --off).
+func threadNotify(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("notify", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	on := fs.Bool("on", false, "enable notifications")
+	off := fs.Bool("off", false, "disable notifications")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *on == *off {
+		return errors.New("thread notify: exactly one of --on or --off is required")
+	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	c := daemonClient(cfg)
+	if err := c.ThreadNotify(context.Background(), rid, *on); err != nil {
+		return err
+	}
+	state := "off"
+	if *on {
+		state = "on"
+	}
+	fmt.Printf("notifications %s for %s\n", state, rid)
 	return nil
 }

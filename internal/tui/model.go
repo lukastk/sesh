@@ -409,6 +409,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "i":
 		m.showID = !m.showID
+	case "n":
+		return m, m.notifySelected()
 	case "y":
 		if _, ok := m.Selected(); ok {
 			m.uuidPopup = true
@@ -665,6 +667,20 @@ func (m Model) deleteSelected() tea.Cmd {
 	}
 }
 
+// notifySelected TOGGLES the selected thread's notification gate.
+func (m Model) notifySelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return actionMsg{err: c.ThreadNotify(ctx, row.ID, !row.Notify)}
+	}
+}
+
 // archiveSelected TOGGLES the selected thread's archived state (archive in the
 // active view, unarchive in the archived/all views — the row knows which).
 func (m Model) archiveSelected() tea.Cmd {
@@ -815,9 +831,9 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	default:
-		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	}
 	return b.String()
 }

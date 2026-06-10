@@ -37,6 +37,7 @@ func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req 
 		CreatedAtUnix:  time.Now().Unix(),
 		AgentSessionID: agentSessionID,
 		Parent:         req.Parent,
+		Notify:         d.defaults.NotifyDefault(),
 		// HeadlessStarted stays false: the conversation begins on the first turn
 		// (codex mints its session id there; claude/pi create from the pre-assigned id).
 	}

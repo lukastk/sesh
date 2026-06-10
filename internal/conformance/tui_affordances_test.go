@@ -32,6 +32,7 @@ func init() {
 	registerTUIClaim("uuid-popup-copy", claimUUIDPopupCopy)
 	registerTUIClaim("columns-config", claimColumnsConfig)
 	registerTUIClaim("cwd-label-column", claimCwdLabelColumn)
+	registerTUIClaim("notify-toggle", claimNotifyToggle)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -473,6 +474,36 @@ func claimCwdLabelColumn(t *testing.T) {
 	m2, _ = renderUntilRow(t, m2, "labelme")
 	if !strings.Contains(rowLine(m2.View(), "labelme"), boxDir) {
 		t.Errorf("fallback CWD column missing the real path: %q", rowLine(m2.View(), "labelme"))
+	}
+	_ = th
+}
+
+// claimNotifyToggle: `n` really flips the selected thread's notify gate on the
+// daemon, and the NTF column renders the muted state.
+func claimNotifyToggle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "muteme")
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m, _ = renderUntilRow(t, m, "muteme")
+	m = runKey(t, m, "n")
+
+	if threadByName(t, sb, "muteme").Notify {
+		t.Fatalf("n did not flip the gate off on the daemon")
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		m, _ = render(t, m)
+		return strings.Contains(rowLine(m.View(), "muteme"), "off")
+	}) {
+		t.Errorf("NTF column never rendered the muted state: %q", rowLine(m.View(), "muteme"))
+	}
+	m = runKey(t, m, "n")
+	if !threadByName(t, sb, "muteme").Notify {
+		t.Errorf("second n did not flip the gate back on")
 	}
 	_ = th
 }

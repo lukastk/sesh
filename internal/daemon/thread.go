@@ -148,6 +148,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		CreatedAtUnix:  time.Now().Unix(),
 		AgentSessionID: agentSessionID,
 		Parent:         req.Parent,
+		Notify:         d.defaults.NotifyDefault(),
 		// A headed spawn BEGINS the conversation (the agent launches with this
 		// session id) — so a later headless turn on the idle thread must RESUME,
 		// not create. See api.Thread.HeadlessStarted.

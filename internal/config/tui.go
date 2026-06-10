@@ -56,3 +56,41 @@ func LoadTUI(home string) (*TUIConfig, error) {
 	}
 	return f.TUI, nil
 }
+
+// Defaults is the [defaults] table — record-creation defaults the daemon
+// applies (policy knobs, dotfiles-owned like the rest of config.toml).
+type Defaults struct {
+	// Notifications is the notify gate new threads start with. nil = true.
+	Notifications *bool `toml:"notifications"`
+}
+
+type defaultsFile struct {
+	Defaults *Defaults `toml:"defaults"`
+}
+
+// LoadDefaults reads the [defaults] table. Missing file/table = all defaults.
+func LoadDefaults(home string) (Defaults, error) {
+	raw, err := os.ReadFile(ConfigPath(home))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Defaults{}, nil
+		}
+		return Defaults{}, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+	}
+	var f defaultsFile
+	if err := toml.Unmarshal(raw, &f); err != nil {
+		return Defaults{}, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+	}
+	if f.Defaults == nil {
+		return Defaults{}, nil
+	}
+	return *f.Defaults, nil
+}
+
+// NotifyDefault resolves the notification default (unset = true).
+func (d Defaults) NotifyDefault() bool {
+	if d.Notifications == nil {
+		return true
+	}
+	return *d.Notifications
+}

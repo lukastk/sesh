@@ -13,6 +13,9 @@ type Thread struct {
 	CreatedAtUnix int64    `json:"created_at_unix"`
 	// Parent is the parent thread's id ('' = root) — the tree the TUI renders.
 	Parent string `json:"parent,omitempty"`
+	// Notify gates the user's notification hooks for this thread (hooks receive
+	// SESH_NOTIFY=0/1; the daemon never decides what a notification IS).
+	Notify bool `json:"notify"`
 	// AgentSessionID is the agent's own conversation id (captured at/after spawn;
 	// what makes resume possible).
 	AgentSessionID string `json:"agent_session_id,omitempty"`
@@ -270,4 +273,10 @@ type HeadlessReplyResponse struct {
 	Working   bool   `json:"working"`
 	HaveReply bool   `json:"have_reply"`
 	Reply     string `json:"reply,omitempty"`
+}
+
+// NotifyThreadRequest toggles a thread's notification gate.
+type NotifyThreadRequest struct {
+	ID string `json:"id"`
+	On bool   `json:"on"`
 }

@@ -55,6 +55,7 @@ var declaredTUIClaims = []string{
 	"tree-render-fold",          // children collapse under their parent by default; →/← fold with ▾/▸ + rails over real threads
 	"tree-config-expand",        // [tui] expand_children / --expand starts nodes expanded
 	"tree-orphan-promotes",      // a child whose parent left the view promotes to top level
+	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

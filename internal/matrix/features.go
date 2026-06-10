@@ -309,6 +309,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.notify",
+		Description: "per-thread notification gate: [defaults] notifications at creation, thread notify --on/--off, hooks receive SESH_NOTIFY (policy stays in the hook)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "daemon.hooks",
 		Description: "[[hooks]] event hooks: observed busy/head/lifecycle edges run user commands ($SHELL -c, event env); observer-bound across the mesh; list/enable/disable/test",
 		Localities:  bothLoc,

@@ -11,6 +11,7 @@ import (
 func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/rename", d.handleThreadRename)
 	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
+	mux.HandleFunc("POST /v1/threads/notify", d.handleThreadNotify)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
 	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
@@ -212,6 +213,29 @@ func (d *Daemon) handleThreadReparent(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := d.store.SetThreadParent(req.ID, req.Parent); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	th, err := d.store.GetThread(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+}
+
+// handleThreadNotify toggles a thread's notification gate.
+func (d *Daemon) handleThreadNotify(w http.ResponseWriter, r *http.Request) {
+	var req api.NotifyThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "notify: id is required")
+		return
+	}
+	if err := d.store.SetThreadNotify(req.ID, req.On); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	th, err := d.store.GetThread(req.ID)

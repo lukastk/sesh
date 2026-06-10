@@ -19,7 +19,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [x] **A5** Parent/child threads + collapsible tree view
 - [x] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
-- [ ] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
+- [x] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
 - [ ] **C1** `sesh await`
 - [ ] **C2** `sesh delegate` (+ `--sandbox`)
 - [ ] **C3** `sesh subscribe` + turn-delivery engine
@@ -271,6 +271,17 @@ DAEMON doesn't know about toasts — myrig's hook command does, keeping
 mechanism/policy split). myrig: port sesh-notify + a default needs-input hook.
 **Verify:** cells: toggle persists + round-trips the wire; hook env reflects it;
 TUI claim for the toggle key + glyph.
+**SHIPPED 2026-06-10** — schema v6 (migration 9, notify default 1). [defaults]
+notifications in config.toml applied at BOTH create paths; thread notify
+--on/--off (inferred); TUI n key + NTF column ("off" when muted; IN the
+default set — a muted thread must be visible); hooks carry SESH_NOTIFY and the
+HOOK honors it (mechanism/policy split — the daemon never decides what a
+notification is; the gate-probe cell proves the hook still fires with gate=0).
+myrig: config.toml → config.toml.jinja, notify-idle hook MACBOOK-ONLY (v1's
+exact provisioning; observer-bound covers the mesh), sesh-v2-notify port
+(SESH_NOTIFY gate first, cwd-label'd body, → ~/.mybin/notify), seshv2-notif-
+on/off aliases. Cells thread.notify local+remote (133 total) + notify-toggle
+claim (35).
 
 ## C — Agent-to-agent tier
 

@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify),
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -168,8 +168,8 @@ func (s *Store) updateThread(query string, arg any, id string) error {
 func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
-	var headless, started, archived int
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent); err != nil {
+	var headless, started, archived, notify int
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
@@ -178,6 +178,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	}
 	_ = headless // deprecated column (see InsertThread); headless-ness is runtime-inferred
 	t.HeadlessStarted = started == 1
+	t.Notify = notify == 1
 	return t, nil
 }
 
@@ -187,6 +188,25 @@ func (s *Store) SetThreadParent(id, parent string) error {
 	res, err := s.db.Exec(`UPDATE threads SET parent = ? WHERE id = ?`, parent, id)
 	if err != nil {
 		return fmt.Errorf("store: set parent: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// SetThreadNotify persists a thread's notification toggle.
+func (s *Store) SetThreadNotify(id string, on bool) error {
+	res, err := s.db.Exec(`UPDATE threads SET notify = ? WHERE id = ?`, boolInt(on), id)
+	if err != nil {
+		return fmt.Errorf("store: set notify: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrThreadNotFound

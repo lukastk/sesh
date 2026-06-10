@@ -33,6 +33,7 @@ const (
 	ColCwd     = "cwd"
 	ColTags    = "tags"
 	ColTickets = "tickets"
+	ColNotify  = "notify"
 	ColCreated = "created"
 )
 
@@ -70,6 +71,13 @@ var colOrder = []colSpec{
 			}
 			return strconv.Itoa(r.TicketsOpen)
 		}},
+	{name: ColNotify, header: "NTF", fixedW: 3,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if r.Notify {
+				return ""
+			}
+			return "off"
+		}},
 	{name: ColTags, header: "TAGS", fixedW: 16,
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
 	{name: ColCreated, header: "CREATED", fixedW: 10,
@@ -78,7 +86,7 @@ var colOrder = []colSpec{
 
 // DefaultColumns is the built-in visible set (HEAD/BUSY deliberately off — the
 // glyph gutter carries the state; ID off — `i` toggles it).
-var DefaultColumns = []string{ColMachine, ColAgent, ColName, ColCwd, ColTags}
+var DefaultColumns = []string{ColMachine, ColAgent, ColName, ColCwd, ColTags, ColNotify}
 
 // ValidColumnNames returns the known names (for error messages), in render order.
 func ValidColumnNames() []string {

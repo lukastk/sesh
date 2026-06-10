@@ -13,7 +13,9 @@ package api
 // status/row/snapshot.
 // 4: `tickets_open` added to row/snapshot (open = not done/dropped).
 // 5: `parent` added to the thread record (parent/child trees).
-const SchemaVersion = 5
+// 6: `notify` added to the thread record (per-thread notification gate;
+// hooks receive SESH_NOTIFY).
+const SchemaVersion = 6
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

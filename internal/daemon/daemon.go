@@ -53,6 +53,8 @@ type Daemon struct {
 	// feeds it (see eventer.go / hookrunner.go).
 	hooks *hookRunner
 	evt   *eventer
+	// defaults: [defaults] record-creation knobs (notify gate).
+	defaults config.Defaults
 	// mmaint converges the master cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -112,6 +114,11 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
+	defaults, err := config.LoadDefaults(cfg.Home)
+	if err != nil {
+		return nil, err
+	}
+	d.defaults = defaults
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly

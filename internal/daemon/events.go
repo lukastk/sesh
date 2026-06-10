@@ -29,6 +29,9 @@ func (e Event) Env() map[string]string {
 		"SESH_TAGS":        strings.Join(e.Snap.Tags, ","),
 		"SESH_HEAD":        string(e.Snap.Head),
 		"SESH_BUSY":        string(e.Snap.Busy),
+		// The per-thread gate: the user's notify hook respects it (the daemon
+		// never decides what a notification is — policy stays in the hook).
+		"SESH_NOTIFY": map[bool]string{true: "1", false: "0"}[e.Snap.Notify],
 	}
 	if e.From != "" || e.To != "" {
 		m["SESH_EVENT_FROM"] = e.From

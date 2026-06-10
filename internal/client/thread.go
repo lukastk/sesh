@@ -32,6 +32,11 @@ func (c *Client) ThreadList(ctx context.Context, includeArchived, allMachines bo
 	return out, c.getJSON(ctx, u, &out)
 }
 
+// ThreadNotify posts POST /v1/threads/notify (the per-thread gate).
+func (c *Client) ThreadNotify(ctx context.Context, id string, on bool) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/notify", api.NotifyThreadRequest{ID: id, On: on}, nil)
+}
+
 // ThreadReparent posts POST /v1/threads/reparent ('' parent = make root).
 func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)

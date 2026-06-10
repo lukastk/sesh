@@ -62,6 +62,10 @@ var migrations = []string{
 	// restarts (the hook DEFINITION lives in config.toml; the mute is runtime
 	// state, so it lives here).
 	`CREATE TABLE IF NOT EXISTS hook_mutes (name TEXT PRIMARY KEY);`,
+	// 9: per-thread notifications — hooks carry SESH_NOTIFY so the user's
+	// notify hook can respect a thread's mute. Default ON.
+	`ALTER TABLE threads ADD COLUMN notify INTEGER NOT NULL DEFAULT 1;`,
+
 
 }
 

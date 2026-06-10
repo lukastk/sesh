@@ -100,6 +100,18 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
+### IN PROGRESS: the PARITY ROADMAP (_dev/PARITY_ROADMAP.md — THE working contract)
+21 features from the (b)-list discussion, built FULL-FEATURED (Lukas's explicit
+no-scarcity directive, saved in auto-memory), each: v1 research → cells/claims →
+full gate → deploy both → live smoke → tick. DONE so far (2026-06-10): A1 columns
+(+SESH_HOME default hazard fix ~/.sesh→~/.sesh-v2), A2 [[cwd_label]], A3 full fzf
+filter, A4 predicates+[[tui.views]] (schema v4 tickets_open join), A5 parent/child
++tree (schema v5, migration 7), F1 current-thread inference + sesh info (+ id-PREFIX
+resolution; SESH_THREAD_ID now also in headless turns). Matrix 129 cells, 33 TUI
+claims. NEXT: B1 hooks → B2 notifications → C1 await → C2 delegate → C3 subscribe →
+D0-D6 transcript layer → E1-E4 hygiene. Testing lesson (bit twice): NEVER settle a
+claim on row ABSENCE alone — vacuously true pre-publish; settle on PRESENCE first.
+
 ### DONE: v1-parity (a)-list TUI affordances (2026-06-10 night; deployed both machines)
 From `_dev/V1_FEATURE_AUDIT.md` (the ultracode audit: 178 v1 features compared, doc is
 the (b)/(c) discussion agenda — (b) list NOT yet discussed). Shipped + 8 new claims (21

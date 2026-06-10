@@ -28,6 +28,7 @@ var declaredTUIClaims = []string{
 	"action-delete",             // the delete key really drops the record
 	"action-archive",            // the archive key really parks the thread
 	"action-nav",                // the nav key really switches the tmux client
+	"action-nav-headless",       // Enter on a HEADLESS thread promotes it (headful) then enters
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -68,6 +69,50 @@ func init() {
 	registerTUIClaim("action-delete", claimActionDelete)
 	registerTUIClaim("action-archive", claimActionArchive)
 	registerTUIClaim("action-nav", claimActionNav)
+	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
+}
+
+// claimActionNavHeadless: a HEADLESS thread has no pane, so Enter must PROMOTE it
+// (headless -> headed, conversation resumed) and THEN enter — not silently nav to a
+// non-existent session. Asserts the real promotion (a session that never existed for a
+// headless thread now exists) and that the nav landed a client on it.
+func claimActionNavHeadless(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	// A LOCAL headless thread (promotion routes to the local daemon) with one real turn
+	// so it has a resumable session id.
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	th := local.newHeadlessThread(t, "pi", "hlnav")
+	if !th.Headless {
+		t.Fatalf("thread did not start headless: %+v", th)
+	}
+	local.headlessTurn(t, th.ID, "Reply with exactly: ok")
+
+	// A master window for this machine, so the (master-path) nav has a window to switch to.
+	master := "sesh-tuihlmaster-" + th.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "m:home")
+
+	bin := seshBin(t)
+	// A local thread's inner switch uses cfg.TmuxSocket, so the nav subprocess needs the
+	// sandbox's work socket (in production the TUI inherits it from its env).
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "hlnav")
+
+	// Enter -> promote then enter.
+	if m = runKey(t, m, "enter"); m.LastErr() != nil {
+		t.Fatalf("nav-on-headless errored: %v", m.LastErr())
+	}
+	// The promotion created a real session (headless threads NEVER have one) and the nav
+	// landed a client on it — the observable proof of promote-then-enter.
+	if !waitUntil(15*time.Second, func() bool { return innerClientSession(t, local.TmuxSocket) == "sesh_hlnav" }) {
+		t.Errorf("after Enter on a headless thread, no client on sesh_hlnav (promote+enter failed); got %q", innerClientSession(t, local.TmuxSocket))
+	}
 }
 
 // claimActionNav: the nav key really switches the tmux client to the selected

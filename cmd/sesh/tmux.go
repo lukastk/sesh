@@ -78,7 +78,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 		if sock := filepath.Base(strings.SplitN(t, ",", 2)[0]); sock != cfg.TmuxSocket {
 			return fmt.Errorf("nav --in-client: current client is on tmux socket %q, not the work socket %q", sock, cfg.TmuxSocket)
 		}
-		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session)
+		script := tmux.InnerSwitchInClientScript(cfg.TmuxSocket, session)
 		if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
 			return fmt.Errorf("nav --in-client: switch-client: %v: %s", err, out)
 		}

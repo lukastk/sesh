@@ -196,20 +196,53 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// navSelected jumps to the selected thread's session by driving the `sesh tmux
-// nav` primitive (outer switch + inner switch-client + bare-shell kick). The TUI
-// emits a locator and shells out; it does not re-implement nav.
+// navSelected enters the selected thread. A headless thread has no pane and a dead
+// thread's pane is gone, so neither can be navved to directly — entering one first
+// PROMOTES it (headless -> headed) or RESUMES it (dead -> live), then jumps to the
+// resulting session. That compose only works on the owning machine (promote/resume
+// route to the local daemon), so cross-machine it fails LOUDLY rather than navving to
+// a non-existent session (which would silently no-op). An alive headed thread skips
+// straight to nav. The jump itself drives the `sesh tmux nav` primitive (outer switch +
+// inner switch-client + bare-shell kick); the TUI shells out, it does not re-implement nav.
 func (m Model) navSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
 	bin, env := m.binaryPath, m.navEnv
-	target := row.Machine + ":" + row.SessionName
-	// A LOCAL thread, when we're inside its work socket's tmux, switches in the current
-	// client (no master). Otherwise: the full master nav path.
-	useInClient := m.machine != "" && row.Machine == m.machine && inWorkSocketTmux(m.tmuxSocket)
+	local := m.machine != "" && row.Machine == m.machine
+	// A LOCAL thread, when we're inside its work socket's tmux, switches the current
+	// client in place (no master). Otherwise: the full master nav path.
+	useInClient := local && inWorkSocketTmux(m.tmuxSocket)
 	return func() tea.Msg {
+		sessionName := row.SessionName
+		// Headless or dead => no live session to enter. Promote/resume first (local only).
+		if row.Headless || row.Activity == api.ActivityDead {
+			verb := "resume"
+			if row.Headless {
+				verb = "promote"
+			}
+			if !local {
+				return actionMsg{err: fmt.Errorf("%q is on %s — %s it there first (cross-machine %s isn't supported from here)", row.Name, row.Machine, verb, verb)}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			var resp api.ThreadResponse
+			var err error
+			if row.Headless {
+				resp, err = m.client.ThreadHeadful(ctx, row.ID)
+			} else {
+				resp, err = m.client.ThreadResume(ctx, row.ID)
+			}
+			if err != nil {
+				return actionMsg{err: fmt.Errorf("%s %q: %w", verb, row.Name, err)}
+			}
+			sessionName = resp.Thread.SessionName
+		}
+		if sessionName == "" {
+			return actionMsg{err: fmt.Errorf("enter %q: thread has no session", row.Name)}
+		}
+		target := row.Machine + ":" + sessionName
 		args := []string{"tmux", "nav", "--to", target}
 		if useInClient {
 			args = append(args, "--in-client")

@@ -449,8 +449,21 @@ pane is READY — reuse the readiness probe daemon-side, never the blank-pane
 race); `--sandbox` on new/resume/delegate (claude: permission mode; codex:
 sandbox flag; pi: research equivalent — loud N/A if none); spawn DEFAULTS in
 config.toml (`[spawn]` table: default sandbox per agent, default model?, …).
-NOTE: Lukas's message cut off here ("you should be specify in config.toml
-what") — assumed: per-agent spawn defaults. CONFIRM the intended scope.
+LUKAS CONFIRMED (2026-06-10): config.toml sets the DEFAULT spawn behavior;
+evaluate per-agent vs global (likely BOTH: [spawn] global + [spawn.<agent>]
+overrides, with an `args` literal-passthrough escape hatch for very
+agent-specific settings). HIS SETTINGS: default = YOLO (bypass permissions —
+"I don't want to sandbox it"). RESEARCH FINDING: v1 ALWAYS passed
+--dangerously-skip-permissions to claude (yolo WAS v1's default; --sandbox
+was the opt-in restriction) — v2 spawning bare claude is a quiet v1
+REGRESSION this fixes. Mode mapping: claude yolo=--dangerously-skip-
+permissions / default=bare / sandbox=bare-headless(default-deny edits in
+--print, v1's reading); codex yolo=--dangerously-bypass-approvals-and-sandbox
+/ default=bare / sandbox=--sandbox read-only; pi has NO permission flags (his
+own agent, always full access) — a configured pi mode other than default is
+LOUD unsupported, never a silent no-op. Modes apply to headed spawns, resume,
+headless turns, and delegate (--yolo/--sandbox CLI flags override config).
+myrig config.toml gets [spawn] mode = "yolo".
 **Verify:** cells per agent: --msg's text really reaches the conversation;
 --sandbox observably restricts (agent-specific assertion, e.g. a write refused).
 

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
@@ -55,12 +56,46 @@ func tmuxNav(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("nav", flag.ContinueOnError)
 	to := fs.String("to", "", "target as <machine>:<session> (required)")
 	inClient := fs.Bool("in-client", false, "switch the CURRENT tmux client to the target (local target on the current work socket only; no master)")
+	attach := fs.Bool("attach", false, "ATTACH this terminal to the target thread (for use from a plain shell outside tmux); REPLACES the process")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	machine, session, ok := strings.Cut(*to, ":")
 	if !ok || machine == "" || session == "" {
 		return errors.New("nav: --to must be <machine>:<session>")
+	}
+
+	// Attach: from a plain shell (no tmux client to switch), make this terminal BECOME
+	// the thread — exec `tmux attach` locally, or `ssh -t … tmux attach` for a peer. This
+	// replaces the process, so on detach the user returns to the shell they launched from.
+	if *attach {
+		if machine == cfg.Machine {
+			tb, err := exec.LookPath("tmux")
+			if err != nil {
+				return err
+			}
+			// attach -t does NOT honor the "=" exact-match prefix, so use the bare name.
+			return syscall.Exec(tb, []string{"tmux", "-L", cfg.TmuxSocket, "attach", "-t", session}, tmuxCleanEnv())
+		}
+		reg, err := peers.Load(cfg.PeersPath())
+		if err != nil {
+			return err
+		}
+		peer, ok := reg.Get(machine)
+		if !ok {
+			return fmt.Errorf("nav --attach: unknown machine %q (no peer registered)", machine)
+		}
+		if peer.TmuxSocket == "" {
+			return fmt.Errorf("nav --attach: peer %q has no tmux socket (see `sesh peer add --tmux-socket`)", machine)
+		}
+		sb, err := exec.LookPath("ssh")
+		if err != nil {
+			return err
+		}
+		remote := "env -u TMUX tmux -L " + shellQuote(peer.TmuxSocket) + " attach -t " + shellQuote(session)
+		sshArgs := append([]string{"ssh", "-t", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+		sshArgs = append(sshArgs, peer.SSH, remote)
+		return syscall.Exec(sb, sshArgs, os.Environ())
 	}
 
 	// In-client nav: skip the master entirely and just switch THIS tmux client to the

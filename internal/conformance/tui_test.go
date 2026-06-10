@@ -29,6 +29,7 @@ var declaredTUIClaims = []string{
 	"action-archive",            // the archive key really parks the thread
 	"action-nav",                // the nav key really switches the tmux client
 	"action-nav-headless",       // Enter on a HEADLESS thread promotes it (headful) then enters
+	"action-nav-attach",         // Enter from a plain shell (no tmux) attaches the terminal to the thread
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -70,6 +71,36 @@ func init() {
 	registerTUIClaim("action-archive", claimActionArchive)
 	registerTUIClaim("action-nav", claimActionNav)
 	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
+	registerTUIClaim("action-nav-attach", claimActionNavAttach)
+}
+
+// claimActionNavAttach: when the TUI runs OUTSIDE tmux (a plain shell), Enter doesn't
+// switch a client (there is none) — it asks the caller to ATTACH the terminal to the
+// thread. Asserts the model quits with a pending `tmux nav --to <thread> --attach`.
+func claimActionNavAttach(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	th := local.newThread(t, "pi", "attd", "/tmp")
+	local.waitThreadReady(t, th.ID, "pi")
+
+	bin := seshBin(t)
+	// m.tmux == "" => a plain shell => Enter attaches (not switch).
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, nil).WithLocal(local.Machine, local.TmuxSocket).WithTmux("")
+	m, _ = renderUntilRow(t, m, "attd")
+	m = runKey(t, m, "enter")
+
+	argv, ok := m.PendingAttach()
+	if !ok {
+		t.Fatalf("Enter outside tmux did not request an attach (PendingAttach=false)")
+	}
+	joined := strings.Join(argv, " ")
+	want := local.Machine + ":" + th.SessionName
+	if !strings.Contains(joined, "nav") || !strings.Contains(joined, "--attach") || !strings.Contains(joined, want) {
+		t.Errorf("attach argv = %v; want it to `nav --to %s --attach`", argv, want)
+	}
 }
 
 // claimActionNavHeadless: a HEADLESS thread has no pane, so Enter must PROMOTE it
@@ -101,7 +132,9 @@ func claimActionNavHeadless(t *testing.T) {
 	// A local thread's inner switch uses cfg.TmuxSocket, so the nav subprocess needs the
 	// sandbox's work socket (in production the TUI inherits it from its env).
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
-	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket)
+	// In tmux but NOT on the work socket => the master nav path (deterministic regardless
+	// of the ambient $TMUX go test runs under).
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1")
 	m, _ = renderUntilRow(t, m, "hlnav")
 
 	// Enter -> promote then enter.
@@ -147,7 +180,9 @@ func claimActionNav(t *testing.T) {
 	}
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_MASTER_SOCKET=" + master}
 
-	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv)
+	// In tmux but not on the work socket => the master nav path (the peer thread is remote
+	// anyway). Deterministic regardless of the ambient $TMUX go test runs under.
+	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv).WithTmux("/tmp/notwork,1,1")
 	m, _ = renderUntilRow(t, m, "navme") // wait for the mesh sync to replicate it
 
 	// Enter -> nav. Asserts on the REAL servers:

@@ -176,6 +176,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-attach",
+		Description: "`tmux nav --attach` (Enter from a plain shell, no tmux) attaches the terminal to the thread — a real client lands on the target session",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-in-client-multi",
 		Description: "with MULTIPLE clients on one work-socket session (master window + direct attach), `nav --in-client` switches the client whose keystroke triggered it (the Enter-presser), not just any attached client",
 		Localities:  []Locality{Local},

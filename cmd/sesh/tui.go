@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"os"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -20,6 +22,17 @@ func runTUI(args []string) error {
 	cfg := config.Load()
 	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
-	return err
+	final, err := p.Run()
+	if err != nil {
+		return err
+	}
+	// Enter from a plain shell (outside tmux) quits the TUI to ATTACH the terminal to the
+	// thread: now that the TUI has exited and restored the terminal, exec the attach so
+	// this process BECOMES the thread (on detach the user returns to their shell).
+	if fm, ok := final.(tui.Model); ok {
+		if argv, attach := fm.PendingAttach(); attach {
+			return syscall.Exec(argv[0], argv, os.Environ())
+		}
+	}
+	return nil
 }

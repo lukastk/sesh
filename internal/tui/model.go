@@ -43,6 +43,10 @@ type Model struct {
 	// work socket's tmux. Empty (the test/default) => always use the master nav path.
 	machine    string
 	tmuxSocket string
+	// tmux is this process's $TMUX (captured at construction so behavior is deterministic
+	// and testable). "" => not in tmux (Enter attaches); basename == tmuxSocket => on the
+	// work socket (Enter switches in place).
+	tmux string
 
 	rows      []api.ThreadRow
 	machines  []api.MachineView // per-machine freshness, for the staleness footer
@@ -52,6 +56,11 @@ type Model struct {
 	lastErr   error
 	width     int
 	height    int
+
+	// attachTarget, when set, means the TUI quit in order to ATTACH the terminal to a
+	// thread (Enter from a plain shell, outside tmux). The caller reads PendingAttach
+	// after Run() and execs the attach. "" = quit normally.
+	attachTarget string
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -60,7 +69,14 @@ func New(socketPath string, allMachines bool) Model {
 	if err != nil {
 		bin = "sesh"
 	}
-	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin}
+	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin, tmux: os.Getenv("TMUX")}
+}
+
+// WithTmux overrides the captured $TMUX value (tests set it to drive the Enter path
+// deterministically: "" => attach, a work-socket value => in-client, else master path).
+func (m Model) WithTmux(tmux string) Model {
+	m.tmux = tmux
+	return m
 }
 
 // WithExec overrides how the nav action execs sesh (binary path + extra env) —
@@ -69,6 +85,16 @@ func (m Model) WithExec(binaryPath string, env []string) Model {
 	m.binaryPath = binaryPath
 	m.navEnv = env
 	return m
+}
+
+// PendingAttach reports whether the TUI quit to attach the terminal to a thread, and
+// if so returns the argv to exec (`sesh tmux nav --to <target> --attach`). The caller
+// (runTUI) execs it AFTER the TUI has exited and restored the terminal.
+func (m Model) PendingAttach() ([]string, bool) {
+	if m.attachTarget == "" {
+		return nil, false
+	}
+	return []string{m.binaryPath, "tmux", "nav", "--to", m.attachTarget, "--attach"}, true
 }
 
 // WithLocal sets this client's own machine + work socket, enabling in-client nav for
@@ -161,6 +187,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err
 		}
 		return m, m.fetch() // re-fetch so the grid reflects the mutation
+	case attachMsg:
+		// Quit so the terminal is restored, then runTUI execs the attach.
+		m.attachTarget = msg.target
+		return m, tea.Quit
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -169,6 +199,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // actionMsg is the result of an in-app mutation.
 type actionMsg struct{ err error }
+
+// attachMsg asks the TUI to quit and have the caller attach the terminal to target
+// (<machine>:<session>) — used when Enter is pressed outside tmux.
+type attachMsg struct{ target string }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -213,7 +247,7 @@ func (m Model) navSelected() tea.Cmd {
 	local := m.machine != "" && row.Machine == m.machine
 	// A LOCAL thread, when we're inside its work socket's tmux, switches the current
 	// client in place (no master). Otherwise: the full master nav path.
-	useInClient := local && inWorkSocketTmux(m.tmuxSocket)
+	useInClient := local && onWorkSocket(m.tmux, m.tmuxSocket)
 	return func() tea.Msg {
 		sessionName := row.SessionName
 		// Headless or dead => no live session to enter. Promote/resume first (local only).
@@ -243,6 +277,13 @@ func (m Model) navSelected() tea.Cmd {
 			return actionMsg{err: fmt.Errorf("enter %q: thread has no session", row.Name)}
 		}
 		target := row.Machine + ":" + sessionName
+		// Outside tmux entirely (a plain shell): there's no client to switch — ATTACH
+		// this terminal to the thread instead. The TUI quits and the caller execs
+		// `tmux nav --attach` (which, unlike the TUI, can reach the peer registry for a
+		// remote attach). Inside tmux: switch in place / via the master.
+		if m.tmux == "" {
+			return attachMsg{target: target}
+		}
 		args := []string{"tmux", "nav", "--to", target}
 		if useInClient {
 			args = append(args, "--in-client")
@@ -256,13 +297,13 @@ func (m Model) navSelected() tea.Cmd {
 	}
 }
 
-// inWorkSocketTmux reports whether $TMUX shows we're a client on tmux socket `name`.
-func inWorkSocketTmux(name string) bool {
-	t := os.Getenv("TMUX")
-	if t == "" || name == "" {
+// onWorkSocket reports whether the $TMUX value `tmux` shows we're a client on tmux
+// socket `name` (its basename matches).
+func onWorkSocket(tmux, name string) bool {
+	if tmux == "" || name == "" {
 		return false
 	}
-	return filepath.Base(strings.SplitN(t, ",", 2)[0]) == name
+	return filepath.Base(strings.SplitN(tmux, ",", 2)[0]) == name
 }
 
 // stopSelected ends the selected thread's runtime (agent + session) but keeps

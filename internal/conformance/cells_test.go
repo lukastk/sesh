@@ -52,6 +52,7 @@ var skipReasons = map[string]string{
 	"master.holding":            "an empty work server's master window falls back to a holding 'scratch' shell, not a 'no sessions' loop",
 	"tmux.work-conf":            "the work tmux server starts with `tmux -f <SESH_TMUX_CONF>` (sesh's own UI, separate from ~/.tmux.conf)",
 	"tmux.nav-in-client-multi":  "with multiple clients on one session, nav --in-client switches the one that pressed Enter, not just any client",
+	"tmux.nav-attach":           "nav --attach (Enter from a plain shell) attaches the terminal to the thread (a client lands on it)",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
 	"api.tcp-parity":            "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",
 	"ticket.create":             "create a ticket",

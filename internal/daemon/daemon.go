@@ -47,6 +47,8 @@ type Daemon struct {
 	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
 	// the cross-machine view (GET /v1/mesh) is a local read.
 	mesh *meshSync
+	// naming is the user's [[session_name]] policy (nil = default sesh_<name>).
+	naming *config.Naming
 	// mmaint converges the master cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -91,8 +93,14 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 
+	naming, err := config.LoadNaming(cfg.Home)
+	if err != nil {
+		st.Close() //nolint:errcheck
+		return nil, err
+	}
 	d := &Daemon{
 		cfg:        cfg,
+		naming:     naming,
 		store:      st,
 		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		hlInFlight: map[string]bool{},

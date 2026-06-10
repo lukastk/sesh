@@ -142,8 +142,12 @@ func testThreadSendHeadless(t *testing.T, agent string, loc matrix.Locality) {
 // ---- helpers ----
 
 func (sb *Sandbox) newHeadlessThread(t *testing.T, agent, name string) api.Thread {
+	return sb.newHeadlessThreadAt(t, agent, name, "/tmp")
+}
+
+func (sb *Sandbox) newHeadlessThreadAt(t *testing.T, agent, name, cwd string) api.Thread {
 	t.Helper()
-	stdout, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", agent, "--name", name, "--cwd", "/tmp", "--headless", "--json")
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", agent, "--name", name, "--cwd", cwd, "--headless", "--json")
 	if err != nil {
 		t.Fatalf("thread new --headless (%s): %v\n%s", agent, err, stderr)
 	}

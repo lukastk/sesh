@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -88,7 +89,11 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := uuid.NewString()
-	session := "sesh_" + sanitizeName(req.Name)
+	session, err := d.sessionNameFor(req.Cwd, id, req.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if d.tmux.HasSession(session) {
 		writeError(w, http.StatusConflict, "thread: tmux session "+session+" already exists")
 		return
@@ -337,6 +342,20 @@ func (d *Daemon) paneChanging(pane string) (bool, error) {
 // sanitizeName maps a thread name to a tmux-safe session suffix. tmux session
 // names may not contain ":" or "." and we avoid whitespace; everything else
 // becomes "_".
+// sessionNameFor resolves a thread's tmux session name: the user's
+// [[session_name]] config policy when a rule matches the cwd, else the default
+// sesh_<sanitized-name> convention. Policy errors (bad placeholder, empty
+// expansion) are loud — never a silently wrong name.
+func (d *Daemon) sessionNameFor(cwd, threadID, threadName string) (string, error) {
+	home, _ := os.UserHomeDir()
+	if name, matched, err := d.naming.SessionNameFor(cwd, threadID, threadName, home); err != nil {
+		return "", err
+	} else if matched {
+		return name, nil
+	}
+	return "sesh_" + sanitizeName(threadName), nil
+}
+
 func sanitizeName(name string) string {
 	var b strings.Builder
 	for _, r := range name {

@@ -253,6 +253,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.session-name",
+		Description: "configurable session naming: [[session_name]] cwd-regex rules in <SESH_HOME>/config.toml template the REAL tmux session name (named groups + {tid8}/{name}/{cwd}); applies to headed spawn AND revival minting; no match = default sesh_<name>; a broken config refuses the daemon loudly",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.resume",
 		Description: "revive an IDLE thread into a pane: recreate session + relaunch agent with --resume (conversation continuity; == headful under the unified model)",
 		Agents:      agentic,

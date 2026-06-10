@@ -98,7 +98,11 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 	// a previously-paned thread keeps its own.
 	session := thread.SessionName
 	if strings.HasPrefix(session, "headless-") {
-		session = "sesh_" + sanitizeName(thread.Name)
+		var err error
+		if session, err = d.sessionNameFor(thread.Cwd, thread.ID, thread.Name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if d.tmux.HasSession(session) {
 		writeError(w, http.StatusConflict, "revive: a tmux session "+session+" already exists")

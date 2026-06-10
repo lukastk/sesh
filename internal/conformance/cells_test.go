@@ -38,6 +38,7 @@ var skipReasons = map[string]string{
 	"thread.delete":             "drop a record without touching the runtime",
 	"thread.headful":            "revive a never-paned idle thread into a pane (== resume, unified model); codex-before-any-turn is N/A (separate test)",
 	"thread.headful-busy":       "reviving a thread mid-turn (headless turn in flight) is rejected with a conflict",
+	"thread.session-name":      "[[session_name]] config rules name the real tmux session from cwd (spawn + revival); default without a match; broken config = no daemon",
 	"thread.resume":             "revive an idle thread into a pane (recreate session + relaunch with --resume); conversation continuity verified for all three agents (claude needs a clean top-level env, guaranteed by daemon ScrubHarnessEnv)",
 	"thread.snapshot":           "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
 	"mesh.snapshot":             "GET /v1/mesh: L2 sync replicates a peer's snapshot into the local cache (ssh transport); merged view read locally",

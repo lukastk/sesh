@@ -186,6 +186,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "master.ensure",
+		Description: "`sesh master ensure` converges the master to one-window-per-machine: recreates ONLY missing machine windows (the prefix+K recovery) with a REAL re-attach, never touches existing windows, no-ops when complete, and builds the whole master when down",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "master.watchers",
 		Description: "`sesh master watchers` lists the origin masters with a LIVE window-attach into this work server (marker liveness-checked against real clients) — present while a real ssh-attached master is up, gone after master down; powers 'send to my master' routing",
 		Localities:  []Locality{Remote},

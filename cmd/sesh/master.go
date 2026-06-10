@@ -28,7 +28,7 @@ const masterSession = "master"
 
 func runMaster(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh master <up|window|attach|down|watchers>")
+		return errors.New("usage: sesh master <up|window|attach|down|ensure|watchers>")
 	}
 	cfg := config.Load()
 	switch args[0] {
@@ -40,6 +40,8 @@ func runMaster(args []string) error {
 		return masterAttach(cfg, args[1:])
 	case "down":
 		return masterDown(cfg, args[1:])
+	case "ensure":
+		return masterEnsure(cfg, args[1:])
 	case "watchers":
 		return masterWatchers(cfg, args[1:])
 	default:
@@ -120,6 +122,67 @@ func masterUp(cfg config.Config, args []string) error {
 		}
 	}
 	fmt.Printf("master up on %q: %s\n", cfg.MasterSocket, strings.Join(machines, ", "))
+	return nil
+}
+
+// masterEnsure converges the master to "one window per machine": builds the whole
+// master when it is down (== `master up`), and when it is up, (re)creates ONLY the
+// missing machine windows — the recovery for a window lost to prefix+K/kill-window,
+// which `master up`'s loud non-idempotency refuses to handle. Existing windows are
+// never touched, so it is safe to run on a live, attached cockpit (the v1 prefix+R
+// muscle memory).
+func masterEnsure(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("ensure", flag.ContinueOnError)
+	machinesFlag := fs.String("machines", "", "comma-separated machines (default: self + all peers; 'self' allowed)")
+	tmuxConf := fs.String("tmux-conf", "", "tmux config file, used only when the master server must be CREATED")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if _, err := mtmux(cfg, "has-session", "-t", "="+masterSession); err != nil {
+		// Not up: ensure == up.
+		upArgs := []string{}
+		if *machinesFlag != "" {
+			upArgs = append(upArgs, "--machines", *machinesFlag)
+		}
+		if *tmuxConf != "" {
+			upArgs = append(upArgs, "--tmux-conf", *tmuxConf)
+		}
+		return masterUp(cfg, upArgs)
+	}
+	machines, err := masterMachines(cfg, *machinesFlag)
+	if err != nil {
+		return err
+	}
+	out, err := mtmux(cfg, "list-windows", "-t", masterSession, "-F", "#{window_name}")
+	if err != nil {
+		return fmt.Errorf("master ensure: list-windows: %v: %s", err, out)
+	}
+	existing := map[string]bool{}
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			existing[l] = true
+		}
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	var created []string
+	for _, m := range machines {
+		if existing[m] {
+			continue
+		}
+		winCmd := fmt.Sprintf("%s master window %s", shellQuote(self), shellQuote(m))
+		if out, err := mtmux(cfg, "new-window", "-d", "-t", masterSession+":", "-n", m, winCmd); err != nil {
+			return fmt.Errorf("master ensure: new-window %s: %v: %s", m, err, out)
+		}
+		created = append(created, m)
+	}
+	if len(created) == 0 {
+		fmt.Printf("master ensure: all windows present (%s)\n", strings.Join(machines, ", "))
+	} else {
+		fmt.Printf("master ensure: created %s\n", strings.Join(created, ", "))
+	}
 	return nil
 }
 

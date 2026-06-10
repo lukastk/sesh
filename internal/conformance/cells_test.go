@@ -50,6 +50,7 @@ var skipReasons = map[string]string{
 	"master.up":                 "sesh master up builds a window per machine, each attached into that machine's work server (peer over ssh)",
 	"master.reconnect":          "the per-window supervisor re-establishes a dropped attach (local + ssh-localhost peer)",
 	"master.holding":            "an empty work server's master window falls back to a holding 'scratch' shell, not a 'no sessions' loop",
+	"master.ensure":            "master ensure recreates only missing machine windows (real re-attach), no-ops when complete, builds when down",
 	"master.watchers":          "master watchers lists origins with a live window-attach (marker liveness), present while up, gone after down",
 	"tmux.work-conf":            "the work tmux server starts with `tmux -f <SESH_TMUX_CONF>` (sesh's own UI, separate from ~/.tmux.conf)",
 	"tmux.nav-in-client-multi":  "with multiple clients, nav --in-client switches exactly the carried client (--client/$SESH_NAV_CLIENT); ambiguous carrier-less calls fail loudly",

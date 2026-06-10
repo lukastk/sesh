@@ -16,6 +16,19 @@ import (
 //	columns = ["machine", "agent", "name", "cwd", "tags"]
 type TUIConfig struct {
 	Columns []string `toml:"columns"`
+	// Views are the custom Tab-cycle views: a name + a predicate over the
+	// thread rows (compiled by the TUI; a broken filter is loud at startup).
+	//
+	//	[[tui.views]]
+	//	name   = "ticketed"
+	//	filter = "ticketed and not archived"
+	Views []TUIView `toml:"views"`
+}
+
+// TUIView is one custom view definition.
+type TUIView struct {
+	Name   string `toml:"name"`
+	Filter string `toml:"filter"`
 }
 
 type tuiConfigFile struct {

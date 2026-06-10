@@ -194,6 +194,9 @@ type ThreadRow struct {
 	Head       Head       `json:"head"`
 	Busy       Busy       `json:"busy"`
 	Attachment Attachment `json:"attachment"`
+	// TicketsOpen is the number of bound, still-open tickets (not done/dropped)
+	// — the TUI's `ticketed` predicate and TICKETS column read it.
+	TicketsOpen int `json:"tickets_open"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -216,6 +219,7 @@ type ThreadSnapshot struct {
 	Head           Head       `json:"head"`
 	Busy           Busy       `json:"busy"`
 	Attachment     Attachment `json:"attachment"`
+	TicketsOpen    int        `json:"tickets_open"`
 	AgentRunning   bool       `json:"agent_running"`
 	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion
 }

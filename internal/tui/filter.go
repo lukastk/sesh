@@ -156,7 +156,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, nil
 	case "tab":
-		m.view = (m.view + 1) % 3
+		m.view = (m.view + 1) % View(m.viewCount())
 		m.cursor = 0
 		return m, m.fetch()
 	case "backspace":

@@ -102,3 +102,26 @@ func scanTicket(r scanner) (api.Ticket, error) {
 	err := r.Scan(&t.ID, &t.Name, &t.Description, &t.Prompt, &t.Status, &t.ThreadID, &t.CreatedAtUnix)
 	return t, err
 }
+
+// OpenTicketCounts returns, per thread id, the number of bound tickets that
+// are still OPEN (not done, not dropped) — joined into grid rows and mesh
+// snapshots so the TUI's `ticketed` predicate reflects real ticket state.
+func (s *Store) OpenTicketCounts() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT thread_id, COUNT(*) FROM tickets
+		WHERE thread_id != '' AND status NOT IN (?, ?) GROUP BY thread_id`,
+		api.StatusDone, api.StatusDropped)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}

@@ -29,27 +29,64 @@ import (
 const refreshInterval = 3 * time.Second
 
 // Model is the TUI state. Its rows come only from the daemon grid.
-// View is which subset of threads the grid shows; Tab cycles. The current view's
-// name is rendered in the title (so the user always knows what they're looking at).
+// View indexes into the model's view list: the three built-ins followed by
+// the config-defined custom views ([[tui.views]]). Tab cycles; the current
+// view's name is rendered in the title.
 type View int
 
 const (
 	ViewActive   View = iota // non-archived (the default)
 	ViewArchived             // archived only
 	ViewAll                  // everything
+	viewBuiltins             // = number of built-ins; custom views follow
 )
 
-func (v View) String() string {
-	switch v {
+// customView is one compiled [[tui.views]] entry.
+type customView struct {
+	name string
+	pred Predicate
+}
+
+func (m Model) viewName() string {
+	switch m.view {
 	case ViewActive:
 		return "active"
 	case ViewArchived:
 		return "archived"
 	case ViewAll:
 		return "all"
-	default:
-		return "?"
 	}
+	if i := int(m.view - viewBuiltins); i >= 0 && i < len(m.customViews) {
+		return m.customViews[i].name
+	}
+	return "?"
+}
+
+func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
+
+// WithViews installs the compiled custom views (see CompileViews).
+func (m Model) WithViews(views []customView) Model {
+	m.customViews = views
+	return m
+}
+
+// ViewSpec is one [[tui.views]] entry as the caller hands it over.
+type ViewSpec struct{ Name, Filter string }
+
+// CompileViews compiles [[tui.views]] specs (loud on a broken name/filter).
+func CompileViews(specs []ViewSpec) ([]customView, error) {
+	out := make([]customView, 0, len(specs))
+	for i, sp := range specs {
+		if sp.Name == "" || sp.Filter == "" {
+			return nil, fmt.Errorf("[tui.views] entry %d: name and filter are both required", i+1)
+		}
+		pred, err := CompilePredicate(sp.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("[tui.views] %q: %w", sp.Name, err)
+		}
+		out = append(out, customView{name: sp.Name, pred: pred})
+	}
+	return out, nil
 }
 
 // promptKind says what the line-prompt input will do on submit.
@@ -82,6 +119,10 @@ type Model struct {
 	// one-line status (e.g. "UUID copied"), shown dim under the title.
 	uuidPopup bool
 	note      string
+
+	// customViews are the compiled [[tui.views]] entries (after the built-ins
+	// in the Tab cycle).
+	customViews []customView
 
 	// Filter state (see filter.go): filtering = the prompt is being edited;
 	// filter = the ACTIVE query (persists when applied via Esc); filterCaret =
@@ -218,6 +259,11 @@ func (m Model) Init() tea.Cmd { return m.fetch() }
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
 	c, view, all := m.client, m.view, m.allMachines
+	var pred *Predicate
+	if i := int(view - viewBuiltins); i >= 0 && i < len(m.customViews) {
+		p := m.customViews[i].pred
+		pred = &p
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -231,10 +277,17 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				if (view == ViewActive && t.Archived) || (view == ViewArchived && !t.Archived) {
+				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen}
+				if pred != nil {
+					// A custom view sees EVERYTHING its predicate admits
+					// (archived included — `not archived` is the user's call).
+					if !pred.Eval(row) {
+						continue
+					}
+				} else if (view == ViewActive && t.Archived) || (view == ViewArchived && !t.Archived) {
 					continue
 				}
-				rows = append(rows, api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment})
+				rows = append(rows, row)
 			}
 		}
 		// Stable order (machine, then name, then id) so the cursor never jumps —
@@ -342,7 +395,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
 	case "tab":
-		m.view = (m.view + 1) % 3
+		m.view = (m.view + 1) % View(m.viewCount())
 		m.cursor = 0
 		return m, m.fetch()
 	case "i":
@@ -694,7 +747,7 @@ func BusyGlyph(row api.ThreadRow) string {
 // the rendered output reflects the model's REAL rows.
 func (m Model) View() string {
 	var b strings.Builder
-	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.view.String()+"]") + "\n")
+	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")
 	if m.lastErr != nil {
 		b.WriteString(styleDim.Render("(daemon unreachable: "+m.lastErr.Error()+")") + "\n")
 	}

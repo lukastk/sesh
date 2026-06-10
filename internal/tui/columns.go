@@ -15,6 +15,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ const (
 	ColName    = "name"
 	ColCwd     = "cwd"
 	ColTags    = "tags"
+	ColTickets = "tickets"
 	ColCreated = "created"
 )
 
@@ -61,6 +63,13 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string { return string(r.Head) }},
 	{name: ColBusy, header: "BUSY", fixedW: 4,
 		cell: func(_ *Model, r api.ThreadRow) string { return string(r.Busy) }},
+	{name: ColTickets, header: "TKT", fixedW: 3,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if r.TicketsOpen == 0 {
+				return ""
+			}
+			return strconv.Itoa(r.TicketsOpen)
+		}},
 	{name: ColTags, header: "TAGS", fixedW: 16,
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
 	{name: ColCreated, header: "CREATED", fixedW: 10,

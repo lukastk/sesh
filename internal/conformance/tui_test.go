@@ -51,6 +51,7 @@ var declaredTUIClaims = []string{
 	"filter-target-uuid",        // ctrl+t toggles the search target to uuid; a tid prefix narrows to exactly that thread
 	"filter-esc-applies",        // Esc APPLIES the filter (stays active, / re-edits); normal-mode Esc still quits
 	"filter-start-flag",         // --filter (the popup binding) opens already filtering
+	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

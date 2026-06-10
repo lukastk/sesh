@@ -88,12 +88,16 @@ func (m *maintainer) tick() {
 	if err != nil {
 		attached = map[string]bool{} // tmux unreachable => nothing attached
 	}
+	tickets, err := m.d.store.OpenTicketCounts()
+	if err != nil {
+		tickets = map[string]int{} // transient store error: counts refresh next tick
+	}
 	now := time.Now()
 
 	present := make(map[string]bool, len(threads))
 	for _, th := range threads {
 		present[th.ID] = true
-		m.refreshThread(th, attached, now)
+		m.refreshThread(th, attached, tickets, now)
 	}
 	// Drop state for threads that no longer exist.
 	m.mu.Lock()
@@ -107,7 +111,7 @@ func (m *maintainer) tick() {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now time.Time) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]int, now time.Time) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -116,7 +120,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 	}
 	m.mu.Unlock()
 
-	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached}
+	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID]}
 
 	// The two axes are PROBED, never read from the record: head from pane
 	// presence, busy from the pane content-diff (headful) or the turn registry

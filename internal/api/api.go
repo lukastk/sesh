@@ -11,7 +11,8 @@ package api
 // 3: the two-axes state model — `activity` REPLACED by the orthogonal
 // `head` ("headful"|"headless") and `busy` ("busy"|"idle") on
 // status/row/snapshot.
-const SchemaVersion = 3
+// 4: `tickets_open` added to row/snapshot (open = not done/dropped).
+const SchemaVersion = 4
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

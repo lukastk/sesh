@@ -44,7 +44,17 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui columns: %w", err)
 	}
-	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols)
+	var views []tui.ViewSpec
+	if tcfg != nil {
+		for _, v := range tcfg.Views {
+			views = append(views, tui.ViewSpec{Name: v.Name, Filter: v.Filter})
+		}
+	}
+	compiled, err := tui.CompileViews(views)
+	if err != nil {
+		return err
+	}
+	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled)
 	// CWD column labels: compiled ONCE here, loud on a broken rule; per-cwd
 	// label errors (unknown placeholder in a matching rule) are loud at startup
 	// too — never a silently-wrong column. Inside the labeler a rule error is

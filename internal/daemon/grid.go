@@ -32,6 +32,11 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tickets, err := d.store.OpenTicketCounts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	rows := make([]api.ThreadRow, len(threads))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, gridConcurrency)
@@ -41,7 +46,7 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = d.resolveRow(threads[i])
+			rows[i] = d.resolveRow(threads[i], tickets)
 		}(i)
 	}
 	wg.Wait()
@@ -62,11 +67,11 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 // background maintainer's O(1) maintained state (so the whole grid is a memory
 // read, not N concurrent ~3s probes). Fallback: an on-demand resolve for a thread
 // the maintainer has not ticked yet (just created) — correctness without a tick.
-func (d *Daemon) resolveRow(th api.Thread) api.ThreadRow {
+func (d *Daemon) resolveRow(th api.Thread, tickets map[string]int) api.ThreadRow {
 	if snap, ok := d.maint.stateOf(th.ID); ok {
-		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment}
+		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment, TicketsOpen: tickets[th.ID]}
 	}
-	row := api.ThreadRow{Thread: th, Attachment: api.Detached}
+	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID]}
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		head, busy = api.Headless, api.BusyIdle

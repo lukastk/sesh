@@ -16,7 +16,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
 - [x] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
 - [x] **F1** Current-thread inference (3-source resolver) + `sesh info`
-- [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
+- [x] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [ ] **A5** Parent/child threads + collapsible tree view
 - [ ] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
 - [ ] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
@@ -140,6 +140,19 @@ Tab cycles built-ins (active/archived/all) + custom views in order.
 **Verify:** unit tests for the grammar (incl. loud compile errors); claims: a
 custom view from config shows exactly the matching real threads; ticket
 selector flips when a real ticket is created/closed.
+**SHIPPED 2026-06-10** — research note: v1's lexer+parser ported VERBATIM
+(predFn re-typed api.ThreadRow); selectors re-mapped to the two axes +
+tickets (open count as digits; atom `ticketed`); tags == x is ANY-OF (the
+useful reading). meta.<key> selectors arrive with D6 (loud-unknown until
+then). Daemon: schema v4 — tickets_open joined into grid rows AND mesh
+snapshots (store.OpenTicketCounts, one GROUP-BY per tick/grid call); TKT
+column available, off by default. [[tui.views]] compiled LOUDLY at TUI start;
+Tab cycles built-ins + customs in BOTH normal and filter mode; custom views
+fetch archived too (the predicate decides). Lukas's ticketed/unticketed views
+in myrig config.toml. Rule columns ([[tui.columns]] when/glyph) still pending
+— they need the anchor machinery; folded into a later polish pass, noted.
+Claim custom-views (real ticket create/activate→appears; done→leaves, both
+directions) + 40 grammar unit cases.
 
 ### A5. Parent/child threads + collapsible tree view
 **Why:** Lukas: children collapse under their parent (▾/▸ + ├/└ rails), DEFAULT

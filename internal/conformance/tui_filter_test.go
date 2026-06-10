@@ -5,6 +5,7 @@ package conformance
 // start, and match-count rendering.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ func init() {
 	registerTUIClaim("filter-target-uuid", claimFilterTargetUUID)
 	registerTUIClaim("filter-esc-applies", claimFilterEscApplies)
 	registerTUIClaim("filter-start-flag", claimFilterStartFlag)
+	registerTUIClaim("custom-views", claimCustomViews)
 }
 
 // threeRowModel: a sandbox with three distinctly-named real threads, model
@@ -213,4 +215,67 @@ func claimFilterStartFlag(t *testing.T) {
 func waitUntilT(t *testing.T, cond func() bool) bool {
 	t.Helper()
 	return waitUntil(25*time.Second, cond)
+}
+
+// claimCustomViews: a [[tui.views]] view compiled from config shows EXACTLY
+// the rows its predicate admits, against REAL ticket state — Tab reaches it,
+// the title names it, and closing the real ticket flips the row out of the
+// view (both directions).
+func claimCustomViews(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	tk := sb.newHeadlessThread(t, "pi", "withticket")
+	sb.newHeadlessThread(t, "pi", "noticket")
+
+	// A real ticket bound to withticket (create, then activate onto the thread).
+	out, stderr, err := sb.Runner.Run(t, "ticket", "create", "--name", "fix it", "--json")
+	if err != nil {
+		t.Fatalf("ticket create: %v\n%s", err, stderr)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &created); err != nil {
+		t.Fatalf("decode ticket: %v\n%s", err, out)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", created.ID, "--status", "active", "--thread", tk.ID); err != nil {
+		t.Fatalf("ticket activate: %v\n%s", err, stderr)
+	}
+
+	views, err := tui.CompileViews([]tui.ViewSpec{{Name: "ticketed", Filter: "ticketed and not archived"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithViews(views)
+
+	// Tab past the three built-ins to the custom view; wait for the
+	// maintainer's snapshot to carry the ticket join.
+	for range 3 {
+		m = runSpecial(t, m, tea.KeyTab)
+	}
+	if !waitUntilT(t, func() bool {
+		m, _ = render(t, m)
+		v := m.View()
+		return strings.Contains(v, "withticket") && !strings.Contains(v, "noticket")
+	}) {
+		t.Fatalf("custom view never settled to exactly the ticketed thread:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "[ticketed]") {
+		t.Errorf("title does not name the custom view: %q", firstLine(m.View()))
+	}
+
+	// Close the ticket -> the row leaves the view (the predicate tracks REAL
+	// ticket state, not a snapshot of it).
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", created.ID, "--status", "done"); err != nil {
+		t.Fatalf("ticket done: %v\n%s", err, stderr)
+	}
+	if !waitUntilT(t, func() bool {
+		m, _ = render(t, m)
+		return !strings.Contains(m.View(), "withticket")
+	}) {
+		t.Fatalf("closed ticket did not flip the row out of the view:\n%s", m.View())
+	}
 }

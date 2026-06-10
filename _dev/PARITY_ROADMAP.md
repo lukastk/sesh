@@ -20,7 +20,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A5** Parent/child threads + collapsible tree view
 - [x] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
 - [x] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
-- [ ] **C1** `sesh await`
+- [x] **C1** `sesh await`
 - [ ] **C2** `sesh delegate` (+ `--sandbox`)
 - [ ] **C3** `sesh subscribe` + turn-delivery engine
 - [ ] **D0** Transcript-resolution layer (per-agent transcript file location)
@@ -294,6 +294,14 @@ claim (35).
 code contract documented for scripting.
 **Verify:** matrix cells (all 3 agents × localities): await returns when a real
 turn really finishes; times out loudly when it doesn't.
+**SHIPPED 2026-06-10** — v1's mesh-read design preserved: await polls the
+LOCAL merged mesh view, so a peer's thread awaits with NO routing (the remote
+cells run await locally for a peer's turn). Mesh-wide id-prefix resolution
+(resolveMeshThreadID). Positional + --id forms (Go flag stops at the first
+positional — pop a leading ref before Parse; remember this for delegate).
+Contract proven concurrently: the reply is retrievable the MOMENT await
+returns; timeout-mid-real-turn loud; already-idle immediate; unknown loud.
+6 cells (139 total).
 
 ### C2. `sesh delegate` (+ `--sandbox`)
 **v1:** `internal/cli/delegate.go` — ephemeral one-shot headless worker:

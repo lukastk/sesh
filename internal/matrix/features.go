@@ -309,6 +309,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.await",
+		Description: "sesh await: block until a real turn completes (busy→idle) by polling the LOCAL mesh view — a peer's thread awaits with no forwarding; --timeout loud on expiry",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.notify",
 		Description: "per-thread notification gate: [defaults] notifications at creation, thread notify --on/--off, hooks receive SESH_NOTIFY (policy stays in the hook)",
 		Localities:  bothLoc,

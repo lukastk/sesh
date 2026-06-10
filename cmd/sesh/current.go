@@ -126,3 +126,37 @@ func shortJoin(ids []string, n int) string {
 	}
 	return strings.Join(out, ", ")
 }
+
+// resolveMeshThreadID is resolveThreadID with MESH-wide prefix resolution: an
+// explicit ref may name a thread on any machine (await/watchers work across
+// the mesh by id); inference (env/pane) stays local as always.
+func resolveMeshThreadID(c *client.Client, cfg config.Config, explicit string) (string, error) {
+	if explicit == "" {
+		return resolveThreadID(cfg, "")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mesh, err := c.Mesh(ctx)
+	if err != nil {
+		return "", err
+	}
+	var hits []string
+	for _, mv := range mesh.Machines {
+		for _, th := range mv.Threads {
+			if th.ID == explicit {
+				return explicit, nil
+			}
+			if strings.HasPrefix(th.ID, explicit) {
+				hits = append(hits, th.ID)
+			}
+		}
+	}
+	switch len(hits) {
+	case 0:
+		return "", fmt.Errorf("no thread on the mesh with id (or prefix) %q", explicit)
+	case 1:
+		return hits[0], nil
+	default:
+		return "", fmt.Errorf("id prefix %q is ambiguous (%d threads: %s …)", explicit, len(hits), shortJoin(hits, 3))
+	}
+}

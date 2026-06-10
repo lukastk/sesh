@@ -49,8 +49,8 @@ func testThreadSnapshot(t *testing.T, agent string) {
 		t.Fatalf("thread never appeared in the snapshot")
 	}
 	r, _ := row()
-	if r.Machine != sb.Machine || r.AgentKind != agent || r.Headless {
-		t.Errorf("snapshot row identity wrong: machine=%q agent=%q headless=%v", r.Machine, r.AgentKind, r.Headless)
+	if r.Machine != sb.Machine || r.AgentKind != agent {
+		t.Errorf("snapshot row identity wrong: machine=%q agent=%q", r.Machine, r.AgentKind)
 	}
 	// Settles to waiting (the maintainer's rolling window may lag the daemon's
 	// readiness probe by up to one busy-window, so poll rather than assert instantly).

@@ -136,7 +136,7 @@ func TestRealCrossHost(t *testing.T) {
 			if _, stderr, err := runLocal("thread", "stop", "--id", id, "--machine", partnerName); err != nil {
 				t.Fatalf("remote stop: %v\n%s", err, stderr)
 			}
-			if !waitUntil(15*time.Second, func() bool { return routedActivity(id) == api.ActivityDead }) {
+			if !waitUntil(15*time.Second, func() bool { return routedActivity(id) == api.ActivityIdle }) {
 				t.Errorf("%s thread still alive on %s after stop", agent, partnerName)
 			}
 		})

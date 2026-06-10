@@ -43,11 +43,7 @@ func runMesh(args []string) error {
 		}
 		fmt.Printf("== %s (%s) — %d threads ==\n", mv.Machine, fresh, len(mv.Threads))
 		for _, t := range mv.Threads {
-			kind := "headed"
-			if t.Headless {
-				kind = "headless"
-			}
-			fmt.Printf("  %-7s %-8s %-8s %-7s %s\n", t.Activity, t.Attachment, kind, t.AgentKind, t.Name)
+			fmt.Printf("  %-7s %-8s %-7s %s\n", t.Activity, t.Attachment, t.AgentKind, t.Name)
 		}
 	}
 	return nil

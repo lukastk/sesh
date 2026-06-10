@@ -10,12 +10,14 @@ type Thread struct {
 	AgentKind     string   `json:"agent_kind"`
 	Name          string   `json:"name"`
 	Tags          []string `json:"tags"`
-	Headless      bool     `json:"headless"`
 	CreatedAtUnix int64    `json:"created_at_unix"`
 	// AgentSessionID is the agent's own conversation id (captured at/after spawn;
 	// what makes resume possible).
 	AgentSessionID string `json:"agent_session_id,omitempty"`
-	// HeadlessStarted is true once the first headless turn has run.
+	// HeadlessStarted is true once the CONVERSATION has begun — a headed spawn sets
+	// it at launch, a headless thread on its first turn. It picks resume-vs-create
+	// semantics for headless turns; it is NOT a headless/headful mode bit (that is
+	// inferred from runtime — see Activity).
 	HeadlessStarted bool `json:"headless_started,omitempty"`
 	// Archived hides the thread from the active list (record kept).
 	Archived bool `json:"archived,omitempty"`
@@ -24,20 +26,30 @@ type Thread struct {
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
 // distinct signal (per the Phase 3b design decision; see _dev/SPEC.md §3):
 //
-//   - Activity   from pane content-diff (working/waiting) + pane liveness (dead)
+//   - Activity   from pane content-diff (working/waiting), the headless turn
+//     registry (working), and pane/turn absence (idle)
 //   - Attachment from `tmux list-clients`
 //
 // They are orthogonal because a detached agent can still be working, and a
 // not-currently-viewed idle agent still needs input. ticket needs-input is
 // derived from Activity == waiting REGARDLESS of attachment.
 
-// Activity is whether the agent is mid-turn, idle, or gone.
+// Activity is the thread's INFERRED runtime state (headless/headful is not a
+// stored mode — a thread is whatever its runtime currently is):
+//
+//	working — a turn is in progress: a live pane that is actively changing, OR a
+//	          headless turn process in flight
+//	waiting — a live pane, byte-stable (agent at its prompt, awaiting input)
+//	idle    — NO runtime at all (no pane, no turn): the unified state formerly
+//	          split into "dead" (was headed) and headless-between-turns. An idle
+//	          thread is a durable conversation that accepts EITHER revival verb:
+//	          resume/headful (a pane) or send-headless (one turn).
 type Activity string
 
 const (
-	ActivityWorking Activity = "working" // the pane is actively changing (mid-turn)
-	ActivityWaiting Activity = "waiting" // the pane is byte-stable (idle, awaiting input)
-	ActivityDead    Activity = "dead"    // no live agent process under a marked pane
+	ActivityWorking Activity = "working"
+	ActivityWaiting Activity = "waiting"
+	ActivityIdle    Activity = "idle"
 )
 
 // Attachment is whether any tmux client is attached to the thread's session.

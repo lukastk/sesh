@@ -127,7 +127,7 @@ func testRuntimeState(t *testing.T, agent string, loc matrix.Locality) {
 	if out, err := sb.rawTmux(t, "kill-session", "-t", "=sesh_rt"); err != nil {
 		t.Fatalf("kill-session: %v\n%s", err, out)
 	}
-	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityDead }) {
+	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityIdle }) {
 		t.Errorf("activity never became dead after kill")
 	}
 }
@@ -228,7 +228,7 @@ func testThreadStop(t *testing.T, agent string, loc matrix.Locality) {
 	if !threadInList(t, sb, th.ID) {
 		t.Errorf("stopped thread %s dropped from the list (stop must keep the record)", th.ID)
 	}
-	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityDead {
+	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityIdle {
 		t.Errorf("stopped thread activity = %q, want dead", got)
 	}
 }

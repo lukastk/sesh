@@ -274,42 +274,29 @@ func (m Model) navSelected() tea.Cmd {
 	useInClient := local && onWorkSocket(m.tmux, m.tmuxSocket)
 	return func() tea.Msg {
 		sessionName := row.SessionName
-		// Headless or dead => no live session to enter. Promote/resume first: on the
-		// local daemon directly, or ROUTED to the owning machine (`--machine`, the
-		// same mesh routing the CLI uses) for a remote thread — then enter.
-		if row.Headless || row.Activity == api.ActivityDead {
-			verb := "resume"
-			if row.Headless {
-				verb = "promote"
-			}
+		// IDLE => no live session to enter: REVIVE it first (the unified model — a
+		// resumable conversation, whether it last ran headed or headless), on the
+		// local daemon directly or ROUTED to the owning machine (`--machine`, the
+		// same mesh routing the CLI uses) — then enter.
+		if row.Activity == api.ActivityIdle {
 			if local {
 				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer cancel()
-				var resp api.ThreadResponse
-				var err error
-				if row.Headless {
-					resp, err = m.client.ThreadHeadful(ctx, row.ID)
-				} else {
-					resp, err = m.client.ThreadResume(ctx, row.ID)
-				}
+				resp, err := m.client.ThreadResume(ctx, row.ID)
 				if err != nil {
-					return actionMsg{err: fmt.Errorf("%s %q: %w", verb, row.Name, err)}
+					return actionMsg{err: fmt.Errorf("revive %q: %w", row.Name, err)}
 				}
 				sessionName = resp.Thread.SessionName
 			} else {
-				sub := "resume"
-				if row.Headless {
-					sub = "headful"
-				}
-				cmd := exec.Command(bin, "thread", sub, "--id", row.ID, "--machine", row.Machine)
+				cmd := exec.Command(bin, "thread", "resume", "--id", row.ID, "--machine", row.Machine)
 				cmd.Env = append(os.Environ(), env...)
 				if out, err := cmd.CombinedOutput(); err != nil {
-					return actionMsg{err: fmt.Errorf("%s %q on %s: %v: %s", verb, row.Name, row.Machine, err, strings.TrimSpace(string(out)))}
+					return actionMsg{err: fmt.Errorf("revive %q on %s: %v: %s", row.Name, row.Machine, err, strings.TrimSpace(string(out)))}
 				}
-				// Promotion/resume can mint the session name — re-resolve it on the owner.
+				// Revival can mint the session name — re-resolve it on the owner.
 				lout, err := routedSessionName(bin, env, row.Machine, row.ID)
 				if err != nil {
-					return actionMsg{err: fmt.Errorf("%s %q: re-resolve session: %w", verb, row.Name, err)}
+					return actionMsg{err: fmt.Errorf("revive %q: re-resolve session: %w", row.Name, err)}
 				}
 				sessionName = lout
 			}
@@ -452,15 +439,15 @@ var (
 // Glyph maps a row's live state to a status glyph. These are part of the contract
 // the TUI conformance asserts against REAL state.
 //
-//	◐ working   ● waiting (idle / needs input)   ✗ dead
+//	◐ working   ● waiting (live pane, needs input)   ◌ idle (no runtime — Enter revives)
 func Glyph(row api.ThreadRow) string {
 	switch row.Activity {
 	case api.ActivityWorking:
 		return "◐"
 	case api.ActivityWaiting:
 		return "●"
-	case api.ActivityDead:
-		return "✗"
+	case api.ActivityIdle:
+		return "◌"
 	default:
 		return "?"
 	}

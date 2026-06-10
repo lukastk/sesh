@@ -69,12 +69,12 @@ func TestDeleteMissingThread(t *testing.T) {
 
 func TestHeadlessSession(t *testing.T) {
 	s := openTestStore(t)
-	th := api.Thread{ID: "h1", Machine: "m", SessionName: "headless-h1", Cwd: "/x", AgentKind: "codex", Name: "h", Tags: []string{}, Headless: true}
+	th := api.Thread{ID: "h1", Machine: "m", SessionName: "headless-h1", Cwd: "/x", AgentKind: "codex", Name: "h", Tags: []string{}}
 	if err := s.InsertThread(th); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	got, _ := s.GetThread("h1")
-	if !got.Headless || got.AgentSessionID != "" || got.HeadlessStarted {
+	if got.AgentSessionID != "" || got.HeadlessStarted {
 		t.Fatalf("fresh headless wrong: %+v", got)
 	}
 	// First turn discovers codex's session id and marks started.

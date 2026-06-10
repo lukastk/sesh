@@ -6,7 +6,9 @@ package api
 
 // SchemaVersion is the version of the client-facing JSON schema. Bump on any
 // breaking change to a response shape.
-const SchemaVersion = 1
+// 2: the unified thread model — Thread.headless dropped (headless/headful is
+// inferred runtime, not a stored mode); Activity value "dead" renamed "idle".
+const SchemaVersion = 2
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

@@ -67,13 +67,9 @@ func (d *Daemon) resolveRow(th api.Thread) api.ThreadRow {
 		return api.ThreadRow{Thread: th, Activity: snap.Activity, Attachment: snap.Attachment}
 	}
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached}
-	if th.Headless {
-		row.Activity = d.headlessActivity(th.ID)
-		return row
-	}
 	activity, err := d.resolveActivity(th)
 	if err != nil {
-		activity = api.ActivityDead
+		activity = api.ActivityIdle
 	}
 	row.Activity = activity
 	if loc, found, _ := d.tmux.FindPaneByThreadID(th.ID); found {

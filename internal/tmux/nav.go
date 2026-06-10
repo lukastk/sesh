@@ -52,7 +52,8 @@ func InnerSwitchScript(socket, session, marker string) string {
 	// nothing) — switch-client does — so the attach target is the bare name.
 	attach := fmt.Sprintf("env -u TMUX tmux -L %s attach -t %s", socket, session)
 	kick := fmt.Sprintf("tmux -L %s new-session -d -s _seshnavkick %s", s, shArg(attach))
-	return fmt.Sprintf(`sel=""; `+
+	return fmt.Sprintf(`tmux -L %[1]s has-session -t %[6]s 2>/dev/null || { echo "nav: no session %[7]s on work socket %[2]s (it may have just died — re-check and revive it)" >&2; exit 1; }; `+
+		`sel=""; `+
 		`mk=$(cat %[4]s 2>/dev/null); `+
 		`if [ -n "$mk" ] && tmux -L %[1]s list-clients -F '#{client_name} #{client_pid}' 2>/dev/null | grep -Fxq "$mk"; then sel="${mk%% *}"; fi; `+
 		`if [ -z "$sel" ]; then `+
@@ -63,7 +64,7 @@ func InnerSwitchScript(socket, session, marker string) string {
 		`else echo "nav: $n clients on work socket %[2]s and no live master marker (%[5]s) — restart the master so its attach records itself" >&2; exit 1; fi; `+
 		`fi; `+
 		`exec tmux -L %[1]s switch-client -c "$sel" -t %[6]s`,
-		s, socket, kick, mk, marker, tgt)
+		s, socket, kick, mk, marker, tgt, session)
 }
 
 // NOTE: the --in-client switch is implemented directly in cmd/sesh (tmuxNav), not as

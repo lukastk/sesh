@@ -118,19 +118,16 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 
 	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached}
 
-	if th.Headless {
-		snap.Activity = m.d.headlessActivity(th.ID)
-		if snap.Activity == api.ActivityWorking {
-			st.lastActive = now.Unix()
-		}
-		snap.LastActiveUnix = st.lastActive
-		m.publish(st, snap)
-		return
-	}
-
+	// Unified model: the runtime is probed, never read from the record. A live
+	// marked pane => content-diff working/waiting; no pane but a headless turn in
+	// flight => working; neither => IDLE (revivable by resume/headful or a turn).
 	loc, found, err := m.d.tmux.FindPaneByThreadID(th.ID)
 	if err != nil || !found {
-		snap.Activity = api.ActivityDead
+		snap.Activity = api.ActivityIdle
+		if m.d.headlessActivity(th.ID) == api.ActivityWorking {
+			snap.Activity = api.ActivityWorking
+			st.lastActive = now.Unix()
+		}
 		snap.LastActiveUnix = st.lastActive
 		m.publish(st, snap)
 		return
@@ -138,7 +135,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	snap.AgentRunning = running && agent.Kind == th.AgentKind
 	if !snap.AgentRunning {
-		snap.Activity = api.ActivityDead // marked pane but the agent exited
+		snap.Activity = api.ActivityIdle // marked pane but the agent exited
 		snap.LastActiveUnix = st.lastActive
 		m.publish(st, snap)
 		return
@@ -149,7 +146,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 
 	content, err := m.d.tmux.CapturePane(loc.Pane)
 	if err != nil {
-		snap.Activity = api.ActivityDead // pane vanished mid-tick
+		snap.Activity = api.ActivityIdle // pane vanished mid-tick
 		snap.LastActiveUnix = st.lastActive
 		m.publish(st, snap)
 		return
@@ -220,6 +217,13 @@ func (m *maintainer) snapshot() api.MachineSnapshot {
 		Threads:         make([]api.ThreadSnapshot, 0, len(m.st)),
 	}
 	for _, st := range m.st {
+		// A just-created thread has an entry but no published snapshot yet (its
+		// first probe is in flight) — emitting the zero value would be a row with
+		// an empty identity. It joins the snapshot on its first publish; until
+		// then on-demand readers use the grid's resolveRow fallback.
+		if st.snap.Thread.ID == "" {
+			continue
+		}
 		out.Threads = append(out.Threads, st.snap)
 	}
 	return out

@@ -245,11 +245,7 @@ func threadSnapshot(cfg config.Config, args []string) error {
 		return nil
 	}
 	for _, row := range snap.Threads {
-		kind := "headed"
-		if row.Headless {
-			kind = "headless"
-		}
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, kind, row.AgentKind, row.Name, row.ID)
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, row.AgentKind, row.Name, row.ID)
 	}
 	return nil
 }

@@ -134,9 +134,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		AgentKind:      string(kind),
 		Name:           req.Name,
 		Tags:           []string{},
-		Headless:       false,
 		CreatedAtUnix:  time.Now().Unix(),
 		AgentSessionID: agentSessionID,
+		// A headed spawn BEGINS the conversation (the agent launches with this
+		// session id) — so a later headless turn on the idle thread must RESUME,
+		// not create. See api.Thread.HeadlessStarted.
+		HeadlessStarted: true,
 	}
 	if err := d.store.InsertThread(thread); err != nil {
 		d.tmux.KillSession(session) // keep store and runtime consistent
@@ -219,23 +222,18 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id}
 
-	// Headless threads have no pane; activity comes from the in-flight turn
-	// registry, and attachment is meaningless (always detached).
-	if thread.Headless {
-		resp.Activity = d.headlessActivity(id)
-		resp.Attachment = api.Detached
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
-
 	loc, found, err := d.tmux.FindPaneByThreadID(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !found {
-		// No marked live pane: dead and (necessarily) detached.
-		resp.Activity = api.ActivityDead
+		// No pane: a headless turn in flight is working; otherwise the unified
+		// IDLE state. Attachment is necessarily detached.
+		resp.Activity = api.ActivityIdle
+		if d.headlessActivity(id) == api.ActivityWorking {
+			resp.Activity = api.ActivityWorking
+		}
 		resp.Attachment = api.Detached
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -258,17 +256,17 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	resp.AgentRunning = running && agent.Kind == thread.AgentKind
 	if !resp.AgentRunning {
-		// A marked pane but no live agent of the right kind: the agent exited.
-		// dead — needs a restart.
-		resp.Activity = api.ActivityDead
+		// A marked pane but no live agent of the right kind: the agent exited —
+		// idle (revivable).
+		resp.Activity = api.ActivityIdle
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
 		// The pane vanished mid-probe (e.g. the session was killed concurrently).
-		// An unreachable pane is dead, not a server error.
-		resp.Activity = api.ActivityDead
+		// An unreachable pane is idle, not a server error.
+		resp.Activity = api.ActivityIdle
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -280,27 +278,27 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolveActivity computes just the activity axis for a thread (dead/working/
-// waiting), the signal ticket needs-input depends on. Shared with the status
+// resolveActivity computes just the activity axis for a thread (working/waiting/
+// idle), the signal ticket needs-input depends on. Shared with the status
 // endpoint's logic.
 func (d *Daemon) resolveActivity(thread api.Thread) (api.Activity, error) {
-	if thread.Headless {
-		return d.headlessActivity(thread.ID), nil
-	}
 	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
 	if err != nil {
 		return "", err
 	}
 	if !found {
-		return api.ActivityDead, nil
+		if d.headlessActivity(thread.ID) == api.ActivityWorking {
+			return api.ActivityWorking, nil
+		}
+		return api.ActivityIdle, nil
 	}
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	if !(running && agent.Kind == thread.AgentKind) {
-		return api.ActivityDead, nil
+		return api.ActivityIdle, nil
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
-		return api.ActivityDead, nil // pane vanished mid-probe => dead
+		return api.ActivityIdle, nil // pane vanished mid-probe => idle
 	}
 	if working {
 		return api.ActivityWorking, nil

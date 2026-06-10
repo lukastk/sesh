@@ -34,9 +34,10 @@ func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req 
 		AgentKind:      string(kind),
 		Name:           req.Name,
 		Tags:           []string{},
-		Headless:       true,
 		CreatedAtUnix:  time.Now().Unix(),
 		AgentSessionID: agentSessionID,
+		// HeadlessStarted stays false: the conversation begins on the first turn
+		// (codex mints its session id there; claude/pi create from the pre-assigned id).
 	}
 	if err := d.store.InsertThread(thread); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -69,8 +70,11 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if !thread.Headless {
-		writeError(w, http.StatusBadRequest, "thread is headed; use /v1/threads/send")
+	// Unified model: a headless turn is valid on any IDLE thread — including one
+	// that previously ran headed (its conversation resumes per-turn). A LIVE pane
+	// owns the conversation, so a concurrent headless turn would fork it: loud 409.
+	if _, found, err := d.tmux.FindPaneByThreadID(req.ID); err == nil && found {
+		writeError(w, http.StatusConflict, "thread has a live pane — send into the pane (thread send), or stop it first")
 		return
 	}
 
@@ -90,9 +94,36 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		codexHome, _ = agents.CodexHome(d.cfg.CodexHome)
 	}
 
+	// A HEADED-BORN codex thread began its conversation in a pane, but codex mints
+	// its session id itself — recover it from the rollouts (same as revive) so the
+	// turn CONTINUES that conversation instead of silently starting a fresh one.
+	// No rollout = no turn ever ran in the pane = nothing to continue: loud N/A.
+	sessionID, started := thread.AgentSessionID, thread.HeadlessStarted
+	if thread.AgentKind == string(agents.Codex) && started && sessionID == "" {
+		releaseSlot := func() {
+			d.hlMu.Lock()
+			delete(d.hlInFlight, req.ID)
+			d.hlMu.Unlock()
+		}
+		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix)
+		if err != nil {
+			releaseSlot()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !found {
+			releaseSlot()
+			writeError(w, http.StatusUnprocessableEntity,
+				"send-headless: codex thread has no session id (no turn has ever run) — nothing to continue (N/A)")
+			return
+		}
+		sessionID = discovered
+		d.store.SetThreadAgentSession(req.ID, sessionID) //nolint:errcheck
+	}
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), thread.AgentSessionID, thread.Cwd, thread.HeadlessStarted, req.Text, codexHome)
+			agents.Kind(thread.AgentKind), sessionID, thread.Cwd, started, req.Text, codexHome)
 
 		d.hlMu.Lock()
 		delete(d.hlInFlight, req.ID)

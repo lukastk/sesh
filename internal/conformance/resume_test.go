@@ -63,8 +63,8 @@ func testThreadResume(t *testing.T, agent string, loc matrix.Locality) {
 	if out, err := sb.rawTmux(t, "kill-session", "-t", "=sesh_rs"); err != nil {
 		t.Fatalf("kill-session: %v\n%s", err, out)
 	}
-	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityDead }) {
-		t.Fatalf("thread never went dead after kill")
+	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityIdle }) {
+		t.Fatalf("thread never went idle after kill")
 	}
 
 	// Resume: recreate the session + relaunch the agent with --resume.

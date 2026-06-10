@@ -61,13 +61,13 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.new.headless",
-		Description: "spawn a headless thread (persistent child agent, no window)",
+		Description: "spawn a thread with NO pane (a durable conversation, idle until revived or sent a turn) — no tmux session exists, state is the unified idle",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
 	Register(Feature{
 		ID:          "thread.stop",
-		Description: "end a thread's runtime (agent + session) but KEEP the record (dead, resumable)",
+		Description: "end a thread's runtime (agent + session) but KEEP the record (idle, revivable)",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
@@ -79,7 +79,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.send.headless",
-		Description: "send a message to a headless thread as a turn",
+		Description: "run a turn on an IDLE thread (headless-born or previously-headed — headless is runtime, not a mode): working while in flight, idle after, reply captured; a LIVE pane refuses the turn loudly (would fork the conversation)",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
@@ -146,7 +146,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.headful",
-		Description: "promote a LIVE headless thread into a headed tmux pane (resume the conversation) — a real agent lands in a real pane, the record flips to headed",
+		Description: "revive an idle never-paned thread into a real tmux pane (== resume under the unified model; the verb is kept) — a real agent lands in a real pane resuming the conversation",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
@@ -228,7 +228,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.runtime-state",
-		Description: "working/waiting/dead/detached — test all transitions, both directions (the v1 codex bug)",
+		Description: "working/waiting/idle + attached/detached — test all transitions, both directions (the v1 codex bug); idle = the unified no-runtime state",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
@@ -254,7 +254,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.resume",
-		Description: "revive a dead headed thread: recreate session + relaunch agent with --resume",
+		Description: "revive an IDLE thread into a pane: recreate session + relaunch agent with --resume (conversation continuity; == headful under the unified model)",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

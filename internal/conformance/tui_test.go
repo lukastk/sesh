@@ -121,7 +121,9 @@ func claimActionNavRemoteDead(t *testing.T) {
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_MASTER_SOCKET=" + master}
 
 	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv).WithTmux("/tmp/notwork,1,1")
-	m, _ = renderUntilRow(t, m, "rdead") // mesh sync replicates the dead thread
+	// Wait for the replicated row to SETTLE to idle (stop leaves a brief stale
+	// "waiting" snapshot in the mesh; Enter on it would skip the revival).
+	m, _ = renderUntilRowState(t, m, "rdead", api.ActivityIdle)
 
 	if m = runKey(t, m, "enter"); m.LastErr() != nil {
 		t.Fatalf("nav on remote dead thread errored: %v", m.LastErr())
@@ -314,9 +316,6 @@ func claimActionNavHeadless(t *testing.T) {
 	local := newSandbox(t, matrix.Local)
 	local.startDaemon(t)
 	th := local.newHeadlessThread(t, "pi", "hlnav")
-	if !th.Headless {
-		t.Fatalf("thread did not start headless: %+v", th)
-	}
 	local.headlessTurn(t, th.ID, "Reply with exactly: ok")
 
 	// A master window for this machine, so the (master-path) nav has a window to switch to.
@@ -333,7 +332,9 @@ func claimActionNavHeadless(t *testing.T) {
 	// In tmux but NOT on the work socket => the master nav path (deterministic regardless
 	// of the ambient $TMUX go test runs under).
 	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1")
-	m, _ = renderUntilRow(t, m, "hlnav")
+	// Wait for the row to SETTLE to idle (the turn above leaves a brief "working"
+	// snapshot; Enter on a stale row would skip the revival).
+	m, _ = renderUntilRowState(t, m, "hlnav", api.ActivityIdle)
 
 	// Enter -> promote then enter.
 	if m = runKey(t, m, "enter"); m.LastErr() != nil {
@@ -608,6 +609,27 @@ func renderUntilRow(t *testing.T, m tui.Model, name string) (tui.Model, api.Thre
 	}) {
 		_, view := render(t, m)
 		t.Fatalf("row %q never appeared in the TUI; view:\n%s", name, view)
+	}
+	return m, got
+}
+
+// renderUntilRowState waits for the named row to reach the given activity — used
+// before Enter when the test just changed a thread's runtime (the maintainer's
+// snapshot lags by a tick; Enter on a stale row exercises the wrong path).
+func renderUntilRowState(t *testing.T, m tui.Model, name string, want api.Activity) (tui.Model, api.ThreadRow) {
+	t.Helper()
+	var got api.ThreadRow
+	if !waitUntil(25*time.Second, func() bool {
+		m, _ = render(t, m)
+		r, ok := rowByName(m, name)
+		if ok && r.Activity == want {
+			got = r
+			return true
+		}
+		return false
+	}) {
+		_, view := render(t, m)
+		t.Fatalf("row %q never reached %s in the TUI; view:\n%s", name, want, view)
 	}
 	return m, got
 }

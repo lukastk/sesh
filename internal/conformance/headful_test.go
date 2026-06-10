@@ -46,9 +46,6 @@ func testThreadHeadful(t *testing.T, agent string, loc matrix.Locality) {
 	sb.startDaemon(t)
 
 	th := sb.newHeadlessThread(t, agent, "promo")
-	if !th.Headless {
-		t.Fatalf("thread did not start headless: %+v", th)
-	}
 	// One real turn establishes the session (codex mints its id here).
 	sb.headlessTurn(t, th.ID, "Reply with exactly: ok")
 

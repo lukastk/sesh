@@ -181,9 +181,9 @@ func (d *Daemon) handleTicketNeedsInput(w http.ResponseWriter, r *http.Request) 
 	thread, err := d.store.GetThread(ticket.ThreadID)
 	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
-			// Bound thread record is gone: treat like a dead thread (needs-restart).
+			// Bound thread record is gone: treat like an idle thread (needs-restart).
 			out.NeedsRestart = true
-			out.ThreadActivity = string(api.ActivityDead)
+			out.ThreadActivity = string(api.ActivityIdle)
 			writeJSON(w, http.StatusOK, out)
 			return
 		}
@@ -199,7 +199,7 @@ func (d *Daemon) handleTicketNeedsInput(w http.ResponseWriter, r *http.Request) 
 	switch activity {
 	case api.ActivityWaiting:
 		out.NeedsInput = true
-	case api.ActivityDead:
+	case api.ActivityIdle:
 		out.NeedsRestart = true
 	}
 	writeJSON(w, http.StatusOK, out)

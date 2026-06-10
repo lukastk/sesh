@@ -19,10 +19,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 	if err != nil {
 		return err
 	}
+	// The headless COLUMN is deprecated (the unified model infers headless/headful
+	// from runtime); kept in the schema for compatibility, always written 0, never read.
 	headless := 0
-	if t.Headless {
-		headless = 1
-	}
 	started := 0
 	if t.HeadlessStarted {
 		started = 1
@@ -177,7 +176,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
 		return t, fmt.Errorf("store: decode thread tags: %w", err)
 	}
-	t.Headless = headless == 1
+	_ = headless // deprecated column (see InsertThread); headless-ness is runtime-inferred
 	t.HeadlessStarted = started == 1
 	return t, nil
 }

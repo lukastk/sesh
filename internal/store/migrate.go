@@ -58,6 +58,11 @@ var migrations = []string{
 	// 7: parent/child — a thread may have a parent thread (tree views, child
 	// spawns). Plain uuid reference, '' = root; cycle-guarded at the API layer.
 	`ALTER TABLE threads ADD COLUMN parent TEXT NOT NULL DEFAULT '';`,
+	// 8: hook mutes — `sesh hooks disable <name>` persists across daemon
+	// restarts (the hook DEFINITION lives in config.toml; the mute is runtime
+	// state, so it lives here).
+	`CREATE TABLE IF NOT EXISTS hook_mutes (name TEXT PRIMARY KEY);`,
+
 }
 
 // migrate applies any unapplied migrations. The current version lives in

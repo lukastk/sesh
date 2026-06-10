@@ -49,6 +49,10 @@ type Daemon struct {
 	mesh *meshSync
 	// naming is the user's [[session_name]] policy (nil = default sesh_<name>).
 	naming *config.Naming
+	// hooks + evt: the [[hooks]] runner and the mesh-wide observer loop that
+	// feeds it (see eventer.go / hookrunner.go).
+	hooks *hookRunner
+	evt   *eventer
 	// mmaint converges the master cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -108,6 +112,16 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
+	hooks, err := config.LoadHooks(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [[hooks]] refuses the daemon loudly
+	}
+	muted, err := st.HookMutes()
+	if err != nil {
+		return nil, err
+	}
+	d.hooks = newHookRunner(hooks, muted)
+	d.evt = newEventer(d, d.hooks)
 	if cfg.MasterSelfheal {
 		d.mmaint = newMasterMaint(d)
 	}
@@ -126,6 +140,7 @@ func (d *Daemon) Serve() error {
 	d.started = time.Now()
 	d.maint.start() // begin keeping local thread state fresh in the background
 	d.mesh.start()  // begin syncing peers' snapshots into the local cache
+	go d.evt.run()  // observe the merged mesh + fire [[hooks]]
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the master cockpit to one window per connected machine
 	}
@@ -167,6 +182,7 @@ func (d *Daemon) Serve() error {
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopAPI(ctx)
+	d.evt.shutdown()
 	if d.mmaint != nil {
 		d.mmaint.stopAndWait()
 	}

@@ -125,3 +125,32 @@ func (s *Store) OpenTicketCounts() (map[string]int, error) {
 	}
 	return out, rows.Err()
 }
+
+// SetHookMuted persists a hook's mute state.
+func (s *Store) SetHookMuted(name string, muted bool) error {
+	var err error
+	if muted {
+		_, err = s.db.Exec(`INSERT OR IGNORE INTO hook_mutes (name) VALUES (?)`, name)
+	} else {
+		_, err = s.db.Exec(`DELETE FROM hook_mutes WHERE name = ?`, name)
+	}
+	return err
+}
+
+// HookMutes returns the persisted muted hook names.
+func (s *Store) HookMutes() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT name FROM hook_mutes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[n] = true
+	}
+	return out, rows.Err()
+}

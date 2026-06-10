@@ -117,3 +117,20 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	}
 	return nil
 }
+
+// HooksList fetches GET /v1/hooks.
+func (c *Client) HooksList(ctx context.Context) (api.HooksListResponse, error) {
+	var out api.HooksListResponse
+	return out, c.getJSON(ctx, "http://unix/v1/hooks", &out)
+}
+
+// HooksMute posts POST /v1/hooks/mute.
+func (c *Client) HooksMute(ctx context.Context, name string, muted bool) error {
+	return c.postJSON(ctx, "http://unix/v1/hooks/mute", api.HookMuteRequest{Name: name, Muted: muted}, nil)
+}
+
+// HooksTest posts POST /v1/hooks/test (synchronous run).
+func (c *Client) HooksTest(ctx context.Context, name, threadID string) (api.HookTestResponse, error) {
+	var out api.HookTestResponse
+	return out, c.postJSON(ctx, "http://unix/v1/hooks/test", api.HookTestRequest{Name: name, ThreadID: threadID}, &out)
+}

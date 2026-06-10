@@ -87,6 +87,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh info:", err)
 			os.Exit(1)
 		}
+	case "hooks":
+		if err := runHooks(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh hooks:", err)
+			os.Exit(1)
+		}
 	case "cwd-label":
 		if err := runCwdLabel(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh cwd-label:", err)

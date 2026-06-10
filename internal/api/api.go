@@ -33,3 +33,46 @@ type ErrorResponse struct {
 	Schema int    `json:"schema"`
 	Error  string `json:"error"`
 }
+
+// --- hooks (PARITY_ROADMAP B1) ---
+
+// HookInfo is one configured hook + its runtime mute state.
+type HookInfo struct {
+	Name    string `json:"name"`
+	Event   string `json:"event"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	Machine string `json:"machine,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+	Command string `json:"command"`
+	Muted   bool   `json:"muted"`
+}
+
+// HooksListResponse is GET /v1/hooks.
+type HooksListResponse struct {
+	Schema int        `json:"schema"`
+	Hooks  []HookInfo `json:"hooks"`
+}
+
+// HookMuteRequest is POST /v1/hooks/mute (enable = muted false).
+type HookMuteRequest struct {
+	Name  string `json:"name"`
+	Muted bool   `json:"muted"`
+}
+
+// HookTestRequest is POST /v1/hooks/test — run a hook synchronously with a
+// synthetic (or a real thread's) event.
+type HookTestRequest struct {
+	Name     string `json:"name"`
+	ThreadID string `json:"thread_id,omitempty"`
+}
+
+// HookTestResponse carries the synchronous run's combined output.
+type HookTestResponse struct {
+	Schema int    `json:"schema"`
+	Name   string `json:"name"`
+	Output string `json:"output"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}

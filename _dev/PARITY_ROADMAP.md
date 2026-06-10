@@ -18,7 +18,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [x] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [x] **A5** Parent/child threads + collapsible tree view
-- [ ] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
+- [x] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
 - [ ] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
 - [ ] **C1** `sesh await`
 - [ ] **C2** `sesh delegate` (+ `--sandbox`)
@@ -248,6 +248,17 @@ the store, not the config file). Loud: unknown event names refuse the daemon.
 **Verify:** matrix cells: a real hook command fires on a real busy→idle edge
 (file-touch assertion), filters scope it, disable mutes it, test runs it
 synchronously. Both localities where sensible (hooks are per-daemon — local).
+**SHIPPED 2026-06-10** — research note: v1's Runner ported (async + timeout +
+loud-log failures + sync test); exec via $SHELL -c (v2 doctrine; v1 used
+sh -c). THE design carried over: OBSERVER-BOUND events — the new eventer loop
+(4th daemon loop, 1s tick) diffs the MERGED mesh view (maintainer + peer
+snapshot cache) and fires LOCAL hooks for edges observed ANYWHERE; the remote
+cell proves a local hook firing for a peer thread's real turn with no hook on
+the peer. Events: busy_changed/head_changed (from/to) + created/deleted/
+archived/unarchived/renamed; first tick = baseline (no re-announce on daemon
+restart). Mutes persisted (migration 8) via /v1/hooks API. Cells daemon.hooks
+local+remote (131 total). Test lesson: an idle→busy edge needs the thread
+OBSERVED idle first — wait for status + an eventer tick before the turn.
 
 ### B2. Per-thread notifications
 **Lukas:** per-thread on/off toggle, config.toml default `notifications = true`.

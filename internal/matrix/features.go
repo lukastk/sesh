@@ -309,6 +309,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "daemon.hooks",
+		Description: "[[hooks]] event hooks: observed busy/head/lifecycle edges run user commands ($SHELL -c, event env); observer-bound across the mesh; list/enable/disable/test",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "daemon.mesh-read",
 		Description: "cross-machine read via the peer mesh",
 		Localities:  []Locality{Remote},

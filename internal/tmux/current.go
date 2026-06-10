@@ -62,3 +62,19 @@ func CurrentFromEnv(machine string) (api.TmuxCurrentResponse, error) {
 	}
 	return out, nil
 }
+
+// ThreadIDOfPane reads the @sesh-thread-id birth-stamp of an EXPLICIT pane on an
+// EXPLICIT work socket — the popup-binding variant of CurrentFromEnv (a popup's own
+// $TMUX_PANE is the popup, not the pane the user was on; the binding carries the
+// real pane id). Returns "" when the pane carries no thread mark (a plain shell —
+// a legitimate state, not an error). A missing PANE is a loud error.
+func ThreadIDOfPane(socket, pane string) (string, error) {
+	cmd := exec.Command("tmux", "-L", socket, "display-message", "-p", "-t", pane, "-F", "#{"+ThreadIDOption+"}")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("tmux display-message -t %s: %w: %s", pane, err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}

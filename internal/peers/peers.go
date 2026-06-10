@@ -131,6 +131,16 @@ func (r *Registry) Add(p Peer) error {
 }
 
 // List returns all peers sorted by machine.
+// Remove deletes a peer by machine name. Removing an unknown peer is a loud
+// error (a typo must not silently "succeed").
+func (r *Registry) Remove(machine string) error {
+	if _, ok := r.Peers[machine]; !ok {
+		return fmt.Errorf("peers: no peer named %q", machine)
+	}
+	delete(r.Peers, machine)
+	return nil
+}
+
 func (r Registry) List() []Peer {
 	out := make([]Peer, 0, len(r.Peers))
 	for _, p := range r.Peers {

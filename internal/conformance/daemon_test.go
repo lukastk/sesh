@@ -65,6 +65,19 @@ func testDaemonLifecycle(t *testing.T, loc matrix.Locality) {
 		t.Errorf("[%s] second `daemon start` unexpectedly succeeded", loc)
 	}
 
+	// --- restart: the old process dies, a NEW one (different pid) answers ---
+	if _, stderr, err := r.Run(t, "daemon", "restart"); err != nil {
+		t.Fatalf("[%s] daemon restart failed: %v\n%s", loc, err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool { return !pidAlive(pid) }) {
+		t.Errorf("[%s] old daemon pid %d still alive after restart", loc, pid)
+	}
+	st = mustStatus(t, r)
+	if st.PID == pid || !pidAlive(st.PID) {
+		t.Fatalf("[%s] restart did not produce a new live daemon (old=%d new=%d alive=%v)", loc, pid, st.PID, pidAlive(st.PID))
+	}
+	pid = st.PID
+
 	// --- stop ---
 	if _, stderr, err := r.Run(t, "daemon", "stop"); err != nil {
 		t.Fatalf("[%s] daemon stop failed: %v\n%s", loc, err, stderr)

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +34,16 @@ func runDaemon(args []string) error {
 	case "run":
 		return daemonRun(cfg)
 	case "start":
+		return daemonStart(cfg)
+	case "restart":
+		// stop-then-start; "wasn't running" is a legitimate restart precondition
+		// (printed, not hidden), any other stop failure aborts loudly.
+		if err := daemonStop(cfg); err != nil {
+			if !strings.Contains(err.Error(), "no daemon running") {
+				return err
+			}
+			fmt.Println("(daemon was not running)")
+		}
 		return daemonStart(cfg)
 	case "stop":
 		return daemonStop(cfg)

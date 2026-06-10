@@ -1,13 +1,16 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lukastk/sesh/internal/config"
+	"github.com/lukastk/sesh/internal/tmux"
 	"github.com/lukastk/sesh/internal/tui"
 )
 
@@ -16,11 +19,32 @@ import (
 func runTUI(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	allMachines := fs.Bool("all-machines", false, "show threads from every machine in the mesh")
+	cursor := fs.Bool("cursor", false, "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	cfg := config.Load()
 	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket)
+	if *cursor {
+		// Which pane was the user on? From a popup the only honest carrier is the
+		// binding's $SESH_TUI_PANE (the popup's own $TMUX_PANE is the popup); from a
+		// plain pane shell $TMUX_PANE is the pane itself. A pane with no thread mark
+		// is a legitimate no-preselect; a missing carrier with --cursor is loud.
+		pane := os.Getenv("SESH_TUI_PANE")
+		if pane == "" {
+			pane = os.Getenv("TMUX_PANE")
+		}
+		if pane == "" {
+			return errors.New("tui --cursor: neither $SESH_TUI_PANE nor $TMUX_PANE is set (not inside tmux?)")
+		}
+		id, err := tmux.ThreadIDOfPane(cfg.TmuxSocket, pane)
+		if err != nil {
+			return fmt.Errorf("tui --cursor: %w", err)
+		}
+		if id != "" {
+			m = m.WithPreselect(id)
+		}
+	}
 	// WHICH tmux client this TUI renders on, for in-client nav's --client. The only
 	// trustworthy carrier is the keybinding: the myrig confs run the TUI popup via
 	// run-shell, which expands #{client_name} for the PRESSING client and bakes it

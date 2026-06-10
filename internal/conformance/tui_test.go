@@ -35,6 +35,14 @@ var declaredTUIClaims = []string{
 	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
 	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
 	"action-nav-remote-dead",    // Enter on a DEAD thread on ANOTHER machine resumes it THERE (routed over the mesh) and enters it
+	"quit-esc",                  // Esc quits from normal mode; inside the line prompt it only closes the prompt
+	"view-cycle-tab",            // Tab cycles active/archived/all against REAL archived state; the title names the view
+	"action-rename",             // the r line-prompt really renames the thread on the daemon
+	"action-tag",                // the t line-prompt really adds a tag on the daemon
+	"cursor-wrap",               // up/down wrap around the row list
+	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
+	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it
+	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

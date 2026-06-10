@@ -29,10 +29,59 @@ import (
 const refreshInterval = 3 * time.Second
 
 // Model is the TUI state. Its rows come only from the daemon grid.
+// View is which subset of threads the grid shows; Tab cycles. The current view's
+// name is rendered in the title (so the user always knows what they're looking at).
+type View int
+
+const (
+	ViewActive   View = iota // non-archived (the default)
+	ViewArchived             // archived only
+	ViewAll                  // everything
+)
+
+func (v View) String() string {
+	switch v {
+	case ViewActive:
+		return "active"
+	case ViewArchived:
+		return "archived"
+	case ViewAll:
+		return "all"
+	default:
+		return "?"
+	}
+}
+
+// promptKind says what the line-prompt input will do on submit.
+type promptKind int
+
+const (
+	promptNone   promptKind = iota
+	promptRename            // rename the selected thread
+	promptTag               // add a tag to the selected thread
+)
+
 type Model struct {
 	client      *client.Client
 	allMachines bool
-	archived    bool
+	view        View
+	showID      bool // `i` toggles an ID column (tid8) — the only id surface in the TUI
+
+	// Line-prompt input mode (rename / tag-add). While prompting, ordinary keys
+	// edit the input; Enter submits, Esc cancels.
+	prompting   promptKind
+	promptInput []rune
+	promptRow   api.ThreadRow // the row the prompt acts on (captured at open)
+
+	// preselectID: when set, the first successful fetch moves the cursor to this
+	// thread (the `--cursor` start-on-current-thread affordance), then clears it.
+	preselectID string
+
+	// uuidPopup: `y` shows the selected thread's FULL uuid in a popup; `c` inside
+	// it copies to the system clipboard, any other key closes. note is the last
+	// one-line status (e.g. "UUID copied"), shown dim under the title.
+	uuidPopup bool
+	note      string
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -120,6 +169,13 @@ func (m Model) WithLocal(machine, tmuxSocket string) Model {
 	return m
 }
 
+// WithPreselect makes the first fetch place the cursor on the given thread id
+// (no-op if the thread is not in the current view).
+func (m Model) WithPreselect(threadID string) Model {
+	m.preselectID = threadID
+	return m
+}
+
 // meshMsg carries a freshly-fetched mesh view, already flattened to rows.
 type meshMsg struct {
 	rows      []api.ThreadRow
@@ -136,7 +192,7 @@ func (m Model) Init() tea.Cmd { return m.fetch() }
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
-	c, archived, all := m.client, m.archived, m.allMachines
+	c, view, all := m.client, m.view, m.allMachines
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -150,7 +206,7 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				if t.Archived && !archived {
+				if (view == ViewActive && t.Archived) || (view == ViewArchived && !t.Archived) {
 					continue
 				}
 				rows = append(rows, api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment})
@@ -190,6 +246,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rows = msg.rows
 			m.machines = msg.machines
 			m.fetchedAt = msg.fetchedAt
+			if m.preselectID != "" {
+				for i, r := range m.rows {
+					if r.ID == m.preselectID {
+						m.cursor = i
+						break
+					}
+				}
+				m.preselectID = "" // one-shot: only the first fetch positions the cursor
+			}
 			if m.cursor >= len(m.rows) {
 				m.cursor = max(0, len(m.rows)-1)
 			}
@@ -198,6 +263,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, m.fetch()
 	case actionMsg:
+		m.note = ""
 		if msg.err != nil {
 			m.lastErr = msg.err
 		}
@@ -229,19 +295,47 @@ type attachMsg struct{ target string }
 type navDoneMsg struct{}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.uuidPopup {
+		return m.handleUUIDKey(msg)
+	}
+	if m.prompting != promptNone {
+		return m.handlePromptKey(msg)
+	}
 	switch msg.String() {
-	case "q", "ctrl+c":
+	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
+	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
+	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
+		m.cursor-- // wraps: top -> bottom (matches the fzf pickers' --cycle feel)
+		if m.cursor < 0 {
+			m.cursor = max(0, len(m.rows)-1)
 		}
 	case "down", "j":
-		if m.cursor < len(m.rows)-1 {
-			m.cursor++
+		m.cursor++
+		if m.cursor >= len(m.rows) {
+			m.cursor = 0
 		}
-	case "r":
+	case "tab":
+		m.view = (m.view + 1) % 3
+		m.cursor = 0
 		return m, m.fetch()
+	case "i":
+		m.showID = !m.showID
+	case "y":
+		if _, ok := m.Selected(); ok {
+			m.uuidPopup = true
+		}
+	case "R":
+		return m, m.fetch()
+	case "r":
+		if row, ok := m.Selected(); ok {
+			m.prompting, m.promptRow, m.promptInput = promptRename, row, []rune(row.Name)
+		}
+	case "t":
+		if row, ok := m.Selected(); ok {
+			m.prompting, m.promptRow, m.promptInput = promptTag, row, nil
+		}
 	case "x":
 		return m, m.stopSelected()
 	case "d":
@@ -252,6 +346,92 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.navSelected()
 	}
 	return m, nil
+}
+
+// handleUUIDKey: inside the uuid popup, `c` copies the full uuid to the system
+// clipboard (failure is a LOUD error in the error line); any key closes the popup.
+func (m Model) handleUUIDKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.uuidPopup = false
+	if msg.String() == "c" {
+		if row, ok := m.Selected(); ok {
+			if err := copyToClipboard(row.ID); err != nil {
+				m.lastErr = fmt.Errorf("copy uuid: %w", err)
+			} else {
+				m.note = "UUID copied to clipboard"
+			}
+		}
+	}
+	return m, nil
+}
+
+// handlePromptKey edits the line-prompt: Enter submits, Esc cancels, Backspace
+// deletes, printable runes append.
+func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.prompting, m.promptInput = promptNone, nil
+		return m, nil
+	case "enter":
+		kind, row, input := m.prompting, m.promptRow, strings.TrimSpace(string(m.promptInput))
+		m.prompting, m.promptInput = promptNone, nil
+		if input == "" {
+			return m, nil
+		}
+		switch kind {
+		case promptRename:
+			return m, m.renameRow(row, input)
+		case promptTag:
+			return m, m.tagRow(row, input)
+		}
+		return m, nil
+	case "backspace":
+		if len(m.promptInput) > 0 {
+			m.promptInput = m.promptInput[:len(m.promptInput)-1]
+		}
+		return m, nil
+	}
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.promptInput = append(m.promptInput, msg.Runes...)
+	case tea.KeySpace:
+		m.promptInput = append(m.promptInput, ' ')
+	}
+	return m, nil
+}
+
+// renameRow renames a thread via the CLI verb (uniform local/remote: the CLI's
+// --machine routing reaches the owning daemon; the TUI does not re-implement it).
+func (m Model) renameRow(row api.ThreadRow, name string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "rename", "--id", row.ID, "--name", name}
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("rename %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		return actionMsg{}
+	}
+}
+
+// tagRow adds a tag to a thread via the CLI verb (routing as renameRow).
+func (m Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "tag", "--id", row.ID, "--add", tag}
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("tag %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		return actionMsg{}
+	}
 }
 
 // navSelected enters the selected thread. A headless thread has no pane and a dead
@@ -398,7 +578,8 @@ func (m Model) deleteSelected() tea.Cmd {
 	}
 }
 
-// archiveSelected parks the selected thread (record kept, hidden from the list).
+// archiveSelected TOGGLES the selected thread's archived state (archive in the
+// active view, unarchive in the archived/all views — the row knows which).
 func (m Model) archiveSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
@@ -408,7 +589,7 @@ func (m Model) archiveSelected() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return actionMsg{err: c.ThreadArchive(ctx, row.ID, true)}
+		return actionMsg{err: c.ThreadArchive(ctx, row.ID, !row.Archived)}
 	}
 }
 
@@ -422,6 +603,15 @@ func (m Model) Selected() (api.ThreadRow, bool) {
 
 // Rows exposes the current rows (for tests).
 func (m Model) Rows() []api.ThreadRow { return m.rows }
+
+// CurrentView exposes the active view (for tests).
+func (m Model) CurrentView() View { return m.view }
+
+// Cursor exposes the cursor index (for tests).
+func (m Model) Cursor() int { return m.cursor }
+
+// Prompting reports whether the line-prompt is open (for tests).
+func (m Model) Prompting() bool { return m.prompting != promptNone }
 
 // LastErr exposes the most recent fetch/action error (for tests).
 func (m Model) LastErr() error { return m.lastErr }
@@ -476,11 +666,31 @@ func BusyGlyph(row api.ThreadRow) string {
 // the rendered output reflects the model's REAL rows.
 func (m Model) View() string {
 	var b strings.Builder
-	b.WriteString(styleHeader.Render("sesh — live threads") + "\n")
+	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.view.String()+"]") + "\n")
 	if m.lastErr != nil {
 		b.WriteString(styleDim.Render("(daemon unreachable: "+m.lastErr.Error()+")") + "\n")
 	}
-	b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s %-12s %-7s %-8s %-4s %-20s %s", "HB", "MACHINE", "AGENT", "HEAD", "BUSY", "NAME", "TAGS")) + "\n")
+	if m.note != "" {
+		b.WriteString(styleDim.Render(m.note) + "\n")
+	}
+	if m.uuidPopup {
+		if row, ok := m.Selected(); ok {
+			b.WriteString(styleHeader.Render("┃ "+row.ID+" ┃") + "\n")
+			b.WriteString(styleDim.Render("  c to copy · any other key to close") + "\n")
+		}
+	}
+	if m.prompting != promptNone {
+		label := "rename"
+		if m.prompting == promptTag {
+			label = "tag"
+		}
+		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s█", label, m.promptRow.Name, string(m.promptInput))) + "\n")
+	}
+	idHdr, idFmt := "", "%.0s"
+	if m.showID {
+		idHdr, idFmt = fmt.Sprintf("%-9s", "ID"), "%-9s"
+	}
+	b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s %-12s "+idFmt+"%-7s %-8s %-4s %-20s %s", "HB", "MACHINE", idHdr, "AGENT", "HEAD", "BUSY", "NAME", "TAGS")) + "\n")
 
 	if len(m.rows) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
@@ -494,8 +704,12 @@ func (m Model) View() string {
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		line := fmt.Sprintf("%s%s%s %-12s %-7s %-8s %-4s %-20s %s",
-			HeadGlyph(row), BusyGlyph(row), att, trunc(row.Machine, 12), trunc(row.AgentKind, 7), string(row.Head), string(row.Busy), trunc(row.Name, 20), tags)
+		id := row.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		line := fmt.Sprintf("%s%s%s %-12s "+idFmt+"%-7s %-8s %-4s %-20s %s",
+			HeadGlyph(row), BusyGlyph(row), att, trunc(row.Machine, 12), id, trunc(row.AgentKind, 7), string(row.Head), string(row.Busy), trunc(row.Name, 20), tags)
 		if i == m.cursor {
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
@@ -515,13 +729,16 @@ func (m Model) View() string {
 			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · last seen %ds ago", mv.Machine, age)) + "\n")
 		}
 	}
-	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · x stop · d delete · a archive · r refresh · q quit") + "\n")
+	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	return b.String()
 }
 
+// trunc shortens to n COLUMNS' worth of runes (byte slicing would split
+// multi-byte runes — session/thread names contain non-ASCII).
 func trunc(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }

@@ -12,7 +12,7 @@ import (
 // runPeer implements `sesh peer <add|list>` — the local mesh registry.
 func runPeer(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh peer <add|list>")
+		return errors.New("usage: sesh peer <add|list|remove>")
 	}
 	cfg := config.Load()
 	switch args[0] {
@@ -20,6 +20,8 @@ func runPeer(args []string) error {
 		return peerAdd(cfg, args[1:])
 	case "list":
 		return peerList(cfg)
+	case "remove":
+		return peerRemove(cfg, args[1:])
 	default:
 		return fmt.Errorf("unknown peer subcommand %q", args[0])
 	}
@@ -80,5 +82,29 @@ func peerList(cfg config.Config) error {
 		}
 		fmt.Printf("%s\t%s\t%s\t%s\n", p.Machine, p.Transport(), target, p.Home)
 	}
+	return nil
+}
+
+// peerRemove drops a peer from the local mesh registry. Unknown name = loud error.
+func peerRemove(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("remove", flag.ContinueOnError)
+	machine := fs.String("machine", "", "peer machine name to remove (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *machine == "" {
+		return errors.New("peer remove: --machine is required")
+	}
+	reg, err := peers.Load(cfg.PeersPath())
+	if err != nil {
+		return err
+	}
+	if err := reg.Remove(*machine); err != nil {
+		return err
+	}
+	if err := reg.Save(cfg.PeersPath()); err != nil {
+		return err
+	}
+	fmt.Printf("removed peer %s\n", *machine)
 	return nil
 }

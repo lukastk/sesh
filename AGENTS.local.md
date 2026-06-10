@@ -46,7 +46,7 @@ recent session); in zsh, ALWAYS quote `-t "=name"` (unquoted =word does PATH loo
   had 9 stale ms-* bindings from exactly that; surgically unbound live (b B e E m M g G
   j J k o O , .) to match a fresh start.
 
-### IN PROGRESS: the UNIFIED THREAD MODEL (Lukas directive 2026-06-10: "go ahead")
+### DONE: the UNIFIED THREAD MODEL (Lukas directive 2026-06-10; schema v2; deployed both machines)
 Headless/headful becomes INFERRED runtime, not a stored gate. Design (committed here as
 the execution checkpoint — if compacted, resume from this list):
 - **States (inferred per tick)**: pane-live (probe content-diff → working/waiting) |
@@ -70,6 +70,19 @@ the execution checkpoint — if compacted, resume from this list):
   runtime-state + snapshot/mesh/TUI claims: dead→idle strings. grep -rn '"dead"\|ActivityDead\|Headless' over conformance + tui + myrig.
 - Execution order: api → store → daemon (maintainer/headless/headful/resume/thread/grid)
   → cmd → tui → build → conformance pass → FULL suite → deploy both + myrig picker.
+- SHIPPED. Four extra bugs the gates+live smoke caught: (1) headed-born CODEX turns
+  silently started fresh conversations (no pre-assigned id) → rollout discovery like
+  revive, loud N/A if no turn ever; (2) maintainer.snapshot() emitted ZERO-IDENTITY rows
+  for just-created threads → excluded until first publish; (3) the nav kick silently
+  no-op'd on a NONEXISTENT session (v1 silent-failure class, reachable via Enter on a
+  snapshot-stale row) → has-session guard, loud error; claims settle rows to idle first;
+  (4) DEPLOY-ENV PARITY: the supervised daemon couldn't run pi/codex headless turns
+  (PATH lacked mise shims) and lacked zshenv API keys → ini adds the shims + sesh runs
+  headless turns through $SHELL -c exactly like tmux runs pane commands (ini pins
+  SHELL=/bin/zsh); the conformance suite CANNOT catch deploy-env gaps (test daemons
+  inherit the dev shell) — live smoke after deploy is mandatory for daemon-exec paths.
+  Supervisor env changes need reread+update (restart reuses in-memory config) and the
+  daemon must restart AFTER the binary build.
 
 ### Cockpit SELF-HEAL + TUI routed compose (2026-06-10 evening, per Lukas)
 Lukas's invariant: "any machine that is CONNECTED has a master window" — overrides the

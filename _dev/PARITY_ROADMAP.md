@@ -15,6 +15,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A1** TUI column system + `[tui]` config defaults
 - [ ] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
 - [ ] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
+- [ ] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [ ] **A5** Parent/child threads + collapsible tree view
 - [ ] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
@@ -128,12 +129,46 @@ nesting supported.
 building (children nest under VISIBLE parents; a child whose parent is filtered
 out promotes to top level), tree_test.go; `→` expands / `←` collapses.
 **v2 design:** data model first — `parent` on api.Thread (+store migration +
-`thread new --parent <id>` + wire). Then the tree rendering port. Cross-machine
+`thread new --parent <id>` + wire). Per F1's v1 research: `new` run INSIDE a
+thread defaults the parent to the current thread (--no-parent forces a root;
+outside a thread = root, not an error). Then the tree rendering port. Cross-machine
 nuance v1 didn't have: parent and child may live on different machines (mesh
 rows) — group by parent uuid regardless of machine. Glyph rails per v1.
 **Verify:** matrix cell for `thread.new --parent` (record + wire, local+remote);
 claims: tree renders real parent/child rows nested, default collapsed, →/←
 fold/unfold, config default honored, filtered-out parent promotes child.
+
+### F1. Current-thread inference + `sesh info` (added 2026-06-10, Lukas)
+**Why:** v1's deep ergonomic layer — run a verb INSIDE a thread's pane and the
+thread is inferred; `sesh info` with no args describes "here". v2 demands --id
+everywhere.
+**v1 (researched):** `internal/cli/current.go` — `resolveCurrentUUID(explicit)`:
+(1) explicit arg (full/short uuid), (2) `$SESH_SESSION_ID` (baked into every
+spawned agent's env, validated against the daemon, stale → fall through),
+(3) `$TMUX_PANE` pane walk, else LOUD "not running inside a sesh — pass an
+explicit uuid". Inferring verbs: info, state, tail, transcript, parent,
+children, subscriptions, subscribe/unsubscribe --from, send --to-parent, and
+`new` (parent DEFAULTS to the current thread — root only with --no-parent or
+outside a thread; inference failure here is legitimately not an error).
+`info` prints uuid/name/agent/machine/cwd/status/archived/tags/tmux locator
+(+ --json).
+**v2 design:** `internal/cli`-side resolver: (1) explicit --id (keep full/short
+prefix resolution — ALSO new: v2 has no short-id resolution; add it), (2)
+`$SESH_THREAD_ID` — start injecting it into spawned panes AND headless turn
+processes (v2's pane birth-stamp `@sesh-thread-id` + `tmux.ThreadIDOfPane`
+makes source 3 trivial and walker-free), (3) `$TMUX_PANE` → ThreadIDOfPane on
+the work socket, else loud. Retrofit --id-optional onto every single-thread
+verb: status, send, send-headless, stop, resume/headful, archive, tag, rename,
+delete (delete stays EXPLICIT-only — destructive + inference is a footgun),
+ticket bind/list-by-thread, and all D/C verbs as they land. NEW VERB `sesh
+info [id]`: thread record + two-axes state + attachment + tmux locator +
+session name + tags + ticket summary (+ --json). `new --parent` inference
+arrives with A5 (record it there).
+**Verify:** cells: info (3 agents × localities — run INSIDE a real pane via
+send-keys, no args, correct thread described); resolver unit tests (precedence,
+stale env fall-through, loud failure); claim-level: one retrofitted verb (e.g.
+`thread status` with no --id inside a pane) per locality; delete-refuses-
+inference free test.
 
 ## B — Daemon eventing
 

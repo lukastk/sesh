@@ -100,6 +100,20 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
+### DONE: v1-parity (a)-list TUI affordances (2026-06-10 night; deployed both machines)
+From `_dev/V1_FEATURE_AUDIT.md` (the ultracode audit: 178 v1 features compared, doc is
+the (b)/(c) discussion agenda — (b) list NOT yet discussed). Shipped + 8 new claims (21
+total): Esc quits (normal mode only; prompt/popup own their Esc), Tab view-cycle
+active/archived/all w/ title label ("a" now TOGGLES archive from row.Archived), line
+prompt r=rename (prefilled)/t=tag (submit via CLI verbs => routed cross-machine; R is
+refresh now), cursor wrap, i=tid8 column, y=full-UUID popup + c copies (v1 clipboard.go
+ported verbatim; claim asserts at a PATH-stubbed wl-copy boundary), `tui --cursor` +
+SESH_TUI_PANE=#{pane_id} carrier in the work-conf s binding (popup\'s own $TMUX_PANE is
+the popup!), rune-safe trunc, peer remove, daemon restart (lifecycle cells assert new
+pid + old dead). Conf applied live via mt-reload-conf; live smoke: real prefix+s popup
+preselected the pressing pane\'s thread, Esc closed. One unreproduced one-off flake in a
+TUI-claims package run (lost output; full gate + two re-runs green) — watch for it.
+
 ### DONE: the TWO-AXES state model (Lukas 2026-06-10 late; schema v3; deployed both machines)
 Replaces `activity {working,waiting,idle}` ENTIRELY (the enum fuses axes: waiting ≡
 headful∧quiet, idle ≡ headless∧quiet, and `working` ERASES the head axis). New wire on

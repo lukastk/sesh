@@ -47,6 +47,13 @@ type Model struct {
 	// and testable). "" => not in tmux (Enter attaches); basename == tmuxSocket => on the
 	// work socket (Enter switches in place).
 	tmux string
+	// clientName is the tmux client this TUI is rendered on (resolved by the caller
+	// BEFORE the TUI grabs the terminal, while stdin is still the tty — see runTUI).
+	// In-client nav passes it as `--client` so the switch targets exactly this client:
+	// a ttyless nav subprocess cannot resolve it itself (tmux's ambient "current
+	// client" fallback picks an arbitrary client — observed live moving a master
+	// window's attach instead of the invoker).
+	clientName string
 
 	rows      []api.ThreadRow
 	machines  []api.MachineView // per-machine freshness, for the staleness footer
@@ -95,6 +102,12 @@ func (m Model) PendingAttach() ([]string, bool) {
 		return nil, false
 	}
 	return []string{m.binaryPath, "tmux", "nav", "--to", m.attachTarget, "--attach"}, true
+}
+
+// WithClient sets the tmux client this TUI renders on (for in-client nav's --client).
+func (m Model) WithClient(name string) Model {
+	m.clientName = name
+	return m
 }
 
 // WithLocal sets this client's own machine + work socket, enabling in-client nav for
@@ -296,6 +309,9 @@ func (m Model) navSelected() tea.Cmd {
 		args := []string{"tmux", "nav", "--to", target}
 		if useInClient {
 			args = append(args, "--in-client")
+			if m.clientName != "" {
+				args = append(args, "--client", m.clientName)
+			}
 		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)

@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +33,7 @@ var declaredTUIClaims = []string{
 	"action-nav-headless",       // Enter on a HEADLESS thread promotes it (headful) then enters
 	"action-nav-attach",         // Enter from a plain shell (no tmux) attaches the terminal to the thread
 	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
+	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -74,6 +77,84 @@ func init() {
 	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
 	registerTUIClaim("action-nav-attach", claimActionNavAttach)
 	registerTUIClaim("action-nav-quits", claimActionNavQuits)
+	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
+}
+
+// claimActionNavInClient: the TUI's Enter on a LOCAL thread, when the TUI runs inside
+// the work socket's tmux, switches EXACTLY the client the TUI renders on — passed as
+// --client, resolved by the caller while it held the tty. With several clients on the
+// work server (the production topology: master-window supervisors + direct attaches),
+// a ttyless ambient pick moved an arbitrary client — the live A4 bug. Two real
+// clients; the model carries client B's identity; Enter must move B and only B.
+func claimActionNavInClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newThread(t, "pi", "icnav", "/tmp")
+	sb.waitThreadReady(t, th.ID, "pi")
+	if _, err := sb.rawTmux(t, "new-session", "-d", "-s", "icscr", "-c", "/tmp"); err != nil {
+		t.Fatalf("scratch session: %v", err)
+	}
+
+	// Two REAL clients on the scratch session (outer isolated servers).
+	dir := t.TempDir()
+	octl := func(sock string, args ...string) {
+		c := exec.Command("tmux", append([]string{"-S", sock}, args...)...)
+		c.Env = sandboxEnv(nil)
+		c.Run() //nolint:errcheck
+	}
+	for _, n := range []string{"a", "b"} {
+		sock := filepath.Join(dir, n+".sock")
+		octl(sock, "-f", "/dev/null", "new-session", "-d", "-s", "o", "-x", "120", "-y", "40")
+		octl(sock, "send-keys", "-t", "o:0", "-l", "env -u TMUX tmux -L "+sb.TmuxSocket+" attach -t icscr")
+		octl(sock, "send-keys", "-t", "o:0", "Enter")
+	}
+	t.Cleanup(func() {
+		octl(filepath.Join(dir, "a.sock"), "kill-server")
+		octl(filepath.Join(dir, "b.sock"), "kill-server")
+	})
+	if !waitUntil(10*time.Second, func() bool { return workClientTotal(t, sb) == 2 }) {
+		t.Fatalf("expected 2 work clients, got %v", workClientSessions(t, sb))
+	}
+	// Pick one client as "the TUI's" (B = the second by name order; identity is what
+	// matters, not which).
+	var names []string
+	for name := range clientSessionsByName(t, sb) {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	bClient := names[len(names)-1]
+
+	bin := seshBin(t)
+	// The nav subprocess ALSO reads $TMUX (its in-client guard) — pin it to the same
+	// work-socket value the model sees, overriding whatever tmux go test runs under.
+	fakeTmux := "/tmp/x/" + sb.TmuxSocket + ",1,1"
+	navEnv := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine, "SESH_TMUX_SOCKET=" + sb.TmuxSocket, "SESH_MASTER_SOCKET=" + sb.MasterSocket, "TMUX=" + fakeTmux}
+	// $TMUX on the WORK socket => the in-client path; the model carries B's identity.
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, navEnv).
+		WithLocal(sb.Machine, sb.TmuxSocket).
+		WithTmux(fakeTmux).
+		WithClient(bClient)
+	m, _ = renderUntilRow(t, m, "icnav")
+	if m = runKey(t, m, "enter"); m.LastErr() != nil {
+		t.Fatalf("in-client nav errored: %v", m.LastErr())
+	}
+
+	// B (the TUI's client) is on the thread; the other client did not move.
+	if !waitUntil(10*time.Second, func() bool {
+		cs := clientSessionsByName(t, sb)
+		other := ""
+		for name, sess := range cs {
+			if name != bClient {
+				other = sess
+			}
+		}
+		return cs[bClient] == th.SessionName && other == "icscr"
+	}) {
+		t.Errorf("TUI in-client nav: want B(%s)->%q + other->icscr, got %v", bClient, th.SessionName, clientSessionsByName(t, sb))
+	}
 }
 
 // claimActionNavQuits: after Enter successfully enters a thread, the TUI must QUIT —

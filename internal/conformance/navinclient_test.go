@@ -43,12 +43,36 @@ func testNavInClient(t *testing.T) {
 	}
 	tmuxVal := strings.TrimSpace(spOut) + ",1,1" // basename == work socket => passes the in-client guard
 
+	// The invoking client, passed explicitly (the test process has no tty; callers
+	// without one must identify themselves — see tmux.nav-in-client-multi for the
+	// which-client semantics incl. the loud ttyless-without---client failure).
+	clOut, err := sb.rawTmux(t, "list-clients", "-F", "#{client_name}")
+	if err != nil || strings.TrimSpace(clOut) == "" {
+		t.Fatalf("client name: %v\n%s", err, clOut)
+	}
+	clientName := strings.TrimSpace(strings.SplitN(strings.TrimSpace(clOut), "\n", 2)[0])
+
 	// nav --in-client to s2: the SAME client switches in place.
-	if _, stderr, err := runNav(t, sb, tmuxVal, "--in-client", "--to", sb.Machine+":"+s2); err != nil {
+	if _, stderr, err := runNav(t, sb, tmuxVal, "--in-client", "--client", clientName, "--to", sb.Machine+":"+s2); err != nil {
 		t.Fatalf("nav --in-client: %v\n%s", err, stderr)
 	}
 	if !waitUntil(8*time.Second, func() bool { return navClientSession(t, sb) == s2 }) {
 		t.Errorf("in-client nav did not switch the client to %s (still %q)", s2, navClientSession(t, sb))
+	}
+
+	// Pane-context resolution: NO carrier, but $TMUX_PANE belongs to a session with
+	// EXACTLY ONE client — unambiguous, so nav resolves that client itself (the
+	// "ran directly in an unshared pane" case). Switch back to s1 that way.
+	paneOut, err := sb.rawTmux(t, "list-panes", "-t", "="+s2, "-F", "#{pane_id}")
+	if err != nil || strings.TrimSpace(paneOut) == "" {
+		t.Fatalf("pane of %s: %v\n%s", s2, err, paneOut)
+	}
+	paneID := strings.TrimSpace(strings.SplitN(strings.TrimSpace(paneOut), "\n", 2)[0])
+	if _, stderr, err := runNavPane(t, sb, tmuxVal, paneID, "--in-client", "--to", sb.Machine+":"+s1); err != nil {
+		t.Fatalf("nav --in-client (pane-context): %v\n%s", err, stderr)
+	}
+	if !waitUntil(8*time.Second, func() bool { return navClientSession(t, sb) == s1 }) {
+		t.Errorf("pane-context in-client nav did not switch the client to %s (still %q)", s1, navClientSession(t, sb))
 	}
 
 	// Loud errors (never a silent no-op):
@@ -81,8 +105,15 @@ func navClientSession(t *testing.T, sb *Sandbox) string {
 }
 
 // runNav runs `sesh tmux nav <args>` with the sandbox config and an explicit $TMUX
-// (empty => $TMUX unset), so the in-client guard sees exactly what we set.
+// (empty => $TMUX unset), so the in-client guard sees exactly what we set. The
+// ambient TMUX_PANE/SESH_NAV_CLIENT (go test may run inside a tmux) are stripped so
+// nav's client resolution sees only what the test provides.
 func runNav(t *testing.T, sb *Sandbox, tmuxVal string, args ...string) (string, string, error) {
+	return runNavPane(t, sb, tmuxVal, "", args...)
+}
+
+// runNavPane is runNav with an explicit $TMUX_PANE (empty => unset).
+func runNavPane(t *testing.T, sb *Sandbox, tmuxVal, paneVal string, args ...string) (string, string, error) {
 	t.Helper()
 	bin := seshBin(t)
 	env := sandboxEnv(map[string]string{
@@ -91,12 +122,16 @@ func runNav(t *testing.T, sb *Sandbox, tmuxVal string, args ...string) (string, 
 	})
 	filtered := env[:0:0]
 	for _, kv := range env {
-		if !strings.HasPrefix(kv, "TMUX=") {
-			filtered = append(filtered, kv)
+		if strings.HasPrefix(kv, "TMUX=") || strings.HasPrefix(kv, "TMUX_PANE=") || strings.HasPrefix(kv, "SESH_NAV_CLIENT=") {
+			continue
 		}
+		filtered = append(filtered, kv)
 	}
 	if tmuxVal != "" {
 		filtered = append(filtered, "TMUX="+tmuxVal)
+	}
+	if paneVal != "" {
+		filtered = append(filtered, "TMUX_PANE="+paneVal)
 	}
 	cmd := exec.Command(bin, append([]string{"tmux", "nav"}, args...)...)
 	cmd.Env = filtered

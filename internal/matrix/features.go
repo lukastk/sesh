@@ -182,7 +182,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "tmux.nav-in-client-multi",
-		Description: "with MULTIPLE clients on one work-socket session (master window + direct attach), `nav --in-client` switches the client whose keystroke triggered it (the Enter-presser), not just any attached client",
+		Description: "with MULTIPLE clients on one work-socket session, `nav --in-client` switches exactly the client the caller identifies (--client / the $SESH_NAV_CLIENT a popup keybinding bakes in); a carrier-less ambiguous call fails loudly moving NOBODY (ambient picks are arbitrary)",
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{

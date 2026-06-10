@@ -56,6 +56,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("nav", flag.ContinueOnError)
 	to := fs.String("to", "", "target as <machine>:<session> (required)")
 	inClient := fs.Bool("in-client", false, "switch the CURRENT tmux client to the target (local target on the current work socket only; no master)")
+	clientFlag := fs.String("client", "", "with --in-client: the exact tmux client to switch (e.g. the TUI resolves its own client before grabbing the terminal); required when stdin is not a tty")
 	attach := fs.Bool("attach", false, "ATTACH this terminal to the target thread (for use from a plain shell outside tmux); REPLACES the process")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -113,9 +114,52 @@ func tmuxNav(cfg config.Config, args []string) error {
 		if sock := filepath.Base(strings.SplitN(t, ",", 2)[0]); sock != cfg.TmuxSocket {
 			return fmt.Errorf("nav --in-client: current client is on tmux socket %q, not the work socket %q", sock, cfg.TmuxSocket)
 		}
-		script := tmux.InnerSwitchInClientScript(cfg.TmuxSocket, session)
-		if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
-			return fmt.Errorf("nav --in-client: switch-client: %v: %s", err, out)
+		// WHICH client — this must be EXACT, never ambient: tmux's "current client"
+		// for a command client is an arbitrary pick (it cannot identify a piped
+		// subprocess, a popup's pty, or even a pane's pty as any attached client —
+		// observed live moving a master window's attach instead of the invoker).
+		// Deterministic carriers, in order:
+		//   1. --client          (the caller resolved it, e.g. the TUI)
+		//   2. $SESH_NAV_CLIENT  (the keybinding expanded #{client_name} via run-shell
+		//                         and baked it into the popup env — see the myrig confs)
+		//   3. $TMUX_PANE's session has EXACTLY ONE client (a directly-run command in
+		//      an unshared pane — unambiguous without any carrier)
+		// Anything else is ambiguous => loud error, never a wrong-client switch.
+		client := *clientFlag
+		if client == "" {
+			client = os.Getenv("SESH_NAV_CLIENT")
+		}
+		if client == "" {
+			pane := os.Getenv("TMUX_PANE")
+			if pane == "" {
+				return errors.New("nav --in-client: cannot identify the invoking client ($TMUX_PANE unset) — pass --client")
+			}
+			sessOut, err := exec.Command("tmux", "-L", cfg.TmuxSocket, "display-message", "-p", "-t", pane, "#{session_name}").Output()
+			if err != nil {
+				return fmt.Errorf("nav --in-client: resolve %s's session: %v", pane, err)
+			}
+			sess := strings.TrimSpace(string(sessOut))
+			clOut, err := exec.Command("tmux", "-L", cfg.TmuxSocket, "list-clients", "-t", "="+sess, "-F", "#{client_name}").Output()
+			if err != nil {
+				return fmt.Errorf("nav --in-client: list clients of %q: %v", sess, err)
+			}
+			var cls []string
+			for _, l := range strings.Split(strings.TrimSpace(string(clOut)), "\n") {
+				if l = strings.TrimSpace(l); l != "" {
+					cls = append(cls, l)
+				}
+			}
+			switch len(cls) {
+			case 1:
+				client = cls[0]
+			case 0:
+				return fmt.Errorf("nav --in-client: no client attached to session %q", sess)
+			default:
+				return fmt.Errorf("nav --in-client: %d clients on session %q — ambiguous; use the sesh keybindings (which carry the client) or pass --client", len(cls), sess)
+			}
+		}
+		if out, err := exec.Command("tmux", "-L", cfg.TmuxSocket, "switch-client", "-c", client, "-t", "="+session).CombinedOutput(); err != nil {
+			return fmt.Errorf("nav --in-client: switch-client %s: %v: %s", client, err, out)
 		}
 		return nil
 	}

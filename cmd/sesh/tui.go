@@ -21,6 +21,16 @@ func runTUI(args []string) error {
 	}
 	cfg := config.Load()
 	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket)
+	// WHICH tmux client this TUI renders on, for in-client nav's --client. The only
+	// trustworthy carrier is the keybinding: the myrig confs run the TUI popup via
+	// run-shell, which expands #{client_name} for the PRESSING client and bakes it
+	// into $SESH_NAV_CLIENT. (In-process resolution is ambient/arbitrary — tmux can't
+	// map a popup's or pane's pty back to a client; observed live switching a master
+	// window's attach instead of the invoker.) Without it, nav falls back to the
+	// unambiguous single-client-pane case or fails loudly — never a wrong client.
+	if name := os.Getenv("SESH_NAV_CLIENT"); name != "" {
+		m = m.WithClient(name)
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {

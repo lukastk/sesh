@@ -52,7 +52,7 @@ var skipReasons = map[string]string{
 	"master.holding":            "an empty work server's master window falls back to a holding 'scratch' shell, not a 'no sessions' loop",
 	"master.watchers":          "master watchers lists origins with a live window-attach (marker liveness), present while up, gone after down",
 	"tmux.work-conf":            "the work tmux server starts with `tmux -f <SESH_TMUX_CONF>` (sesh's own UI, separate from ~/.tmux.conf)",
-	"tmux.nav-in-client-multi":  "with multiple clients on one session, nav --in-client switches the one that pressed Enter, not just any client",
+	"tmux.nav-in-client-multi":  "with multiple clients, nav --in-client switches exactly the carried client (--client/$SESH_NAV_CLIENT); ambiguous carrier-less calls fail loudly",
 	"tmux.nav-master-multi":     "with multiple clients on a work server, the master-path nav switches the master window's marker-recorded client; a direct attach never moves",
 	"tmux.nav-attach":           "nav --attach (Enter from a plain shell) attaches the terminal to the thread (a client lands on it)",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",

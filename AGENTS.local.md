@@ -2,28 +2,41 @@
 
 ## Build status: ALL GREEN
 
-Feature matrix: **118 cells** (added `master.up/reconnect/holding`, `tmux.work-conf`,
-http twins, etc.). Separate **TUI conformance track: 9 claims** (+ `action-nav-headless`).
-Plus **`TestRealCrossHost`** + **`TestRealCrossHostHTTP`** (real network mymain↔macbook) —
-env-gated/skip-able. The only non-green is a KNOWN flake: `thread.resume/codex/remote`
-(codex-resume timing under full-suite load; passes in isolation).
+Feature matrix: **120 cells** (added `master.*`, `tmux.work-conf`, `tmux.nav-in-client-multi`,
+`tmux.nav-attach`, http twins, etc.). Separate **TUI conformance track: 11 claims**
+(+ `action-nav-headless`, `action-nav-attach`). Plus **`TestRealCrossHost`** +
+**`TestRealCrossHostHTTP`** (real network mymain↔macbook) — env-gated/skip-able.
+`go test ./...` green (incl. the once-flaky `thread.resume/codex/remote`).
 
-### TUI "enter a thread doesn't work" — FIXED 2026-06-10 (commit 03e24a9)
-Two real bugs behind it (debugged by driving the real TUI in nested tmux):
-1. **Headless/dead threads couldn't be entered.** The TUI's Enter only navved to
-   `row.SessionName`, but a headless thread has NO pane and a dead one's pane is gone — so
-   it navved to a non-existent session and SILENTLY no-op'd. `navSelected` now COMPOSES
-   (the backlog design): a headless thread is promoted (`thread headful`), a dead one
-   resumed (`thread resume`) on its owning daemon, THEN entered; cross-machine it fails
-   LOUDLY (promote/resume must run on the owner). Alive headed → straight to nav.
-2. **nav switched the wrong client (or none).** `InnerSwitchScript` used `switch-client`
-   with NO `-c`, which is UNRELIABLE from a subprocess (the entered thread often wasn't
-   actually shown). Both inner-switch paths now target a client EXPLICITLY: the master
-   path switches the work server's (single) client; `nav --in-client` switches the client
-   on THIS pane's session (`$TMUX_PANE`) via `InnerSwitchInClientScript`. Kept the
-   bare-shell kick for the genuinely-no-client case. Conformance: TUI claim
-   `action-nav-headless`. **Deploy: update `~/.local/bin/sesh-v2` + restart `sesh-v2-daemon`
-   (the TUI/nav run the binary directly; master windows don't need restart for this).**
+### TUI "enter a thread doesn't work" — FIXED 2026-06-10 (03e24a9, 355de97). THREE bugs:
+Debugged by driving the real TUI in nested tmux + a faithful 2-client repro.
+1. **Headless/dead threads couldn't be entered.** Enter only navved to `row.SessionName`,
+   but a headless thread has NO pane and a dead one's pane is gone — so it navved to a
+   non-existent session and SILENTLY no-op'd. `navSelected` now COMPOSES (the backlog
+   design): a headless thread is promoted (`thread headful`), a dead one resumed
+   (`thread resume`) on its owning daemon, THEN entered; cross-machine fails LOUDLY.
+2. **`nav --in-client` switched the WRONG client** — THE one Lukas actually hit ("works in
+   a master window, not the inner tmux"). With the master up, its window holds a client on
+   the work socket AND a direct inner-tmux attach is a SECOND client on the same session.
+   Resolving "the client" as `list-clients | head -1` picked the master's client, switching
+   a view the user wasn't looking at. FIX: resolve the CURRENT client via `tmux
+   display-message -p '#{client_name}'` (the client whose keystroke is handled = the one
+   that pressed Enter) and switch IT. Conformance `tmux.nav-in-client-multi` (2 real
+   clients, nav from B, asserts B moved — fails on head -1).
+3. The master-path inner switch had the same bare-`switch-client` unreliability →
+   `InnerSwitchScript` now also targets the work server's client explicitly (kick fallback
+   kept). Conformance TUI claim `action-nav-headless`.
+**Deploy: just update `~/.local/bin/sesh-v2` (TUI/nav run the binary directly; no daemon
+or master restart needed).**
+
+### TUI enter from a PLAIN SHELL → attaches (feature, 2026-06-10, commit 1fc3463)
+`seshv2 tui` outside tmux: Enter ATTACHES the terminal to the thread instead of trying to
+switch a (non-existent) client. The TUI captures `$TMUX` at construction (`m.tmux`,
+deterministic/testable via `WithTmux`); when empty, `navSelected` returns `attachMsg` →
+the TUI quits → `runTUI` execs `tmux nav --attach`, which `syscall.Exec`s `tmux attach`
+locally or `ssh -t … tmux attach` for a peer (on detach → back to the launching shell).
+Conformance `tmux.nav-attach` (real client lands on the target) + TUI claim
+`action-nav-attach` (model quits with a pending nav --attach).
 
 ### Work-server tmux config — `SESH_TMUX_CONF` + `peer --tmux-conf` (commit 9aba503, Backlog #5)
 `SESH_TMUX_CONF` → the work `tmux.Server` is `NewServerWithConf`, prepending `-f <conf>`

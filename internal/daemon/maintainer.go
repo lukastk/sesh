@@ -118,14 +118,15 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 
 	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached}
 
-	// Unified model: the runtime is probed, never read from the record. A live
-	// marked pane => content-diff working/waiting; no pane but a headless turn in
-	// flight => working; neither => IDLE (revivable by resume/headful or a turn).
+	// The two axes are PROBED, never read from the record: head from pane
+	// presence, busy from the pane content-diff (headful) or the turn registry
+	// (headless).
 	loc, found, err := m.d.tmux.FindPaneByThreadID(th.ID)
 	if err != nil || !found {
-		snap.Activity = api.ActivityIdle
-		if m.d.headlessActivity(th.ID) == api.ActivityWorking {
-			snap.Activity = api.ActivityWorking
+		snap.Head = api.Headless
+		snap.Busy = api.BusyIdle
+		if m.d.turnInFlight(th.ID) {
+			snap.Busy = api.BusyBusy
 			st.lastActive = now.Unix()
 		}
 		snap.LastActiveUnix = st.lastActive
@@ -135,18 +136,23 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	snap.AgentRunning = running && agent.Kind == th.AgentKind
 	if !snap.AgentRunning {
-		snap.Activity = api.ActivityIdle // marked pane but the agent exited
+		// A marked pane whose agent exited: no live runtime — headless·idle.
+		snap.Head = api.Headless
+		snap.Busy = api.BusyIdle
 		snap.LastActiveUnix = st.lastActive
 		m.publish(st, snap)
 		return
 	}
+	snap.Head = api.Headful
 	if attached[loc.Session] {
 		snap.Attachment = api.Attached
 	}
 
 	content, err := m.d.tmux.CapturePane(loc.Pane)
 	if err != nil {
-		snap.Activity = api.ActivityIdle // pane vanished mid-tick
+		// Pane vanished mid-tick: no runtime after all.
+		snap.Head = api.Headless
+		snap.Busy = api.BusyIdle
 		snap.LastActiveUnix = st.lastActive
 		m.publish(st, snap)
 		return
@@ -172,9 +178,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, now 
 	}
 	st.changes = pruned
 	if len(st.changes) >= busyChangesNeeded {
-		snap.Activity = api.ActivityWorking
+		snap.Busy = api.BusyBusy
 	} else {
-		snap.Activity = api.ActivityWaiting
+		snap.Busy = api.BusyIdle
 	}
 	snap.LastActiveUnix = st.lastActive
 	m.publish(st, snap)

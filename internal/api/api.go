@@ -8,7 +8,10 @@ package api
 // breaking change to a response shape.
 // 2: the unified thread model — Thread.headless dropped (headless/headful is
 // inferred runtime, not a stored mode); Activity value "dead" renamed "idle".
-const SchemaVersion = 2
+// 3: the two-axes state model — `activity` REPLACED by the orthogonal
+// `head` ("headful"|"headless") and `busy` ("busy"|"idle") on
+// status/row/snapshot.
+const SchemaVersion = 3
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

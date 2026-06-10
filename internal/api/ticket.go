@@ -73,5 +73,6 @@ type TicketNeedsInput struct {
 	NeedsRestart   bool   `json:"needs_restart"`
 	Status         string `json:"status"`
 	ThreadID       string `json:"thread_id,omitempty"`
-	ThreadActivity string `json:"thread_activity,omitempty"`
+	ThreadHead     string `json:"thread_head,omitempty"`
+	ThreadBusy     string `json:"thread_busy,omitempty"`
 }

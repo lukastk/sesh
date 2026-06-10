@@ -305,7 +305,8 @@ func (sb *Sandbox) waitThreadReady(t *testing.T, threadID, agent string) string 
 		if err != nil || nonBlankLines(cap) < 3 {
 			return false // TUI has not rendered yet
 		}
-		return sb.threadStatus(t, threadID).Activity == api.ActivityWaiting
+		st := sb.threadStatus(t, threadID)
+		return st.Head == api.Headful && st.Busy == api.BusyIdle
 	})
 	if !ok {
 		t.Fatalf("%s thread never became ready for input", agent)

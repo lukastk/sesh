@@ -47,9 +47,9 @@ func testThreadNewHeadless(t *testing.T, agent string, loc matrix.Locality) {
 	if _, err := sb.rawTmux(t, "has-session", "-t", "="+th.SessionName); err == nil {
 		t.Errorf("headless thread unexpectedly has a tmux session %q", th.SessionName)
 	}
-	// It is IDLE (the unified no-runtime state) with no turn in flight.
-	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityIdle {
-		t.Errorf("fresh headless thread activity = %s, want idle", got)
+	// No runtime at all: headless·idle.
+	if st := sb.threadStatus(t, th.ID); st.Head != api.Headless || st.Busy != api.BusyIdle {
+		t.Errorf("fresh headless thread state = %s/%s, want headless/idle", st.Head, st.Busy)
 	}
 }
 
@@ -72,15 +72,15 @@ func testThreadSendHeadless(t *testing.T, agent string, loc matrix.Locality) {
 
 	// The thread is "working" while the turn process is in flight (the live
 	// signal the design promises).
-	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("headless thread never went working after a turn")
 	}
 	// ...then returns to IDLE once the turn completes (the unified no-runtime state).
 	if !waitUntil(120*time.Second, func() bool { return !sb.headlessReply(t, th.ID).Working }) {
 		t.Fatalf("headless turn never completed")
 	}
-	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityIdle {
-		t.Errorf("after turn, activity = %s, want idle", got)
+	if st := sb.threadStatus(t, th.ID); st.Head != api.Headless || st.Busy != api.BusyIdle {
+		t.Errorf("after turn, state = %s/%s, want headless/idle", st.Head, st.Busy)
 	}
 
 	// A real reply was produced (the agent processed the turn), and it carries the
@@ -102,16 +102,16 @@ func testThreadSendHeadless(t *testing.T, agent string, loc matrix.Locality) {
 		"Remember this codeword: "+fact+". Just reply: ok."); err != nil {
 		t.Fatalf("plant fact: %v\n%s", err, stderr)
 	}
-	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, hd.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, hd.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("fact turn never started")
 	}
-	if !waitUntil(90*time.Second, func() bool { return sb.threadStatus(t, hd.ID).Activity == api.ActivityWaiting }) {
+	if !waitUntil(90*time.Second, func() bool { st := sb.threadStatus(t, hd.ID); return st.Head == api.Headful && st.Busy == api.BusyIdle }) {
 		t.Fatalf("fact turn never completed")
 	}
 	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", hd.ID); err != nil {
 		t.Fatalf("stop headed: %v\n%s", err, stderr)
 	}
-	if !waitUntil(15*time.Second, func() bool { return sb.threadStatus(t, hd.ID).Activity == api.ActivityIdle }) {
+	if !waitUntil(15*time.Second, func() bool { st := sb.threadStatus(t, hd.ID); return st.Head == api.Headless && st.Busy == api.BusyIdle }) {
 		t.Fatalf("headed thread never went idle after stop")
 	}
 	if _, stderr, err := sb.Runner.Run(t, "thread", "send-headless", "--id", hd.ID, "--text",

@@ -53,7 +53,7 @@ daemon/API     per-machine; single-writer-per-record + read replicas; HTTP+JSON 
 - **No session persistence; records persist, runtime is re-derived.** This split is load-bearing, so state it plainly:
   - **Thread *records* persist** — they live in the daemon's SQLite store and survive reboots.
   - **Only the tmux *runtime* is ephemeral** — when a machine reboots, every tmux session disappears, and that is expected. The runtime (session/window/pane, liveness) is never stored; it is always re-derived live.
-  - **A record whose session is gone is reported `idle`, and is NEVER auto-deleted.** Pointing at a vanished session is not an error — it is just an idle thread (the unified no-runtime state), which can be revived on demand (`resume`/`headful`, a pane) or sent a headless turn (§3), or explicitly dropped. Garbage-collecting idle records is always a deliberate user action (`stop` then `delete`), never automatic.
+  - **A record whose session is gone is reported `headless·idle`, and is NEVER auto-deleted.** Pointing at a vanished session is not an error — it is just an idle thread (the unified no-runtime state), which can be revived on demand (`resume`/`headful`, a pane) or sent a headless turn (§3), or explicitly dropped. Garbage-collecting idle records is always a deliberate user action (`stop` then `delete`), never automatic.
 
 ### Commands (the contracts)
 
@@ -89,7 +89,7 @@ Rule of thumb: any time a myrig function would need to *know something sesh know
 - **Headless/headful is NOT a stored mode — it is inferred runtime** (the unified model, 2026-06-10): a thread is a durable conversation; at any moment its runtime is a live pane, a headless turn in flight, or nothing (`idle`). `thread new --headless` just means "don't open a pane now"; an idle thread accepts EITHER revival verb — `resume`/`headful` (a pane) or `send-headless` (one stateless turn, `--resume`-continued).
 - The thread carries an **`agent_kind`**: `claude | codex | pi`.
 - **Runtime state is two *orthogonal* axes**, resolved by polling (never stored as truth) — *revised in Phase 3b after finding the original single enum conflated independent signals*:
-  - **`activity` = `working | waiting | idle`.** `working` = a live pane mid-turn OR a headless turn process in flight; `waiting` = a live pane, byte-stable (agent at its prompt); `idle` = no runtime at all (no pane, no turn — the unified state formerly split into "dead" and headless-between-turns). `working`/`waiting` come from a **pane content-diff probe**: sample the pane's visible bytes across a short window; a pane that changes is mid-turn (`working`), a byte-stable pane is idle (`waiting`). This is **agent-agnostic** and observable. It is reliable because all three agent TUIs animate a live timer/spinner while a turn runs, so the pane is never byte-stable while working — even during a silent tool-run. (The earlier transcript-marker idea fails here: pi batch-writes its JSONL only at turn *end*, so a headed TUI turn is never observably "busy" that way. A per-agent transcript path is kept noted only as a *future fallback* for any agent later found to have genuinely non-animating silent turns.)
+  - **TWO orthogonal state axes (never a fused enum): `head = headful | headless` and `busy = busy | idle`.** `head` is the runtime FORM: `headful` = a live pane runs the agent; `headless` = no pane. `busy` is execution: `busy` = a turn is executing (a changing pane via content-diff, or a headless turn process via the registry); `idle` = quiet. The four states: headful·busy (pane mid-turn), headful·idle (agent at its prompt — needs-input), headless·busy (turn in flight — nothing to enter), headless·idle (no runtime — revive or send a turn). The old single `activity` enum fused these (waiting ≡ headful·idle, the old idle ≡ headless·idle) and `working` erased the head axis. `working`/`waiting` come from a **pane content-diff probe**: sample the pane's visible bytes across a short window; a pane that changes is mid-turn (`working`), a byte-stable pane is idle (`waiting`). This is **agent-agnostic** and observable. It is reliable because all three agent TUIs animate a live timer/spinner while a turn runs, so the pane is never byte-stable while working — even during a silent tool-run. (The earlier transcript-marker idea fails here: pi batch-writes its JSONL only at turn *end*, so a headed TUI turn is never observably "busy" that way. A per-agent transcript path is kept noted only as a *future fallback* for any agent later found to have genuinely non-animating silent turns.)
   - **`attachment` = `attached | detached`**, from `tmux list-clients`: is anyone currently viewing the session.
   - The axes are **independent**: a `detached` agent can still be `working`, and an idle agent still needs input whether or not it is being watched. Crucially, **ticket `needs-input` (§4) derives from `activity == waiting` *regardless of attachment*** — a not-currently-viewed idle agent still needs input; you just are not looking at it.
   - This is the same signal the TUI needs for status glyphs. The `working/waiting` distinction is the v1 codex-detection failure region; its test asserts both directions of the real transition (and that `working` is detected while `detached`).
@@ -101,7 +101,7 @@ Rule of thumb: any time a myrig function would need to *know something sesh know
 Runtime-resolved (not stored): `pane`, `runtime_state`, liveness.
 
 - **`agent_session_id`** is the agent's *own* conversation id, captured at/after spawn (pi/claude are launched with a sesh-assigned id; codex mints its own on the first turn and is discovered after). It is what makes `resume` possible.
-- **The record is the durable thing; it persists in SQLite and is never auto-deleted** (see §2). A record outliving its tmux session is an `idle` thread, not garbage.
+- **The record is the durable thing; it persists in SQLite and is never auto-deleted** (see §2). A record outliving its tmux session is a `headless·idle` thread, not garbage.
 
 ### Operations
 
@@ -114,7 +114,7 @@ wrapper, not in sesh (mechanism, not UX).
 
 | verb | record | runtime (agent + tmux session) | use |
 |---|---|---|---|
-| **stop** | kept (becomes `idle`) | ended | free the agent/pane now, keep the thread to revive later |
+| **stop** | kept (becomes `headless·idle`) | ended | free the agent/pane now, keep the thread to revive later |
 | **delete** | dropped | left untouched (refuses a LIVE thread unless `--force` — deleting a live thread orphans its agent) | forget a (usually already-dead) record |
 | **archive** | kept, hidden from the active list | untouched | park it — a keepable state, distinct from `idle` and from `deleted` |
 | **resume** | kept | **revived**: recreate the tmux session and relaunch the agent with `--resume <agent_session_id>` so the conversation continues | bring any **idle** thread back into a pane on demand (`headful` is the same operation) |
@@ -142,7 +142,7 @@ As v1, mutations route to the owning machine's daemon (single writer), which exe
   - `ready` — prompt final; deployable; unattached.
   - `active` — attached to a thread.
   - `done` — terminal (the agent may set this).
-- **`needs-input` is not a stored state — it is a derived view:** `status == active AND thread.activity == waiting` (the `activity` axis of §3, **regardless of `attachment`** — a detached idle agent still needs input). (An `idle` thread on an undone ticket is "needs-restart", not "needs-input" — that's why the `activity` axis distinguishes `waiting` from `idle`.)
+- **`needs-input` is not a stored state — it is a derived view:** `status == active AND thread.activity == waiting` (the `activity` axis of §3, **regardless of `attachment`** — a detached idle agent still needs input). (A `headless·idle` thread on an undone ticket is "needs-revival", not "needs-input" = `headful·idle` — single-axis predicates, no decoding.)
 
 ### Responsibilities split
 

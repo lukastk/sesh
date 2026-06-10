@@ -164,11 +164,10 @@ func (d *Daemon) handleThreadHeadlessReply(w http.ResponseWriter, r *http.Reques
 
 // headlessActivity reports a headless thread's activity from the in-flight
 // registry: working while a turn process runs, waiting otherwise.
-func (d *Daemon) headlessActivity(id string) api.Activity {
+// turnInFlight reports whether a headless turn process is currently running for
+// the thread (the busy axis for headless threads).
+func (d *Daemon) turnInFlight(id string) bool {
 	d.hlMu.Lock()
 	defer d.hlMu.Unlock()
-	if d.hlInFlight[id] {
-		return api.ActivityWorking
-	}
-	return api.ActivityWaiting
+	return d.hlInFlight[id]
 }

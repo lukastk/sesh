@@ -33,13 +33,13 @@ func testThreadGridLocal(t *testing.T) {
 	th := sb.newThread(t, "pi", "g", "/tmp")
 	pane := sb.waitThreadReady(t, th.ID, "pi")
 
-	// Idle -> the row says waiting.
-	if got := gridRow(t, sb, false, th.ID).Activity; got != api.ActivityWaiting {
-		t.Errorf("idle thread grid activity = %s, want waiting", got)
+	// Quiet pane -> headful/idle.
+	if got := gridRow(t, sb, false, th.ID); got.Head != api.Headful || got.Busy != api.BusyIdle {
+		t.Errorf("quiet thread grid state = %s/%s, want headful/idle", got.Head, got.Busy)
 	}
 	// Real turn -> the row flips to working (the grid tracks reality).
 	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS works")
-	if !waitUntil(30*time.Second, func() bool { return gridRow(t, sb, false, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(30*time.Second, func() bool { return gridRow(t, sb, false, th.ID).Busy == api.BusyBusy }) {
 		t.Errorf("grid row never became working during a real turn")
 	}
 }
@@ -62,8 +62,8 @@ func testThreadGridRemote(t *testing.T, tr meshTransport) {
 	if row.Machine != peer.Machine {
 		t.Errorf("peer row machine = %q, want %q", row.Machine, peer.Machine)
 	}
-	if row.Activity != api.ActivityWaiting {
-		t.Errorf("peer row activity = %s, want waiting", row.Activity)
+	if row.Head != api.Headful || row.Busy != api.BusyIdle {
+		t.Errorf("peer row state = %s/%s, want headful/idle", row.Head, row.Busy)
 	}
 }
 

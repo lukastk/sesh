@@ -58,20 +58,20 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolveRow returns a thread's live activity + attachment. Fast path: the
+// resolveRow returns a thread's live state axes + attachment. Fast path: the
 // background maintainer's O(1) maintained state (so the whole grid is a memory
 // read, not N concurrent ~3s probes). Fallback: an on-demand resolve for a thread
 // the maintainer has not ticked yet (just created) — correctness without a tick.
 func (d *Daemon) resolveRow(th api.Thread) api.ThreadRow {
 	if snap, ok := d.maint.stateOf(th.ID); ok {
-		return api.ThreadRow{Thread: th, Activity: snap.Activity, Attachment: snap.Attachment}
+		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment}
 	}
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached}
-	activity, err := d.resolveActivity(th)
+	head, busy, err := d.resolveState(th)
 	if err != nil {
-		activity = api.ActivityIdle
+		head, busy = api.Headless, api.BusyIdle
 	}
-	row.Activity = activity
+	row.Head, row.Busy = head, busy
 	if loc, found, _ := d.tmux.FindPaneByThreadID(th.ID); found {
 		if clients, _ := d.tmux.ClientCount(loc.Session); clients > 0 {
 			row.Attachment = api.Attached

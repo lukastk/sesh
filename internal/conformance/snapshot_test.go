@@ -54,9 +54,9 @@ func testThreadSnapshot(t *testing.T, agent string) {
 	}
 	// Settles to waiting (the maintainer's rolling window may lag the daemon's
 	// readiness probe by up to one busy-window, so poll rather than assert instantly).
-	if !waitUntil(5*time.Second, func() bool { r, ok := row(); return ok && r.Activity == api.ActivityWaiting }) {
+	if !waitUntil(5*time.Second, func() bool { r, ok := row(); return ok && r.Head == api.Headful &&  r.Busy == api.BusyIdle }) {
 		r, _ := row()
-		t.Errorf("idle thread snapshot activity = %q, want waiting", r.Activity)
+		t.Errorf("quiet thread snapshot state = %s/%s, want headful/idle", r.Head, r.Busy)
 	}
 
 	// O(1) read: a snapshot must return fast — it serves the maintained state, it
@@ -73,7 +73,7 @@ func testThreadSnapshot(t *testing.T, agent string) {
 	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS works")
 	if !waitUntil(30*time.Second, func() bool {
 		r, ok := row()
-		return ok && r.Activity == api.ActivityWorking
+		return ok && r.Busy == api.BusyBusy
 	}) {
 		t.Fatalf("snapshot never reflected the working state of a real turn")
 	}

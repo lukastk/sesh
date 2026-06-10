@@ -52,10 +52,10 @@ func testThreadResume(t *testing.T, agent string, loc matrix.Locality) {
 		"Remember this codeword: "+token+". Just reply: ok."); err != nil {
 		t.Fatalf("send codeword: %v\n%s", err, stderr)
 	}
-	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(45*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("codeword turn never started")
 	}
-	if !waitUntil(90*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWaiting }) {
+	if !waitUntil(90*time.Second, func() bool { st := sb.threadStatus(t, th.ID); return st.Head == api.Headful && st.Busy == api.BusyIdle }) {
 		t.Fatalf("codeword turn never completed")
 	}
 
@@ -63,7 +63,7 @@ func testThreadResume(t *testing.T, agent string, loc matrix.Locality) {
 	if out, err := sb.rawTmux(t, "kill-session", "-t", "=sesh_rs"); err != nil {
 		t.Fatalf("kill-session: %v\n%s", err, out)
 	}
-	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityIdle }) {
+	if !waitUntil(10*time.Second, func() bool { st := sb.threadStatus(t, th.ID); return st.Head == api.Headless && st.Busy == api.BusyIdle }) {
 		t.Fatalf("thread never went idle after kill")
 	}
 

@@ -98,16 +98,16 @@ func TestRealCrossHost(t *testing.T) {
 		t.Fatalf("peer add: %v\n%s", err, stderr)
 	}
 
-	routedActivity := func(id string) api.Activity {
+	routedState := func(id string) (api.Head, api.Busy) {
 		stdout, _, err := runLocal("thread", "status", "--id", id, "--machine", partnerName, "--json")
 		if err != nil {
-			return "ERR"
+			return "ERR", "ERR"
 		}
 		var st api.ThreadStatusResponse
 		if json.Unmarshal([]byte(strings.TrimSpace(stdout)), &st) != nil {
-			return "ERR"
+			return "ERR", "ERR"
 		}
-		return st.Activity
+		return st.Head, st.Busy
 	}
 
 	// For each agent: spawn on the partner, prove it's genuinely alive THERE (a
@@ -128,15 +128,16 @@ func TestRealCrossHost(t *testing.T) {
 			})
 
 			// Alive ON the partner.
-			if !waitUntil(45*time.Second, func() bool { return routedActivity(id) == api.ActivityWaiting }) {
-				t.Fatalf("%s thread never became alive on %s (activity=%s)", agent, partnerName, routedActivity(id))
+			if !waitUntil(45*time.Second, func() bool { h, b := routedState(id); return h == api.Headful && b == api.BusyIdle }) {
+				h, b := routedState(id)
+				t.Fatalf("%s thread never became alive on %s (state=%s/%s)", agent, partnerName, h, b)
 			}
 
 			// Stop ends the runtime on the partner; the routed status flips to dead.
 			if _, stderr, err := runLocal("thread", "stop", "--id", id, "--machine", partnerName); err != nil {
 				t.Fatalf("remote stop: %v\n%s", err, stderr)
 			}
-			if !waitUntil(15*time.Second, func() bool { return routedActivity(id) == api.ActivityIdle }) {
+			if !waitUntil(15*time.Second, func() bool { h, b := routedState(id); return h == api.Headless && b == api.BusyIdle }) {
 				t.Errorf("%s thread still alive on %s after stop", agent, partnerName)
 			}
 		})
@@ -262,19 +263,20 @@ func TestRealCrossHostHTTP(t *testing.T) {
 	})
 
 	// 2. routed status over http resolves it ALIVE on the partner.
-	routedActivity := func() api.Activity {
+	routedState := func() (api.Head, api.Busy) {
 		out, _, err := runLocal("thread", "status", "--id", id, "--machine", partnerName, "--json")
 		if err != nil {
-			return "ERR"
+			return "ERR", "ERR"
 		}
 		var st api.ThreadStatusResponse
 		if json.Unmarshal([]byte(strings.TrimSpace(out)), &st) != nil {
-			return "ERR"
+			return "ERR", "ERR"
 		}
-		return st.Activity
+		return st.Head, st.Busy
 	}
-	if !waitUntil(45*time.Second, func() bool { return routedActivity() == api.ActivityWaiting }) {
-		t.Fatalf("routed http status never saw the thread alive on %s (activity=%s)", partnerName, routedActivity())
+	if !waitUntil(45*time.Second, func() bool { h, b := routedState(); return h == api.Headful && b == api.BusyIdle }) {
+		h, b := routedState()
+		t.Fatalf("routed http status never saw the thread alive on %s (state=%s/%s)", partnerName, h, b)
 	}
 
 	c := client.New(localHome + "/daemon.sock")

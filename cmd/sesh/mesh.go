@@ -43,7 +43,7 @@ func runMesh(args []string) error {
 		}
 		fmt.Printf("== %s (%s) — %d threads ==\n", mv.Machine, fresh, len(mv.Threads))
 		for _, t := range mv.Threads {
-			fmt.Printf("  %-7s %-8s %-7s %s\n", t.Activity, t.Attachment, t.AgentKind, t.Name)
+			fmt.Printf("  %-8s %-4s %-8s %-7s %s\n", t.Head, t.Busy, t.Attachment, t.AgentKind, t.Name)
 		}
 	}
 	return nil

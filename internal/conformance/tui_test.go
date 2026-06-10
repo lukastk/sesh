@@ -123,7 +123,7 @@ func claimActionNavRemoteDead(t *testing.T) {
 	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv).WithTmux("/tmp/notwork,1,1")
 	// Wait for the replicated row to SETTLE to idle (stop leaves a brief stale
 	// "waiting" snapshot in the mesh; Enter on it would skip the revival).
-	m, _ = renderUntilRowState(t, m, "rdead", api.ActivityIdle)
+	m, _ = renderUntilRowState(t, m, "rdead", api.Headless, api.BusyIdle)
 
 	if m = runKey(t, m, "enter"); m.LastErr() != nil {
 		t.Fatalf("nav on remote dead thread errored: %v", m.LastErr())
@@ -334,7 +334,7 @@ func claimActionNavHeadless(t *testing.T) {
 	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1")
 	// Wait for the row to SETTLE to idle (the turn above leaves a brief "working"
 	// snapshot; Enter on a stale row would skip the revival).
-	m, _ = renderUntilRowState(t, m, "hlnav", api.ActivityIdle)
+	m, _ = renderUntilRowState(t, m, "hlnav", api.Headless, api.BusyIdle)
 
 	// Enter -> promote then enter.
 	if m = runKey(t, m, "enter"); m.LastErr() != nil {
@@ -562,23 +562,25 @@ func claimGridRenderRealState(t *testing.T) {
 	if row.Machine != sb.Machine {
 		t.Errorf("row machine = %q, want the real %q (fixture?)", row.Machine, sb.Machine)
 	}
-	if got := sb.threadStatus(t, th.ID).Activity; row.Activity != got {
-		t.Errorf("row activity = %q, but the daemon says %q", row.Activity, got)
+	if st := sb.threadStatus(t, th.ID); row.Head != st.Head || row.Busy != st.Busy {
+		t.Errorf("row state = %s/%s, but the daemon says %s/%s", row.Head, row.Busy, st.Head, st.Busy)
 	}
-	if !strings.Contains(rowLine(view, "tuithread"), tui.Glyph(row)) {
-		t.Errorf("rendered line does not show the glyph for the row's activity: %q", rowLine(view, "tuithread"))
+	if line := rowLine(view, "tuithread"); !strings.Contains(line, tui.HeadGlyph(row)) || !strings.Contains(line, tui.BusyGlyph(row)) {
+		t.Errorf("rendered line does not show BOTH axis glyphs for the row's state: %q", line)
 	}
 
-	// Change reality: a real turn -> both the row's activity AND its rendered glyph
-	// must flip to working (the matrix's both-directions rule, applied to the TUI).
+	// Change reality: a real turn -> the row's BUSY axis AND its rendered glyph
+	// must flip (the matrix's both-directions rule, applied to the TUI), while
+	// the HEAD axis stays headful.
 	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS works")
 	if !waitUntil(30*time.Second, func() bool {
 		mm, v := render(t, m)
 		r, ok := rowByName(mm, "tuithread")
-		return ok && r.Activity == api.ActivityWorking &&
-			strings.Contains(rowLine(v, "tuithread"), tui.Glyph(r))
+		return ok && r.Busy == api.BusyBusy && r.Head == api.Headful &&
+			strings.Contains(rowLine(v, "tuithread"), tui.BusyGlyph(r)) &&
+			strings.Contains(rowLine(v, "tuithread"), tui.HeadGlyph(r))
 	}) {
-		t.Fatalf("TUI grid never reflected the working state of a real turn")
+		t.Fatalf("TUI grid never reflected the busy state of a real turn")
 	}
 }
 
@@ -616,20 +618,20 @@ func renderUntilRow(t *testing.T, m tui.Model, name string) (tui.Model, api.Thre
 // renderUntilRowState waits for the named row to reach the given activity — used
 // before Enter when the test just changed a thread's runtime (the maintainer's
 // snapshot lags by a tick; Enter on a stale row exercises the wrong path).
-func renderUntilRowState(t *testing.T, m tui.Model, name string, want api.Activity) (tui.Model, api.ThreadRow) {
+func renderUntilRowState(t *testing.T, m tui.Model, name string, wantHead api.Head, wantBusy api.Busy) (tui.Model, api.ThreadRow) {
 	t.Helper()
 	var got api.ThreadRow
 	if !waitUntil(25*time.Second, func() bool {
 		m, _ = render(t, m)
 		r, ok := rowByName(m, name)
-		if ok && r.Activity == want {
+		if ok && r.Head == wantHead && r.Busy == wantBusy {
 			got = r
 			return true
 		}
 		return false
 	}) {
 		_, view := render(t, m)
-		t.Fatalf("row %q never reached %s in the TUI; view:\n%s", name, want, view)
+		t.Fatalf("row %q never reached %s/%s in the TUI; view:\n%s", name, wantHead, wantBusy, view)
 	}
 	return m, got
 }

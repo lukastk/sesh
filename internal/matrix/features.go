@@ -228,7 +228,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.runtime-state",
-		Description: "working/waiting/idle + attached/detached — test all transitions, both directions (the v1 codex bug); idle = the unified no-runtime state",
+		Description: "the two orthogonal state axes head(headful/headless) x busy(busy/idle) + attachment — all transitions, both directions (the v1 codex bug)",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

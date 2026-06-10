@@ -153,7 +153,7 @@ func (m Model) fetch() tea.Cmd {
 				if t.Archived && !archived {
 					continue
 				}
-				rows = append(rows, api.ThreadRow{Thread: t.Thread, Activity: t.Activity, Attachment: t.Attachment})
+				rows = append(rows, api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment})
 			}
 		}
 		// Stable order (machine, then name, then id) so the cursor never jumps —
@@ -274,11 +274,16 @@ func (m Model) navSelected() tea.Cmd {
 	useInClient := local && onWorkSocket(m.tmux, m.tmuxSocket)
 	return func() tea.Msg {
 		sessionName := row.SessionName
-		// IDLE => no live session to enter: REVIVE it first (the unified model — a
-		// resumable conversation, whether it last ran headed or headless), on the
-		// local daemon directly or ROUTED to the owning machine (`--machine`, the
-		// same mesh routing the CLI uses) — then enter.
-		if row.Activity == api.ActivityIdle {
+		// headless·busy: a turn is mid-flight — there is no pane to enter and a
+		// revival would fork the conversation (the daemon would 409 anyway): loud.
+		if row.Head == api.Headless && row.Busy == api.BusyBusy {
+			return actionMsg{err: fmt.Errorf("%q: a headless turn is in flight — wait for it to finish (◌▶ → ◌·), then enter", row.Name)}
+		}
+		// headless·idle => no runtime to enter: REVIVE it first (a resumable
+		// conversation, whether it last ran headed or headless), on the local
+		// daemon directly or ROUTED to the owning machine (`--machine`, the same
+		// mesh routing the CLI uses) — then enter.
+		if row.Head == api.Headless {
 			if local {
 				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer cancel()
@@ -439,15 +444,29 @@ var (
 // Glyph maps a row's live state to a status glyph. These are part of the contract
 // the TUI conformance asserts against REAL state.
 //
-//	◐ working   ● waiting (live pane, needs input)   ◌ idle (no runtime — Enter revives)
-func Glyph(row api.ThreadRow) string {
-	switch row.Activity {
-	case api.ActivityWorking:
-		return "◐"
-	case api.ActivityWaiting:
+// HeadGlyph renders the runtime-form axis:
+//
+//	● headful (a live pane — enterable)   ◌ headless (no pane)   ? unknown
+func HeadGlyph(row api.ThreadRow) string {
+	switch row.Head {
+	case api.Headful:
 		return "●"
-	case api.ActivityIdle:
+	case api.Headless:
 		return "◌"
+	default:
+		return "?"
+	}
+}
+
+// BusyGlyph renders the execution axis:
+//
+//	▶ busy (a turn is executing)   · idle (quiet)   ? unknown
+func BusyGlyph(row api.ThreadRow) string {
+	switch row.Busy {
+	case api.BusyBusy:
+		return "▶"
+	case api.BusyIdle:
+		return "·"
 	default:
 		return "?"
 	}
@@ -461,7 +480,7 @@ func (m Model) View() string {
 	if m.lastErr != nil {
 		b.WriteString(styleDim.Render("(daemon unreachable: "+m.lastErr.Error()+")") + "\n")
 	}
-	b.WriteString(styleHeader.Render(fmt.Sprintf("  %-2s %-12s %-7s %-7s %-20s %s", "", "MACHINE", "AGENT", "STATE", "NAME", "TAGS")) + "\n")
+	b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s %-12s %-7s %-8s %-4s %-20s %s", "HB", "MACHINE", "AGENT", "HEAD", "BUSY", "NAME", "TAGS")) + "\n")
 
 	if len(m.rows) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
@@ -475,8 +494,8 @@ func (m Model) View() string {
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		line := fmt.Sprintf("%s %s %-12s %-7s %-7s %-20s %s",
-			Glyph(row), att, trunc(row.Machine, 12), trunc(row.AgentKind, 7), string(row.Activity), trunc(row.Name, 20), tags)
+		line := fmt.Sprintf("%s%s%s %-12s %-7s %-8s %-4s %-20s %s",
+			HeadGlyph(row), BusyGlyph(row), att, trunc(row.Machine, 12), trunc(row.AgentKind, 7), string(row.Head), string(row.Busy), trunc(row.Name, 20), tags)
 		if i == m.cursor {
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {

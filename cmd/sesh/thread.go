@@ -219,7 +219,7 @@ func threadGrid(cfg config.Config, args []string) error {
 		return nil
 	}
 	for _, row := range resp.Rows {
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, row.Machine, row.AgentKind, row.Name, row.ID)
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Head, row.Busy, row.Attachment, row.Machine, row.AgentKind, row.Name, row.ID)
 	}
 	return nil
 }
@@ -245,7 +245,7 @@ func threadSnapshot(cfg config.Config, args []string) error {
 		return nil
 	}
 	for _, row := range snap.Threads {
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\n", row.Activity, row.Attachment, row.AgentKind, row.Name, row.ID)
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", row.Head, row.Busy, row.Attachment, row.AgentKind, row.Name, row.ID)
 	}
 	return nil
 }
@@ -338,7 +338,8 @@ func threadStatus(cfg config.Config, args []string) error {
 	if *asJSON {
 		return emitJSON(resp)
 	}
-	fmt.Printf("activity:      %s\n", resp.Activity)
+	fmt.Printf("head:          %s\n", resp.Head)
+	fmt.Printf("busy:          %s\n", resp.Busy)
 	fmt.Printf("attachment:    %s (%d clients)\n", resp.Attachment, resp.Clients)
 	fmt.Printf("agent_running: %t\n", resp.AgentRunning)
 	fmt.Printf("needs_input:   %t\n", resp.NeedsInput())

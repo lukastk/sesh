@@ -31,7 +31,7 @@ var skipReasons = map[string]string{
 	"thread.list-all.http":      "live fan-out (thread list --all-machines) over the peer's TCP API — SSH↔HTTP parity twin",
 	"thread.grid.http":          "live fan-out grid over the peer's TCP API — SSH↔HTTP parity twin",
 	"thread.resolve-pane":       "resolve pane via @sesh-thread-id marker",
-	"thread.runtime-state":      "activity (working/waiting/idle) + attachment axes, all transitions both directions (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",
+	"thread.runtime-state":      "head(headful/headless) x busy(busy/idle) + attachment axes, all transitions both directions (codex: directory-trust prompt at spawn eats input)",
 	"thread.rename":             "rename a thread record",
 	"thread.tag":                "add/remove tags",
 	"thread.archive":            "park a thread (hidden from active list, record kept)",

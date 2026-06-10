@@ -162,7 +162,7 @@ func ticketNeedsInput(cfg config.Config, args []string) error {
 	if *asJSON {
 		return emitJSON(resp)
 	}
-	fmt.Printf("needs_input=%t needs_restart=%t (status=%s activity=%s)\n",
-		resp.NeedsInput, resp.NeedsRestart, resp.Status, resp.ThreadActivity)
+	fmt.Printf("needs_input=%t needs_restart=%t (status=%s head=%s busy=%s)\n",
+		resp.NeedsInput, resp.NeedsRestart, resp.Status, resp.ThreadHead, resp.ThreadBusy)
 	return nil
 }

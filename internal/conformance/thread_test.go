@@ -67,7 +67,7 @@ func testSendHeadful(t *testing.T, agent string, loc matrix.Locality) {
 	}
 
 	// Observable effect: the message landed and the agent began a turn.
-	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("agent never started working after send (message not delivered?)")
 	}
 }
@@ -105,7 +105,7 @@ func testRuntimeState(t *testing.T, agent string, loc matrix.Locality) {
 	// Send a real turn WHILE DETACHED; activity must flip to working (pane
 	// animates with no client attached).
 	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how DNS resolution works")
-	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("activity never became working after a turn (detached)")
 	}
 	if got := sb.threadStatus(t, th.ID); got.Attachment != api.Detached {
@@ -113,7 +113,7 @@ func testRuntimeState(t *testing.T, agent string, loc matrix.Locality) {
 	}
 
 	// Turn completes -> back to waiting (the other direction).
-	if !waitUntil(60*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWaiting }) {
+	if !waitUntil(60*time.Second, func() bool { st := sb.threadStatus(t, th.ID); return st.Head == api.Headful && st.Busy == api.BusyIdle }) {
 		t.Fatalf("activity never returned to waiting after the turn")
 	}
 
@@ -127,7 +127,7 @@ func testRuntimeState(t *testing.T, agent string, loc matrix.Locality) {
 	if out, err := sb.rawTmux(t, "kill-session", "-t", "=sesh_rt"); err != nil {
 		t.Fatalf("kill-session: %v\n%s", err, out)
 	}
-	if !waitUntil(10*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityIdle }) {
+	if !waitUntil(10*time.Second, func() bool { st := sb.threadStatus(t, th.ID); return st.Head == api.Headless && st.Busy == api.BusyIdle }) {
 		t.Errorf("activity never became dead after kill")
 	}
 }
@@ -228,8 +228,8 @@ func testThreadStop(t *testing.T, agent string, loc matrix.Locality) {
 	if !threadInList(t, sb, th.ID) {
 		t.Errorf("stopped thread %s dropped from the list (stop must keep the record)", th.ID)
 	}
-	if got := sb.threadStatus(t, th.ID).Activity; got != api.ActivityIdle {
-		t.Errorf("stopped thread activity = %q, want dead", got)
+	if st := sb.threadStatus(t, th.ID); st.Head != api.Headless || st.Busy != api.BusyIdle {
+		t.Errorf("stopped thread state = %s/%s, want headless/idle", st.Head, st.Busy)
 	}
 }
 

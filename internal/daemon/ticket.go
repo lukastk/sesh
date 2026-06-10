@@ -181,25 +181,27 @@ func (d *Daemon) handleTicketNeedsInput(w http.ResponseWriter, r *http.Request) 
 	thread, err := d.store.GetThread(ticket.ThreadID)
 	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
-			// Bound thread record is gone: treat like an idle thread (needs-restart).
+			// Bound thread record is gone: like a runtime-less thread (needs-revival).
 			out.NeedsRestart = true
-			out.ThreadActivity = string(api.ActivityIdle)
+			out.ThreadHead, out.ThreadBusy = string(api.Headless), string(api.BusyIdle)
 			writeJSON(w, http.StatusOK, out)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	activity, err := d.resolveActivity(thread)
+	head, busy, err := d.resolveState(thread)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out.ThreadActivity = string(activity)
-	switch activity {
-	case api.ActivityWaiting:
+	out.ThreadHead, out.ThreadBusy = string(head), string(busy)
+	// needs-input: a live agent blocked on the human. needs-restart (revival):
+	// no runtime at all. A busy thread needs neither.
+	switch {
+	case head == api.Headful && busy == api.BusyIdle:
 		out.NeedsInput = true
-	case api.ActivityIdle:
+	case head == api.Headless && busy == api.BusyIdle:
 		out.NeedsRestart = true
 	}
 	writeJSON(w, http.StatusOK, out)

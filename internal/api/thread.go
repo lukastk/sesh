@@ -34,22 +34,39 @@ type Thread struct {
 // not-currently-viewed idle agent still needs input. ticket needs-input is
 // derived from Activity == waiting REGARDLESS of attachment.
 
-// Activity is the thread's INFERRED runtime state (headless/headful is not a
-// stored mode — a thread is whatever its runtime currently is):
+// The thread's runtime state is TWO ORTHOGONAL AXES (plus Attachment below) —
+// never a fused enum (the old activity values "waiting"/"idle" each secretly
+// encoded a (head,busy) pair, and "working" erased the head axis entirely):
 //
-//	working — a turn is in progress: a live pane that is actively changing, OR a
-//	          headless turn process in flight
-//	waiting — a live pane, byte-stable (agent at its prompt, awaiting input)
-//	idle    — NO runtime at all (no pane, no turn): the unified state formerly
-//	          split into "dead" (was headed) and headless-between-turns. An idle
-//	          thread is a durable conversation that accepts EITHER revival verb:
-//	          resume/headful (a pane) or send-headless (one turn).
-type Activity string
+//	head — the FORM of the runtime:
+//	         headful  = a live tmux pane runs the agent
+//	         headless = no pane (a turn process may or may not be in flight)
+//	busy — whether a turn is executing right now:
+//	         busy = a live pane that is actively changing (content-diff), OR a
+//	                headless turn process in flight (the turn registry)
+//	         idle = not executing: a pane at its prompt (headful) or no
+//	                runtime at all (headless)
+//
+// The four states: headful·busy (pane mid-turn), headful·idle (agent at its
+// prompt, blocked on the human), headless·busy (turn in flight — nothing to
+// enter), headless·idle (no runtime — revive with resume/headful, or run a
+// turn with send-headless). Both axes are strings so an unrecognized value
+// from a version-skewed peer renders as a loud "?" on exactly that axis.
+
+// Head is the runtime-form axis.
+type Head string
 
 const (
-	ActivityWorking Activity = "working"
-	ActivityWaiting Activity = "waiting"
-	ActivityIdle    Activity = "idle"
+	Headful  Head = "headful"
+	Headless Head = "headless"
+)
+
+// Busy is the execution axis.
+type Busy string
+
+const (
+	BusyBusy Busy = "busy"
+	BusyIdle Busy = "idle"
 )
 
 // Attachment is whether any tmux client is attached to the thread's session.
@@ -158,27 +175,29 @@ type ResolvePaneResponse struct {
 type ThreadStatusResponse struct {
 	Schema       int        `json:"schema"`
 	ID           string     `json:"id"`
-	Activity     Activity   `json:"activity"`
+	Head         Head       `json:"head"`
+	Busy         Busy       `json:"busy"`
 	Attachment   Attachment `json:"attachment"`
 	AgentRunning bool       `json:"agent_running"`
 	Clients      int        `json:"clients"`
 	Pane         string     `json:"pane,omitempty"`
 }
 
-// NeedsInput is the derived "the human is blocking the agent" view: the agent is
-// idle (waiting) regardless of whether anyone is currently attached.
-func (s ThreadStatusResponse) NeedsInput() bool { return s.Activity == ActivityWaiting }
+// NeedsInput is the derived "the human is blocking the agent" view: a live pane
+// whose agent is at its prompt (headful·idle), regardless of attachment.
+func (s ThreadStatusResponse) NeedsInput() bool { return s.Head == Headful && s.Busy == BusyIdle }
 
 // ThreadRow is a thread plus its live runtime status — the unit the TUI grid
 // renders. The status is computed live (never stored).
 type ThreadRow struct {
 	Thread
-	Activity   Activity   `json:"activity"`
+	Head       Head       `json:"head"`
+	Busy       Busy       `json:"busy"`
 	Attachment Attachment `json:"attachment"`
 }
 
-// NeedsInput is the derived needs-input view for a row (activity == waiting).
-func (r ThreadRow) NeedsInput() bool { return r.Activity == ActivityWaiting }
+// NeedsInput is the derived needs-input view for a row (headful·idle).
+func (r ThreadRow) NeedsInput() bool { return r.Head == Headful && r.Busy == BusyIdle }
 
 // ThreadGridResponse is returned by GET /v1/threads/grid: every thread with its
 // live status, optionally fanned out across the mesh.
@@ -194,7 +213,8 @@ type ThreadGridResponse struct {
 // _dev/MESH.md.
 type ThreadSnapshot struct {
 	Thread
-	Activity       Activity   `json:"activity"`
+	Head           Head       `json:"head"`
+	Busy           Busy       `json:"busy"`
 	Attachment     Attachment `json:"attachment"`
 	AgentRunning   bool       `json:"agent_running"`
 	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion

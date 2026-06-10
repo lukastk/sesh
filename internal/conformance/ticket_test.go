@@ -113,7 +113,7 @@ func testTicketSendPrompt(t *testing.T, agent string, loc matrix.Locality) {
 	if _, stderr, err := sb.Runner.Run(t, "ticket", "send-prompt", "--id", id); err != nil {
 		t.Fatalf("send-prompt: %v\n%s", err, stderr)
 	}
-	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Activity == api.ActivityWorking }) {
+	if !waitUntil(30*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyBusy }) {
 		t.Fatalf("agent never started a turn after send-prompt (prompt not delivered?)")
 	}
 }
@@ -219,7 +219,7 @@ func testTicketNeedsInput(t *testing.T, loc matrix.Locality) {
 	sb.sendKeys(t, pane, "Write a detailed 150-word explanation of how TLS works")
 	if !waitUntil(30*time.Second, func() bool {
 		ni := sb.ticketNeedsInput(t, id)
-		return !ni.NeedsInput && ni.ThreadActivity == string(api.ActivityWorking)
+		return !ni.NeedsInput && ni.ThreadBusy == string(api.BusyBusy)
 	}) {
 		t.Fatalf("working bound thread should NOT need input")
 	}

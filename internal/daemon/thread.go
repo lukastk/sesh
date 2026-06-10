@@ -233,16 +233,17 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		// No pane: a headless turn in flight is working; otherwise the unified
-		// IDLE state. Attachment is necessarily detached.
-		resp.Activity = api.ActivityIdle
-		if d.headlessActivity(id) == api.ActivityWorking {
-			resp.Activity = api.ActivityWorking
+		// No pane: headless; busy iff a turn is in flight. Necessarily detached.
+		resp.Head = api.Headless
+		resp.Busy = api.BusyIdle
+		if d.turnInFlight(id) {
+			resp.Busy = api.BusyBusy
 		}
 		resp.Attachment = api.Detached
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
+	resp.Head = api.Headful
 	resp.Pane = loc.Pane
 
 	// Attachment axis (independent of activity).
@@ -261,54 +262,54 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	resp.AgentRunning = running && agent.Kind == thread.AgentKind
 	if !resp.AgentRunning {
-		// A marked pane but no live agent of the right kind: the agent exited —
-		// idle (revivable).
-		resp.Activity = api.ActivityIdle
+		// A marked pane but no live agent of the right kind: no runtime —
+		// headless·idle (revivable).
+		resp.Head = api.Headless
+		resp.Busy = api.BusyIdle
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
 		// The pane vanished mid-probe (e.g. the session was killed concurrently).
-		// An unreachable pane is idle, not a server error.
-		resp.Activity = api.ActivityIdle
+		// An unreachable pane is no runtime, not a server error.
+		resp.Head = api.Headless
+		resp.Busy = api.BusyIdle
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
+	resp.Busy = api.BusyIdle
 	if working {
-		resp.Activity = api.ActivityWorking
-	} else {
-		resp.Activity = api.ActivityWaiting
+		resp.Busy = api.BusyBusy
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolveActivity computes just the activity axis for a thread (working/waiting/
-// idle), the signal ticket needs-input depends on. Shared with the status
-// endpoint's logic.
-func (d *Daemon) resolveActivity(thread api.Thread) (api.Activity, error) {
+// resolveState computes the two runtime axes for a thread — the signals ticket
+// needs-input/needs-revival depend on. Shared with the status endpoint's logic.
+func (d *Daemon) resolveState(thread api.Thread) (api.Head, api.Busy, error) {
 	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !found {
-		if d.headlessActivity(thread.ID) == api.ActivityWorking {
-			return api.ActivityWorking, nil
+		if d.turnInFlight(thread.ID) {
+			return api.Headless, api.BusyBusy, nil
 		}
-		return api.ActivityIdle, nil
+		return api.Headless, api.BusyIdle, nil
 	}
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
 	if !(running && agent.Kind == thread.AgentKind) {
-		return api.ActivityIdle, nil
+		return api.Headless, api.BusyIdle, nil
 	}
 	working, err := d.paneChanging(loc.Pane)
 	if err != nil {
-		return api.ActivityIdle, nil // pane vanished mid-probe => idle
+		return api.Headless, api.BusyIdle, nil // pane vanished mid-probe => no runtime
 	}
 	if working {
-		return api.ActivityWorking, nil
+		return api.Headful, api.BusyBusy, nil
 	}
-	return api.ActivityWaiting, nil
+	return api.Headful, api.BusyIdle, nil
 }
 
 // paneChanging samples a pane's visible content several times and reports whether

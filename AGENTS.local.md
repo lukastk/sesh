@@ -46,6 +46,22 @@ recent session); in zsh, ALWAYS quote `-t "=name"` (unquoted =word does PATH loo
   had 9 stale ms-* bindings from exactly that; surgically unbound live (b B e E m M g G
   j J k o O , .) to match a fresh start.
 
+### Cockpit SELF-HEAL + TUI routed compose (2026-06-10 evening, per Lukas)
+Lukas's invariant: "any machine that is CONNECTED has a master window" — overrides the
+earlier K=intent rationale. `masterMaint` (3rd daemon loop, 5s tick): converges an
+EXISTING master to self + mesh-REACHABLE registered peers; only ADDS windows; downed
+master stays down; unreachable peers (e.g. unprovisioned macstudio) never get a window
+forced (and a K'd unreachable window stays gone — but mt-start/mt-ensure still create
+it manually). SESH_MASTER_SELFHEAL=off = test isolation only (master.ensure cell would
+race the healer). Cells: master.selfheal (kill→auto-recreate+real re-attach, ghost peer
+excluded, no resurrect) + master.ensure (manual, prefix+R / mt-ensure). PROVEN LIVE:
+killed windows back in 3-5s on both machines' masters. ALSO: the TUI's Enter now ROUTES
+cross-machine promote/resume (`thread headful|resume --machine` + re-resolve session
+from the owner) — the dead-test123-on-mymain-from-macbook case; previously only the
+picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart required;
+window supervisors keep old binaries until their window is K'd (healer recreates with
+the new one — a poor-man's rolling supervisor upgrade).
+
 ### macbook residual state (pending, not blocking)
 Its WORK server predates the conf wiring (3 live user threads — q/test/mac-shell — not
 mine to kill): new work conf + bindings were `source-file`d onto the RUNNING server

@@ -2,6 +2,9 @@ package tmux
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -141,4 +144,58 @@ func (s *Server) SessionAttached(session string) (bool, error) {
 		}
 	}
 	return false, nil // session not found => nothing attached
+}
+
+// PaneInfo describes one pane for adoption: its session, root process, cwd,
+// and any existing thread mark.
+type PaneInfo struct {
+	Session  string
+	Pane     string
+	PanePID  int
+	Cwd      string
+	ThreadID string // existing @sesh-thread-id ("" = unmanaged)
+}
+
+// FindPaneByID locates a pane on this server by its %id.
+func (s *Server) FindPaneByID(pane string) (PaneInfo, bool, error) {
+	out, err := s.run("list-panes", "-a", "-F",
+		"#{session_name}"+fieldSep+"#{pane_id}"+fieldSep+"#{pane_pid}"+fieldSep+"#{pane_current_path}"+fieldSep+"#{"+ThreadIDOption+"}")
+	if err != nil {
+		return PaneInfo{}, false, err
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, fieldSep)
+		if len(f) != 5 {
+			return PaneInfo{}, false, fmt.Errorf("tmux: unexpected list-panes fields %q", line)
+		}
+		if f[1] != pane {
+			continue
+		}
+		pid, err := strconv.Atoi(f[2])
+		if err != nil {
+			return PaneInfo{}, false, fmt.Errorf("tmux: bad pane pid %q", f[2])
+		}
+		return PaneInfo{Session: f[0], Pane: f[1], PanePID: pid, Cwd: f[3], ThreadID: f[4]}, true, nil
+	}
+	return PaneInfo{}, false, nil
+}
+
+// StampPaneThreadID birth-stamps a pane as a thread's (adoption — spawned
+// panes are stamped at creation).
+func (s *Server) StampPaneThreadID(pane, threadID string) error {
+	_, err := s.run("set-option", "-p", "-t", pane, ThreadIDOption, threadID)
+	return err
+}
+
+// SocketPath returns this server's socket path (pi's RPC pane matching needs
+// the caller's socket in path form).
+func (s *Server) SocketPath() string {
+	dir := os.Getenv("TMUX_TMPDIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), s.socket)
 }

@@ -28,8 +28,8 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **D2** `sesh copy` (transcript copy)
 - [x] **D3** `sesh new --fork-from` (rewind-and-branch)
 - [x] **D4** `sesh backup` / `restore`
-- [ ] **D5** Adopt/register foreign agents
-- [ ] **D6** `meta` KV on threads
+- [x] **D5** Adopt/register foreign agents
+- [x] **D6** `meta` KV on threads
 - [ ] **E1** SESH_MACHINE: daemon refuses silent hostname fallback
 - [ ] **E2** `sesh doctor`
 - [ ] **E3** Spawn knobs: `--msg`, `--sandbox`, config.toml spawn defaults
@@ -418,6 +418,19 @@ kind+session, birth-stamps the pane, creates the record. Loud when detection
 is ambiguous.
 **Verify:** cells: a manually-launched real agent pane becomes a managed thread
 (status/send/stop all work on it).
+**SHIPPED 2026-06-10** — v1's exp15 walkers ported: claude argv (--session-id/
+--resume regex), pi RPC socket (socket.go + ResolveUUIDByPane — authoritative),
+codex open-rollout-by-PID (lsof/procfs). WORK-SERVER PANES ONLY (pane ids are
+per-server; everything assumes the work socket) — Local-only feature, the
+tmux.current precedent. Adopted record: SessionName = the pane's session,
+HeadlessStarted=true, stamped @sesh-thread-id → fully managed thereafter.
+Cells 3 agents × Local (manual launches, EXACT session-id match for claude/pi,
+codex identified after a manual pane turn; re-adopt/non-agent/unknown loud).
+### D6 SHIPPED 2026-06-10 — meta JSON column (migration 11, schema v7;
+MIGRATIONS ARE APPEND-ONLY: an insert mid-list desyncs deployed DBs — caught
+pre-deploy, comment added). meta set/get/unset/list (missing key LOUD);
+predicate grammar completed with meta.<key> selectors + presence atoms.
+Cells thread.meta local+remote (170 total).
 
 ### D6. `meta` KV — `sesh meta set/get/list` arbitrary per-thread metadata
 (v1 meta.go); feeds A4's `meta.<key>` selectors and dynamic columns.

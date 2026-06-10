@@ -92,6 +92,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh delegate:", err)
 			os.Exit(1)
 		}
+	case "meta":
+		if err := runMeta(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh meta:", err)
+			os.Exit(1)
+		}
 	case "backup":
 		if err := runBackup(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh backup:", err)

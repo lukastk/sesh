@@ -152,3 +152,15 @@ func (c *Client) ThreadTranscript(ctx context.Context, id string, tail int) (api
 	}
 	return out, c.getJSON(ctx, url, &out)
 }
+
+// ThreadAdopt posts POST /v1/threads/adopt.
+func (c *Client) ThreadAdopt(ctx context.Context, pane, name string) (api.ThreadResponse, error) {
+	var out api.ThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name}, &out)
+}
+
+// ThreadMeta posts POST /v1/threads/meta ('' value deletes the key).
+func (c *Client) ThreadMeta(ctx context.Context, id, key, value string) (api.ThreadResponse, error) {
+	var out api.ThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/meta", api.MetaThreadRequest{ID: id, Key: key, Value: value}, &out)
+}

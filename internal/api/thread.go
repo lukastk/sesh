@@ -16,6 +16,9 @@ type Thread struct {
 	// Notify gates the user's notification hooks for this thread (hooks receive
 	// SESH_NOTIFY=0/1; the daemon never decides what a notification IS).
 	Notify bool `json:"notify"`
+	// Meta is arbitrary per-thread KV ([[tui.views]] meta.<key> predicates,
+	// scripts). Mutated via thread meta set/unset.
+	Meta map[string]string `json:"meta,omitempty"`
 	// AgentSessionID is the agent's own conversation id (captured at/after spawn;
 	// what makes resume possible).
 	AgentSessionID string `json:"agent_session_id,omitempty"`
@@ -285,4 +288,18 @@ type HeadlessReplyResponse struct {
 type NotifyThreadRequest struct {
 	ID string `json:"id"`
 	On bool   `json:"on"`
+}
+
+// AdoptThreadRequest brings an agent sesh didn't spawn under management
+// (work-server panes only; detection per agent, every ambiguity loud).
+type AdoptThreadRequest struct {
+	Pane string `json:"pane"`
+	Name string `json:"name"`
+}
+
+// MetaThreadRequest sets ('' value = deletes) one meta key.
+type MetaThreadRequest struct {
+	ID    string `json:"id"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }

@@ -94,3 +94,124 @@ func (d Defaults) NotifyDefault() bool {
 	}
 	return *d.Notifications
 }
+
+// --- [spawn] (PARITY_ROADMAP E3) ---
+
+// SpawnConfig is the [spawn] table (+ [spawn.<agent>] overrides): the DEFAULT
+// behavior for launching agents. Modes:
+//
+//	yolo    — bypass permissions (claude --dangerously-skip-permissions,
+//	          codex --dangerously-bypass-approvals-and-sandbox; pi is always
+//	          full-access, so yolo ≡ default for it)
+//	default — the agent's own defaults (prompts)
+//	sandbox — restricted (codex --sandbox read-only; claude headless default-
+//	          deny; pi: IMPOSSIBLE — loud)
+//
+// Args is a literal extra-argv escape hatch for agent-specific settings.
+type SpawnConfig struct {
+	Mode string   `toml:"mode"`
+	Args []string `toml:"args"`
+}
+
+type spawnFile struct {
+	Spawn map[string]any `toml:"spawn"`
+}
+
+// SpawnModes are the valid [spawn] modes.
+var SpawnModes = []string{"yolo", "default", "sandbox"}
+
+// Spawn is the resolved per-agent spawn policy.
+type Spawn struct {
+	global SpawnConfig
+	agents map[string]SpawnConfig
+}
+
+// LoadSpawn reads [spawn] + [spawn.<agent>]. Missing = zero policy (mode
+// "default"). Unknown modes, or sandbox configured for pi, refuse LOUDLY.
+func LoadSpawn(home string) (Spawn, error) {
+	out := Spawn{agents: map[string]SpawnConfig{}}
+	raw, err := os.ReadFile(ConfigPath(home))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return out, nil
+		}
+		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+	}
+	var f spawnFile
+	if err := toml.Unmarshal(raw, &f); err != nil {
+		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+	}
+	decode := func(v any, into *SpawnConfig, name string) error {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("config: [spawn%s] must be a table", name)
+		}
+		if mode, ok := m["mode"].(string); ok {
+			into.Mode = mode
+		}
+		if args, ok := m["args"].([]any); ok {
+			for _, a := range args {
+				s, ok := a.(string)
+				if !ok {
+					return fmt.Errorf("config: [spawn%s] args must be strings", name)
+				}
+				into.Args = append(into.Args, s)
+			}
+		}
+		return nil
+	}
+	for k, v := range f.Spawn {
+		switch k {
+		case "mode":
+			if s, ok := v.(string); ok {
+				out.global.Mode = s
+			}
+		case "args":
+			if err := decode(map[string]any{"args": v}, &out.global, ""); err != nil {
+				return out, err
+			}
+		case "claude", "codex", "pi":
+			var sc SpawnConfig
+			if err := decode(v, &sc, "."+k); err != nil {
+				return out, err
+			}
+			out.agents[k] = sc
+		default:
+			return out, fmt.Errorf("config: [spawn] unknown key %q (mode, args, or an agent table)", k)
+		}
+	}
+	for agent := range map[string]bool{"": true, "claude": true, "codex": true, "pi": true} {
+		mode := out.ModeFor(agent)
+		valid := mode == ""
+		for _, m := range SpawnModes {
+			if mode == m {
+				valid = true
+			}
+		}
+		if !valid {
+			return out, fmt.Errorf("config: [spawn] unknown mode %q (valid: %v)", mode, SpawnModes)
+		}
+	}
+	if out.ModeFor("pi") == "sandbox" {
+		return out, fmt.Errorf("config: [spawn] pi cannot be sandboxed (pi has no permission system) — yolo/default only")
+	}
+	return out, nil
+}
+
+// ModeFor resolves an agent's mode ([spawn.<agent>] wins over [spawn]; '' =
+// default).
+func (s Spawn) ModeFor(agent string) string {
+	if a, ok := s.agents[agent]; ok && a.Mode != "" {
+		return a.Mode
+	}
+	return s.global.Mode
+}
+
+// ArgsFor resolves an agent's extra args (global + per-agent, in that order).
+func (s Spawn) ArgsFor(agent string) []string {
+	out := append([]string(nil), s.global.Args...)
+	if a, ok := s.agents[agent]; ok {
+		out = append(out, a.Args...)
+	}
+	return out
+}

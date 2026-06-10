@@ -14,8 +14,11 @@ import (
 type Config struct {
 	// Home is the base directory holding the socket, db, and pid file.
 	Home string
-	// Machine is this daemon's identity in the mesh.
-	Machine string
+	// Machine is this daemon's identity in the mesh. MachineExplicit reports
+	// whether it came from $SESH_MACHINE (vs the hostname fallback, which only
+	// CLIENT reads may use — the daemon refuses to start on a guessed identity).
+	Machine         string
+	MachineExplicit bool
 	// TmuxSocket is the tmux server socket NAME (tmux -L) that sesh threads run
 	// on. Per the spec this is just a regular tmux server; the name carries no
 	// semantics. Default "mytmux"; overridable so tests use an isolated server.
@@ -77,7 +80,12 @@ func Load() Config {
 	}
 
 	machine := os.Getenv("SESH_MACHINE")
+	machineExplicit := machine != ""
 	if machine == "" {
+		// Hostname fallback is CLIENT-only convenience (reads persist nothing).
+		// The DAEMON refuses to run on it — machine identity is load-bearing
+		// (records, routing, ownership, delivery) and must never be guessed for
+		// anything that persists. See MachineExplicit.
 		h, err := os.Hostname()
 		if err != nil {
 			panic("config: SESH_MACHINE unset and cannot resolve hostname: " + err.Error())
@@ -97,7 +105,8 @@ func Load() Config {
 
 	return Config{
 		Home:         home,
-		Machine:      machine,
+		Machine:         machine,
+		MachineExplicit: machineExplicit,
 		TmuxSocket:   socket,
 		MasterSocket: masterSocket,
 		TmuxConf:     os.Getenv("SESH_TMUX_CONF"),

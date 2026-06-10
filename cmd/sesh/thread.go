@@ -42,6 +42,8 @@ func runThread(args []string) error {
 		return threadRename(cfg, rest)
 	case "info":
 		return runInfo(cfg, rest)
+	case "adopt":
+		return threadAdopt(cfg, rest)
 	case "transcript":
 		return threadTranscript(cfg, rest)
 	case "notify":
@@ -627,5 +629,32 @@ func threadTranscript(cfg config.Config, args []string) error {
 	for _, l := range resp.Lines {
 		fmt.Println(l)
 	}
+	return nil
+}
+
+// threadAdopt brings a manually-launched agent under sesh management
+// (work-server panes only; the pane defaults to the caller's own).
+func threadAdopt(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
+	pane := fs.String("pane", "", "tmux pane id on the work server (default: $TMUX_PANE)")
+	name := fs.String("name", "", "thread name (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pane == "" {
+		*pane = os.Getenv("TMUX_PANE")
+	}
+	if *pane == "" || *name == "" {
+		return errors.New("thread adopt: --name and a pane (--pane or $TMUX_PANE) are required")
+	}
+	resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), *pane, *name)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Thread)
+	}
+	fmt.Printf("adopted %s (%s, session %s) as %s\n", *pane, resp.Thread.AgentKind, resp.Thread.AgentSessionID, resp.Thread.ID)
 	return nil
 }

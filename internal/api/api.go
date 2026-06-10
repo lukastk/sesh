@@ -15,7 +15,8 @@ package api
 // 5: `parent` added to the thread record (parent/child trees).
 // 6: `notify` added to the thread record (per-thread notification gate;
 // hooks receive SESH_NOTIFY).
-const SchemaVersion = 6
+// 7: `meta` (arbitrary per-thread KV) added to the thread record.
+const SchemaVersion = 7
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

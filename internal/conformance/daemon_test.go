@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,26 @@ func testDaemonLifecycle(t *testing.T, loc matrix.Locality) {
 		sb = newSandbox(t, loc)
 	}
 	r := sb.Runner
+
+	// --- E1: a daemon without an EXPLICIT machine identity refuses to start
+	// (the hostname fallback is client-only; a guessed identity would mint
+	// unreachable records) ---
+	if loc == matrix.Local {
+		if lr, ok := r.(*localRunner); ok {
+			noID := map[string]string{}
+			for k, v := range lr.env {
+				noID[k] = v
+			}
+			delete(noID, "SESH_MACHINE")
+			bare := &localRunner{bin: lr.bin, env: noID}
+			if _, stderr, err := bare.Run(t, "daemon", "start"); err == nil {
+				t.Errorf("daemon started without SESH_MACHINE (must refuse)")
+				bare.Run(t, "daemon", "stop") //nolint:errcheck
+			} else if !strings.Contains(stderr, "SESH_MACHINE") {
+				t.Errorf("identity refusal does not name SESH_MACHINE: %s", stderr)
+			}
+		}
+	}
 
 	// --- start ---
 	if _, stderr, err := r.Run(t, "daemon", "start"); err != nil {

@@ -72,6 +72,13 @@ type Daemon struct {
 // to start if a live daemon already owns the socket — two writers on one store
 // is exactly the kind of silent corruption sesh must avoid.
 func New(cfg config.Config) (*Daemon, error) {
+	if !cfg.MachineExplicit {
+		// Machine identity is load-bearing (every record is stamped with it;
+		// routing/ownership/delivery match on it). A daemon running as a guessed
+		// hostname would mint records nothing on the mesh can reach — the exact
+		// silent-fallback class v1's --machine bug taught us to refuse.
+		return nil, fmt.Errorf("daemon: SESH_MACHINE is not set — the daemon refuses to run on a guessed identity (hostname %q); set SESH_MACHINE explicitly", cfg.Machine)
+	}
 	// The daemon must spawn agents as clean, TOP-LEVEL sessions. If it was started
 	// from inside an agent harness (e.g. under Claude Code, or by the conformance
 	// suite), inherited markers like CLAUDECODE=1 / CLAUDE_CODE_SESSION_ID make a

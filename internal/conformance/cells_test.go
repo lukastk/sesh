@@ -67,6 +67,8 @@ var skipReasons = map[string]string{
 	"ticket.send-prompt":        "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",
 	"ticket.set-status":         "set status incl. agent-driven done",
 	"ticket.needs-input":        "derived view active && waiting",
+	"thread.meta":               "KV set/get/unset round-trip + wire; meta.<key> predicates see real values; missing key loud; remote routed",
+	"thread.adopt":              "a manual real agent adopted with its TRUE session id (argv/socket/rollout); becomes a managed headful thread; non-agent/managed/unknown panes loud",
 	"thread.fork":               "fork@turn-1 carries A not B (real divergence); the branch CONTINUES with memory; the source byte-untouched; loud out-of-range/turn-less",
 	"thread.backup":             "backup→wipe→restore byte-equal per agent; claude native restore + RESUMED memory; idempotent; copy composes; loud guards; remote routed",
 	"thread.subscribe":          "a real turn lands formatted in the subscriber's REAL pane exactly once; cycle refused/--allow-cycle; unsubscribe stops; remote = peer-owned delivery into a local pane",

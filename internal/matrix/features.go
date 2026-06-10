@@ -309,6 +309,17 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.meta",
+		Description: "arbitrary per-thread KV (meta set/get/unset/list); feeds [[tui.views]] meta.<key> predicates; missing keys loud",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.adopt",
+		Description: "adopt a manually-launched agent (work-server panes only): true identity via argv/RPC socket/rollout; every ambiguity loud; LOCAL-only by design (pane ids are per-server)",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.fork",
 		Description: "new --fork-from [--message-id N]: branch a conversation's prefix under a fresh session id (headless-born, resumes from the branch point); the source is untouched",
 		Agents:      agentic,

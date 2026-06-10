@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify),
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta),
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -169,7 +169,8 @@ func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
 	var headless, started, archived, notify int
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify); err != nil {
+	var meta string
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
@@ -179,6 +180,11 @@ func scanThread(r scanner) (api.Thread, error) {
 	_ = headless // deprecated column (see InsertThread); headless-ness is runtime-inferred
 	t.HeadlessStarted = started == 1
 	t.Notify = notify == 1
+	if meta != "" {
+		if err := json.Unmarshal([]byte(meta), &t.Meta); err != nil {
+			return t, fmt.Errorf("store: decode thread meta: %w", err)
+		}
+	}
 	return t, nil
 }
 
@@ -207,6 +213,38 @@ func (s *Store) SetThreadNotify(id string, on bool) error {
 	res, err := s.db.Exec(`UPDATE threads SET notify = ? WHERE id = ?`, boolInt(on), id)
 	if err != nil {
 		return fmt.Errorf("store: set notify: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+func metaJSON(m map[string]string) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m) //nolint:errcheck — map[string]string cannot fail
+	return string(b)
+}
+
+// SetThreadMetaKey sets (or, with value "", deletes) one meta key.
+func (s *Store) SetThreadMetaKey(id, key, value string) error {
+	th, err := s.GetThread(id)
+	if err != nil {
+		return err
+	}
+	if th.Meta == nil {
+		th.Meta = map[string]string{}
+	}
+	if value == "" {
+		delete(th.Meta, key)
+	} else {
+		th.Meta[key] = value
+	}
+	res, err := s.db.Exec(`UPDATE threads SET meta = ? WHERE id = ?`, metaJSON(th.Meta), id)
+	if err != nil {
+		return fmt.Errorf("store: set meta: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrThreadNotFound

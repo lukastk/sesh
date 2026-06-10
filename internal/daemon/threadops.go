@@ -16,6 +16,7 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
 	mux.HandleFunc("POST /v1/threads/notify", d.handleThreadNotify)
 	mux.HandleFunc("GET /v1/threads/transcript", d.handleThreadTranscript)
+	mux.HandleFunc("POST /v1/threads/meta", d.handleThreadMeta)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
 	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
@@ -290,4 +291,27 @@ func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) 
 		Schema: api.SchemaVersion, ID: id, Path: path,
 		Lines: lines, LastReply: reply, ReplyCount: count,
 	})
+}
+
+// handleThreadMeta sets ('' value = deletes) one meta key.
+func (d *Daemon) handleThreadMeta(w http.ResponseWriter, r *http.Request) {
+	var req api.MetaThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" || req.Key == "" {
+		writeError(w, http.StatusBadRequest, "meta: id and key are required")
+		return
+	}
+	if err := d.store.SetThreadMetaKey(req.ID, req.Key, req.Value); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	th, err := d.store.GetThread(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
 }

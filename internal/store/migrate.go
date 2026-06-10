@@ -74,6 +74,11 @@ var migrations = []string{
 		last_count INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (subscriber, subscribee)
 	);`,
+	// 11: meta — arbitrary per-thread KV (JSON object column; powers the TUI's
+	// meta.<key> predicates and future dynamic columns). APPENDED last:
+	// migrations apply by index, inserting mid-list desyncs deployed DBs.
+	`ALTER TABLE threads ADD COLUMN meta TEXT NOT NULL DEFAULT '{}';`,
+
 
 
 

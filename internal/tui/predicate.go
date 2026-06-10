@@ -314,6 +314,9 @@ func selectorFn(name string) func(api.ThreadRow) string {
 	case "tags":
 		return func(r api.ThreadRow) string { return strings.Join(r.Tags, ",") }
 	}
+	if key, ok := strings.CutPrefix(strings.ToLower(name), "meta."); ok && key != "" {
+		return func(r api.ThreadRow) string { return r.Meta[key] }
+	}
 	return nil
 }
 
@@ -371,5 +374,9 @@ func atomFn(t ptok) (predFn, error) {
 	case "ticketed":
 		return func(r api.ThreadRow) bool { return r.TicketsOpen > 0 }, nil
 	}
-	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, ticketed) — comparisons need an operator (e.g. agent == pi)", t.text)
+	// A bare `meta.<key>` atom is true when the key is present and non-empty (v1).
+	if key, ok := strings.CutPrefix(strings.ToLower(t.text), "meta."); ok && key != "" {
+		return func(r api.ThreadRow) bool { return r.Meta[key] != "" }, nil
+	}
+	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
 }

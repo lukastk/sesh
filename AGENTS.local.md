@@ -2,10 +2,37 @@
 
 ## Build status: ALL GREEN
 
-Feature matrix: **100 cells, all green** (on branch `mesh-replicated-state`). Separate
-**TUI conformance track: 8/8 claims green** (+ `mesh-render-offline`) + structural
-import rule + completeness gate. Plus **`TestRealCrossHost`** (real network ssh hop
-mymain↔macbook, all 3 agents) — env-gated/skip-able. `go test ./...` green.
+Feature matrix: **118 cells** (added `master.up/reconnect/holding`, `tmux.work-conf`,
+http twins, etc.). Separate **TUI conformance track: 9 claims** (+ `action-nav-headless`).
+Plus **`TestRealCrossHost`** + **`TestRealCrossHostHTTP`** (real network mymain↔macbook) —
+env-gated/skip-able. The only non-green is a KNOWN flake: `thread.resume/codex/remote`
+(codex-resume timing under full-suite load; passes in isolation).
+
+### TUI "enter a thread doesn't work" — FIXED 2026-06-10 (commit 03e24a9)
+Two real bugs behind it (debugged by driving the real TUI in nested tmux):
+1. **Headless/dead threads couldn't be entered.** The TUI's Enter only navved to
+   `row.SessionName`, but a headless thread has NO pane and a dead one's pane is gone — so
+   it navved to a non-existent session and SILENTLY no-op'd. `navSelected` now COMPOSES
+   (the backlog design): a headless thread is promoted (`thread headful`), a dead one
+   resumed (`thread resume`) on its owning daemon, THEN entered; cross-machine it fails
+   LOUDLY (promote/resume must run on the owner). Alive headed → straight to nav.
+2. **nav switched the wrong client (or none).** `InnerSwitchScript` used `switch-client`
+   with NO `-c`, which is UNRELIABLE from a subprocess (the entered thread often wasn't
+   actually shown). Both inner-switch paths now target a client EXPLICITLY: the master
+   path switches the work server's (single) client; `nav --in-client` switches the client
+   on THIS pane's session (`$TMUX_PANE`) via `InnerSwitchInClientScript`. Kept the
+   bare-shell kick for the genuinely-no-client case. Conformance: TUI claim
+   `action-nav-headless`. **Deploy: update `~/.local/bin/sesh-v2` + restart `sesh-v2-daemon`
+   (the TUI/nav run the binary directly; master windows don't need restart for this).**
+
+### Work-server tmux config — `SESH_TMUX_CONF` + `peer --tmux-conf` (commit 9aba503, Backlog #5)
+`SESH_TMUX_CONF` → the work `tmux.Server` is `NewServerWithConf`, prepending `-f <conf>`
+(sourced at server start, ignored when running). So sesh's tmux carries its OWN UI (the
+per-thread status bar) separate from the user's `~/.tmux.conf` — fixes the gray bar after
+v1 retires. `peer.TmuxConf` (`peer add --tmux-conf`) → the master's remote window starts
+the peer's work server with its conf. myrig owns the conf FILE (a `-f` conf REPLACES base,
+so it must `source` the base bits it wants + add the sesh status line). NOT YET WIRED in
+myrig — the binary supports it; activating it is a myrig change.
 
 ### Mesh / live cross-machine state (branch mesh-replicated-state) — the killer feature
 Design in `_dev/MESH.md`. Three decoupled loops:

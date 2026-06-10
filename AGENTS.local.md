@@ -44,8 +44,37 @@ Conformance `tmux.nav-attach` (real client lands on the target) + TUI claim
 per-thread status bar) separate from the user's `~/.tmux.conf` — fixes the gray bar after
 v1 retires. `peer.TmuxConf` (`peer add --tmux-conf`) → the master's remote window starts
 the peer's work server with its conf. myrig owns the conf FILE (a `-f` conf REPLACES base,
-so it must `source` the base bits it wants + add the sesh status line). NOT YET WIRED in
-myrig — the binary supports it; activating it is a myrig change.
+so it must `source` the base bits it wants + add the sesh status line). NOW WIRED in
+myrig — see the next section.
+
+### myrig port (BACKLOG #4b) — STAGED in myrig's working tree 2026-06-10, AWAITING LUKAS'S REVIEW
+The master-tmux + sesh myrig layer is ported to v2 (PARALLEL to v1 — old files untouched).
+UNCOMMITTED in `~/mysetup/myrig` (Lukas reviews/commits/provisions; never commit for him):
+- **`home/.sesh-v2/myrig/`** (NEW — the consolidated v2 folder; named `.sesh-v2` to match
+  SESH_HOME, not Lukas's tentative `.seshv2` — flagged for his confirmation):
+  `tmux.work.conf` (sources base, overrides status-format[0] → `seshv2-current-status`,
+  rebinds s→`seshv2 tui` Tab→`seshv2-archive-here`, unbinds v1-only S/R/</>) and
+  `tmux.master.conf` (sources base, prefix C-a, status-left=#W, status on + re-source
+  windows-format, s/a→tui popup, K=kill-window, P=clipboard paste, unbinds
+  A/S/Tab/R/</>/,/./o/O/L/c; mms-on-machine pick-machine popups NOT ported — thin by design).
+- **`sesh-v2.sh.jinja`** grew: `mms2-start [--no-attach]` (master up --tmux-conf + attach),
+  `mms2-attach`, `mms2-kill`, `sst2`, `seshv2-current-status` (pane→thread via env-injected
+  `TMUX=<sock>, TMUX_PANE=<pane>` + `tmux current --json`, fields via `thread list --json
+  --archived` + jq), `seshv2-archive-here` (toggle), clipboard cluster
+  (`_seshv2_clip_get_image/text` copied from v1 so v1 deletion can't break it;
+  `seshv2-send-clipboard <machine>` → `tmux stage-file --to`; `_seshv2_send_clipboard_and_paste`
+  → master window name = machine → send-keys staged path into the master pane).
+- **Wiring**: supervisor ini adds `SESH_TMUX_CONF=~/.sesh-v2/myrig/tmux.work.conf`;
+  peers.json.jinja adds per-peer `"tmux_conf"` (peer's OWN home path).
+VERIFIED LIVE on mymain: both confs load on isolated sockets (bindings + format asserted);
+status line + tag + archive-toggle round-trip on a real claude thread (created→deleted);
+`stage-file --to macbook` landed + read back over the real mesh. NOT testable here:
+clipboard grab (headless box, no X) — straight port of working v1 code.
+ACTIVATION (after Lukas commits + provisions): daemon restart picks up SESH_TMUX_CONF; then
+`tmux -L sesh-v2 kill-server` (work conf applies at server START) + `mms2-kill && mms2-start`.
+Known gaps (flagged, not blocking): no per-window reconnect after prefix+K (master up is
+loudly non-idempotent — needs `master window add` or idempotent up, a sesh change);
+no v2 `mms-copy-to-master` (depended on v1 client marker files); no nav history (L unbound).
 
 ### Mesh / live cross-machine state (branch mesh-replicated-state) — the killer feature
 Design in `_dev/MESH.md`. Three decoupled loops:

@@ -100,6 +100,20 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
+### IN PROGRESS: the TWO-AXES state model (Lukas 2026-06-10 late; schema v3)
+Replaces `activity {working,waiting,idle}` ENTIRELY (the enum fuses axes: waiting ≡
+headful∧quiet, idle ≡ headless∧quiet, and `working` ERASES the head axis). New wire on
+status/row/snapshot: `head: "headful"|"headless"` (live pane vs not) + `busy: bool`
+(pane mid-turn via content-diff, or headless turn in flight via registry). States:
+headful·busy ◐, headful·idle ●, headless·busy ◉ (turn in flight — Enter = loud "turn
+in flight, wait"), headless·idle ◌ (no runtime — Enter revives, send-headless turns).
+needs-input = headful∧¬busy; ticket needs-restart = headless∧¬busy. Sweep: api (drop
+Activity+the uncommitted Runtime draft), maintainer/thread-status/resolveActivity/
+grid/ticket, TUI (glyph/STATE cols/navSelected: revive iff headless∧¬busy), CLI prints,
+myrig picker jq + markers, SPEC §3, harness waitThreadReady (waiting → headful∧¬busy),
+ALL cells/claims re-assert (runtime-state, send.headless, snapshot, crosshost, mesh,
+grid-render claim). Then full suite + deploy both + live smoke.
+
 ### Configurable SESSION NAMING (2026-06-10, per Lukas; deployed)
 `[[session_name]]` rules in `<SESH_HOME>/config.toml` (NEW file — sesh mechanism, myrig
 owns the policy at `home/.sesh-v2/config.toml`): first-match cwd regex (matched

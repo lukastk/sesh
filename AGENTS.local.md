@@ -35,6 +35,17 @@ stack a second popup (overlapping navs — chaos); a tmux client whose session i
 killed with detach-on-destroy=on RECONNECTS via the supervisor (plain attach → most
 recent session); in zsh, ALWAYS quote `-t "=name"` (unquoted =word does PATH lookup).
 
+### Late additions (2026-06-10, per Lukas live feedback)
+- Master `prefix+a` = **mt-enter-tmux-session**: fzf over ALL tmux sessions on every
+  machine's v2 work server (`seshv2 tmux info` routed per machine; unreachable → warn+skip),
+  nav via shared `_mt_nav_to`. `A` = archived-thread picker, `s` = thread TUI. E2E-driven.
+- **mt-reload-conf [machine...]**: re-source work conf on each machine's RUNNING work
+  server (ssh-target for remotes) + the LOCAL master conf. tmux lesson recorded in it:
+  source-file ADDS/OVERRIDES only — removed bindings (or ones picked up from ~/.tmux.conf
+  before SESH_TMUX_CONF existed) persist until a true -f restart. macbook's work server
+  had 9 stale ms-* bindings from exactly that; surgically unbound live (b B e E m M g G
+  j J k o O , .) to match a fresh start.
+
 ### macbook residual state (pending, not blocking)
 Its WORK server predates the conf wiring (3 live user threads — q/test/mac-shell — not
 mine to kill): new work conf + bindings were `source-file`d onto the RUNNING server

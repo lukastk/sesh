@@ -161,7 +161,7 @@ func (m *Model) columnsHasID() bool {
 // colWidths computes each active column's render width: fixed columns use
 // fixedW; full-width columns size to their longest visible cell (min the
 // header). Headers always fit.
-func (m *Model) colWidths(cols []colSpec) []int {
+func (m *Model) colWidths(cols []colSpec, vis []treeRow) []int {
 	w := make([]int, len(cols))
 	for i, c := range cols {
 		w[i] = len([]rune(c.header))
@@ -171,8 +171,12 @@ func (m *Model) colWidths(cols []colSpec) []int {
 			}
 			continue
 		}
-		for _, row := range m.rows {
-			if n := len([]rune(c.cell(m, row))); n > w[i] {
+		for _, tr := range vis {
+			cell := c.cell(m, tr.row)
+			if c.name == ColName {
+				cell = tr.prefix + cell // tree rails live in the NAME cell
+			}
+			if n := len([]rune(cell)); n > w[i] {
 				w[i] = n
 			}
 		}
@@ -193,15 +197,27 @@ func (m *Model) renderHeader(cols []colSpec, widths []int) string {
 // Full-width cells are padded (they never truncate); fixed cells truncate.
 // hl, when non-nil, maps column names to matched rune positions (the filter's
 // highlight); positions are styled AFTER padding so widths stay rune-true.
-func (m *Model) renderCells(cols []colSpec, widths []int, row api.ThreadRow, hl map[string][]int) string {
+func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[string][]int) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
-		cell := c.cell(m, row)
+		cell := c.cell(m, tr.row)
+		var shift int
+		if c.name == ColName && tr.prefix != "" {
+			cell = tr.prefix + cell // tree rails (highlight positions shift past them)
+			shift = len([]rune(tr.prefix))
+		}
 		if !c.fullWidth {
 			cell = trunc(cell, widths[i])
 		}
 		cell = pad(cell, widths[i])
 		if pos := hl[c.name]; len(pos) > 0 {
+			if shift > 0 {
+				shifted := make([]int, len(pos))
+				for j, p := range pos {
+					shifted[j] = p + shift
+				}
+				pos = shifted
+			}
 			cell = highlight(cell, pos)
 		}
 		parts[i] = cell

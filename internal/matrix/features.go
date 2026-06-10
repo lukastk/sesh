@@ -66,6 +66,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.parent",
+		Description: "parent/child threads: new --parent (default: the current thread via inference; --no-parent = root), reparent --parent/--root with existence + cycle guards",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.info",
 		Description: "sesh info [id|prefix]: describe one thread; with no arg the CURRENT thread is inferred (explicit > $SESH_THREAD_ID > the calling pane's birth-stamp > loud)",
 		Localities:  bothLoc,

@@ -51,6 +51,14 @@ type rowMatch struct {
 	pos   map[string][]int
 }
 
+// treeRow is one RENDERED row: a match plus its tree prefix (fold marker +
+// rails). Prefixes are empty while a filter query is active (flat ranked list,
+// per v1).
+type treeRow struct {
+	rowMatch
+	prefix string
+}
+
 // matchRow scores a row against the active query. Cols target: each match
 // column (name, cwd label) is scored independently — a row matches if ANY
 // column matches; the best column score ranks it. UUID target: the full uuid
@@ -93,25 +101,123 @@ func (m *Model) matchRow(row api.ThreadRow) (rowMatch, bool) {
 	return rowMatch{row: row, score: best, pos: pos}, true
 }
 
-// visibleMatches applies the active filter to the fetched rows: no query =
-// every row in fetch order; a query = matching rows ranked best-first (stable
-// by name on ties).
-func (m *Model) visibleMatches() []rowMatch {
-	out := make([]rowMatch, 0, len(m.rows))
+// visibleMatches applies the active filter + tree fold state to the fetched
+// rows — THE render order; the cursor indexes into it. A filter query = a flat
+// list ranked best-first (v1). No query = the parent/child TREE: children nest
+// under their VISIBLE parent (a child whose parent is filtered out or on
+// another view promotes to a root), collapsed parents hide their subtree,
+// prefixes carry the ▾/▸ fold marker and ├/└/│ rails.
+func (m *Model) visibleMatches() []treeRow {
+	matched := make([]rowMatch, 0, len(m.rows))
 	for _, r := range m.rows {
 		if rm, ok := m.matchRow(r); ok {
-			out = append(out, rm)
+			matched = append(matched, rm)
 		}
 	}
 	if m.filter != "" {
-		sort.SliceStable(out, func(i, j int) bool {
-			if out[i].score != out[j].score {
-				return out[i].score > out[j].score // best first (v2 is top-down)
+		sort.SliceStable(matched, func(i, j int) bool {
+			if matched[i].score != matched[j].score {
+				return matched[i].score > matched[j].score // best first (v2 is top-down)
 			}
-			return out[i].row.Name < out[j].row.Name
+			return matched[i].row.Name < matched[j].row.Name
 		})
+		out := make([]treeRow, len(matched))
+		for i, rm := range matched {
+			out[i] = treeRow{rowMatch: rm}
+		}
+		return out
+	}
+
+	// Tree walk (v1's orderedRows). Sibling order = fetch order (machine, name, id).
+	inSet := map[string]rowMatch{}
+	order := make([]string, 0, len(matched))
+	for _, rm := range matched {
+		inSet[rm.row.ID] = rm
+		order = append(order, rm.row.ID)
+	}
+	children := map[string][]string{}
+	var roots []string
+	for _, id := range order {
+		if p := inSet[id].row.Parent; p != "" {
+			if _, visible := inSet[p]; visible {
+				children[p] = append(children[p], id)
+				continue
+			}
+		}
+		roots = append(roots, id)
+	}
+	var out []treeRow
+	var walk func(id, indent string, isLast, isRoot bool)
+	walk = func(id, indent string, isLast, isRoot bool) {
+		prefix := indent
+		if !isRoot {
+			if isLast {
+				prefix += "└ "
+			} else {
+				prefix += "├ "
+			}
+		}
+		kids := children[id]
+		if len(kids) > 0 {
+			if m.isExpanded(id) {
+				prefix += "▾ "
+			} else {
+				prefix += "▸ "
+			}
+		}
+		out = append(out, treeRow{rowMatch: inSet[id], prefix: prefix})
+		if len(kids) > 0 && m.isExpanded(id) {
+			childIndent := indent
+			if !isRoot {
+				if isLast {
+					childIndent += "  "
+				} else {
+					childIndent += "│ "
+				}
+			}
+			for i, k := range kids {
+				walk(k, childIndent, i == len(kids)-1, false)
+			}
+		}
+	}
+	for _, r := range roots {
+		walk(r, "", true, true)
 	}
 	return out
+}
+
+// isExpanded reports a node's fold state (per-node override, else the
+// configured default — children start collapsed unless [tui] expand_children
+// or --expand).
+func (m *Model) isExpanded(id string) bool {
+	if v, ok := m.expanded[id]; ok {
+		return v
+	}
+	return m.defaultExpand
+}
+
+// foldSelected sets the selected row's fold state (→ expand, ← collapse).
+func (m *Model) foldSelected(expand bool) {
+	if tr, ok := m.selectedTree(); ok {
+		if m.expanded == nil {
+			m.expanded = map[string]bool{}
+		}
+		m.expanded[tr.row.ID] = expand
+	}
+}
+
+func (m *Model) selectedTree() (treeRow, bool) {
+	vis := m.visibleMatches()
+	if m.cursor < 0 || m.cursor >= len(vis) {
+		return treeRow{}, false
+	}
+	return vis[m.cursor], true
+}
+
+// WithExpand sets the default fold state (--expand / [tui] expand_children).
+func (m Model) WithExpand(expand bool) Model {
+	m.defaultExpand = expand
+	return m
 }
 
 // handleFilterKey handles keys while the filter prompt is being edited.
@@ -132,13 +238,20 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(1)
 		return m, nil
 	case "left":
+		// Caret left; AT the start, collapse the selected node instead (v1 —
+		// with an empty query the caret is at both ends, so ← just collapses).
 		if m.filterCaret > 0 {
 			m.filterCaret--
+		} else {
+			m.foldSelected(false)
 		}
 		return m, nil
 	case "right":
+		// Caret right; AT the end, expand instead.
 		if m.filterCaret < len([]rune(m.filter)) {
 			m.filterCaret++
+		} else {
+			m.foldSelected(true)
 		}
 		return m, nil
 	case "home", "ctrl+a":

@@ -16,6 +16,9 @@ import (
 //	columns = ["machine", "agent", "name", "cwd", "tags"]
 type TUIConfig struct {
 	Columns []string `toml:"columns"`
+	// ExpandChildren makes tree nodes start EXPANDED (default false: children
+	// start collapsed under their parent, per v1).
+	ExpandChildren bool `toml:"expand_children"`
 	// Views are the custom Tab-cycle views: a name + a predicate over the
 	// thread rows (compiled by the TUI; a broken filter is loud at startup).
 	//

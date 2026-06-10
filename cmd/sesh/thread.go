@@ -42,6 +42,8 @@ func runThread(args []string) error {
 		return threadRename(cfg, rest)
 	case "info":
 		return runInfo(cfg, rest)
+	case "reparent":
+		return threadReparent(cfg, rest)
 	case "tag":
 		return threadTag(cfg, rest)
 	case "archive":
@@ -385,6 +387,8 @@ func threadNew(cfg config.Config, args []string) error {
 	name := fs.String("name", "", "thread name (required)")
 	cwd := fs.String("cwd", "", "absolute start directory (required)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
+	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
+	noParent := fs.Bool("no-parent", false, "force a root thread (suppress parent inference)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -392,9 +396,28 @@ func threadNew(cfg config.Config, args []string) error {
 	if *agent == "" || *name == "" || *cwd == "" {
 		return errors.New("thread new: --agent, --name and --cwd are required")
 	}
+	// Parent (v1 semantics, on the F1 resolver): an explicit --parent resolves
+	// (prefix ok, loud unknown); otherwise a `new` run INSIDE a thread defaults
+	// to it as parent. Inference failure here is a LEGITIMATE root, not an
+	// error; --no-parent forces a root.
+	resolvedParent := ""
+	switch {
+	case *noParent && *parent != "":
+		return errors.New("thread new: --parent and --no-parent are mutually exclusive")
+	case *parent != "":
+		rp, err := resolveThreadID(cfg, *parent)
+		if err != nil {
+			return err
+		}
+		resolvedParent = rp
+	case !*noParent:
+		if rp, err := resolveThreadID(cfg, ""); err == nil {
+			resolvedParent = rp
+		}
+	}
 	c := daemonClient(cfg)
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
-		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless,
+		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
 	})
 	if err != nil {
 		return err
@@ -483,5 +506,40 @@ func threadPane(cfg config.Config, args []string) error {
 		return errors.New("no live pane for thread (dead)")
 	}
 	fmt.Printf("%s:%d %s (pid %d)\n", resp.Pane.Session, resp.Pane.Window, resp.Pane.Pane, resp.Pane.PanePID)
+	return nil
+}
+
+// threadReparent re-parents a thread (--root makes it a root). The daemon
+// guards existence and cycles loudly.
+func threadReparent(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("reparent", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	parent := fs.String("parent", "", "new parent thread id/prefix")
+	root := fs.Bool("root", false, "make the thread a root (no parent)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if (*parent == "") == !*root {
+		return errors.New("thread reparent: exactly one of --parent or --root is required")
+	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	newParent := ""
+	if *parent != "" {
+		if newParent, err = resolveThreadID(cfg, *parent); err != nil {
+			return err
+		}
+	}
+	c := daemonClient(cfg)
+	if err := c.ThreadReparent(context.Background(), rid, newParent); err != nil {
+		return err
+	}
+	if newParent == "" {
+		fmt.Printf("%s is now a root\n", rid)
+	} else {
+		fmt.Printf("%s -> child of %s\n", rid, newParent)
+	}
 	return nil
 }

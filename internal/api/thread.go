@@ -11,6 +11,8 @@ type Thread struct {
 	Name          string   `json:"name"`
 	Tags          []string `json:"tags"`
 	CreatedAtUnix int64    `json:"created_at_unix"`
+	// Parent is the parent thread's id ('' = root) — the tree the TUI renders.
+	Parent string `json:"parent,omitempty"`
 	// AgentSessionID is the agent's own conversation id (captured at/after spawn;
 	// what makes resume possible).
 	AgentSessionID string `json:"agent_session_id,omitempty"`
@@ -83,6 +85,13 @@ type NewThreadRequest struct {
 	Name     string `json:"name"`               // thread name (also seeds session name)
 	Cwd      string `json:"cwd"`                // absolute start dir
 	Headless bool   `json:"headless,omitempty"` // headless (no window) vs headed
+	Parent   string `json:"parent,omitempty"`   // parent thread id ('' = root); must exist
+}
+
+// ReparentThreadRequest re-parents a thread ('' = make it a root).
+type ReparentThreadRequest struct {
+	ID     string `json:"id"`
+	Parent string `json:"parent"`
 }
 
 // ThreadResponse wraps a single thread.

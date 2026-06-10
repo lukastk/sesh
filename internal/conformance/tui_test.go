@@ -52,6 +52,9 @@ var declaredTUIClaims = []string{
 	"filter-esc-applies",        // Esc APPLIES the filter (stays active, / re-edits); normal-mode Esc still quits
 	"filter-start-flag",         // --filter (the popup binding) opens already filtering
 	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
+	"tree-render-fold",          // children collapse under their parent by default; →/← fold with ▾/▸ + rails over real threads
+	"tree-config-expand",        // [tui] expand_children / --expand starts nodes expanded
+	"tree-orphan-promotes",      // a child whose parent left the view promotes to top level
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

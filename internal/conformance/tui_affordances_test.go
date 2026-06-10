@@ -108,20 +108,32 @@ func claimViewCycleTab(t *testing.T) {
 	}
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	// Wait until the maintainer has published BOTH threads' state (stayme visible,
-	// parkme settled as archived and therefore absent from the active view).
+	// Settle on BOTH threads being PUBLISHED (the [all] condition) before
+	// cycling — waiting on absence alone is trivially true pre-publish and
+	// races the maintainer (this claim flaked exactly that way once).
 	var view string
+	m = runSpecial(t, m, tea.KeyTab)
+	m = runSpecial(t, m, tea.KeyTab) // -> [all]
 	if !waitUntil(25*time.Second, func() bool {
 		m, view = render(t, m)
-		return strings.Contains(view, "stayme") && !strings.Contains(view, "parkme")
+		return strings.Contains(view, "stayme") && strings.Contains(view, "parkme")
 	}) {
-		t.Fatalf("active view never settled to stayme-only:\n%s", view)
+		t.Fatalf("[all] never showed both threads:\n%s", view)
 	}
-	if !strings.Contains(view, "[active]") {
-		t.Errorf("default view title missing [active]: %q", firstLine(view))
+	if !strings.Contains(view, "[all]") {
+		t.Errorf("title missing [all]: %q", firstLine(view))
 	}
 
-	m = runSpecial(t, m, tea.KeyTab) // -> archived (the Tab fetch runs against the real daemon)
+	m = runSpecial(t, m, tea.KeyTab) // wraps -> [active]
+	view = m.View()
+	if !strings.Contains(view, "[active]") {
+		t.Errorf("title missing [active]: %q", firstLine(view))
+	}
+	if !strings.Contains(view, "stayme") || strings.Contains(view, "parkme") {
+		t.Errorf("active view rows wrong (want stayme only):\n%s", view)
+	}
+
+	m = runSpecial(t, m, tea.KeyTab) // -> archived
 	view = m.View()
 	if !strings.Contains(view, "[archived]") {
 		t.Errorf("archived view title missing [archived]: %q", firstLine(view))
@@ -129,12 +141,7 @@ func claimViewCycleTab(t *testing.T) {
 	if strings.Contains(view, "stayme") || !strings.Contains(view, "parkme") {
 		t.Errorf("archived view rows wrong (want parkme only):\n%s", view)
 	}
-
-	m = runSpecial(t, m, tea.KeyTab) // -> all
-	view = m.View()
-	if !strings.Contains(view, "[all]") || !strings.Contains(view, "stayme") || !strings.Contains(view, "parkme") {
-		t.Errorf("all view wrong (want both rows + [all]):\n%s", view)
-	}
+	m = runSpecial(t, m, tea.KeyTab) // -> all again for the cycle-back check
 
 	m = runSpecial(t, m, tea.KeyTab) // -> back to active
 	if m.CurrentView() != tui.ViewActive {

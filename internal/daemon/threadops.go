@@ -10,6 +10,7 @@ import (
 
 func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/rename", d.handleThreadRename)
+	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
 	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
@@ -170,4 +171,53 @@ func (d *Daemon) threadOpErr(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
+// handleThreadReparent re-parents a thread ('' = root). The new parent must
+// exist, and the chain from it must not loop back through the thread (a cycle
+// would hang every tree walk) — both are loud refusals.
+func (d *Daemon) handleThreadReparent(w http.ResponseWriter, r *http.Request) {
+	var req api.ReparentThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "reparent: id is required")
+		return
+	}
+	if _, err := d.store.GetThread(req.ID); err != nil {
+		writeError(w, http.StatusNotFound, "reparent: thread "+req.ID+" not found")
+		return
+	}
+	if req.Parent != "" {
+		if req.Parent == req.ID {
+			writeError(w, http.StatusBadRequest, "reparent: a thread cannot be its own parent")
+			return
+		}
+		seen := map[string]bool{req.ID: true}
+		for p := req.Parent; p != ""; {
+			if seen[p] {
+				writeError(w, http.StatusBadRequest, "reparent: would create a cycle through "+p)
+				return
+			}
+			seen[p] = true
+			th, err := d.store.GetThread(p)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "reparent: parent "+p+" does not exist")
+				return
+			}
+			p = th.Parent
+		}
+	}
+	if err := d.store.SetThreadParent(req.ID, req.Parent); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	th, err := d.store.GetThread(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
 }

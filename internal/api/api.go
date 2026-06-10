@@ -12,7 +12,8 @@ package api
 // `head` ("headful"|"headless") and `busy` ("busy"|"idle") on
 // status/row/snapshot.
 // 4: `tickets_open` added to row/snapshot (open = not done/dropped).
-const SchemaVersion = 4
+// 5: `parent` added to the thread record (parent/child trees).
+const SchemaVersion = 5
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

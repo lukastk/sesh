@@ -32,6 +32,11 @@ func (c *Client) ThreadList(ctx context.Context, includeArchived, allMachines bo
 	return out, c.getJSON(ctx, u, &out)
 }
 
+// ThreadReparent posts POST /v1/threads/reparent ('' parent = make root).
+func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)
+}
+
 // ThreadRename posts POST /v1/threads/rename.
 func (c *Client) ThreadRename(ctx context.Context, id, name string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/rename", api.RenameThreadRequest{ID: id, Name: name}, nil)

@@ -24,6 +24,7 @@ var skipReasons = map[string]string{
 	"tmux.send-text":            "paste/send text into a pane",
 	"thread.new.headed":         "spawn headed thread in a real tmux pane",
 	"thread.new.headless":       "spawn a thread with no pane: no tmux session, unified idle state (stateless-per-turn)",
+	"thread.parent":             "parent/child records: new --parent (+inference/--no-parent) + reparent (cycle guard loud)",
 	"thread.info":               "describe one thread; no-arg = current-thread inference (explicit/prefix > env > pane stamp > loud)",
 	"thread.stop":               "end a thread's runtime but keep the record (idle, revivable)",
 	"thread.send.headful":       "send into live pane (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",

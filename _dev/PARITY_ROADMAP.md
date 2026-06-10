@@ -17,7 +17,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
 - [x] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [x] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
-- [ ] **A5** Parent/child threads + collapsible tree view
+- [x] **A5** Parent/child threads + collapsible tree view
 - [ ] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
 - [ ] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
 - [ ] **C1** `sesh await`
@@ -171,6 +171,20 @@ rows) — group by parent uuid regardless of machine. Glyph rails per v1.
 **Verify:** matrix cell for `thread.new --parent` (record + wire, local+remote);
 claims: tree renders real parent/child rows nested, default collapsed, →/←
 fold/unfold, config default honored, filtered-out parent promotes child.
+**SHIPPED 2026-06-10** — research note: v1's orderedRows walk ported (roots →
+children, ▾/▸ + ├/└/│ rails in the NAME cell, filter query = flat ranked list,
+orphan promotes). Schema v5: parent on the record (migration 7); new --parent
+(prefix ok) with v1's INFERENCE default (inside a thread = child of it;
+--no-parent = root; failure outside = legitimately root); thread reparent
+--parent/--root with existence + CYCLE guards (daemon walks the chain).
+Cross-machine nesting works by uuid (parent and child may live on different
+machines). Fold keys: →/l ←/h normal mode; filter mode folds at the caret
+boundaries (v1). [tui] expand_children + --expand. Highlight positions shift
+past rails. Cells thread.parent local+remote (129 total) + 3 tree claims (33
+claims). GATE CATCH: view-cycle-tab's settle condition was vacuously-true
+pre-publish (absence-based) — flaked once in this gate after 4 lucky ones;
+re-ordered to settle on [all] presence first. The lesson is general: NEVER
+settle a claim on row ABSENCE alone.
 
 ### F1. Current-thread inference + `sesh info` (added 2026-06-10, Lukas)
 **Why:** v1's deep ergonomic layer — run a verb INSIDE a thread's pane and the

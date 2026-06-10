@@ -83,6 +83,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread: cwd must be an absolute path")
 		return
 	}
+	if req.Parent != "" {
+		if _, err := d.store.GetThread(req.Parent); err != nil {
+			writeError(w, http.StatusBadRequest, "thread: parent "+req.Parent+" does not exist")
+			return
+		}
+	}
 	if req.Headless {
 		d.newHeadlessThread(w, kind, req)
 		return
@@ -141,6 +147,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		Tags:           []string{},
 		CreatedAtUnix:  time.Now().Unix(),
 		AgentSessionID: agentSessionID,
+		Parent:         req.Parent,
 		// A headed spawn BEGINS the conversation (the agent launches with this
 		// session id) — so a later headless turn on the idle thread must RESUME,
 		// not create. See api.Thread.HeadlessStarted.

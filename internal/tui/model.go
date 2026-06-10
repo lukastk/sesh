@@ -124,6 +124,11 @@ type Model struct {
 	// in the Tab cycle).
 	customViews []customView
 
+	// Tree fold state: per-node overrides + the configured default (children
+	// start collapsed unless [tui] expand_children / --expand).
+	expanded      map[string]bool
+	defaultExpand bool
+
 	// Filter state (see filter.go): filtering = the prompt is being edited;
 	// filter = the ACTIVE query (persists when applied via Esc); filterCaret =
 	// rune index of the text caret; target = what the query matches.
@@ -394,6 +399,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
+	case "right", "l":
+		m.foldSelected(true)
+	case "left", "h":
+		m.foldSelected(false)
 	case "tab":
 		m.view = (m.view + 1) % View(m.viewCount())
 		m.cursor = 0
@@ -671,14 +680,11 @@ func (m Model) archiveSelected() tea.Cmd {
 	}
 }
 
-// Selected returns the VISIBLE row under the cursor, if any (the filter
-// narrows what the cursor moves over).
+// Selected returns the VISIBLE row under the cursor, if any (the filter and
+// the tree's fold state decide what the cursor moves over).
 func (m Model) Selected() (api.ThreadRow, bool) {
-	vis := m.visibleMatches()
-	if m.cursor < 0 || m.cursor >= len(vis) {
-		return api.ThreadRow{}, false
-	}
-	return vis[m.cursor].row, true
+	tr, ok := m.selectedTree()
+	return tr.row, ok
 }
 
 // Rows exposes the current rows (for tests).
@@ -768,15 +774,15 @@ func (m Model) View() string {
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s█", label, m.promptRow.Name, string(m.promptInput))) + "\n")
 	}
 	cols := m.activeColumns()
-	widths := m.colWidths(cols)
+	vis := m.visibleMatches()
+	widths := m.colWidths(cols, vis)
 	b.WriteString(styleHeader.Render("  HB  "+m.renderHeader(cols, widths)) + "\n")
 
-	vis := m.visibleMatches()
 	if len(vis) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
 	}
-	for i, rm := range vis {
-		row := rm.row
+	for i, tr := range vis {
+		row := tr.row
 		att := " "
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
@@ -784,10 +790,10 @@ func (m Model) View() string {
 		if i == m.cursor {
 			// The selected row uses reverse video; matched-rune styling inside it
 			// would reset the reverse — selection is the dominant cue.
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row, nil)
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, nil)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row, rm.pos)
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, tr.pos)
 			b.WriteString("  " + line + "\n")
 		}
 	}
@@ -809,7 +815,7 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	default:
 		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	}

@@ -187,6 +187,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err
 		}
 		return m, m.fetch() // re-fetch so the grid reflects the mutation
+	case navDoneMsg:
+		// The selected thread is now on screen (the client switched under us) —
+		// quit so the TUI (and the popup hosting it) gets out of the way. Staying
+		// open would leave the TUI covering the very thread the user entered.
+		return m, tea.Quit
 	case attachMsg:
 		// Quit so the terminal is restored, then runTUI execs the attach.
 		m.attachTarget = msg.target
@@ -203,6 +208,10 @@ type actionMsg struct{ err error }
 // attachMsg asks the TUI to quit and have the caller attach the terminal to target
 // (<machine>:<session>) — used when Enter is pressed outside tmux.
 type attachMsg struct{ target string }
+
+// navDoneMsg reports a successful nav: the user is where they asked to be, so the
+// TUI quits. (A FAILED nav stays an actionMsg with the error, keeping the TUI open.)
+type navDoneMsg struct{}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -293,7 +302,7 @@ func (m Model) navSelected() tea.Cmd {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return actionMsg{}
+		return navDoneMsg{}
 	}
 }
 

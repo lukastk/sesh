@@ -186,6 +186,16 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "master.watchers",
+		Description: "`sesh master watchers` lists the origin masters with a LIVE window-attach into this work server (marker liveness-checked against real clients) — present while a real ssh-attached master is up, gone after master down; powers 'send to my master' routing",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "tmux.nav-master-multi",
+		Description: "with MULTIPLE clients on a machine's work server (the master's window supervisor + a direct attach), the master-path nav switches the MASTER WINDOW's client — recorded by the supervisor's attach marker — and never moves the direct attach (the old `list-clients | head -1` resolution moved the wrong client); peer = real ssh hop",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.work-conf",
 		Description: "SESH_TMUX_CONF: the WORK tmux server is started with `tmux -f <conf>` (carries sesh's own tmux UI, separate from the user's default ~/.tmux.conf) — proved by a sentinel option only that conf sets being live on the work socket",
 		Localities:  []Locality{Local},

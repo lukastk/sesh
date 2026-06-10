@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
+	"github.com/lukastk/sesh/internal/tmux"
 )
 
 // The master tmux server is the cross-machine cockpit: one session with one window
@@ -24,7 +28,7 @@ const masterSession = "master"
 
 func runMaster(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh master <up|window|attach|down>")
+		return errors.New("usage: sesh master <up|window|attach|down|watchers>")
 	}
 	cfg := config.Load()
 	switch args[0] {
@@ -36,6 +40,8 @@ func runMaster(args []string) error {
 		return masterAttach(cfg, args[1:])
 	case "down":
 		return masterDown(cfg, args[1:])
+	case "watchers":
+		return masterWatchers(cfg, args[1:])
 	default:
 		return fmt.Errorf("unknown master subcommand %q", args[0])
 	}
@@ -198,14 +204,19 @@ func masterWindow(cfg config.Config, args []string) error {
 // conf (when non-empty) is the work server's `-f` config, applied if THIS attach is
 // what starts the server (so an empty machine's scratch shell already carries sesh's
 // tmux UI). The daemon applies the same conf when it starts the server for a thread.
-func workAttach(socket, conf string) string {
+// marker is the MasterClientMarker path on the WORK machine: before attaching, the
+// script records "<tty> <pid>" — which, after the exec, are exactly the tmux client's
+// #{client_name} and #{client_pid} — so nav's inner switch can target THIS window's
+// client among many (other masters' windows, direct attaches). Rewritten on every
+// reconnect, so it tracks the supervisor's current attach.
+func workAttach(socket, conf, marker string) string {
 	newSess := fmt.Sprintf(`tmux -L %s new-session -d -s scratch -c "$HOME"`, socket)
 	if conf != "" {
 		newSess = fmt.Sprintf(`tmux -f "%s" -L %s new-session -d -s scratch -c "$HOME"`, conf, socket)
 	}
 	return fmt.Sprintf(
-		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; exec tmux -L %[1]s attach`,
-		socket, newSess)
+		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; printf '%%s %%s\n' "$(tty)" "$$" > "%[3]s"; exec tmux -L %[1]s attach`,
+		socket, newSess, marker)
 }
 
 // masterAttachCommand returns a factory that builds the attach process for a machine:
@@ -213,8 +224,9 @@ func workAttach(socket, conf string) string {
 // go through workAttach so an empty work server falls back to a holding shell.
 func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, error) {
 	if machine == cfg.Machine {
+		marker := tmux.MasterClientMarker(cfg.Home, cfg.Machine)
 		return func() *exec.Cmd {
-			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket, cfg.TmuxConf))
+			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket, cfg.TmuxConf, marker))
 			c.Env = tmuxCleanEnv()
 			return c
 		}, nil
@@ -230,7 +242,11 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	if peer.TmuxSocket == "" {
 		return nil, fmt.Errorf("master window: peer %q has no tmux socket (see `sesh peer add --tmux-socket`)", machine)
 	}
-	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, peer.TmuxConf))
+	if peer.Home == "" {
+		return nil, fmt.Errorf("master window: peer %q has no home (see `sesh peer add --home`)", machine)
+	}
+	marker := tmux.MasterClientMarker(peer.Home, cfg.Machine)
+	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, peer.TmuxConf, marker))
 	sshArgs := append([]string{"-tt", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, remote)
 	return func() *exec.Cmd {
@@ -238,6 +254,66 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 		c.Env = tmuxCleanEnv()
 		return c
 	}, nil
+}
+
+// masterWatchers lists the origin machines whose master cockpit currently has a LIVE
+// window-attach into THIS machine's work server — "who is watching me". Each master
+// window's attach records "<client_name> <client_pid>" in MasterClientMarker(home,
+// origin); an origin counts only if that exact pair is a current client of the work
+// server, so a stale marker from a torn-down master never counts. Consumers (e.g.
+// myrig's mt-copy-to-master) use this to route "send to my master" without guessing.
+func masterWatchers(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("watchers", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	watchers, err := liveWatchers(cfg)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(struct {
+			Schema   int      `json:"schema"`
+			Watchers []string `json:"watchers"`
+		}{api.SchemaVersion, watchers})
+	}
+	for _, w := range watchers {
+		fmt.Println(w)
+	}
+	return nil
+}
+
+func liveWatchers(cfg config.Config) ([]string, error) {
+	markers, err := filepath.Glob(filepath.Join(cfg.Home, "master-client.*"))
+	if err != nil {
+		return nil, err
+	}
+	// No work server / no clients => no watchers (a legitimate state, not an error).
+	live := map[string]bool{}
+	if out, err := exec.Command("tmux", "-L", cfg.TmuxSocket, "list-clients", "-F", "#{client_name} #{client_pid}").Output(); err == nil {
+		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				live[l] = true
+			}
+		}
+	}
+	watchers := []string{}
+	for _, m := range markers {
+		origin := strings.TrimPrefix(filepath.Base(m), "master-client.")
+		if origin == "" {
+			continue
+		}
+		b, err := os.ReadFile(m)
+		if err != nil {
+			continue // marker vanished mid-scan (supervisor reconnecting) — not live now
+		}
+		if live[strings.TrimSpace(string(b))] {
+			watchers = append(watchers, origin)
+		}
+	}
+	sort.Strings(watchers)
+	return watchers, nil
 }
 
 // masterAttach replaces this process with a tmux attach to the master server.

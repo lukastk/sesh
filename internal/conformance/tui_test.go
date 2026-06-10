@@ -30,6 +30,7 @@ var declaredTUIClaims = []string{
 	"action-nav",                // the nav key really switches the tmux client
 	"action-nav-headless",       // Enter on a HEADLESS thread promotes it (headful) then enters
 	"action-nav-attach",         // Enter from a plain shell (no tmux) attaches the terminal to the thread
+	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -72,6 +73,66 @@ func init() {
 	registerTUIClaim("action-nav", claimActionNav)
 	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
 	registerTUIClaim("action-nav-attach", claimActionNavAttach)
+	registerTUIClaim("action-nav-quits", claimActionNavQuits)
+}
+
+// claimActionNavQuits: after Enter successfully enters a thread, the TUI must QUIT —
+// in the popup flow, a TUI that stays open sits on top of the very thread the user
+// just entered (the "popup doesn't close" bug). Both directions: a successful nav
+// produces a quit; a FAILED nav keeps the TUI open with the error on screen.
+func claimActionNavQuits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	th := local.newThread(t, "pi", "navq", "/tmp")
+	local.waitThreadReady(t, th.ID, "pi")
+
+	master := "sesh-tuinavq-" + th.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "m:home")
+
+	bin := seshBin(t)
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1")
+	m, _ = renderUntilRow(t, m, "navq")
+
+	step := func(m tui.Model) (tui.Model, tea.Cmd) {
+		nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("enter")})
+		if cmd == nil {
+			t.Fatalf("enter produced no command")
+		}
+		nm2, cmd2 := nm.(tui.Model).Update(cmd()) // cmd() runs the REAL nav
+		return nm2.(tui.Model), cmd2
+	}
+
+	// Success direction: the nav lands -> the model requests quit.
+	m, after := step(m)
+	if m.LastErr() != nil {
+		t.Fatalf("nav errored: %v", m.LastErr())
+	}
+	if after == nil {
+		t.Fatalf("successful nav produced no follow-up command (expected quit)")
+	}
+	if _, ok := after().(tea.QuitMsg); !ok {
+		t.Errorf("successful nav did not QUIT the TUI (got %T) — the popup would stay open over the entered thread", after())
+	}
+
+	// Failure direction: no master server -> the nav fails -> the TUI STAYS OPEN
+	// with the error (quitting would eat it).
+	mustTmux(t, master, "kill-server")
+	m, after = step(m)
+	if m.LastErr() == nil {
+		t.Errorf("failed nav reported no error")
+	}
+	if after != nil {
+		if _, ok := after().(tea.QuitMsg); ok {
+			t.Errorf("FAILED nav quit the TUI — it must stay open showing the error")
+		}
+	}
 }
 
 // claimActionNavAttach: when the TUI runs OUTSIDE tmux (a plain shell), Enter doesn't

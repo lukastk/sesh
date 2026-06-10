@@ -126,9 +126,11 @@ func tmuxNav(cfg config.Config, args []string) error {
 		return fmt.Errorf("nav outer select (window %q on %s): %w", machine, cfg.MasterSocket, err)
 	}
 
-	// (2) Inner: switch M's mytmux client to the target session.
+	// (2) Inner: switch M's mytmux client to the target session — specifically the
+	// client this master's window recorded in its marker (see MasterClientMarker),
+	// so a direct attach or another master's window is never the one moved.
 	if machine == cfg.Machine {
-		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session)
+		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session, tmux.MasterClientMarker(cfg.Home, cfg.Machine))
 		out, err := exec.Command("sh", "-c", script).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("nav inner switch (local): %v: %s", err, out)
@@ -146,7 +148,10 @@ func tmuxNav(cfg config.Config, args []string) error {
 	if peer.TmuxSocket == "" {
 		return fmt.Errorf("nav: peer %q has no tmux socket registered (see `sesh peer add --tmux-socket`)", machine)
 	}
-	script := tmux.InnerSwitchScript(peer.TmuxSocket, session)
+	if peer.Home == "" {
+		return fmt.Errorf("nav: peer %q has no home registered (see `sesh peer add --home`)", machine)
+	}
+	script := tmux.InnerSwitchScript(peer.TmuxSocket, session, tmux.MasterClientMarker(peer.Home, cfg.Machine))
 	navArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
 	navArgs = append(navArgs, peer.SSH, script)
 	out, err := exec.Command("ssh", navArgs...).CombinedOutput()

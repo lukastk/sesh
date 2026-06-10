@@ -38,17 +38,17 @@ func InnerSwitchScript(socket, session string) string {
 }
 
 // InnerSwitchInClientScript switches THIS terminal's client to session, for
-// `nav --in-client`. We're inside a tmux pane ($TMUX_PANE), so resolve the client
-// attached to that pane's session and switch it EXPLICITLY — never bare
-// switch-client (unreliable from a subprocess) and never the server-wide
-// "first client" (which could be someone else's). No kick: in-client means a
-// client already exists — us.
+// `nav --in-client`. The crux: when several clients are attached to the SAME session
+// (e.g. a master window AND a direct attach), we must switch the one whose keystroke
+// we're handling — the user who pressed Enter — not just any client. tmux's
+// `display-message -p '#{client_name}'` resolves exactly that "current client" (the
+// one whose input is being processed), so switch IT explicitly. Falls back to bare
+// switch-client if no current client can be resolved.
 func InnerSwitchInClientScript(socket, session string) string {
 	s := shArg(socket)
 	tgt := shArg("=" + session)
 	return fmt.Sprintf(
-		`p="$TMUX_PANE"; sess=$(tmux -L %[1]s display-message -p -t "$p" '#{session_name}'); `+
-			`cl=$(tmux -L %[1]s list-clients -t "$sess" -F '#{client_name}' 2>/dev/null | head -1); `+
+		`cl=$(tmux -L %[1]s display-message -p '#{client_name}' 2>/dev/null); `+
 			`if [ -n "$cl" ]; then tmux -L %[1]s switch-client -c "$cl" -t %[2]s; `+
 			`else tmux -L %[1]s switch-client -t %[2]s; fi`,
 		s, tgt)

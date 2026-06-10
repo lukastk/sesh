@@ -176,6 +176,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-in-client-multi",
+		Description: "with MULTIPLE clients on one work-socket session (master window + direct attach), `nav --in-client` switches the client whose keystroke triggered it (the Enter-presser), not just any attached client",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "tmux.work-conf",
 		Description: "SESH_TMUX_CONF: the WORK tmux server is started with `tmux -f <conf>` (carries sesh's own tmux UI, separate from the user's default ~/.tmux.conf) — proved by a sentinel option only that conf sets being live on the work socket",
 		Localities:  []Locality{Local},

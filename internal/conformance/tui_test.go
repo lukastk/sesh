@@ -34,6 +34,7 @@ var declaredTUIClaims = []string{
 	"action-nav-attach",         // Enter from a plain shell (no tmux) attaches the terminal to the thread
 	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
 	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
+	"action-nav-remote-dead",    // Enter on a DEAD thread on ANOTHER machine resumes it THERE (routed over the mesh) and enters it
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -78,6 +79,61 @@ func init() {
 	registerTUIClaim("action-nav-attach", claimActionNavAttach)
 	registerTUIClaim("action-nav-quits", claimActionNavQuits)
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
+	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
+}
+
+// claimActionNavRemoteDead: Enter on a thread that is DEAD on ANOTHER machine must
+// revive it THERE (resume routed over the mesh — the same `--machine` routing the
+// CLI uses) and then enter it. Hit live: a dead codex thread on mymain was
+// un-enterable from the macbook TUI ("resume it there first") while the picker
+// routed it fine. Asserted on the real servers: the peer's session is genuinely
+// recreated (it was genuinely gone) and a client lands on it.
+func claimActionNavRemoteDead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+	th := peer.newThread(t, "pi", "rdead", "/tmp")
+	peer.waitThreadReady(t, th.ID, "pi")
+	// Really kill the runtime: the session must be GONE so the nav can't cheat.
+	if _, stderr, err := peer.Runner.Run(t, "thread", "stop", "--id", th.ID); err != nil {
+		t.Fatalf("thread stop: %v\n%s", err, stderr)
+	}
+	if !waitUntil(10*time.Second, func() bool { return tmuxSessionCount(peer.TmuxSocket) == 0 }) {
+		t.Fatalf("peer session did not die after stop")
+	}
+
+	master := "sesh-tuirdead-" + th.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", peer.Machine)
+	mustTmux(t, master, "select-window", "-t", "m:home")
+
+	bin := seshBin(t)
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_MASTER_SOCKET=" + master}
+
+	m := tui.New(local.Home+"/daemon.sock", true).WithExec(bin, navEnv).WithTmux("/tmp/notwork,1,1")
+	m, _ = renderUntilRow(t, m, "rdead") // mesh sync replicates the dead thread
+
+	if m = runKey(t, m, "enter"); m.LastErr() != nil {
+		t.Fatalf("nav on remote dead thread errored: %v", m.LastErr())
+	}
+	// The thread was REVIVED on the peer (its session exists again — it was gone)
+	// and entered (a client landed on it, master flipped to the peer's window).
+	if !waitUntil(20*time.Second, func() bool { return innerClientSession(t, peer.TmuxSocket) == th.SessionName }) {
+		t.Errorf("remote dead thread not revived+entered: peer client on %q, want %q", innerClientSession(t, peer.TmuxSocket), th.SessionName)
+	}
+	if got := activeWindowOf(t, master); got != peer.Machine {
+		t.Errorf("master active window = %q, want %q", got, peer.Machine)
+	}
 }
 
 // claimActionNavInClient: the TUI's Enter on a LOCAL thread, when the TUI runs inside

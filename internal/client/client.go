@@ -134,3 +134,23 @@ func (c *Client) HooksTest(ctx context.Context, name, threadID string) (api.Hook
 	var out api.HookTestResponse
 	return out, c.postJSON(ctx, "http://unix/v1/hooks/test", api.HookTestRequest{Name: name, ThreadID: threadID}, &out)
 }
+
+// Subscribe posts POST /v1/subscriptions (on the SUBSCRIBEE's owner daemon).
+func (c *Client) Subscribe(ctx context.Context, subscriber, subscribee string, allowCycle bool) error {
+	return c.postJSON(ctx, "http://unix/v1/subscriptions", api.SubscribeRequest{Subscriber: subscriber, Subscribee: subscribee, AllowCycle: allowCycle}, nil)
+}
+
+// Unsubscribe posts POST /v1/subscriptions/remove.
+func (c *Client) Unsubscribe(ctx context.Context, subscriber, subscribee string) error {
+	return c.postJSON(ctx, "http://unix/v1/subscriptions/remove", api.SubscribeRequest{Subscriber: subscriber, Subscribee: subscribee}, nil)
+}
+
+// Subscriptions fetches GET /v1/subscriptions[?id=].
+func (c *Client) Subscriptions(ctx context.Context, id string) (api.SubscriptionsResponse, error) {
+	var out api.SubscriptionsResponse
+	url := "http://unix/v1/subscriptions"
+	if id != "" {
+		url += "?id=" + id
+	}
+	return out, c.getJSON(ctx, url, &out)
+}

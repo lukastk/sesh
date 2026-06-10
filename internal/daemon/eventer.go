@@ -95,6 +95,10 @@ func (e *eventer) tick() {
 		}
 		if was.Busy != now.Busy && was.Busy != "" && now.Busy != "" {
 			e.runner.handle(Event{Type: "busy_changed", Snap: now, From: string(was.Busy), To: string(now.Busy)})
+			if now.Busy == api.BusyIdle {
+				// The turn-delivery engine (C3): owner-side, guarded per edge.
+				go e.d.deliverSubscriptions(now)
+			}
 		}
 		if was.Head != now.Head && was.Head != "" && now.Head != "" {
 			e.runner.handle(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)})

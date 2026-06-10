@@ -134,6 +134,12 @@ func resolveMeshThreadID(c *client.Client, cfg config.Config, explicit string) (
 	if explicit == "" {
 		return resolveThreadID(cfg, "")
 	}
+	// LOCAL list first: it sees just-created threads immediately (the mesh
+	// snapshot lags one maintainer publish) and archived ones; the mesh pass
+	// then covers other machines.
+	if id, err := resolveIDPrefix(c, explicit); err == nil {
+		return id, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	mesh, err := c.Mesh(ctx)

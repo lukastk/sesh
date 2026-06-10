@@ -29,6 +29,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesHeadless(mux)
 	d.routesHeadful(mux)
 	d.routesTickets(mux)
+	d.routesSubscriptions(mux)
 	mux.HandleFunc("GET /v1/hooks", d.handleHooksList)
 	mux.HandleFunc("POST /v1/hooks/mute", d.handleHooksMute)
 	mux.HandleFunc("POST /v1/hooks/test", d.handleHooksTest)

@@ -65,6 +65,16 @@ var migrations = []string{
 	// 9: per-thread notifications — hooks carry SESH_NOTIFY so the user's
 	// notify hook can respect a thread's mute. Default ON.
 	`ALTER TABLE threads ADD COLUMN notify INTEGER NOT NULL DEFAULT 1;`,
+	// 10: subscriptions — (subscriber, subscribee) edges + the last-delivered
+	// reply count (seeds the delivery tracker across daemon restarts so a turn
+	// is never re-delivered).
+	`CREATE TABLE IF NOT EXISTS subscriptions (
+		subscriber TEXT NOT NULL,
+		subscribee TEXT NOT NULL,
+		last_count INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (subscriber, subscribee)
+	);`,
+
 
 
 }

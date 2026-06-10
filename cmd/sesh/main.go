@@ -92,6 +92,21 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh delegate:", err)
 			os.Exit(1)
 		}
+	case "subscribe":
+		if err := runSubscribe(config.Load(), os.Args[2:], false); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh subscribe:", err)
+			os.Exit(1)
+		}
+	case "unsubscribe":
+		if err := runSubscribe(config.Load(), os.Args[2:], true); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh unsubscribe:", err)
+			os.Exit(1)
+		}
+	case "subscriptions":
+		if err := runSubscriptions(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh subscriptions:", err)
+			os.Exit(1)
+		}
 	case "await":
 		if err := runAwait(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh await:", err)

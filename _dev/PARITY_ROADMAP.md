@@ -22,7 +22,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
 - [x] **C1** `sesh await`
 - [x] **C2** `sesh delegate` (`--sandbox` loud until E3)
-- [ ] **C3** `sesh subscribe` + turn-delivery engine
+- [x] **C3** `sesh subscribe` + turn-delivery engine
 - [x] **D0** Transcript-resolution layer (per-agent transcript file location)
 - [ ] **D1** `sesh tail`
 - [ ] **D2** `sesh copy` (transcript copy)
@@ -334,6 +334,19 @@ A), rate limit. Cross-machine: subscribee and subscriber on different daemons �
 delivery routes over the mesh.
 **Verify:** cells: a real reply lands in the real subscriber pane exactly once;
 cycle guard refuses; unsubscribe stops delivery; cross-machine twin.
+**SHIPPED 2026-06-10** — v1's internal/subscribe ported VERBATIM (Tracker:
+dedup on monotone reply count + circuit breaker; FormatDelivery). Edges in the
+store (migration 10, last_count persisted = restart-safe seeding). Engine on
+the EVENTER's busy→idle, OWNER-side (D0 reads the reply); delivery adapts:
+pane send | headless TURN (the listener agent processes it) | headless·busy =
+loud skip; cross-machine subscriber found via mesh cache + routed send. CLI
+subscribe/unsubscribe/subscriptions with v1 forms (--from defaults to the
+CURRENT thread). resolveMeshThreadID now LOCAL-first (mesh lags a publish).
+Cells thread.subscribe local+crossmachine (153 total). THREE test races fixed
+(all settle-condition class — see the absence-rule note above): local-first
+resolution; structural dedup via a headless listener's reply count (a pane
+agent RESPONDS to deliveries — text counting is invalid); settle on
+reply_count>=1 (the user msg lands in the transcript before the reply).
 
 ## D — Transcript layer
 

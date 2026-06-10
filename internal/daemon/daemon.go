@@ -17,6 +17,7 @@ import (
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
+	"github.com/lukastk/sesh/internal/subscribe"
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
@@ -55,6 +56,8 @@ type Daemon struct {
 	evt   *eventer
 	// defaults: [defaults] record-creation knobs (notify gate).
 	defaults config.Defaults
+	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
+	subTracker *subscribe.Tracker
 	// mmaint converges the master cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -129,6 +132,7 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.hooks = newHookRunner(hooks, muted)
 	d.evt = newEventer(d, d.hooks)
+	d.seedSubTracker()
 	if cfg.MasterSelfheal {
 		d.mmaint = newMasterMaint(d)
 	}

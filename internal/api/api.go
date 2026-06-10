@@ -90,3 +90,25 @@ type TranscriptResponse struct {
 	LastReply  string   `json:"last_reply"`
 	ReplyCount int      `json:"reply_count"`
 }
+
+// --- subscriptions (PARITY_ROADMAP C3) ---
+
+// SubscribeRequest creates/removes a delivery edge: the subscribee's
+// completed turns are sent into the subscriber thread.
+type SubscribeRequest struct {
+	Subscriber string `json:"subscriber"`
+	Subscribee string `json:"subscribee"`
+	AllowCycle bool   `json:"allow_cycle,omitempty"`
+}
+
+// SubscriptionInfo is one edge.
+type SubscriptionInfo struct {
+	Subscriber string `json:"subscriber"`
+	Subscribee string `json:"subscribee"`
+}
+
+// SubscriptionsResponse is GET /v1/subscriptions[?id=].
+type SubscriptionsResponse struct {
+	Schema        int                `json:"schema"`
+	Subscriptions []SubscriptionInfo `json:"subscriptions"`
+}

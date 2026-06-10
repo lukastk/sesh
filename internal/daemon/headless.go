@@ -123,7 +123,7 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), sessionID, thread.Cwd, started, req.Text, codexHome)
+			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, req.Text, codexHome)
 
 		d.hlMu.Lock()
 		delete(d.hlInFlight, req.ID)

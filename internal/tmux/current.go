@@ -69,7 +69,17 @@ func CurrentFromEnv(machine string) (api.TmuxCurrentResponse, error) {
 // real pane id). Returns "" when the pane carries no thread mark (a plain shell —
 // a legitimate state, not an error). A missing PANE is a loud error.
 func ThreadIDOfPane(socket, pane string) (string, error) {
-	cmd := exec.Command("tmux", "-L", socket, "display-message", "-p", "-t", pane, "-F", "#{"+ThreadIDOption+"}")
+	return threadIDOfPane([]string{"-L", socket}, pane)
+}
+
+// ThreadIDOfPaneAtPath is ThreadIDOfPane for an explicit socket PATH (the
+// caller's own $TMUX), so inference works on whatever server the caller is in.
+func ThreadIDOfPaneAtPath(socketPath, pane string) (string, error) {
+	return threadIDOfPane([]string{"-S", socketPath}, pane)
+}
+
+func threadIDOfPane(sockArgs []string, pane string) (string, error) {
+	cmd := exec.Command("tmux", append(append([]string{}, sockArgs...), "display-message", "-p", "-t", pane, "-F", "#{"+ThreadIDOption+"}")...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

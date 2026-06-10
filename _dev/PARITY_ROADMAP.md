@@ -15,7 +15,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **A1** TUI column system + `[tui]` config defaults
 - [x] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
 - [x] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
-- [ ] **F1** Current-thread inference (3-source resolver) + `sesh info`
+- [x] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [ ] **A5** Parent/child threads + collapsible tree view
 - [ ] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
@@ -190,6 +190,20 @@ send-keys, no args, correct thread described); resolver unit tests (precedence,
 stale env fall-through, loud failure); claim-level: one retrofitted verb (e.g.
 `thread status` with no --id inside a pane) per locality; delete-refuses-
 inference free test.
+**SHIPPED 2026-06-10** — research note: v1 walked processes to map pane→agent
+→uuid; v2's @sesh-thread-id birth-stamp + $TMUX socket path makes source 3 a
+single display-message (tmux.ThreadIDOfPaneAtPath). $SESH_THREAD_ID was
+already in spawned/revived panes; NOW also injected into headless turn
+processes (agents.HeadlessTurn carries threadID). NEW: unique-id-PREFIX
+resolution on explicit refs (v2 had none; archived included; ambiguous loud).
+Retrofitted: status/send/send-headless/stop/resume/headful/archive/tag/
+rename/pane/headless-reply; delete stays explicit (footgun); ticket verbs NOT
+inferred (v1 didn't; owner auto-routing re-executes args on another machine
+where pane context doesn't transfer). info registered agent-AGNOSTIC (the
+mechanism is agent-independent — the pane cell uses a real pi pane; narrower
+than the roadmap's 3-agents sketch, deliberately: the stamp is written by
+spawn, not by the agent). Cells thread.info local+remote (127 total); the
+local cell covers all 4 sources + a retrofit + loud paths.
 
 ## B — Daemon eventing
 

@@ -40,6 +40,8 @@ func runThread(args []string) error {
 		return threadHeadlessReply(cfg, rest)
 	case "rename":
 		return threadRename(cfg, rest)
+	case "info":
+		return runInfo(cfg, rest)
 	case "tag":
 		return threadTag(cfg, rest)
 	case "archive":
@@ -66,9 +68,14 @@ func threadRename(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" || *name == "" {
-		return errors.New("thread rename: --id and --name are required")
+	if *name == "" {
+		return errors.New("thread rename: --name is required")
 	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadRename(context.Background(), *id, *name); err != nil {
 		return err
@@ -86,9 +93,14 @@ func threadTag(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" || (len(add) == 0 && len(remove) == 0) {
-		return errors.New("thread tag: --id and at least one --add/--remove required")
+	if len(add) == 0 && len(remove) == 0 {
+		return errors.New("thread tag: at least one --add/--remove required")
 	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadTag(context.Background(), *id, add, remove); err != nil {
 		return err
@@ -104,9 +116,11 @@ func threadArchive(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" {
-		return errors.New("thread archive: --id is required")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadArchive(context.Background(), *id, !*unarchive); err != nil {
 		return err
@@ -150,9 +164,11 @@ func threadResume(cfg config.Config, args []string) error {
 	if *id == "" && fs.NArg() == 1 {
 		*id = fs.Arg(0)
 	}
-	if *id == "" {
-		return errors.New("resume: a thread id is required (--id or positional)")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	resp, err := c.ThreadResume(context.Background(), *id)
 	if err != nil {
@@ -178,9 +194,11 @@ func threadHeadful(cfg config.Config, args []string) error {
 	if *id == "" && fs.NArg() == 1 {
 		*id = fs.Arg(0)
 	}
-	if *id == "" {
-		return errors.New("headful: a thread id is required (--id or positional)")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	resp, err := c.ThreadHeadful(context.Background(), *id)
 	if err != nil {
@@ -266,9 +284,14 @@ func threadSendHeadless(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" || *text == "" {
-		return errors.New("thread send-headless: --id and --text are required")
+	if *text == "" {
+		return errors.New("thread send-headless: --text is required")
 	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadSendHeadless(context.Background(), *id, *text); err != nil {
 		return err
@@ -284,9 +307,11 @@ func threadHeadlessReply(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" {
-		return errors.New("thread headless-reply: --id is required")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	resp, err := c.ThreadHeadlessReply(context.Background(), *id)
 	if err != nil {
@@ -309,9 +334,14 @@ func threadSend(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" || *text == "" {
-		return errors.New("thread send: --id and --text are required")
+	if *text == "" {
+		return errors.New("thread send: --text is required")
 	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadSend(context.Background(), *id, *text); err != nil {
 		return err
@@ -327,9 +357,11 @@ func threadStatus(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" {
-		return errors.New("thread status: --id is required")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	resp, err := c.ThreadStatus(context.Background(), *id)
 	if err != nil {
@@ -414,9 +446,11 @@ func threadStop(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" {
-		return errors.New("thread stop: --id is required")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	if err := c.ThreadStop(context.Background(), *id); err != nil {
 		return err
@@ -432,9 +466,11 @@ func threadPane(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" {
-		return errors.New("thread pane: --id is required")
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
 	}
+	*id = rid
 	c := daemonClient(cfg)
 	resp, err := c.ThreadPane(context.Background(), *id)
 	if err != nil {

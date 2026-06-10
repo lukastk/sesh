@@ -20,11 +20,15 @@ import (
 //
 // codex cannot pre-assign its session id, so its first turn returns the id it
 // generated (newSessionID); pi and claude use the sessionID sesh pre-assigned.
-func HeadlessTurn(kind Kind, sessionID, cwd string, started bool, prompt, codexHome string) (reply, newSessionID string, err error) {
+func HeadlessTurn(kind Kind, threadID, sessionID, cwd string, started bool, prompt, codexHome string) (reply, newSessionID string, err error) {
+	// The turn process carries the thread identity, exactly like a pane does:
+	// the agent (or anything it runs) can `sesh info` itself without being
+	// told who it is.
+	tidEnv := []string{EnvThreadID + "=" + threadID}
 	switch kind {
 	case Pi:
 		// pi --session-id creates-if-missing and resumes uniformly.
-		out, err := runHeadless(cwd, nil, "pi", "--print", "--session-id", sessionID, prompt)
+		out, err := runHeadless(cwd, tidEnv, "pi", "--print", "--session-id", sessionID, prompt)
 		return strings.TrimSpace(out), sessionID, err
 
 	case Claude:
@@ -35,11 +39,11 @@ func HeadlessTurn(kind Kind, sessionID, cwd string, started bool, prompt, codexH
 			args = append(args, "--session-id", sessionID)
 		}
 		args = append(args, prompt)
-		out, err := runHeadless(cwd, nil, "claude", args...)
+		out, err := runHeadless(cwd, tidEnv, "claude", args...)
 		return strings.TrimSpace(out), sessionID, err
 
 	case Codex:
-		var env []string
+		env := append([]string{}, tidEnv...)
 		if codexHome != "" {
 			env = append(env, "CODEX_HOME="+codexHome)
 		}

@@ -82,6 +82,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh tui:", err)
 			os.Exit(1)
 		}
+	case "info":
+		if err := runInfo(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh info:", err)
+			os.Exit(1)
+		}
 	case "cwd-label":
 		if err := runCwdLabel(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh cwd-label:", err)

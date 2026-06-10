@@ -44,6 +44,24 @@ func runTUI(args []string) error {
 		return fmt.Errorf("tui columns: %w", err)
 	}
 	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols)
+	// CWD column labels: compiled ONCE here, loud on a broken rule; per-cwd
+	// label errors (unknown placeholder in a matching rule) are loud at startup
+	// too — never a silently-wrong column. Inside the labeler a rule error is
+	// impossible by then, so the fallback below cannot mask one.
+	labels, err := config.LoadCwdLabels(cfg.Home)
+	if err != nil {
+		return err
+	}
+	if labels != nil {
+		uh, _ := os.UserHomeDir()
+		m = m.WithCwdLabeler(func(cwd string) string {
+			out, lerr := labels.LabelFor(cwd, uh)
+			if lerr != nil {
+				return "!ERR " + lerr.Error()
+			}
+			return out
+		})
+	}
 	if *cursor {
 		// Which pane was the user on? From a popup the only honest carrier is the
 		// binding's $SESH_TUI_PANE (the popup's own $TMUX_PANE is the popup); from a

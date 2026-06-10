@@ -223,9 +223,12 @@ func createdLabel(unix int64) string {
 	return t.Format("2006-01-02")
 }
 
-// cwdDisplay renders a thread's cwd for the CWD column: ~-relative for
-// readability. The [[cwd_label]] rule transform replaces this in A2.
+// cwdDisplay renders a thread's cwd for the CWD column: the [[cwd_label]]
+// transform when configured, else ~-relative.
 func (m *Model) cwdDisplay(cwd string) string {
+	if m.cwdLabeler != nil {
+		return m.cwdLabeler(cwd)
+	}
 	if m.userHome != "" {
 		if rel, ok := strings.CutPrefix(cwd, strings.TrimRight(m.userHome, "/")); ok {
 			return "~" + rel

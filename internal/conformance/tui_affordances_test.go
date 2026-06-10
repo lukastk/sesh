@@ -31,6 +31,7 @@ func init() {
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
 	registerTUIClaim("uuid-popup-copy", claimUUIDPopupCopy)
 	registerTUIClaim("columns-config", claimColumnsConfig)
+	registerTUIClaim("cwd-label-column", claimCwdLabelColumn)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -414,4 +415,57 @@ func renderUntilRowView(t *testing.T, m tui.Model, name string) (tui.Model, stri
 	t.Helper()
 	m, _ = renderUntilRow(t, m, name)
 	return m, m.View()
+}
+
+// claimCwdLabelColumn: the CWD column renders a REAL thread's REAL cwd through
+// the [[cwd_label]] rules (the same compiled transform `sesh cwd-label` uses),
+// and the unconfigured fallback is the ~-relative path.
+func claimCwdLabelColumn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+
+	// A real box-shaped cwd.
+	boxes := t.TempDir()
+	boxDir := filepath.Join(boxes, "20260610_zz9abc__labbox")
+	if err := os.MkdirAll(boxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	th := sb.newHeadlessThreadAt(t, "pi", "labelme", boxDir)
+
+	rules := "[[cwd_label]]\nmatch = '^" + regexpQuoteDir(boxes) + "/[0-9]{8}_(?P<boxid>[a-z0-9]+)__(?P<boxname>[^/]+)$'\nlabel = '{boxname} <{boxid}>'\n"
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"), []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	labels, err := config.LoadCwdLabels(sb.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithColumns([]string{tui.ColName, tui.ColCwd}).
+		WithCwdLabeler(func(cwd string) string {
+			out, lerr := labels.LabelFor(cwd, "")
+			if lerr != nil {
+				t.Fatalf("label %s: %v", cwd, lerr)
+			}
+			return out
+		})
+	m, _ = renderUntilRow(t, m, "labelme")
+	line := rowLine(m.View(), "labelme")
+	if !strings.Contains(line, "labbox <zz9abc>") {
+		t.Errorf("CWD column did not render the rule label: %q", line)
+	}
+	if strings.Contains(line, boxDir) {
+		t.Errorf("raw cwd leaked into the labeled column: %q", line)
+	}
+
+	// Unconfigured: the same row falls back to the raw path (outside ~ here).
+	m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns([]string{tui.ColName, tui.ColCwd})
+	m2, _ = renderUntilRow(t, m2, "labelme")
+	if !strings.Contains(rowLine(m2.View(), "labelme"), boxDir) {
+		t.Errorf("fallback CWD column missing the real path: %q", rowLine(m2.View(), "labelme"))
+	}
+	_ = th
 }

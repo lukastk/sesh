@@ -84,9 +84,11 @@ type Model struct {
 	note      string
 
 	// columns is the visible column set (validated names; see columns.go).
-	// userHome powers the CWD column's ~-relative display.
-	columns  []string
-	userHome string
+	// userHome powers the CWD column's ~-relative display; cwdLabeler, when set,
+	// transforms it further ([[cwd_label]] rules — see WithCwdLabeler).
+	columns    []string
+	userHome   string
+	cwdLabeler func(cwd string) string
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -173,6 +175,14 @@ func (m Model) WithClient(name string) Model {
 func (m Model) WithLocal(machine, tmuxSocket string) Model {
 	m.machine = machine
 	m.tmuxSocket = tmuxSocket
+	return m
+}
+
+// WithCwdLabeler sets the CWD-column display transform (the compiled
+// [[cwd_label]] rules; errors are resolved by the CALLER — a labeler given here
+// is total). Unset = ~-relative paths.
+func (m Model) WithCwdLabeler(f func(string) string) Model {
+	m.cwdLabeler = f
 	return m
 }
 

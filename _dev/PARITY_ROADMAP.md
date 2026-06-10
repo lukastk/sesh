@@ -13,7 +13,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 ## Checklist (dependency order)
 
 - [x] **A1** TUI column system + `[tui]` config defaults
-- [ ] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
+- [x] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
 - [ ] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
 - [ ] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
@@ -82,6 +82,14 @@ available to pickers via a `--label` on list/grid JSON? — decide during build)
 parity with session_name).
 **Verify:** unit tests over the four rules; TUI claim: CWD column shows the
 transformed label of a real thread's real cwd.
+**SHIPPED 2026-06-10** — research note: v1 used [[tui.cwd_rules]] with
+regexp.Expand $group replace + ${ENV} compile-time expansion; v2 re-idiomized
+to the [[session_name]] language (~-relative match, {placeholder} templates) —
+consistency beats v1-fidelity here. Placeholder typos refuse STATICALLY at
+load (checkable against the rule's own groups). No tmux sanitization.
+cwd-label verb prints the identical transform (future hook/toast use).
+Lukas's 4 rules in myrig config.toml; rule 4 (= $HOME→~) is the built-in
+no-match fallback. Claims: cwd-label-column; units in cwdlabel_test.go.
 
 ### A3. Full fzf-style filter mode
 **Why:** Lukas wants the COMPLETE v1 apparatus, explicitly not a minimal core.

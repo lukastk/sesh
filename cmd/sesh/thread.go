@@ -392,10 +392,34 @@ func threadNew(cfg config.Config, args []string) error {
 	cwd := fs.String("cwd", "", "absolute start directory (required)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
+	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
+	messageID := fs.Int("message-id", 0, "fork after the Nth assistant turn (0 = the whole conversation)")
 	noParent := fs.Bool("no-parent", false, "force a root thread (suppress parent inference)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var forkID string
+	if *forkFrom != "" {
+		rid, err := resolveThreadID(cfg, *forkFrom)
+		if err != nil {
+			return err
+		}
+		forkID = rid
+		// Agent + cwd default to the source's (a fork stays the same
+		// conversation); name still names the new thread.
+		if *agent == "" || *cwd == "" {
+			src, ok := lookupThread(daemonClient(cfg), forkID)
+			if !ok {
+				return fmt.Errorf("thread new: fork source %s not found", forkID)
+			}
+			if *agent == "" {
+				*agent = src.AgentKind
+			}
+			if *cwd == "" {
+				*cwd = src.Cwd
+			}
+		}
 	}
 	if *agent == "" || *name == "" || *cwd == "" {
 		return errors.New("thread new: --agent, --name and --cwd are required")
@@ -422,6 +446,7 @@ func threadNew(cfg config.Config, args []string) error {
 	c := daemonClient(cfg)
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
+		ForkFrom: forkID, MessageID: *messageID,
 	})
 	if err != nil {
 		return err

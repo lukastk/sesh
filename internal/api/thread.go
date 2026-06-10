@@ -89,6 +89,12 @@ type NewThreadRequest struct {
 	Cwd      string `json:"cwd"`                // absolute start dir
 	Headless bool   `json:"headless,omitempty"` // headless (no window) vs headed
 	Parent   string `json:"parent,omitempty"`   // parent thread id ('' = root); must exist
+	// ForkFrom branches an EXISTING thread's conversation: the source
+	// transcript's prefix (through MessageID assistant turns; 0 = all) is
+	// copied under a fresh agent session id and the new thread resumes from
+	// that point. Headless-born; the source is untouched.
+	ForkFrom  string `json:"fork_from,omitempty"`
+	MessageID int    `json:"message_id,omitempty"`
 }
 
 // ReparentThreadRequest re-parents a thread ('' = make it a root).

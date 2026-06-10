@@ -89,6 +89,10 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.ForkFrom != "" {
+		d.newForkedThread(w, kind, req)
+		return
+	}
 	if req.Headless {
 		d.newHeadlessThread(w, kind, req)
 		return

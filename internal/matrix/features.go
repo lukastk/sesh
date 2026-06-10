@@ -309,6 +309,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.backup",
+		Description: "backup/restore/copy: sha256-idempotent transcript backups into portable SQLite; restore --to-dir (all agents) / --native (claude; others reported Unsupported); copy composes them; remote = routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.subscribe",
 		Description: "subscriptions: a subscribee's completed turns deliver into subscriber threads (owner-side engine on the eventer; dedup on the monotone reply count; cycle guard + --allow-cycle breaker); remote = cross-machine delivery via the routed send",
 		Localities:  bothLoc,

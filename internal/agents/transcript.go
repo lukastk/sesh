@@ -153,3 +153,22 @@ func readTranscriptLines(path string) ([]string, error) {
 	}
 	return lines, sc.Err()
 }
+
+// NativePath resolves the DETERMINISTIC on-disk location a conversation's
+// transcript would occupy — a restore DESTINATION (TranscriptPath's found
+// reflects existence, false for a file about to be written). Only claude's
+// layout is deterministic from (cwd, session id); pi/codex filenames embed a
+// timestamp and return a loud error.
+func NativePath(kind Kind, agentSessionID, cwd string, homes Homes) (string, error) {
+	switch kind {
+	case Claude:
+		if cwd == "" || agentSessionID == "" {
+			return "", fmt.Errorf("claude native path needs a cwd + session id")
+		}
+		return claude.TranscriptPath(homes.Claude, cwd, agentSessionID), nil
+	case Pi, Codex:
+		return "", fmt.Errorf("native path for %s is not deterministic (filename embeds a timestamp)", kind)
+	default:
+		return "", fmt.Errorf("unknown agent %q", kind)
+	}
+}

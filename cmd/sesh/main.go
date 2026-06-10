@@ -92,6 +92,31 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh delegate:", err)
 			os.Exit(1)
 		}
+	case "backup":
+		if err := runBackup(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh backup:", err)
+			os.Exit(1)
+		}
+	case "restore":
+		if err := runRestore(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh restore:", err)
+			os.Exit(1)
+		}
+	case "copy":
+		if err := runCopy(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh copy:", err)
+			os.Exit(1)
+		}
+	case "tail":
+		if err := runTail(config.Load(), os.Args[2:], false); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh tail:", err)
+			os.Exit(1)
+		}
+	case "transcript":
+		if err := runTail(config.Load(), os.Args[2:], true); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh transcript:", err)
+			os.Exit(1)
+		}
 	case "subscribe":
 		if err := runSubscribe(config.Load(), os.Args[2:], false); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh subscribe:", err)

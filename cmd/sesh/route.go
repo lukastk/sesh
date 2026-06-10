@@ -147,8 +147,13 @@ func routeToMachineSSH(peer peers.Peer, rest []string) error {
 		"env",
 		"SESH_HOME=" + shellQuote(peer.Home),
 		"SESH_MACHINE=" + shellQuote(peer.Machine),
-		shellQuote(peer.Binary),
 	}
+	if peer.CodexHome != "" {
+		// Client-side transcript reads (backup/copy) resolve codex's home from
+		// the routed process's env, not the daemon's.
+		remote = append(remote, "SESH_CODEX_HOME="+shellQuote(peer.CodexHome))
+	}
+	remote = append(remote, shellQuote(peer.Binary))
 	for _, a := range rest {
 		remote = append(remote, shellQuote(a))
 	}

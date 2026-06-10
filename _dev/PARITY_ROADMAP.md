@@ -24,10 +24,10 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **C2** `sesh delegate` (`--sandbox` loud until E3)
 - [x] **C3** `sesh subscribe` + turn-delivery engine
 - [x] **D0** Transcript-resolution layer (per-agent transcript file location)
-- [ ] **D1** `sesh tail`
-- [ ] **D2** `sesh copy` (transcript copy)
+- [x] **D1** `sesh tail`
+- [x] **D2** `sesh copy` (transcript copy)
 - [ ] **D3** `sesh new --fork-from` (rewind-and-branch)
-- [ ] **D4** `sesh backup` / `restore`
+- [x] **D4** `sesh backup` / `restore`
 - [ ] **D5** Adopt/register foreign agents
 - [ ] **D6** `meta` KV on threads
 - [ ] **E1** SESH_MACHINE: daemon refuses silent hostname fallback
@@ -372,13 +372,18 @@ transcript = loud. LastReply returns a MONOTONE reply count (C3's dedup
 marker). Owner-side GET /v1/threads/transcript (?tail) + `thread transcript`
 verb — content never replicated; remote reads route. 6 cells (151 total).
 
-### D1. `sesh tail` — print/follow a thread's transcript (v1
-`internal/cli/*tail*`; research exact flags). Routable cross-machine.
-**Verify:** cells per agent: tail shows a sentinel reply that was really given.
+### D1. `sesh tail` — print a thread's transcript tail.
+**SHIPPED 2026-06-10** — research: v1's tail = last-N (default 20), NO follow
+mode (don't invent). `sesh tail [id] [-n]` + `sesh transcript [id]` (v1's
+whole-dump form), both inferring. Free CLI-forms test (read mechanics are
+matrix-covered by thread.transcript).
 
-### D2. `sesh copy` — copy transcript/last-reply to clipboard (v1 comms.go/
-copy_remote.go; research scope: last reply vs whole transcript vs file). Reuses
-the TUI clipboard helper + `tmux stage-file` for cross-machine.
+### D2. `sesh copy` — transcript copy.
+**SHIPPED 2026-06-10** — research CORRECTED the sketch: v1's copy is NOT a
+clipboard verb — it ships a transcript elsewhere (backup→restore composed,
+in backup.go). v2: copy <id> --to-dir | --to <machine> (stage-file ships the
+SQLite; routed --native restore on the peer; non-claude cross-machine refused
+loudly — v1's false-success guard). Covered in the thread.backup cells.
 
 ### D3. `sesh new --fork-from <id> [--message-id N]` — rewind-and-branch a
 conversation under a NEW thread (v1 `internal/fork/fork.go`). Per-agent
@@ -389,9 +394,15 @@ stays for ACCIDENTAL forks; this is the deliberate verb.
 
 ### D4. `sesh backup` / `restore` — idempotent sha256 transcript backups into
 portable SQLite; `--to`, `--rewrite-cwd`, `--force` (v1 `internal/backup/`).
-Research what of the v1 schema carries over; restore must round-trip D0's
-formats.
-**Verify:** cells: backup→wipe→restore→resume continuity for each agent.
+**SHIPPED 2026-06-10** — v1's package ported (entries re-keyed: thread id +
+agent_session_id — claude's native path needs the session id). restore
+--to-dir (all agents) / --native (claude only; pi/codex → Unsupported, loud,
+never a mid-run abort); OpenExisting guard kept (typo'd path ≠ empty-db false
+success). Cells thread.backup 3 agents × 2 loc (159 total): backup → WIPE the
+test thread's own file → restore → BYTE equality; claude native + a real turn
+proving MEMORY survives; idempotency; loud guards; routed remote. GAP FOUND:
+routed client-side reads lacked the peer's codex home → peers.Peer.CodexHome
+(+ peer add --codex-home) forwarded by the ssh route.
 
 ### D5. Adopt/register foreign agents — bring an agent sesh didn't spawn under
 management (v1 `import.go`/register). v2 stance was provenance-only; the

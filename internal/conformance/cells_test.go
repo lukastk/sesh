@@ -67,6 +67,7 @@ var skipReasons = map[string]string{
 	"ticket.send-prompt":        "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",
 	"ticket.set-status":         "set status incl. agent-driven done",
 	"ticket.needs-input":        "derived view active && waiting",
+	"thread.backup":             "backup→wipe→restore byte-equal per agent; claude native restore + RESUMED memory; idempotent; copy composes; loud guards; remote routed",
 	"thread.subscribe":          "a real turn lands formatted in the subscriber's REAL pane exactly once; cycle refused/--allow-cycle; unsubscribe stops; remote = peer-owned delivery into a local pane",
 	"thread.transcript":         "real transcript located+read after a real turn (sentinel in lines + last_reply; monotone reply_count; pre-turn loud); remote routed",
 	"thread.delegate":           "real one-shot answer + worker GONE after (ephemeral both directions); --keep = usable thread w/ memory; --sandbox loud until E3",

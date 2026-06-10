@@ -182,7 +182,7 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 		}
 		// Register the peer with the client (exercises `sesh peer add`).
 		client := &localRunner{bin: bin, env: clientEnv}
-		if _, stderr, err := client.Run(t, "peer", "add", "--machine", machine, "--ssh", "localhost", "--home", home, "--binary", bin); err != nil {
+		if _, stderr, err := client.Run(t, "peer", "add", "--machine", machine, "--ssh", "localhost", "--home", home, "--binary", bin, "--codex-home", env["SESH_CODEX_HOME"]); err != nil {
 			t.Fatalf("peer add: %v\n%s", err, stderr)
 		}
 		sb = &Sandbox{

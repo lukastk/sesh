@@ -100,7 +100,7 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
-### IN PROGRESS: the TWO-AXES state model (Lukas 2026-06-10 late; schema v3)
+### DONE: the TWO-AXES state model (Lukas 2026-06-10 late; schema v3; deployed both machines)
 Replaces `activity {working,waiting,idle}` ENTIRELY (the enum fuses axes: waiting ≡
 headful∧quiet, idle ≡ headless∧quiet, and `working` ERASES the head axis). New wire on
 status/row/snapshot: `head: "headful"|"headless"` (live pane vs not) + `busy: bool`
@@ -113,6 +113,11 @@ grid/ticket, TUI (glyph/STATE cols/navSelected: revive iff headless∧¬busy), C
 myrig picker jq + markers, SPEC §3, harness waitThreadReady (waiting → headful∧¬busy),
 ALL cells/claims re-assert (runtime-state, send.headless, snapshot, crosshost, mesh,
 grid-render claim). Then full suite + deploy both + live smoke.
+SHIPPED: 125 cells + all claims green in one run; deployed; all four states traversed
+live in order on the mesh. Glyphs (Lukas's choice): head ● headful / ◌ headless, busy
+▶ busy / · idle, ? per-axis unknown (axes are wire STRINGS precisely so skew renders ?).
+Side effect of templated session names: thread NAMES no longer need to be unique
+(sessions are tid8-unique) — duplicate names in the grid are legitimate.
 
 ### Configurable SESSION NAMING (2026-06-10, per Lukas; deployed)
 `[[session_name]]` rules in `<SESH_HOME>/config.toml` (NEW file — sesh mechanism, myrig

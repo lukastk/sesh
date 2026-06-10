@@ -176,6 +176,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "tmux.work-conf",
+		Description: "SESH_TMUX_CONF: the WORK tmux server is started with `tmux -f <conf>` (carries sesh's own tmux UI, separate from the user's default ~/.tmux.conf) — proved by a sentinel option only that conf sets being live on the work socket",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "api.tcp-auth",
 		Description: "the optional TCP API (mobile/remote) requires a bearer token — rejects missing/wrong (401), accepts correct (200), and refuses to start exposed without a token",
 		Localities:  []Locality{Local},

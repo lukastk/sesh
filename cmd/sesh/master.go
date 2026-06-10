@@ -195,10 +195,17 @@ func masterWindow(cfg config.Config, args []string) error {
 // of looping on "no sessions" — and it stays a client of the work server, so nav can
 // switch it into a thread the instant one appears. `attach` (no -t) still prefers the
 // most-recently-used real thread over the placeholder.
-func workAttach(socket string) string {
+// conf (when non-empty) is the work server's `-f` config, applied if THIS attach is
+// what starts the server (so an empty machine's scratch shell already carries sesh's
+// tmux UI). The daemon applies the same conf when it starts the server for a thread.
+func workAttach(socket, conf string) string {
+	newSess := fmt.Sprintf(`tmux -L %s new-session -d -s scratch -c "$HOME"`, socket)
+	if conf != "" {
+		newSess = fmt.Sprintf(`tmux -f "%s" -L %s new-session -d -s scratch -c "$HOME"`, conf, socket)
+	}
 	return fmt.Sprintf(
-		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || tmux -L %[1]s new-session -d -s scratch -c "$HOME"; exec tmux -L %[1]s attach`,
-		socket)
+		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; exec tmux -L %[1]s attach`,
+		socket, newSess)
 }
 
 // masterAttachCommand returns a factory that builds the attach process for a machine:
@@ -207,7 +214,7 @@ func workAttach(socket string) string {
 func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, error) {
 	if machine == cfg.Machine {
 		return func() *exec.Cmd {
-			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket))
+			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket, cfg.TmuxConf))
 			c.Env = tmuxCleanEnv()
 			return c
 		}, nil
@@ -223,7 +230,7 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	if peer.TmuxSocket == "" {
 		return nil, fmt.Errorf("master window: peer %q has no tmux socket (see `sesh peer add --tmux-socket`)", machine)
 	}
-	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket))
+	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, peer.TmuxConf))
 	sshArgs := append([]string{"-tt", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, remote)
 	return func() *exec.Cmd {

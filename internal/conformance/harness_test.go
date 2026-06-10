@@ -99,6 +99,7 @@ type Sandbox struct {
 type sandboxConfig struct {
 	apiAddr  string
 	apiToken string
+	tmuxConf string
 }
 
 type sandboxOpt func(*sandboxConfig)
@@ -107,6 +108,12 @@ type sandboxOpt func(*sandboxConfig)
 // token — i.e. reachable over the HTTP transport, not just ssh.
 func withAPI(addr, token string) sandboxOpt {
 	return func(c *sandboxConfig) { c.apiAddr = addr; c.apiToken = token }
+}
+
+// withTmuxConf starts the sandbox's daemon with SESH_TMUX_CONF=path, so the WORK
+// tmux server it spawns sessions on sources that `-f` config.
+func withTmuxConf(path string) sandboxOpt {
+	return func(c *sandboxConfig) { c.tmuxConf = path }
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
@@ -142,6 +149,9 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	if sc.apiAddr != "" {
 		env["SESH_API_ADDR"] = sc.apiAddr
 		env["SESH_API_TOKEN"] = sc.apiToken
+	}
+	if sc.tmuxConf != "" {
+		env["SESH_TMUX_CONF"] = sc.tmuxConf
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 

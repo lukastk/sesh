@@ -24,6 +24,10 @@ type Config struct {
 	// per machine. `tmux nav` switches the outer client there. Default
 	// "mymastertmux".
 	MasterSocket string
+	// TmuxConf, when set (SESH_TMUX_CONF), is the `tmux -f` config the WORK server
+	// starts with — so sesh's tmux can carry its own UI (e.g. the per-thread status
+	// bar) separate from the user's default ~/.tmux.conf. Empty = tmux default.
+	TmuxConf string
 	// TicketOwner is the canonical always-on machine that owns the ticket store
 	// (the single writer). When set and not this machine, ticket commands route
 	// to the owner. Empty = this machine owns its own tickets (no mesh).
@@ -87,6 +91,7 @@ func Load() Config {
 		Machine:      machine,
 		TmuxSocket:   socket,
 		MasterSocket: masterSocket,
+		TmuxConf:     os.Getenv("SESH_TMUX_CONF"),
 		TicketOwner:  os.Getenv("SESH_TICKET_OWNER"),
 		CodexHome:    os.Getenv("SESH_CODEX_HOME"),
 		APIAddr:      os.Getenv("SESH_API_ADDR"),

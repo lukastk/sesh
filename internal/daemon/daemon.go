@@ -91,7 +91,7 @@ func New(cfg config.Config) (*Daemon, error) {
 	d := &Daemon{
 		cfg:        cfg,
 		store:      st,
-		tmux:       tmux.NewServer(cfg.TmuxSocket),
+		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		hlInFlight: map[string]bool{},
 		hlReply:    map[string]string{},
 	}

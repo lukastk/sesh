@@ -22,18 +22,34 @@ const ThreadIDOption = "@sesh-thread-id"
 // Server addresses one tmux server by socket name (tmux -L <socket>).
 type Server struct {
 	socket string
+	conf   string // optional `tmux -f` config, sourced when THIS server starts; "" = tmux default (~/.tmux.conf)
 }
 
-// NewServer binds to a socket name.
+// NewServer binds to a socket name (tmux's default config).
 func NewServer(socket string) *Server { return &Server{socket: socket} }
+
+// NewServerWithConf binds to a socket name with an explicit `-f` config, so sesh's
+// work tmux can carry its own UI (e.g. the per-thread status bar) instead of the
+// user's default ~/.tmux.conf. An empty conf means tmux's default.
+func NewServerWithConf(socket, conf string) *Server { return &Server{socket: socket, conf: conf} }
 
 // Socket returns the bound socket name.
 func (s *Server) Socket() string { return s.socket }
 
-// run executes `tmux -L <socket> <args...>` and returns stdout. stderr is folded
-// into the error so failures are loud and diagnosable.
+// base returns the `[-f conf] -L socket` prefix. `-f` is sourced only when the server
+// starts; tmux ignores it when connecting to a running server (verified), so it is
+// safe to pass on every invocation.
+func (s *Server) base() []string {
+	if s.conf != "" {
+		return []string{"-f", s.conf, "-L", s.socket}
+	}
+	return []string{"-L", s.socket}
+}
+
+// run executes `tmux [-f conf] -L <socket> <args...>` and returns stdout. stderr is
+// folded into the error so failures are loud and diagnosable.
 func (s *Server) run(args ...string) (string, error) {
-	full := append([]string{"-L", s.socket}, args...)
+	full := append(s.base(), args...)
 	cmd := exec.Command("tmux", full...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -47,7 +63,7 @@ func (s *Server) run(args ...string) (string, error) {
 // serverRunning reports whether this tmux server is up. tmux returns a specific
 // error when no server is running; that is an empty state, not a failure.
 func (s *Server) serverRunning() (bool, error) {
-	full := []string{"-L", s.socket, "has-session"}
+	full := append(s.base(), "has-session")
 	cmd := exec.Command("tmux", full...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

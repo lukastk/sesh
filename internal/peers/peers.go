@@ -30,6 +30,7 @@ type Peer struct {
 	Home       string `json:"home"`                  // the remote SESH_HOME (locates its daemon socket)
 	Binary     string `json:"binary"`                // path to the sesh binary on the remote machine
 	TmuxSocket string `json:"tmux_socket,omitempty"` // the remote mytmux socket NAME (for tmux nav)
+	TmuxConf   string `json:"tmux_conf,omitempty"`   // the remote work tmux `-f` config (master's remote window starts the peer's work server with it)
 
 	// HTTP transport (opt-in). ApiAddr set => this peer is reached over its TCP API.
 	ApiAddr      string `json:"api_addr,omitempty"`       // the peer daemon's TCP API addr (host:port)

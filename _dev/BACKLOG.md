@@ -134,7 +134,15 @@ caches, `_mms_machine_reachable`, nav history, flagged-cycle, `_mms_run_on_machi
 goes ~1,205 → ~150–250 lines. (Parallel to v1 for now; converge onto the canonical socket +
 single master once v2 retires v1.)
 
-## 5. Per-server tmux config for the WORK server (`SESH_TMUX_CONF` + `peer --tmux-conf`)
+## 5. ✅ DONE — Per-server tmux config for the WORK server (`SESH_TMUX_CONF` + `peer --tmux-conf`)
+
+Built: `SESH_TMUX_CONF` (config) → the work `tmux.Server` is `NewServerWithConf`, which
+prepends `-f <conf>` to every invocation (sourced at server start, ignored when running —
+verified). `peers.Peer.TmuxConf` (`peer add --tmux-conf`) → the master's remote window
+starts the peer's work server with its conf (`workAttach(socket, conf)`); local uses
+`cfg.TmuxConf`. Conformance `tmux.work-conf` (Local): a sentinel option only the supplied
+conf sets is live on the work socket (raw tmux). myrig still owns the conf FILE; sesh loads
+the path. Design notes kept below.
 
 Generalize the master's `--tmux-conf` (`-f`, already built) to the WORK server, so sesh's
 tmux can carry the sesh-specific UI (the per-thread status bar) while the user's REGULAR

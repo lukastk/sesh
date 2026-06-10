@@ -83,6 +83,14 @@ type Model struct {
 	uuidPopup bool
 	note      string
 
+	// Filter state (see filter.go): filtering = the prompt is being edited;
+	// filter = the ACTIVE query (persists when applied via Esc); filterCaret =
+	// rune index of the text caret; target = what the query matches.
+	filtering   bool
+	filter      string
+	filterCaret int
+	target      filterTarget
+
 	// columns is the visible column set (validated names; see columns.go).
 	// userHome powers the CWD column's ~-relative display; cwdLabeler, when set,
 	// transforms it further ([[cwd_label]] rules — see WithCwdLabeler).
@@ -264,16 +272,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.machines = msg.machines
 			m.fetchedAt = msg.fetchedAt
 			if m.preselectID != "" {
-				for i, r := range m.rows {
-					if r.ID == m.preselectID {
+				for i, rm := range m.visibleMatches() {
+					if rm.row.ID == m.preselectID {
 						m.cursor = i
 						break
 					}
 				}
 				m.preselectID = "" // one-shot: only the first fetch positions the cursor
 			}
-			if m.cursor >= len(m.rows) {
-				m.cursor = max(0, len(m.rows)-1)
+			if vis := len(m.visibleMatches()); m.cursor >= vis {
+				m.cursor = max(0, vis-1)
 			}
 		}
 		return m, tick()
@@ -318,21 +326,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prompting != promptNone {
 		return m.handlePromptKey(msg)
 	}
+	if m.filtering {
+		return m.handleFilterKey(msg)
+	}
 	switch msg.String() {
 	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
 	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
-		m.cursor-- // wraps: top -> bottom (matches the fzf pickers' --cycle feel)
-		if m.cursor < 0 {
-			m.cursor = max(0, len(m.rows)-1)
-		}
+		m.moveCursor(-1) // wraps (fzf --cycle feel), over the VISIBLE (filtered) rows
 	case "down", "j":
-		m.cursor++
-		if m.cursor >= len(m.rows) {
-			m.cursor = 0
-		}
+		m.moveCursor(1)
+	case "/":
+		m.filtering = true
+		m.filterCaret = len([]rune(m.filter))
 	case "tab":
 		m.view = (m.view + 1) % 3
 		m.cursor = 0
@@ -610,12 +618,14 @@ func (m Model) archiveSelected() tea.Cmd {
 	}
 }
 
-// Selected returns the row under the cursor, if any.
+// Selected returns the VISIBLE row under the cursor, if any (the filter
+// narrows what the cursor moves over).
 func (m Model) Selected() (api.ThreadRow, bool) {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	vis := m.visibleMatches()
+	if m.cursor < 0 || m.cursor >= len(vis) {
 		return api.ThreadRow{}, false
 	}
-	return m.rows[m.cursor], true
+	return vis[m.cursor].row, true
 }
 
 // Rows exposes the current rows (for tests).
@@ -646,6 +656,7 @@ var (
 	styleHeader   = lipgloss.NewStyle().Bold(true)
 	styleSelected = lipgloss.NewStyle().Reverse(true)
 	styleDim      = lipgloss.NewStyle().Faint(true)
+	styleMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 )
 
 // Glyph maps a row's live state to a status glyph. These are part of the contract
@@ -707,18 +718,23 @@ func (m Model) View() string {
 	widths := m.colWidths(cols)
 	b.WriteString(styleHeader.Render("  HB  "+m.renderHeader(cols, widths)) + "\n")
 
-	if len(m.rows) == 0 {
+	vis := m.visibleMatches()
+	if len(vis) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
 	}
-	for i, row := range m.rows {
+	for i, rm := range vis {
+		row := rm.row
 		att := " "
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row)
 		if i == m.cursor {
+			// The selected row uses reverse video; matched-rune styling inside it
+			// would reset the reverse — selection is the dominant cue.
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row, nil)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, row, rm.pos)
 			b.WriteString("  " + line + "\n")
 		}
 	}
@@ -735,7 +751,15 @@ func (m Model) View() string {
 			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · last seen %ds ago", mv.Machine, age)) + "\n")
 		}
 	}
-	b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+	switch {
+	case m.filtering:
+		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
+	case m.filter != "":
+		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+	default:
+		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+	}
 	return b.String()
 }
 

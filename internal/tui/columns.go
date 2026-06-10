@@ -182,14 +182,20 @@ func (m *Model) renderHeader(cols []colSpec, widths []int) string {
 
 // renderCells renders one row's column cells (after the state gutter).
 // Full-width cells are padded (they never truncate); fixed cells truncate.
-func (m *Model) renderCells(cols []colSpec, widths []int, row api.ThreadRow) string {
+// hl, when non-nil, maps column names to matched rune positions (the filter's
+// highlight); positions are styled AFTER padding so widths stay rune-true.
+func (m *Model) renderCells(cols []colSpec, widths []int, row api.ThreadRow, hl map[string][]int) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
 		cell := c.cell(m, row)
 		if !c.fullWidth {
 			cell = trunc(cell, widths[i])
 		}
-		parts[i] = pad(cell, widths[i])
+		cell = pad(cell, widths[i])
+		if pos := hl[c.name]; len(pos) > 0 {
+			cell = highlight(cell, pos)
+		}
+		parts[i] = cell
 	}
 	return strings.Join(parts, " ")
 }

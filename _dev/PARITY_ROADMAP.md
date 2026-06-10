@@ -14,7 +14,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 
 - [x] **A1** TUI column system + `[tui]` config defaults
 - [x] **A2** `[[cwd_label]]` display rules + CWD column + `sesh cwd-label`
-- [ ] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
+- [x] **A3** Full fzf-style filter mode (fuzzy scorer, caret editing, ctrl+t search modes, `--filter`)
 - [ ] **F1** Current-thread inference (3-source resolver) + `sesh info`
 - [ ] **A4** Predicate grammar + custom views (`[[tui.views]]`, ticket-aware)
 - [ ] **A5** Parent/child threads + collapsible tree view
@@ -108,6 +108,19 @@ claim `quit-esc` already encodes this).
 **Verify:** claims: filter narrows real rows (count line correct), caret editing,
 ctrl+t switches target (uuid query matches only in uuid mode), Esc applies and
 keeps the filtered view, `--filter` starts filtering.
+**SHIPPED 2026-06-10** — research note: fuzzy.go + fuzzy_test.go ported
+VERBATIM (FuzzyMatchV1 shape, smart-case, boundary/camel/consecutive bonuses,
+positions for highlight). Filter state on Model (filtering/filter/caret/
+target); visibleMatches() = filter+rank layer between rows and everything
+(cursor/Selected/View all go through it). v1-faithful keys incl. ctrl+k/j,
+ctrl+a/e, ctrl+t (+ Tab view-cycle inside filter mode). ADAPTATIONS: best
+match FIRST + cursor-to-top (v2 is top-down; v1 fzf-reverse), ←/→ tree
+fold-at-boundary joins with A5, ctrl+h/l h-scroll NOT shipped (no h-scroll in
+v2 yet — revisit if full-width columns overflow in practice; flagged, not
+silent). Highlight = post-pad rune styling; SKIPPED on the selected row
+(reverse-video conflict). Both popup bindings start --filter (work also
+--cursor). 6 claims (filter-narrow/rank/caret/target-uuid/esc-applies/
+start-flag) + ported fuzzy units.
 
 ### A4. Predicate grammar + custom views (ticket-aware)
 **Why:** Lukas's motivating example: a view of "threads WITH an open ticket" and

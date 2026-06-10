@@ -21,6 +21,7 @@ func runTUI(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	allMachines := fs.Bool("all-machines", false, "show threads from every machine in the mesh")
 	cursor := fs.Bool("cursor", false, "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)")
+	filter := fs.Bool("filter", false, "start in filter mode (type-to-narrow immediately)")
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -91,6 +92,9 @@ func runTUI(args []string) error {
 	// unambiguous single-client-pane case or fails loudly — never a wrong client.
 	if name := os.Getenv("SESH_NAV_CLIENT"); name != "" {
 		m = m.WithClient(name)
+	}
+	if *filter {
+		m = m.WithFilterStart()
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()

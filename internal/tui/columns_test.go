@@ -37,7 +37,7 @@ func TestFullWidthColumnsSizeToLongestCell(t *testing.T) {
 	}}
 	cols := m.activeColumns()
 	widths := m.colWidths(cols)
-	line := m.renderCells(cols, widths, m.rows[1])
+	line := m.renderCells(cols, widths, m.rows[1], nil)
 	if !strings.Contains(line, "a-much-longer-thread-name-that-must-not-truncate") {
 		t.Errorf("full-width NAME truncated: %q", line)
 	}
@@ -49,7 +49,7 @@ func TestFixedColumnsTruncate(t *testing.T) {
 	}}
 	cols := m.activeColumns()
 	widths := m.colWidths(cols)
-	line := m.renderCells(cols, widths, m.rows[0])
+	line := m.renderCells(cols, widths, m.rows[0], nil)
 	if strings.Contains(line, "an-extremely-long-machine-name") {
 		t.Errorf("fixed MACHINE did not truncate: %q", line)
 	}

@@ -47,9 +47,18 @@ the peer's work server with its conf. myrig owns the conf FILE (a `-f` conf REPL
 so it must `source` the base bits it wants + add the sesh status line). NOW WIRED in
 myrig — see the next section.
 
-### myrig port (BACKLOG #4b) — STAGED in myrig's working tree 2026-06-10, AWAITING LUKAS'S REVIEW
-The master-tmux + sesh myrig layer is ported to v2 (PARALLEL to v1 — old files untouched).
-UNCOMMITTED in `~/mysetup/myrig` (Lukas reviews/commits/provisions; never commit for him):
+### myrig port (BACKLOG #4b) — COMMITTED + DEPLOYED to mymain & macbook 2026-06-10
+(myrig f799024 + a76730d wrapper SESH_TMUX_CONF + 0ce88b6 mt-start exit fix; Lukas
+authorized commit/push/deploy.) Deploy = install-home + daemon restart on both machines.
+mymain: master + work server CYCLED onto the new confs (verified: master prefix C-a /
+machine windows / tui binds; work server `status 2` + seshv2-current-status format —
+started through the master self-window, proving the wrapper's SESH_TMUX_CONF path).
+macbook: files + daemon deployed; its WORK server (3 live threads) and MASTER (2 attached
+clients) were NOT cycled — old confs until restarted (`mt-kill && mt-start` from a fresh
+shell on macbook; work conf applies when its work server next starts empty). NOTE: the
+macOS /opt/homebrew/etc/supervisor.d/sesh-v2-daemon.ini is a HARDLINK to the rendered
+~/.supervisor/conf.d copy — install-home updates both at once.
+The master-tmux + sesh myrig layer is ported to v2 (PARALLEL to v1 — old files untouched):
 - **`home/.sesh-v2/myrig/`** (NEW — the consolidated v2 folder; named `.sesh-v2` to match
   SESH_HOME, not Lukas's tentative `.seshv2` — flagged for his confirmation):
   `tmux.work.conf` (sources base, overrides status-format[0] → `seshv2-current-status`,

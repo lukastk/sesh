@@ -66,7 +66,22 @@ func HeadlessTurn(kind Kind, sessionID, cwd string, started bool, prompt, codexH
 // runHeadless runs an agent command in cwd with no stdin (so codex/others don't
 // block reading it), returning stdout. stderr is folded into the error.
 func runHeadless(cwd string, extraEnv []string, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+	// Run the agent THROUGH the user's shell ($SHELL -c), exactly as a tmux pane
+	// would: a headless turn is the same conversation as a pane turn, so it must
+	// see the same environment. zsh sources ~/.zshenv for every invocation, which
+	// is where interactive setups (PATH additions, API keys) actually live — a
+	// bare exec from the daemon would miss them all (observed live: pi turns
+	// failed provider auth under the supervised daemon while panes worked).
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	quoted := make([]string, 0, len(args)+1)
+	quoted = append(quoted, shellQuoteArg(name))
+	for _, a := range args {
+		quoted = append(quoted, shellQuoteArg(a))
+	}
+	cmd := exec.Command(shell, "-c", strings.Join(quoted, " "))
 	cmd.Dir = cwd
 	cmd.Stdin = nil
 	if extraEnv != nil {
@@ -79,6 +94,11 @@ func runHeadless(cwd string, extraEnv []string, name string, args ...string) (st
 		return "", fmt.Errorf("headless %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+// shellQuoteArg single-quotes a string for POSIX shells.
+func shellQuoteArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // parseCodexExec extracts the agent reply and the session (thread) id from

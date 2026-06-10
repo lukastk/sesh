@@ -60,12 +60,17 @@ macOS /opt/homebrew/etc/supervisor.d/sesh-v2-daemon.ini is a HARDLINK to the ren
 ~/.supervisor/conf.d copy — install-home updates both at once.
 The master-tmux + sesh myrig layer is ported to v2 (PARALLEL to v1 — old files untouched):
 - **`home/.sesh-v2/myrig/`** (NEW — the consolidated v2 folder; named `.sesh-v2` to match
-  SESH_HOME, not Lukas's tentative `.seshv2` — flagged for his confirmation):
-  `tmux.work.conf` (sources base, overrides status-format[0] → `seshv2-current-status`,
-  rebinds s→`seshv2 tui` Tab→`seshv2-archive-here`, unbinds v1-only S/R/</>) and
-  `tmux.master.conf` (sources base, prefix C-a, status-left=#W, status on + re-source
-  windows-format, s/a→tui popup, K=kill-window, P=clipboard paste, unbinds
-  A/S/Tab/R/</>/,/./o/O/L/c; mms-on-machine pick-machine popups NOT ported — thin by design).
+  SESH_HOME). Confs are fully **SELF-CONTAINED** (c8ef32b, per Lukas: base.conf carries V1
+  master-tmux keybindings that must not leak): they never read `~/.tmux.conf`/`base.conf`.
+  `tmux.common.conf` = the generic subset of base (mouse/status pos/window styles/extended-
+  keys block/clipboard/focus; deliberately DROPS tpm+continuum — a continuum restore would
+  recreate `sesh_*` names as agent-less shells the daemon would mis-probe).
+  `tmux.windows-format.conf` = own copy of the captured default windows format.
+  `tmux.work.conf` (C-b; status 2 + v2 row; t shell, K guarded kill-session, s tui,
+  a/A mt-enter-session, Tab archive-here) and `tmux.master.conf` (C-a; status-left #W;
+  a/A picker, s tui, t, K kill-window, P paste; unbinds c/,/./$ defaults). No unbind-v1
+  lists needed anymore. mms-on-machine pick-machine popups still NOT ported (mysystem
+  integration, thin by design).
 - **`sesh-v2.sh.jinja`** grew (naming per Lukas: **`mt-*` = master-tmux cockpit commands**,
   `seshv2-*` = sesh-side helpers): `mt-start [--no-attach]` (master up --tmux-conf + attach),
   `mt-attach`, `mt-kill`, `sst2`, `seshv2-current-status` (pane→thread via env-injected
@@ -78,6 +83,12 @@ The master-tmux + sesh myrig layer is ported to v2 (PARALLEL to v1 — old files
   v1's no-`--to` auto-detect of attached masters relied on marker files written by
   mms-remote-entrypoint, which the v2 Go supervisor doesn't write, so no-`--to` is an fzf
   picker over $MYRIG_MACHINES instead; my_alias groups `-g mt` / `-g sesh2`).
+  **`mt-enter-session [--archived]`** (c8ef32b) = the V1 mms-enter-session twin: fzf over
+  `thread grid --json --all-machines` (⚡/💤/◌ markers), then the TUI's Enter compose in
+  shell (headful for headless / resume for dead, `--machine`-routed, session re-resolved),
+  then context-aware nav (--attach / --in-client / master). Bound prefix+a/A on BOTH
+  servers. E2E-tested (2 real clients; only the invoker switched). JINJA GOTCHA: zsh's
+  braced length form contains brace-hash = a jinja comment-opener; use `$#var` in .jinja.
 - **Wiring**: supervisor ini adds `SESH_TMUX_CONF=~/.sesh-v2/myrig/tmux.work.conf`;
   peers.json.jinja adds per-peer `"tmux_conf"` (peer's OWN home path).
 VERIFIED LIVE on mymain: both confs load on isolated sockets (bindings + format asserted);

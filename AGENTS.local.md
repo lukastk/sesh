@@ -46,6 +46,31 @@ recent session); in zsh, ALWAYS quote `-t "=name"` (unquoted =word does PATH loo
   had 9 stale ms-* bindings from exactly that; surgically unbound live (b B e E m M g G
   j J k o O , .) to match a fresh start.
 
+### IN PROGRESS: the UNIFIED THREAD MODEL (Lukas directive 2026-06-10: "go ahead")
+Headless/headful becomes INFERRED runtime, not a stored gate. Design (committed here as
+the execution checkpoint — if compacted, resume from this list):
+- **States (inferred per tick)**: pane-live (probe content-diff → working/waiting) |
+  turn-in-flight (hlInFlight → working) | **idle** (neither — the UNIFIED state that
+  replaces BOTH "dead" and headless-between-turns). Wire: ActivityDead "dead" RENAMED →
+  ActivityIdle "idle" (api.SchemaVersion bump; reinstall both machines + crosshost note).
+- **Record**: drop the `Headless` gate from api.Thread + all gating (store column kept,
+  deprecated, unread). `HeadlessStarted` re-semanticized = "conversation has begun"
+  (headed new sets TRUE at spawn; headless new sets it on first turn) — it feeds
+  HeadlessTurn's started param so send-headless on a HEADED-BORN idle thread resumes.
+- **Verbs/gates (symmetric)**: send → needs pane-live (409 else). send-headless → 409 if
+  pane-live ("would fork the conversation — use thread send") or turn-in-flight; ALLOWED
+  on any idle thread (headed-born too). headful == resume (merged impl; both CLI verbs
+  kept); allowed on idle only (409 turn-in-flight, 409 pane exists); codex-no-id N/A stays.
+  thread new --headless = "no pane now" spawn choice only.
+- **TUI/grid/picker**: glyph ◌ + label "idle"; Enter on idle → resume (routed if remote);
+  no promote-vs-resume distinction. myrig picker drops .headless jq + 💤→◌ idle.
+- **Conformance re-semantics**: new.headless (record has no pane + idle), send.headless
+  (3 directions: headless-born turn ✓, HEADED-BORN idle turn NEW, pane-live 409 NEW),
+  headful (= resume on a never-paned thread, continuity), headful-busy unchanged,
+  runtime-state + snapshot/mesh/TUI claims: dead→idle strings. grep -rn '"dead"\|ActivityDead\|Headless' over conformance + tui + myrig.
+- Execution order: api → store → daemon (maintainer/headless/headful/resume/thread/grid)
+  → cmd → tui → build → conformance pass → FULL suite → deploy both + myrig picker.
+
 ### Cockpit SELF-HEAL + TUI routed compose (2026-06-10 evening, per Lukas)
 Lukas's invariant: "any machine that is CONNECTED has a master window" — overrides the
 earlier K=intent rationale. `masterMaint` (3rd daemon loop, 5s tick): converges an

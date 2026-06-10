@@ -87,6 +87,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh info:", err)
 			os.Exit(1)
 		}
+	case "delegate":
+		if err := runDelegate(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh delegate:", err)
+			os.Exit(1)
+		}
 	case "await":
 		if err := runAwait(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh await:", err)

@@ -67,6 +67,7 @@ var skipReasons = map[string]string{
 	"ticket.send-prompt":        "deliver prompt to bound thread (codex: directory-trust prompt at spawn eats input)",
 	"ticket.set-status":         "set status incl. agent-driven done",
 	"ticket.needs-input":        "derived view active && waiting",
+	"thread.delegate":           "real one-shot answer + worker GONE after (ephemeral both directions); --keep = usable thread w/ memory; --sandbox loud until E3",
 	"thread.await":              "blocks until a real turn finishes (reply available on return); remote = NO routing, the mesh carries it; timeout/unknown loud",
 	"thread.notify":             "per-thread gate: creation default from config, toggle round-trip, SESH_NOTIFY in real hook env both values",
 	"daemon.hooks":              "[[hooks]] fire on real observed edges; remote = observer-bound (a LOCAL hook fires for a PEER's edge via the mesh cache)",

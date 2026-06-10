@@ -309,6 +309,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.delegate",
+		Description: "sesh delegate: ephemeral one-shot headless worker — spawn, ask, await, print, DELETE (the ephemeral contract holds on failure too); --keep retains; --machine routes the whole verb",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.await",
 		Description: "sesh await: block until a real turn completes (busy→idle) by polling the LOCAL mesh view — a peer's thread awaits with no forwarding; --timeout loud on expiry",
 		Agents:      agentic,

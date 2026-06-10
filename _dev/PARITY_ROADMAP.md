@@ -21,7 +21,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **B1** `[[hooks]]` event hooks + `sesh hooks` CLI
 - [x] **B2** Per-thread notifications (on/off + config default) + myrig toast wiring
 - [x] **C1** `sesh await`
-- [ ] **C2** `sesh delegate` (+ `--sandbox`)
+- [x] **C2** `sesh delegate` (`--sandbox` loud until E3)
 - [ ] **C3** `sesh subscribe` + turn-delivery engine
 - [ ] **D0** Transcript-resolution layer (per-agent transcript file location)
 - [ ] **D1** `sesh tail`
@@ -314,6 +314,13 @@ thread, `--sandbox` (see E3) restricts the agent, prints the reply to stdout
 **Verify:** cells (3 agents × localities): a real question really answered by a
 real ephemeral agent; record gone after (kept with --keep); sandbox flag
 observable (E3's verification).
+**SHIPPED 2026-06-10** — composition of green primitives (new --headless +
+send-headless + reply poll + delete); ephemeral contract holds on EVERY
+failure path (cleanup unless --keep; turn errors surface via the registry's
+"ERROR: " reply convention, loud). --keep cell proves a usable thread with
+MEMORY (second turn recalls). --machine routes the whole verb (remote cells:
+worker lives+dies on the peer). --sandbox declared but loudly NOT IMPLEMENTED
+until E3 (cell-asserted). 6 cells (145 total).
 
 ### C3. `sesh subscribe` + turn-delivery engine
 **v1:** 3 verbs + engine: auto-push a subscribee's replies into subscriber

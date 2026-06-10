@@ -42,6 +42,8 @@ func runThread(args []string) error {
 		return threadRename(cfg, rest)
 	case "info":
 		return runInfo(cfg, rest)
+	case "transcript":
+		return threadTranscript(cfg, rest)
 	case "notify":
 		return threadNotify(cfg, rest)
 	case "reparent":
@@ -571,5 +573,34 @@ func threadNotify(cfg config.Config, args []string) error {
 		state = "on"
 	}
 	fmt.Printf("notifications %s for %s\n", state, rid)
+	return nil
+}
+
+// threadTranscript prints a thread conversation's raw transcript lines (the
+// owner-side D0 read; remote threads route with --machine). D1's `sesh tail`
+// adds the ergonomic follow form.
+func threadTranscript(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("transcript", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	tail := fs.Int("tail", -1, "only the last N lines (default: all)")
+	asJSON := fs.Bool("json", false, "emit JSON (lines + last_reply + reply_count)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	c := daemonClient(cfg)
+	resp, err := c.ThreadTranscript(context.Background(), rid, *tail)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	for _, l := range resp.Lines {
+		fmt.Println(l)
+	}
 	return nil
 }

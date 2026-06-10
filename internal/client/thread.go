@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"strconv"
 	"net/url"
 	"strings"
 
@@ -139,4 +140,15 @@ func (c *Client) ThreadSendHeadless(ctx context.Context, id, text string) error 
 func (c *Client) ThreadHeadlessReply(ctx context.Context, id string) (api.HeadlessReplyResponse, error) {
 	var out api.HeadlessReplyResponse
 	return out, c.getJSON(ctx, "http://unix/v1/threads/headless-reply?id="+url.QueryEscape(id), &out)
+}
+
+// ThreadTranscript fetches GET /v1/threads/transcript?id=&tail= (tail < 0 =
+// the whole transcript).
+func (c *Client) ThreadTranscript(ctx context.Context, id string, tail int) (api.TranscriptResponse, error) {
+	var out api.TranscriptResponse
+	url := "http://unix/v1/threads/transcript?id=" + id
+	if tail >= 0 {
+		url += "&tail=" + strconv.Itoa(tail)
+	}
+	return out, c.getJSON(ctx, url, &out)
 }

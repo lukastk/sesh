@@ -23,7 +23,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **C1** `sesh await`
 - [x] **C2** `sesh delegate` (`--sandbox` loud until E3)
 - [ ] **C3** `sesh subscribe` + turn-delivery engine
-- [ ] **D0** Transcript-resolution layer (per-agent transcript file location)
+- [x] **D0** Transcript-resolution layer (per-agent transcript file location)
 - [ ] **D1** `sesh tail`
 - [ ] **D2** `sesh copy` (transcript copy)
 - [ ] **D3** `sesh new --fork-from` (rewind-and-branch)
@@ -349,6 +349,15 @@ silent empty. This is READ-ONLY; mutation arrives only with D3/D4.
 **Verify:** unit+cells: locate+read a real transcript for each of the 3 agents
 after a real turn; last-reply matches what the agent actually said (VERMILION-
 style sentinel).
+**SHIPPED 2026-06-10** — v1's per-agent subpackages ported WHOLESALE into
+internal/agents/{claude,pi,codexfs} (same module path; codex renamed codexfs
+to avoid colliding with future needs). KEY adaptation: transcripts key on
+AgentSessionID, not thread id (v1's uuid was both). agents.TranscriptPath/
+LastReply/ReadTranscript + ResolveHomes (CLAUDE_CONFIG_DIR / ~/.pi/agent /
+SESH_CODEX_HOME). found=false = legitimate not-yet; READING a missing
+transcript = loud. LastReply returns a MONOTONE reply count (C3's dedup
+marker). Owner-side GET /v1/threads/transcript (?tail) + `thread transcript`
+verb — content never replicated; remote reads route. 6 cells (151 total).
 
 ### D1. `sesh tail` — print/follow a thread's transcript (v1
 `internal/cli/*tail*`; research exact flags). Routable cross-machine.

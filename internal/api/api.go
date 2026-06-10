@@ -78,3 +78,15 @@ type HookTestResponse struct {
 	OK     bool   `json:"ok"`
 	Error  string `json:"error,omitempty"`
 }
+
+// TranscriptResponse is GET /v1/threads/transcript?id=&tail= — the OWNER-side
+// read of a thread conversation's raw transcript lines + the last assistant
+// reply (with its monotone count, the dedup marker).
+type TranscriptResponse struct {
+	Schema     int      `json:"schema"`
+	ID         string   `json:"id"`
+	Path       string   `json:"path"`
+	Lines      []string `json:"lines"`
+	LastReply  string   `json:"last_reply"`
+	ReplyCount int      `json:"reply_count"`
+}

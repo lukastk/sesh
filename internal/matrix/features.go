@@ -309,6 +309,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.transcript",
+		Description: "the transcript-resolution layer (D0): owner-side locate+read of the agent's own conversation file + last-reply extraction with a monotone count; remote = routed (content never replicated)",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.delegate",
 		Description: "sesh delegate: ephemeral one-shot headless worker — spawn, ask, await, print, DELETE (the ephemeral contract holds on failure too); --keep retains; --machine routes the whole verb",
 		Agents:      agentic,

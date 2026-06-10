@@ -1,7 +1,10 @@
 package daemon
 
 import (
+	"strconv"
+
 	"errors"
+	"github.com/lukastk/sesh/internal/agents"
 	"net/http"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -12,6 +15,7 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/rename", d.handleThreadRename)
 	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
 	mux.HandleFunc("POST /v1/threads/notify", d.handleThreadNotify)
+	mux.HandleFunc("GET /v1/threads/transcript", d.handleThreadTranscript)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
 	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
@@ -174,7 +178,7 @@ func (d *Daemon) threadOpErr(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, err.Error())
 }
 
-// handleThreadReparent re-parents a thread ('' = root). The new parent must
+// handleThreadReparent re-parents a thread (” = root). The new parent must
 // exist, and the chain from it must not loop back through the thread (a cycle
 // would hang every tree walk) — both are loud refusals.
 func (d *Daemon) handleThreadReparent(w http.ResponseWriter, r *http.Request) {
@@ -244,4 +248,46 @@ func (d *Daemon) handleThreadNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+}
+
+// handleThreadTranscript is the owner-side transcript read (D0): the raw
+// lines (?tail=N for the last N) + the last assistant reply with its monotone
+// count. Transcript content is NOT mesh-replicated — remote reads route here.
+func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "transcript: id is required")
+		return
+	}
+	th, err := d.store.GetThread(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	tail := -1
+	if t := r.URL.Query().Get("tail"); t != "" {
+		n, perr := strconv.Atoi(t)
+		if perr != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "transcript: bad tail "+t)
+			return
+		}
+		tail = n
+	}
+	homes := agents.ResolveHomes(d.cfg.CodexHome)
+	kind := agents.Kind(th.AgentKind)
+	lines, err := agents.ReadTranscript(kind, th.AgentSessionID, th.Cwd, homes, tail)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	path, _, _ := agents.TranscriptPath(kind, th.AgentSessionID, th.Cwd, homes)
+	reply, count, err := agents.LastReply(kind, th.AgentSessionID, th.Cwd, homes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.TranscriptResponse{
+		Schema: api.SchemaVersion, ID: id, Path: path,
+		Lines: lines, LastReply: reply, ReplyCount: count,
+	})
 }

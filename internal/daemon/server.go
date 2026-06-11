@@ -22,6 +22,7 @@ func (d *Daemon) routes() http.Handler {
 	mux.HandleFunc("POST /v1/tmux/panes", d.handleTmuxCreatePane)
 	mux.HandleFunc("POST /v1/tmux/send-text", d.handleTmuxSendText)
 	mux.HandleFunc("POST /v1/tmux/nav", d.handleTmuxNav)
+	mux.HandleFunc("GET /v1/tmux/master-current", d.handleTmuxMasterCurrent)
 	mux.HandleFunc("POST /v1/tmux/stage-file", d.handleTmuxStageFile)
 	d.routesThreads(mux)
 	d.routesThreadOps(mux)

@@ -58,6 +58,7 @@ var declaredTUIClaims = []string{
 	"tree-orphan-promotes",      // a child whose parent left the view promotes to top level
 	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
 	"action-mutate-remote",      // notify/stop/archive on a thread owned by ANOTHER machine ROUTE to the owner (the local daemon doesn't own it) — the cross-machine gap that direct-client calls silently missed
+	"master-cursor",             // preselecting a NESTED CHILD (the master prefix+s jump path) auto-expands its ancestors so the collapsed child becomes the visible cursor target
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

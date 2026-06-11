@@ -2,8 +2,51 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 )
+
+// MarkerClientThreadID resolves the @sesh-thread-id of the pane the marker's recorded
+// client is CURRENTLY viewing — i.e. the thread the master window at markerPath is
+// showing. Returns "" (NOT an error) when there's nothing to preselect: the marker is
+// absent or malformed, the recorded client is gone (stale tty), or the viewed pane is
+// a plain shell with no thread mark. It is LOUD only on a real tmux failure. The
+// client is verified by name AND pid (a recycled tty must not be mistaken for it) —
+// the same liveness contract as nav's inner switch.
+func (s *Server) MarkerClientThreadID(markerPath string) (string, error) {
+	b, err := os.ReadFile(markerPath)
+	if err != nil {
+		return "", nil // no master client here → nothing to preselect
+	}
+	f := strings.Fields(string(b))
+	if len(f) != 2 {
+		return "", nil
+	}
+	name, pid := f[0], f[1]
+	clients, err := s.run("list-clients", "-F", "#{client_name} #{client_pid}")
+	if err != nil {
+		return "", err
+	}
+	live := false
+	for _, ln := range strings.Split(strings.TrimSpace(clients), "\n") {
+		if strings.TrimSpace(ln) == name+" "+pid {
+			live = true
+			break
+		}
+	}
+	if !live {
+		return "", nil // stale marker (the recorded client is gone)
+	}
+	// The pane the client is CURRENTLY on (its active pane) — exactly what the user
+	// sees in that master window. Its @sesh-thread-id is the current thread ("" =
+	// a plain shell, a legitimate no-preselect).
+	tid, err := s.run("display-message", "-p", "-c", name, "-F", "#{"+ThreadIDOption+"}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(tid), nil
+}
 
 // SelectWindow makes window (by name) the active window — the OUTER half of
 // `tmux nav`: switching the mymastertmux client to a machine's window.

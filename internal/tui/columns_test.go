@@ -173,3 +173,48 @@ func TestOptimisticPending(t *testing.T) {
 		t.Errorf("unconfirmed patch never expired (would mask a silent failure)")
 	}
 }
+
+func TestMasterCursorAsyncAndNestedJump(t *testing.T) {
+	// Async/non-blocking: a master-cursor model's Init is STILL just the fetch — the
+	// resolve fires later (from the first meshMsg), so prefix+s startup is not gated.
+	m := New("/tmp/none.sock", true).WithLocal("self", "sock").WithMasterCursor("peer")
+	if m.Init() == nil {
+		t.Fatal("Init must still kick the fetch (startup must not block on the resolve)")
+	}
+
+	// Nested jump: a collapsed child becomes the cursor target, ancestors expanded.
+	mm := Model{
+		rows: []api.ThreadRow{
+			{Thread: api.Thread{ID: "p", Name: "parent"}},
+			{Thread: api.Thread{ID: "c", Name: "child", Parent: "p"}},
+			{Thread: api.Thread{ID: "g", Name: "grand", Parent: "c"}},
+		},
+		expanded: map[string]bool{}, // all collapsed by default
+	}
+	// Before: the grandchild is hidden (its ancestors are folded).
+	visible := func(id string) bool {
+		for _, tr := range mm.visibleMatches() {
+			if tr.row.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if visible("g") {
+		t.Fatal("grandchild should be hidden while ancestors are collapsed")
+	}
+	// The preselectMsg path (what the async resolve produces) jumps to it.
+	updated, _ := mm.Update(preselectMsg{id: "g"})
+	mm = updated.(Model)
+	if !mm.expanded["p"] || !mm.expanded["c"] {
+		t.Errorf("ancestors not expanded for the nested jump: %v", mm.expanded)
+	}
+	if sel, ok := mm.Selected(); !ok || sel.ID != "g" {
+		t.Errorf("cursor not on the nested child: %+v", sel)
+	}
+	// An empty resolve (no master client / plain shell) is a clean no-op.
+	updated, _ = Model{rows: mm.rows, expanded: map[string]bool{}, cursor: 0}.Update(preselectMsg{id: ""})
+	if updated.(Model).cursor != 0 {
+		t.Errorf("empty preselect should not move the cursor")
+	}
+}

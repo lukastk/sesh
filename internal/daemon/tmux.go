@@ -12,6 +12,24 @@ import (
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
+// handleTmuxMasterCurrent serves GET /v1/tmux/master-current?origin=X: the thread
+// the origin master's window is CURRENTLY showing on THIS machine's work server.
+// Resolved in-process (the daemon owns the socket + reads its own marker), so it's a
+// single fast call the TUI makes asynchronously — never blocking master prefix+s.
+func (d *Daemon) handleTmuxMasterCurrent(w http.ResponseWriter, r *http.Request) {
+	origin := r.URL.Query().Get("origin")
+	if origin == "" {
+		writeError(w, http.StatusBadRequest, "master-current: origin is required")
+		return
+	}
+	tid, err := d.tmux.MarkerClientThreadID(tmux.MasterClientMarker(d.cfg.Home, origin))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid})
+}
+
 // handleTmuxNav serves POST /v1/tmux/nav: the INNER switch-client, run in-process
 // against THIS daemon's own work tmux server. This is what lets an http peer's nav
 // skip the ssh hop entirely — the remote daemon already owns the socket and can read

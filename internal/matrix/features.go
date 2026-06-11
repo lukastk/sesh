@@ -216,6 +216,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "tmux.master-current",
+		Description: "`tmux master-current --origin X` resolves the thread a master window is CURRENTLY showing (the origin master's marker client's active-pane @sesh-thread-id on that machine's work server) — the data behind the TUI's async master prefix+s preselect; routed over the mesh and TRACKS the client across nav (not a stale snapshot)",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-master-http",
 		Description: "the master-path nav's INNER switch-client FOLLOWS the peer's transport: for an http peer (api_addr set) it is carried over the daemon's TCP API (POST /v1/tmux/nav) with NO ssh hop — proved by a deliberately broken ssh dest (http-only.invalid) + the switch still landing; ssh peers keep the (now connection-multiplexed) ssh inner switch",
 		Localities:  []Locality{Remote},

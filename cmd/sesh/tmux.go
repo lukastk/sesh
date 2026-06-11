@@ -45,9 +45,31 @@ func runTmux(args []string) error {
 		return tmuxStageFile(cfg, rest)
 	case "nav":
 		return tmuxNav(cfg, rest)
+	case "master-current":
+		return tmuxMasterCurrent(cfg, rest)
 	default:
 		return fmt.Errorf("unknown tmux subcommand %q", sub)
 	}
+}
+
+// tmuxMasterCurrent prints the thread id the origin master's window is currently
+// showing on this daemon's work server (empty line = none). Routed with --machine to
+// query a specific machine's work server. Used by the TUI's async master-cursor resolve.
+func tmuxMasterCurrent(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("master-current", flag.ContinueOnError)
+	origin := fs.String("origin", "", "the master's machine (whose marker to read) (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *origin == "" {
+		return errors.New("master-current: --origin is required")
+	}
+	tid, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
+	if err != nil {
+		return err
+	}
+	fmt.Println(tid)
+	return nil
 }
 
 // tmuxNav implements `sesh tmux nav --to <machine>:<session>` — the nav

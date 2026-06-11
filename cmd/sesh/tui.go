@@ -114,6 +114,13 @@ func runTUI(args []string) error {
 	if name := os.Getenv("SESH_NAV_CLIENT"); name != "" {
 		m = m.WithClient(name)
 	}
+	// Master prefix+s: the binding bakes the active window's machine into
+	// $SESH_TUI_MASTER_MACHINE (the popup's own pane is the popup, and the thread the
+	// user is in lives on that machine's work server). The TUI resolves it
+	// ASYNCHRONOUSLY after the first render, so prefix+s startup is never delayed.
+	if mm := os.Getenv("SESH_TUI_MASTER_MACHINE"); mm != "" {
+		m = m.WithMasterCursor(mm)
+	}
 	if *filter {
 		m = m.WithFilterStart()
 	}

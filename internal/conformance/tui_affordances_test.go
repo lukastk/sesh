@@ -35,6 +35,7 @@ func init() {
 	registerTUIClaim("columns-reorder", claimColumnsReorder)
 	registerTUIClaim("notify-toggle", claimNotifyToggle)
 	registerTUIClaim("action-mutate-remote", claimActionMutateRemote)
+	registerTUIClaim("master-cursor", claimMasterCursor)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -599,6 +600,42 @@ func claimActionMutateRemote(t *testing.T) {
 		return false
 	}) {
 		t.Errorf("archive did not route to the owner (peer record not archived)")
+	}
+}
+
+// claimMasterCursor: preselecting a NESTED CHILD (the same positionCursorOn path the
+// master prefix+s async resolve uses) auto-expands the child's ancestors so the
+// otherwise-collapsed child becomes the visible cursor target. Real daemon, real
+// parent→child→grandchild tree (children collapsed by default).
+func claimMasterCursor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	parent := sb.newHeadlessThread(t, "pi", "mc-parent")
+	if _, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", "pi", "--name", "mc-child",
+		"--cwd", "/tmp", "--headless", "--parent", parent.ID); err != nil {
+		t.Fatalf("new child: %v\n%s", err, stderr)
+	}
+	child := threadByName(t, sb, "mc-child")
+	if _, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", "pi", "--name", "mc-grand",
+		"--cwd", "/tmp", "--headless", "--parent", child.ID); err != nil {
+		t.Fatalf("new grandchild: %v\n%s", err, stderr)
+	}
+	grand := threadByName(t, sb, "mc-grand")
+
+	// Children collapsed by default → the grandchild is hidden until its ancestors
+	// are expanded. Preselect it (what the async master-cursor resolve feeds).
+	m := tui.New(sb.Home+"/daemon.sock", false).WithPreselect(grand.ID)
+	// renderUntilRow only finds mc-grand once preselect has expanded mc-parent + mc-child.
+	m, _ = renderUntilRow(t, m, "mc-grand")
+	if sel, ok := m.Selected(); !ok || sel.ID != grand.ID {
+		t.Errorf("cursor not on the nested grandchild after preselect: %+v (ok=%v)", sel, ok)
+	}
+	// The parent renders as an EXPANDED node (▾), proving the ancestors were opened.
+	if pl := rowLine(m.View(), "mc-parent"); !strings.Contains(pl, "▾") {
+		t.Errorf("ancestor mc-parent not expanded (no ▾): %q", pl)
 	}
 }
 

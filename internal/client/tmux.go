@@ -44,6 +44,17 @@ func (c *Client) TmuxNav(ctx context.Context, req api.NavRequest) error {
 	return c.postJSON(ctx, "http://unix/v1/tmux/nav", req, nil)
 }
 
+// TmuxMasterCurrent fetches GET /v1/tmux/master-current?origin=X — the thread the
+// origin master's window is currently showing on this daemon's work server ("" = none).
+func (c *Client) TmuxMasterCurrent(ctx context.Context, origin string) (string, error) {
+	var out api.MasterCurrentResponse
+	u := "http://unix/v1/tmux/master-current?origin=" + url.QueryEscape(origin)
+	if err := c.getJSON(ctx, u, &out); err != nil {
+		return "", err
+	}
+	return out.ThreadID, nil
+}
+
 // TmuxStageFile posts POST /v1/tmux/stage-file and returns the staged path.
 func (c *Client) TmuxStageFile(ctx context.Context, name string, content []byte) (api.StageFileResponse, error) {
 	var out api.StageFileResponse

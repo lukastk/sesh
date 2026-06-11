@@ -94,6 +94,14 @@ type NavRequest struct {
 	Origin  string `json:"origin"`
 }
 
+// MasterCurrentResponse returns the thread the daemon's work server is currently
+// showing the origin master's window — GET /v1/tmux/master-current?origin=X.
+// ThreadID == "" means nothing to preselect (no master client, or a plain-shell pane).
+type MasterCurrentResponse struct {
+	Schema   int    `json:"schema"`
+	ThreadID string `json:"thread_id"`
+}
+
 // StageFileRequest is the body of POST /v1/tmux/stage-file. Content is the raw
 // file bytes (base64 via Go's encoding/json []byte handling).
 type StageFileRequest struct {

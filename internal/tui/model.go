@@ -114,6 +114,14 @@ type Model struct {
 	// thread (the `--cursor` start-on-current-thread affordance), then clears it.
 	preselectID string
 
+	// masterCursorMachine: when set (the master popup's prefix+s), the TUI resolves
+	// the thread the active master window is CURRENTLY showing — ASYNCHRONOUSLY, after
+	// the first render, so it never delays startup — then jumps the cursor to it. The
+	// resolve runs on that machine's daemon (the work server it owns), routed when
+	// remote. masterCursorDone makes it a one-shot.
+	masterCursorMachine string
+	masterCursorDone    bool
+
 	// uuidPopup: `y` shows the selected thread's FULL uuid in a popup; `c` inside
 	// it copies to the system clipboard, any other key closes. note is the last
 	// one-line status (e.g. "UUID copied"), shown dim under the title.
@@ -258,6 +266,15 @@ func (m Model) WithPreselect(threadID string) Model {
 	return m
 }
 
+// WithMasterCursor makes the TUI asynchronously resolve, then jump to, the thread
+// the given machine's master window is currently showing (the master prefix+s
+// affordance). machine is the active master window's machine. The resolve happens
+// AFTER the first render, so startup is never blocked.
+func (m Model) WithMasterCursor(machine string) Model {
+	m.masterCursorMachine = machine
+	return m
+}
+
 // meshMsg carries a freshly-fetched mesh view, already flattened to rows.
 type meshMsg struct {
 	rows      []api.ThreadRow
@@ -343,14 +360,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.machines = msg.machines
 			m.fetchedAt = msg.fetchedAt
 			m.applyPending(true) // reconcile: re-apply optimistic patches, GC satisfied/expired ones
-			if m.preselectID != "" {
-				for i, rm := range m.visibleMatches() {
-					if rm.row.ID == m.preselectID {
-						m.cursor = i
-						break
-					}
-				}
-				m.preselectID = "" // one-shot: only the first fetch positions the cursor
+			if m.preselectID != "" && m.positionCursorOn(m.preselectID) {
+				m.preselectID = "" // landed — release it so the user can move freely
 			}
 			if vis := len(m.visibleMatches()); m.cursor >= vis {
 				m.cursor = max(0, vis-1)
@@ -358,10 +369,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Bootstrap the SINGLE poll timer exactly once (on the first successful
 		// fetch). Subsequent meshMsgs — including those from action/reconcile
-		// fetches — do NOT re-arm, so the poll rate can't multiply.
+		// fetches — do NOT re-arm, so the poll rate can't multiply. On the same first
+		// fetch, kick the (async) master-cursor resolve so it never blocks startup.
 		if !m.tickStarted {
 			m.tickStarted = true
+			if m.masterCursorMachine != "" && !m.masterCursorDone {
+				m.masterCursorDone = true
+				return m, tea.Batch(tick(), m.resolveMasterCursor())
+			}
 			return m, tick()
+		}
+		return m, nil
+	case preselectMsg:
+		// The async master-cursor resolve landed: jump to the thread the master window
+		// is showing. Route it through the persistent preselect so that if the row
+		// isn't published yet, a later fetch still lands it (expanding a nested child's
+		// ancestors). Empty id = nothing to preselect (no master client / plain shell).
+		if msg.id != "" {
+			if !m.positionCursorOn(msg.id) {
+				m.preselectID = msg.id
+			}
 		}
 		return m, nil
 	case tickMsg:
@@ -406,6 +433,68 @@ type actionMsg struct {
 	err   error
 	id    string    // the thread the mutation targeted
 	patch *rowPatch // the optimistic change to show until the daemon's read path catches up
+}
+
+// preselectMsg carries the result of the async master-cursor resolve (the thread the
+// active master window is showing). id == "" means nothing to preselect (no master
+// client, or its pane is a plain shell) — a legitimate no-op, never an error.
+type preselectMsg struct{ id string }
+
+// resolveMasterCursor execs `tmux master-current` against the active master window's
+// machine (routed when remote), off the main loop, returning a preselectMsg. Failures
+// resolve to an empty preselect — a missing thread must never disrupt the TUI.
+func (m Model) resolveMasterCursor() tea.Cmd {
+	bin, env, origin, machine := m.binaryPath, m.navEnv, m.machine, m.masterCursorMachine
+	return func() tea.Msg {
+		args := []string{"tmux", "master-current", "--origin", origin}
+		if machine != "" && machine != origin {
+			args = append(args, "--machine", machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.Output()
+		if err != nil {
+			return preselectMsg{} // resolve failed → no preselect (non-fatal)
+		}
+		return preselectMsg{id: strings.TrimSpace(string(out))}
+	}
+}
+
+// positionCursorOn moves the cursor to the row for id, expanding a nested child's
+// ancestors first so it's actually visible in the tree. Returns true if the row was
+// found and the cursor placed; false if id isn't in the current rows yet (the caller
+// keeps the pending preselect so a later fetch — once the maintainer has published it
+// — lands it).
+func (m *Model) positionCursorOn(id string) bool {
+	if id == "" {
+		return false
+	}
+	m.expandAncestors(id)
+	for i, rm := range m.visibleMatches() {
+		if rm.row.ID == id {
+			m.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
+// expandAncestors opens every ancestor of id so a collapsed child becomes visible.
+func (m *Model) expandAncestors(id string) {
+	byID := make(map[string]api.ThreadRow, len(m.rows))
+	for _, r := range m.rows {
+		byID[r.ID] = r
+	}
+	if m.expanded == nil {
+		m.expanded = map[string]bool{}
+	}
+	cur, ok := byID[id]
+	seen := map[string]bool{} // cycle guard
+	for ok && cur.Parent != "" && !seen[cur.Parent] {
+		seen[cur.Parent] = true
+		m.expanded[cur.Parent] = true
+		cur, ok = byID[cur.Parent]
+	}
 }
 
 // optimisticTTL bounds how many reconcile fetches an unsatisfied optimistic patch

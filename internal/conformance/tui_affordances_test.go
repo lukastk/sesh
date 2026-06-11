@@ -490,20 +490,31 @@ func claimNotifyToggle(t *testing.T) {
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	m, _ = renderUntilRow(t, m, "muteme")
+	// Default notify=on → the NTF bell ◉ is shown.
+	if !strings.Contains(rowLine(m.View(), "muteme"), "◉") {
+		t.Errorf("NTF column missing the bell for a notify-on thread: %q", rowLine(m.View(), "muteme"))
+	}
 	m = runKey(t, m, "n")
-
 	if threadByName(t, sb, "muteme").Notify {
 		t.Fatalf("n did not flip the gate off on the daemon")
 	}
+	// Muted → the bell disappears (blank, NOT a glyph).
 	if !waitUntil(15*time.Second, func() bool {
 		m, _ = render(t, m)
-		return strings.Contains(rowLine(m.View(), "muteme"), "off")
+		return !strings.Contains(rowLine(m.View(), "muteme"), "◉")
 	}) {
-		t.Errorf("NTF column never rendered the muted state: %q", rowLine(m.View(), "muteme"))
+		t.Errorf("NTF bell still shown after muting: %q", rowLine(m.View(), "muteme"))
 	}
 	m = runKey(t, m, "n")
 	if !threadByName(t, sb, "muteme").Notify {
 		t.Errorf("second n did not flip the gate back on")
+	}
+	// Re-enabled → the bell returns.
+	if !waitUntil(15*time.Second, func() bool {
+		m, _ = render(t, m)
+		return strings.Contains(rowLine(m.View(), "muteme"), "◉")
+	}) {
+		t.Errorf("NTF bell did not return after re-enabling: %q", rowLine(m.View(), "muteme"))
 	}
 	_ = th
 }

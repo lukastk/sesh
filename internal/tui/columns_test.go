@@ -59,3 +59,25 @@ func TestFixedColumnsTruncate(t *testing.T) {
 		t.Errorf("truncation marker missing: %q", line)
 	}
 }
+
+func TestColumnsRenderInConfiguredOrder(t *testing.T) {
+	// --columns / [tui] columns order is honored (not a fixed built-in order).
+	m := Model{columns: []string{ColTags, ColMachine, ColName}, rows: []api.ThreadRow{
+		{Thread: api.Thread{Name: "n", Machine: "mac", Tags: []string{"t"}}},
+	}}
+	cols := m.activeColumns()
+	got := []string{}
+	for _, c := range cols {
+		got = append(got, c.name)
+	}
+	want := []string{ColTags, ColMachine, ColName}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("column order = %v, want %v", got, want)
+	}
+	// `i` prepends ID without disturbing the rest.
+	m.showID = true
+	cols = m.activeColumns()
+	if cols[0].name != ColID {
+		t.Errorf("i did not prepend ID: %v", cols)
+	}
+}

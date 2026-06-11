@@ -74,9 +74,9 @@ var colOrder = []colSpec{
 	{name: ColNotify, header: "NTF", fixedW: 3,
 		cell: func(_ *Model, r api.ThreadRow) string {
 			if r.Notify {
-				return ""
+				return "◉" // notifications on; blank = off
 			}
-			return "off"
+			return ""
 		}},
 	{name: ColTags, header: "TAGS", fixedW: 16,
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
@@ -139,18 +139,20 @@ func (m Model) WithColumns(names []string) Model {
 // activeColumns returns the specs to render: the configured set in colOrder
 // order, with the ID column joining when toggled on (`i`) even if not configured.
 func (m *Model) activeColumns() []colSpec {
-	want := map[string]bool{}
-	for _, n := range m.columns {
-		want[n] = true
-	}
-	if m.showID {
-		want[ColID] = true
-	} else if !m.columnsHasID() {
-		delete(want, ColID)
-	}
-	out := make([]colSpec, 0, len(colOrder))
+	spec := map[string]colSpec{}
 	for _, c := range colOrder {
-		if want[c.name] {
+		spec[c.name] = c
+	}
+	// Render in the USER's configured order (--columns / [tui] columns), not a
+	// fixed built-in order. The `i` ID toggle prepends ID when it isn't already
+	// configured (so it appears without disturbing the chosen order).
+	names := append([]string(nil), m.columns...)
+	if m.showID && !m.columnsHasID() {
+		names = append([]string{ColID}, names...)
+	}
+	out := make([]colSpec, 0, len(names))
+	for _, n := range names {
+		if c, ok := spec[n]; ok {
 			out = append(out, c)
 		}
 	}

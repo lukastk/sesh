@@ -781,19 +781,35 @@ func onWorkSocket(tmux, name string) bool {
 	return filepath.Base(strings.SplitN(tmux, ",", 2)[0]) == name
 }
 
+// routedVerb execs `thread <verb> --id <row>` against the row's OWNING machine,
+// adding --machine when the row isn't local so the mutation ROUTES over the mesh
+// (http/ssh) — exactly like rename/tag. This is why these work on remote threads:
+// the local daemon doesn't own them, so a direct client call would silently miss.
+// On success the (optional) optimistic patch is returned for instant display.
+func (m Model) routedVerb(row api.ThreadRow, patch *rowPatch, verb string, extra ...string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := append([]string{"thread", verb, "--id", row.ID}, extra...)
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("%s %q: %v: %s", verb, row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		return actionMsg{id: row.ID, patch: patch}
+	}
+}
+
 // stopSelected ends the selected thread's runtime (agent + session) but keeps
-// the record (it becomes a dead, resumable thread).
+// the record (it becomes a dead, resumable thread). Routed to the owner.
 func (m Model) stopSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	c := m.client
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		return actionMsg{err: c.ThreadStop(ctx, row.ID)}
-	}
+	return m.routedVerb(row, nil, "stop")
 }
 
 // deleteSelected drops the selected thread's record. The daemon refuses a live
@@ -803,45 +819,35 @@ func (m Model) deleteSelected() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	c := m.client
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return actionMsg{err: c.ThreadDelete(ctx, row.ID, false)}
-	}
+	return m.routedVerb(row, nil, "delete")
 }
 
-// notifySelected TOGGLES the selected thread's notification gate.
+// notifySelected TOGGLES the selected thread's notification gate (routed to the
+// owner, with an optimistic flip so the NTF column updates instantly).
 func (m Model) notifySelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	c := m.client
 	want := !row.Notify
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := c.ThreadNotify(ctx, row.ID, want); err != nil {
-			return actionMsg{err: err}
-		}
-		return actionMsg{id: row.ID, patch: &rowPatch{notify: bptr(want), ttl: optimisticTTL}}
+	flag := "--off"
+	if want {
+		flag = "--on"
 	}
+	return m.routedVerb(row, &rowPatch{notify: bptr(want), ttl: optimisticTTL}, "notify", flag)
 }
 
 // archiveSelected TOGGLES the selected thread's archived state (archive in the
-// active view, unarchive in the archived/all views — the row knows which).
+// active view, unarchive in the archived/all views — the row knows which). Routed.
 func (m Model) archiveSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	c := m.client
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return actionMsg{err: c.ThreadArchive(ctx, row.ID, !row.Archived)}
+	if row.Archived {
+		return m.routedVerb(row, nil, "archive", "--unarchive")
 	}
+	return m.routedVerb(row, nil, "archive")
 }
 
 // Selected returns the VISIBLE row under the cursor, if any (the filter and

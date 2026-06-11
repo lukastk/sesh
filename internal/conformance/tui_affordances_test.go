@@ -34,6 +34,7 @@ func init() {
 	registerTUIClaim("cwd-label-column", claimCwdLabelColumn)
 	registerTUIClaim("columns-reorder", claimColumnsReorder)
 	registerTUIClaim("notify-toggle", claimNotifyToggle)
+	registerTUIClaim("action-mutate-remote", claimActionMutateRemote)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -501,7 +502,9 @@ func claimNotifyToggle(t *testing.T) {
 	sb.startDaemon(t)
 	th := sb.newHeadlessThread(t, "pi", "muteme")
 
-	m := tui.New(sb.Home+"/daemon.sock", false)
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "muteme")
 	// Default notify=on → the NTF bell ◉ is shown.
 	if !strings.Contains(rowLine(m.View(), "muteme"), "▪") {
@@ -536,6 +539,67 @@ func claimNotifyToggle(t *testing.T) {
 		t.Errorf("NTF bell did not return after re-enabling: %q", rowLine(m.View(), "muteme"))
 	}
 	_ = th
+}
+
+// claimActionMutateRemote: notify / archive on a thread owned by ANOTHER machine
+// ROUTE to the owner. The local daemon doesn't own a remote thread, so a direct
+// client call silently missed it (the bug: 'n' did nothing on a remote row). These
+// verbs now exec the routed CLI (--machine), like rename/tag. Real ssh-localhost peer.
+func claimActionMutateRemote(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+	self := newSandbox(t, matrix.Local)
+	self.startDaemon(t)
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+	bin := seshBin(t)
+	if _, stderr, err := self.Runner.Run(t, "peer", "add", "--machine", peer.Machine,
+		"--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+	// A thread on the PEER (default notify on). self has none, so it's the only row.
+	th := peer.newHeadlessThread(t, "pi", "remote-notif")
+
+	navEnv := []string{"SESH_HOME=" + self.Home, "SESH_MACHINE=" + self.Machine}
+	// --all-machines so the peer's thread is visible; WithLocal so a local machine is
+	// known (remote rows then get --machine; a local row would not).
+	m := tui.New(self.Home+"/daemon.sock", true).WithExec(bin, navEnv).WithLocal(self.Machine, self.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "remote-notif")
+	if sel, _ := m.Selected(); sel.Name != "remote-notif" {
+		t.Fatalf("cursor not on the remote row: %q", sel.Name)
+	}
+
+	// 'n' on the REMOTE row must flip the gate ON THE PEER (routed). The pre-fix
+	// direct-client call hit self's daemon, which doesn't own the thread → no-op.
+	m = runKey(t, m, "n")
+	if m.LastErr() != nil {
+		t.Fatalf("remote notify errored: %v", m.LastErr())
+	}
+	if !waitUntil(15*time.Second, func() bool { return !threadByName(t, peer, "remote-notif").Notify }) {
+		t.Errorf("notify did not route to the owner (peer still shows notify on) — the remote-mutation bug")
+	}
+	// Optimistic: the bell cleared immediately on the routed success.
+	if strings.Contains(rowLine(m.View(), "remote-notif"), "▪") {
+		t.Errorf("remote notify not reflected optimistically: %q", rowLine(m.View(), "remote-notif"))
+	}
+
+	// 'a' (archive) on the remote row also routes — the peer's record becomes archived.
+	m = runKey(t, m, "a")
+	if m.LastErr() != nil {
+		t.Fatalf("remote archive errored: %v", m.LastErr())
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		for _, x := range peer.listThreadsArchived(t) {
+			if x.ID == th.ID && x.Archived {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Errorf("archive did not route to the owner (peer record not archived)")
+	}
 }
 
 // claimColumnsReorder: [[tui.column]] moves (absolute position + relative

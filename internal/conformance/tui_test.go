@@ -57,6 +57,7 @@ var declaredTUIClaims = []string{
 	"tree-config-expand",        // [tui] expand_children / --expand starts nodes expanded
 	"tree-orphan-promotes",      // a child whose parent left the view promotes to top level
 	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
+	"action-mutate-remote",      // notify/stop/archive on a thread owned by ANOTHER machine ROUTE to the owner (the local daemon doesn't own it) — the cross-machine gap that direct-client calls silently missed
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -473,7 +474,9 @@ func claimActionStop(t *testing.T) {
 		t.Fatalf("agent never came up")
 	}
 
-	m := tui.New(sb.Home+"/daemon.sock", false)
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "stopme") // single thread => cursor on it
 	if m = runKey(t, m, "x"); m.LastErr() != nil {
 		t.Fatalf("stop action errored: %v", m.LastErr())
@@ -504,7 +507,9 @@ func claimActionDelete(t *testing.T) {
 	sb.startDaemon(t)
 	th := sb.newHeadlessThread(t, "pi", "delme") // dead-by-construction (no runtime)
 
-	m := tui.New(sb.Home+"/daemon.sock", false)
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "delme")
 	if m = runKey(t, m, "d"); m.LastErr() != nil {
 		t.Fatalf("delete action errored: %v", m.LastErr())
@@ -525,7 +530,9 @@ func claimActionArchive(t *testing.T) {
 	sb.startDaemon(t)
 	th := sb.newHeadlessThread(t, "pi", "parkme")
 
-	m := tui.New(sb.Home+"/daemon.sock", false)
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "parkme")
 	m = runKey(t, m, "a")
 

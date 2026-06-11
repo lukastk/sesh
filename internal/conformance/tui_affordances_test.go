@@ -27,6 +27,7 @@ func init() {
 	registerTUIClaim("action-rename", claimActionRename)
 	registerTUIClaim("action-tag", claimActionTag)
 	registerTUIClaim("action-untag", claimActionUntag)
+	registerTUIClaim("action-reparent", claimActionReparent)
 	registerTUIClaim("cursor-wrap", claimCursorWrap)
 	registerTUIClaim("id-toggle", claimIDToggle)
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
@@ -310,6 +311,98 @@ func containsStrTest(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// claimActionReparent: `P` opens a prompt to paste a parent uuid; submitting really
+// sets the thread's parent on the daemon (the moved node renders nested under it), a
+// cycle is refused LOUDLY with the record untouched, and an empty submit detaches the
+// thread back to a root. The TUI mirror of the `thread reparent` verb.
+func claimActionReparent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	alpha := sb.newHeadlessThread(t, "pi", "alpha")
+	beta := sb.newHeadlessThread(t, "pi", "beta")
+
+	bin := seshBin(t)
+	env := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
+	if !waitUntil(20*time.Second, func() bool { m, _ = render(t, m); return len(m.Rows()) == 2 }) {
+		t.Fatalf("2 rows never appeared")
+	}
+
+	// Put the cursor on beta (the node we move), paste alpha's full uuid, submit.
+	m = selectRowByName(t, m, "beta")
+	m = runKey(t, m, "P")
+	if !m.Prompting() {
+		t.Fatalf("P did not open the reparent prompt")
+	}
+	m = typeText(t, m, alpha.ID)
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.LastErr() != nil {
+		t.Fatalf("reparent errored: %v", m.LastErr())
+	}
+	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == alpha.ID }) {
+		t.Fatalf("daemon did not set beta.parent = alpha (%s); got %q", alpha.ID, threadParentOf(t, sb, beta.ID))
+	}
+	// The moved node renders nested under alpha (its ancestors auto-expand via preselect).
+	if !waitUntil(10*time.Second, func() bool {
+		m, _ = render(t, m)
+		l := rowLine(m.View(), "beta")
+		return strings.Contains(l, "└") || strings.Contains(l, "├")
+	}) {
+		t.Errorf("beta is not rendered nested under alpha:\n%s", m.View())
+	}
+
+	// Cycle guard: making alpha a child of its own descendant beta is refused LOUDLY,
+	// and alpha's record stays a root.
+	m = selectRowByName(t, m, "alpha")
+	m = runKey(t, m, "P")
+	m = typeText(t, m, beta.ID)
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.LastErr() == nil {
+		t.Errorf("reparenting alpha under its descendant beta was NOT refused")
+	}
+	if p := threadParentOf(t, sb, alpha.ID); p != "" {
+		t.Errorf("alpha.parent changed despite the cycle rejection: %q", p)
+	}
+
+	// Detach: an empty submit makes beta a root again (asserted via daemon truth — a
+	// stale UI error from the cycle test may linger in lastErr, which is fine).
+	m = selectRowByName(t, m, "beta")
+	m = runKey(t, m, "P")
+	m = runSpecial(t, m, tea.KeyEnter) // empty input = root
+	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == "" }) {
+		t.Errorf("empty submit did not detach beta to a root; parent=%q", threadParentOf(t, sb, beta.ID))
+	}
+}
+
+// selectRowByName moves the cursor (wrapping) until the selected row has the given name.
+func selectRowByName(t *testing.T, m tui.Model, name string) tui.Model {
+	t.Helper()
+	for i := 0; i < len(m.Rows())+2; i++ {
+		if row, ok := m.Selected(); ok && row.Name == name {
+			return m
+		}
+		m = runSpecial(t, m, tea.KeyDown)
+	}
+	if row, ok := m.Selected(); !ok || row.Name != name {
+		t.Fatalf("could not select row %q", name)
+	}
+	return m
+}
+
+// threadParentOf reads a thread's parent id from the daemon's truth.
+func threadParentOf(t *testing.T, sb *Sandbox, id string) string {
+	t.Helper()
+	for _, th := range sb.listThreads(t) {
+		if th.ID == id {
+			return th.Parent
+		}
+	}
+	return ""
 }
 
 // claimCursorWrap: up from the top wraps to the bottom row, down from the bottom

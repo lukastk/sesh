@@ -93,9 +93,10 @@ func CompileViews(specs []ViewSpec) ([]customView, error) {
 type promptKind int
 
 const (
-	promptNone   promptKind = iota
-	promptRename            // rename the selected thread
-	promptTag               // add a tag to the selected thread
+	promptNone     promptKind = iota
+	promptRename              // rename the selected thread
+	promptTag                 // add a tag to the selected thread
+	promptReparent            // set the selected thread's parent (paste a uuid; empty = root)
 )
 
 type Model struct {
@@ -420,6 +421,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
 		}
+		if msg.err == nil && msg.preselect != "" {
+			m.preselectID = msg.preselect // land the cursor on the moved node once the refetch lands
+		}
+		if msg.err == nil && msg.expand != "" {
+			if m.expanded == nil {
+				m.expanded = map[string]bool{}
+			}
+			m.expanded[msg.expand] = true // keep the new parent open so the moved child is visible
+		}
 		return m, m.fetch() // reconcile against the daemon
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us) —
@@ -439,9 +449,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // actionMsg is the result of an in-app mutation. On success (err == nil) an
 // optional patch records the confirmed change for optimistic display (see pending).
 type actionMsg struct {
-	err   error
-	id    string    // the thread the mutation targeted
-	patch *rowPatch // the optimistic change to show until the daemon's read path catches up
+	err       error
+	id        string    // the thread the mutation targeted
+	patch     *rowPatch // the optimistic change to show until the daemon's read path catches up
+	preselect string    // on success, move the cursor here on the next fetch (structural changes like reparent: no patch, the tree refetches and the moved node is re-selected)
+	expand    string    // on success, expand this node so a freshly-nested child stays visible even before the snapshot reflects the new parent (avoids the preselect/propagation race)
 }
 
 // preselectMsg carries the result of the async master-cursor resolve (the thread the
@@ -701,6 +713,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.tagPopup, m.tagPopupRow, m.tagPopupCursor = true, row, 0
 			}
 		}
+	case "P":
+		if row, ok := m.Selected(); ok {
+			m.prompting, m.promptRow, m.promptInput = promptReparent, row, nil
+		}
 	case "x":
 		return m, m.stopSelected()
 	case "d":
@@ -786,14 +802,20 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		kind, row, input := m.prompting, m.promptRow, strings.TrimSpace(string(m.promptInput))
 		m.prompting, m.promptInput = promptNone, nil
-		if input == "" {
-			return m, nil
-		}
 		switch kind {
 		case promptRename:
+			if input == "" {
+				return m, nil
+			}
 			return m, m.renameRow(row, input)
 		case promptTag:
+			if input == "" {
+				return m, nil
+			}
 			return m, m.tagRow(row, input)
+		case promptReparent:
+			// Empty input is meaningful here: make the thread a root.
+			return m, m.reparentRow(row, input)
 		}
 		return m, nil
 	case "backspace":
@@ -843,6 +865,32 @@ func (m Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
 			return actionMsg{err: fmt.Errorf("tag %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
 		}
 		return actionMsg{id: row.ID, patch: &rowPatch{addTags: []string{tag}, ttl: optimisticTTL}}
+	}
+}
+
+// reparentRow sets a thread's parent via the `thread reparent` verb (empty newParent
+// = --root), routed to the owner. The tree reshapes, so there's NO optimistic patch
+// (structural optimism is a code-smell risk) — on success the reconcile fetch refreshes
+// the tree and the moved node is re-selected with its new ancestors expanded (preselect).
+// A prefix is accepted: the CLI verb resolves --parent the same way it resolves --id.
+func (m Model) reparentRow(row api.ThreadRow, newParent string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "reparent", "--id", row.ID}
+		if newParent == "" {
+			args = append(args, "--root")
+		} else {
+			args = append(args, "--parent", newParent)
+		}
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("reparent %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		return actionMsg{id: row.ID, preselect: row.ID, expand: newParent}
 	}
 }
 
@@ -1128,8 +1176,11 @@ func (m Model) View() string {
 	}
 	if m.prompting != promptNone {
 		label := "rename"
-		if m.prompting == promptTag {
+		switch m.prompting {
+		case promptTag:
 			label = "tag"
+		case promptReparent:
+			label = "parent uuid (empty=root)"
 		}
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s█", label, m.promptRow.Name, string(m.promptInput))) + "\n")
 	}
@@ -1175,9 +1226,9 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · T untag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	default:
-		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · T untag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	}
 	return b.String()
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ func (d *Daemon) routesThreads(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads", d.handleThreadNew)
 	mux.HandleFunc("GET /v1/threads", d.handleThreadList)
 	mux.HandleFunc("GET /v1/threads/pane", d.handleThreadPane)
+	mux.HandleFunc("GET /v1/threads/capture", d.handleThreadCapture)
 	mux.HandleFunc("GET /v1/threads/status", d.handleThreadStatus)
 	mux.HandleFunc("POST /v1/threads/send", d.handleThreadSend)
 }
@@ -240,6 +242,53 @@ func (d *Daemon) handleThreadPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ResolvePaneResponse{Schema: api.SchemaVersion, Found: found, Pane: loc})
+}
+
+// handleThreadCapture returns the live text of a thread's pane (capture-pane). A
+// thread with no live pane is dead — capturing is a loud 409, never an empty string.
+func (d *Daemon) handleThreadCapture(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "thread capture: id is required")
+		return
+	}
+	lines := 0
+	if s := r.URL.Query().Get("lines"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "thread capture: lines must be a non-negative integer")
+			return
+		}
+		lines = n
+	}
+	if _, err := d.store.GetThread(id); err != nil {
+		if errors.Is(err, store.ErrThreadNotFound) {
+			writeError(w, http.StatusNotFound, "thread not found: "+id)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	loc, found, err := d.tmux.FindPaneByThreadID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot capture")
+		return
+	}
+	content, err := d.tmux.CapturePaneLines(loc.Pane, lines)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadCaptureResponse{
+		Schema:  api.SchemaVersion,
+		ID:      id,
+		Lines:   lines,
+		Content: content,
+	})
 }
 
 // The content-diff probe samples a pane repeatedly and declares working when

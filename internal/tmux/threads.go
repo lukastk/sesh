@@ -86,6 +86,16 @@ func (s *Server) CapturePane(pane string) (string, error) {
 	return s.run("capture-pane", "-t", pane, "-p")
 }
 
+// CapturePaneLines returns the text of a pane. lines==0 captures only the visible
+// area; lines>0 captures the last N lines including scrollback (capture-pane -S -N).
+// This backs `sesh thread capture` (peek at a thread's live pane).
+func (s *Server) CapturePaneLines(pane string, lines int) (string, error) {
+	if lines > 0 {
+		return s.run("capture-pane", "-t", pane, "-p", "-S", fmt.Sprintf("-%d", lines))
+	}
+	return s.run("capture-pane", "-t", pane, "-p")
+}
+
 // ClientCount returns how many tmux clients are attached to a session — the
 // attached/detached signal. Uses list-clients (the canonical source) rather than
 // session_attached.

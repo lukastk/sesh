@@ -119,6 +119,18 @@ func (c *Client) ThreadPane(ctx context.Context, id string) (api.ResolvePaneResp
 	return out, c.getJSON(ctx, "http://unix/v1/threads/pane?id="+url.QueryEscape(id), &out)
 }
 
+// ThreadCapture fetches GET /v1/threads/capture?id=&lines= — the live text of a
+// thread's tmux pane. lines==0 captures only the visible area; lines>0 captures the
+// last N lines (including scrollback). Backs `sesh thread capture`.
+func (c *Client) ThreadCapture(ctx context.Context, id string, lines int) (api.ThreadCaptureResponse, error) {
+	var out api.ThreadCaptureResponse
+	u := "http://unix/v1/threads/capture?id=" + url.QueryEscape(id)
+	if lines > 0 {
+		u += "&lines=" + strconv.Itoa(lines)
+	}
+	return out, c.getJSON(ctx, u, &out)
+}
+
 // ThreadStatus fetches GET /v1/threads/status?id= (thread.runtime-state).
 func (c *Client) ThreadStatus(ctx context.Context, id string) (api.ThreadStatusResponse, error) {
 	var out api.ThreadStatusResponse

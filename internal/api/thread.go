@@ -200,6 +200,16 @@ type ResolvePaneResponse struct {
 	Pane   PaneLocator `json:"pane,omitempty"`
 }
 
+// ThreadCaptureResponse returns the captured text of a thread's live pane
+// (GET /v1/threads/capture?id=&lines=). Lines echoes the request (0 = the visible
+// area only; N>0 = the last N lines including scrollback).
+type ThreadCaptureResponse struct {
+	Schema  int    `json:"schema"`
+	ID      string `json:"id"`
+	Lines   int    `json:"lines"`
+	Content string `json:"content"`
+}
+
 // ThreadStatusResponse is the live runtime status of a thread: the two
 // orthogonal axes plus the raw signals they derive from.
 type ThreadStatusResponse struct {

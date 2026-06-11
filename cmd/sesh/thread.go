@@ -30,6 +30,8 @@ func runThread(args []string) error {
 		return threadStop(cfg, rest)
 	case "pane":
 		return threadPane(cfg, rest)
+	case "capture":
+		return threadCapture(cfg, rest)
 	case "status":
 		return threadStatus(cfg, rest)
 	case "send":
@@ -553,6 +555,33 @@ func threadPane(cfg config.Config, args []string) error {
 		return errors.New("no live pane for thread (dead)")
 	}
 	fmt.Printf("%s:%d %s (pid %d)\n", resp.Pane.Session, resp.Pane.Window, resp.Pane.Pane, resp.Pane.PanePID)
+	return nil
+}
+
+// threadCapture prints the live text of a thread's tmux pane (the v1 pane-capture
+// port). Useful for supervising a child agent that may have stalled on a prompt.
+// Routes cross-machine via --machine (the pane is resolved on the owner's daemon).
+func threadCapture(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	lines := fs.Int("lines", 50, "lines to capture (0 = the visible area only)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	c := daemonClient(cfg)
+	resp, err := c.ThreadCapture(context.Background(), rid, *lines)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	fmt.Println(resp.Content)
 	return nil
 }
 

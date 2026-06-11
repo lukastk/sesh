@@ -247,6 +247,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.capture",
+		Description: "capture the live text of a thread's tmux pane (v1 pane-capture); dead thread = loud 409; routed cross-machine (pane resolved on the owner)",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.runtime-state",
 		Description: "the two orthogonal state axes head(headful/headless) x busy(busy/idle) + attachment — all transitions, both directions (the v1 codex bug)",
 		Agents:      agentic,

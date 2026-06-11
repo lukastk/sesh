@@ -27,6 +27,8 @@ func init() {
 				func(t *testing.T) { testThreadStop(t, string(a), loc) })
 			matrix.RegisterTest("thread.resolve-pane", a, loc,
 				func(t *testing.T) { testThreadResolvePane(t, string(a), loc) })
+			matrix.RegisterTest("thread.capture", a, loc,
+				func(t *testing.T) { testThreadCapture(t, string(a), loc) })
 		}
 		matrix.RegisterTest("thread.list", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testThreadList(t, loc) })
@@ -286,6 +288,61 @@ func testThreadResolvePane(t *testing.T, agent string, loc matrix.Locality) {
 	}
 	if !waitUntil(5*time.Second, func() bool { return !sb.resolvePane(t, th.ID).Found }) {
 		t.Errorf("resolve-pane still finds a pane after the session was killed")
+	}
+}
+
+// testThreadCapture proves `sesh thread capture` returns the LIVE text of a
+// thread's pane — the production v1 pane-capture port. The honest, non-circular
+// proof: type a unique sentinel into the real agent's input box via raw tmux (no
+// Enter, so it just sits on screen), then capture THROUGH sesh (daemon →
+// FindPaneByThreadID → capture-pane) and assert the sentinel is in the returned
+// content. Remote routes the capture into the peer's daemon, where the pane lives.
+// Then stop the thread and assert capturing a dead thread is a LOUD error (no
+// empty-string fallback — the house rule the v1 silent-failure class violated).
+func testThreadCapture(t *testing.T, agent string, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, agent, "capture", "/tmp")
+	pane := sb.waitThreadReady(t, th.ID, agent)
+
+	// A unique sentinel typed into the live input box (no Enter): it renders on the
+	// pane without being submitted to the agent, so it is deterministic on-screen.
+	sentinel := "ZxCaptureProbe" + th.ID[:8]
+	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "-l", sentinel); err != nil {
+		t.Fatalf("type sentinel: %v\n%s", err, out)
+	}
+
+	// Capture THROUGH sesh and assert it carries the live sentinel.
+	var content string
+	if !waitUntil(15*time.Second, func() bool {
+		out, _, err := sb.Runner.Run(t, "thread", "capture", "--id", th.ID, "--json")
+		if err != nil {
+			return false
+		}
+		var resp api.ThreadCaptureResponse
+		if json.Unmarshal([]byte(out), &resp) != nil {
+			return false
+		}
+		content = resp.Content
+		return strings.Contains(content, sentinel)
+	}) {
+		t.Fatalf("capture never returned the live sentinel %q; last content:\n%s", sentinel, content)
+	}
+
+	// Stop the thread: its pane is gone, so capture must fail LOUDLY (409), never
+	// return an empty string.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", th.ID); err != nil {
+		t.Fatalf("stop: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool {
+		_, _, err := sb.Runner.Run(t, "thread", "capture", "--id", th.ID, "--json")
+		return err != nil
+	}) {
+		t.Errorf("capturing a dead thread did not fail loudly (silent-failure regression)")
 	}
 }
 

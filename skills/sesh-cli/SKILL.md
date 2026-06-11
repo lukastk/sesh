@@ -22,11 +22,13 @@ Run `sesh help` for the command list and `sesh <command> --help` (or `sesh help 
 
 ## Thread ids and id-prefixes
 
-Threads are identified by a UUID. Almost every `--id` accepts an **unambiguous prefix**
-(`sesh thread stop --id 1a2b3c4d`), and many verbs infer the **current** thread when you
-omit `--id` (from `$SESH_THREAD_ID`, the calling pane's marker, or a loud error if
-ambiguous). The TUI shows the short 8-char form (`i` toggles the ID column; `y` shows the
-full UUID, `c` copies it).
+Threads are identified by a UUID. Every `--id` accepts an **unambiguous prefix**
+(`sesh thread stop --id 1a2b3c4d`; an unknown/ambiguous prefix is a loud error), and most
+verbs infer the **current** thread when you omit `--id` (from `$SESH_THREAD_ID`, the
+calling pane's marker, or a loud error if ambiguous). `delete` is the exception to
+inference only — it accepts a prefix but never infers the current thread (deleting an
+ambient thread is a footgun), so it always needs an explicit `--id`. The TUI shows the
+short 8-char form (`i` toggles the ID column; `y` shows the full UUID, `c` copies it).
 
 ## Before running commands
 

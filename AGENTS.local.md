@@ -58,6 +58,30 @@ error, an explicit prefix now resolves, an unknown prefix is loud. Client-side f
 only, no daemon restart). thread.delete cell (both localities) gained prefix + unknown-
 prefix assertions; live-smoked on mymain. Deployed to all four machines.
 
+## H8 — nav lands on the thread's WINDOW, not the session's last-active window (2026-06-11, commit 26c4395)
+Lukas: entering a thread via the TUI went to the right tmux SESSION but not the right
+WINDOW — open a 2nd window in a thread's session, leave, TUI-enter → landed on the 2nd
+window, not the thread's. Root: every switch targeted `=session`, and switch-client to a
+bare session lands on its LAST-ACTIVE window. Fix: resolve the WINDOW of the
+@sesh-thread-id-marked pane at the SWITCH SITE (the owner's work server — the marker is the
+truth there) and switch to `=session:window`. New optional `nav --thread <id>` threaded
+through ALL paths: in-client (Go `threadWindowTarget` via `list-panes -s -f
+'#{==:#{@sesh-thread-id},<id>}' -F '#{window_index}'`), master local+ssh
+(`InnerSwitchScript` gained a threadID param — resolves in-shell; the no-client kick branch
+selects the window too), master http (`NavRequest.ThreadID` → daemon `handleTmuxNav`),
+attach (select-window before attach, local + over ssh in-shell). TUI passes `--thread
+row.ID` on every Enter; PendingAttach carries it. Empty --thread = plain session nav
+(unchanged — mt-enter-tmux-session + all existing nav cells byte-identical). KEY tmux fact:
+`switch-client -t <paneid>` AND `-t '=session:N'` BOTH select the window (verified live).
+Tests: new `tmux.nav-window` cell (in-client lands on the thread's window in a multi-window
+session; no-`--thread` stays put) + `internal/tmux` test running the REAL generated
+master-path script against a live tmux. All 7 nav cells + action-nav TUI claims green; live
+in-client test moved a client window 1→0. Full suite 182/184 (the 2 reds are the known
+master-current flake + a codex headless-send flake that PASSES in isolation — neither from
+this change). DEPLOY: daemon RESTART needed (http nav handler reads ThreadID). Live on
+mymain/macstudio/termux (daemons restarted). **macbook OFFLINE again — pending 26c4395 +
+restart** (last caught up to 72eb901 earlier).
+
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)
 tmux CANNOT map a popup pty, a pane pty, or a piped subprocess back to the attached

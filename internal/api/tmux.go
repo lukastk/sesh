@@ -84,6 +84,16 @@ type SendTextRequest struct {
 	Enter bool `json:"enter"`
 }
 
+// NavRequest is the body of POST /v1/tmux/nav: the INNER half of `tmux nav`
+// performed in-process by the daemon that owns the work tmux server (so an http
+// peer needs no ssh hop). Session is the target session; Origin is the machine
+// whose master is navigating (selects that master's marker client — see
+// tmux.MasterClientMarker). The outer master-window select stays on the caller.
+type NavRequest struct {
+	Session string `json:"session"`
+	Origin  string `json:"origin"`
+}
+
 // StageFileRequest is the body of POST /v1/tmux/stage-file. Content is the raw
 // file bytes (base64 via Go's encoding/json []byte handling).
 type StageFileRequest struct {

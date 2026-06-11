@@ -9,9 +9,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
+
+// SSHMultiplexArgs returns ssh options that reuse ONE persistent connection per
+// peer (ControlMaster/ControlPersist), so callers piggyback on an already-open
+// master instead of paying a fresh TCP+SSH handshake every invocation. The
+// daemon's mesh-sync keeps this connection warm (re-touched every ~1s), so an
+// interactive `tmux nav` over ssh rides it and switches near-instantly. The
+// ControlPath uses %C (a fixed-length hash of the connection target) so the
+// daemon and the CLI compute the SAME socket and share it, and so the path stays
+// within the unix-socket length limit regardless of how long $SESH_HOME is.
+func SSHMultiplexArgs() []string {
+	dir := filepath.Join(os.TempDir(), "sesh-ssh-cm")
+	os.MkdirAll(dir, 0o700) //nolint:errcheck — best-effort; ssh falls back to no mux
+	return []string{
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=6",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=" + filepath.Join(dir, "%C"),
+		"-o", "ControlPersist=60s",
+	}
+}
 
 // Peer is how to reach one remote machine's daemon. Two transports:
 //   - ssh (always available): ssh into the machine and run sesh against its own

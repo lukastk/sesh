@@ -167,6 +167,17 @@ type Model struct {
 	// window's attach instead of the invoker).
 	clientName string
 
+	// pending holds confirmed-but-not-yet-reflected optimistic mutations
+	// (rename/tag/notify): the daemon applied them, but the TUI's read path
+	// (maintainer snapshot + mesh-sync) lags the write by a tick, so without this a
+	// reconciling fetch would briefly redisplay the STALE value. Applied to matching
+	// rows after each fetch; dropped once the server agrees — or after a few cycles
+	// (ttl), so a mutation that silently didn't take SURFACES rather than sticking.
+	pending map[string]*rowPatch
+
+	// tickStarted guards the one-time bootstrap of the poll timer (see meshMsg).
+	tickStarted bool
+
 	rows      []api.ThreadRow
 	machines  []api.MachineView // per-machine freshness, for the staleness footer
 	fetchedAt int64             // unix time the current data was fetched (for staleness age)
@@ -257,7 +268,9 @@ type meshMsg struct {
 
 type tickMsg time.Time
 
-// Init kicks off the first fetch.
+// Init kicks off the first fetch. (The single poll timer is started from the first
+// meshMsg — see tickStarted — so Init stays a lone fetch cmd, which the conformance
+// harness drives directly.)
 func (m Model) Init() tea.Cmd { return m.fetch() }
 
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
@@ -329,6 +342,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rows = msg.rows
 			m.machines = msg.machines
 			m.fetchedAt = msg.fetchedAt
+			m.applyPending(true) // reconcile: re-apply optimistic patches, GC satisfied/expired ones
 			if m.preselectID != "" {
 				for i, rm := range m.visibleMatches() {
 					if rm.row.ID == m.preselectID {
@@ -342,15 +356,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = max(0, vis-1)
 			}
 		}
-		return m, tick()
+		// Bootstrap the SINGLE poll timer exactly once (on the first successful
+		// fetch). Subsequent meshMsgs — including those from action/reconcile
+		// fetches — do NOT re-arm, so the poll rate can't multiply.
+		if !m.tickStarted {
+			m.tickStarted = true
+			return m, tick()
+		}
+		return m, nil
 	case tickMsg:
-		return m, m.fetch()
+		return m, tea.Batch(m.fetch(), tick())
 	case actionMsg:
 		m.note = ""
 		if msg.err != nil {
 			m.lastErr = msg.err
+		} else if msg.patch != nil && msg.id != "" {
+			// The mutation is CONFIRMED (no error). Record it as an optimistic patch
+			// and apply it now, so the value updates instantly instead of waiting for
+			// the snapshot/mesh-sync read path to catch up.
+			if m.pending == nil {
+				m.pending = map[string]*rowPatch{}
+			}
+			if cur, ok := m.pending[msg.id]; ok {
+				cur.merge(msg.patch)
+			} else {
+				m.pending[msg.id] = msg.patch
+			}
+			m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
 		}
-		return m, m.fetch() // re-fetch so the grid reflects the mutation
+		return m, m.fetch() // reconcile against the daemon
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us) —
 		// quit so the TUI (and the popup hosting it) gets out of the way. Staying
@@ -366,8 +400,118 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// actionMsg is the result of an in-app mutation.
-type actionMsg struct{ err error }
+// actionMsg is the result of an in-app mutation. On success (err == nil) an
+// optional patch records the confirmed change for optimistic display (see pending).
+type actionMsg struct {
+	err   error
+	id    string    // the thread the mutation targeted
+	patch *rowPatch // the optimistic change to show until the daemon's read path catches up
+}
+
+// optimisticTTL bounds how many reconcile fetches an unsatisfied optimistic patch
+// survives before it's dropped and the server's truth shows. A mutation normally
+// reflects within one fetch; surviving several cycles means it silently didn't take
+// — which should surface, not be masked forever.
+const optimisticTTL = 4
+
+// rowPatch is a set of optimistic field overrides for one row (nil/empty = untouched).
+type rowPatch struct {
+	name    *string
+	notify  *bool
+	addTags []string
+	ttl     int
+}
+
+func (p *rowPatch) merge(o *rowPatch) {
+	if o.name != nil {
+		p.name = o.name
+	}
+	if o.notify != nil {
+		p.notify = o.notify
+	}
+	p.addTags = append(p.addTags, o.addTags...)
+	if o.ttl > p.ttl {
+		p.ttl = o.ttl
+	}
+}
+
+func (p *rowPatch) apply(r *api.ThreadRow) {
+	if p.name != nil {
+		r.Name = *p.name
+	}
+	if p.notify != nil {
+		r.Notify = *p.notify
+	}
+	for _, t := range p.addTags {
+		if !containsStr(r.Tags, t) {
+			r.Tags = append(append([]string(nil), r.Tags...), t)
+		}
+	}
+}
+
+// satisfied reports whether the server row already reflects every override.
+func (p *rowPatch) satisfied(r api.ThreadRow) bool {
+	if p.name != nil && r.Name != *p.name {
+		return false
+	}
+	if p.notify != nil && r.Notify != *p.notify {
+		return false
+	}
+	for _, t := range p.addTags {
+		if !containsStr(r.Tags, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// applyPending overlays the pending optimistic patches onto m.rows. When gc is true
+// (a reconcile after a fresh fetch), a patch the server has caught up to is dropped,
+// a patch whose row is gone is dropped, and an unsatisfied patch's ttl is decremented
+// (dropped at zero). When gc is false (right after recording a patch), it only
+// overlays — the freshly-read rows are still stale, so nothing should be GC'd yet.
+func (m *Model) applyPending(gc bool) {
+	if len(m.pending) == 0 {
+		return
+	}
+	idx := map[string]int{}
+	for i := range m.rows {
+		idx[m.rows[i].ID] = i
+	}
+	for id, p := range m.pending {
+		i, ok := idx[id]
+		if !ok {
+			if gc {
+				delete(m.pending, id) // the row vanished (deleted/archived-out) — give up
+			}
+			continue
+		}
+		if gc {
+			if p.satisfied(m.rows[i]) {
+				delete(m.pending, id)
+				continue
+			}
+			p.ttl--
+			if p.ttl <= 0 {
+				delete(m.pending, id) // server never caught up — surface its truth
+				continue
+			}
+		}
+		p.apply(&m.rows[i])
+	}
+}
+
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func sptr(s string) *string { return &s }
+func bptr(b bool) *bool     { return &b }
 
 // attachMsg asks the TUI to quit and have the caller attach the terminal to target
 // (<machine>:<session>) — used when Enter is pressed outside tmux.
@@ -502,7 +646,7 @@ func (m Model) renameRow(row api.ThreadRow, name string) tea.Cmd {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("rename %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
 		}
-		return actionMsg{}
+		return actionMsg{id: row.ID, patch: &rowPatch{name: sptr(name), ttl: optimisticTTL}}
 	}
 }
 
@@ -519,7 +663,7 @@ func (m Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("tag %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
 		}
-		return actionMsg{}
+		return actionMsg{id: row.ID, patch: &rowPatch{addTags: []string{tag}, ttl: optimisticTTL}}
 	}
 }
 
@@ -674,10 +818,14 @@ func (m Model) notifySelected() tea.Cmd {
 		return nil
 	}
 	c := m.client
+	want := !row.Notify
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return actionMsg{err: c.ThreadNotify(ctx, row.ID, !row.Notify)}
+		if err := c.ThreadNotify(ctx, row.ID, want); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{id: row.ID, patch: &rowPatch{notify: bptr(want), ttl: optimisticTTL}}
 	}
 }
 

@@ -5,10 +5,35 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/tmux"
 )
+
+// handleTmuxNav serves POST /v1/tmux/nav: the INNER switch-client, run in-process
+// against THIS daemon's own work tmux server. This is what lets an http peer's nav
+// skip the ssh hop entirely — the remote daemon already owns the socket and can read
+// its own master-client marker. Identical logic to the local/ssh InnerSwitchScript,
+// just executed here.
+func (d *Daemon) handleTmuxNav(w http.ResponseWriter, r *http.Request) {
+	var req api.NavRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Session == "" || req.Origin == "" {
+		writeError(w, http.StatusBadRequest, "nav: session and origin are required")
+		return
+	}
+	script := tmux.InnerSwitchScript(d.cfg.TmuxSocket, req.Session, tmux.MasterClientMarker(d.cfg.Home, req.Origin))
+	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("nav inner switch: %v: %s", err, out))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "switched": true})
+}
 
 func (d *Daemon) handleTmuxInfo(w http.ResponseWriter, r *http.Request) {
 	sessions, err := d.tmux.Info(d.cfg.Machine)

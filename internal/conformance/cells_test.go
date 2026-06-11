@@ -59,6 +59,7 @@ var skipReasons = map[string]string{
 	"tmux.work-conf":            "the work tmux server starts with `tmux -f <SESH_TMUX_CONF>` (sesh's own UI, separate from ~/.tmux.conf)",
 	"tmux.nav-in-client-multi":  "with multiple clients, nav --in-client switches exactly the carried client (--client/$SESH_NAV_CLIENT); ambiguous carrier-less calls fail loudly",
 	"tmux.nav-master-multi":     "with multiple clients on a work server, the master-path nav switches the master window's marker-recorded client; a direct attach never moves",
+	"tmux.nav-master-http":      "the master-path nav's inner switch-client follows the peer's transport: an http peer carries it over POST /v1/tmux/nav (no ssh) — proved by a broken ssh dest + the switch still landing",
 	"tmux.nav-attach":           "nav --attach (Enter from a plain shell) attaches the terminal to the thread (a client lands on it)",
 	"api.tcp-auth":              "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
 	"api.tcp-parity":            "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",

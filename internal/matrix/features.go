@@ -216,6 +216,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-master-http",
+		Description: "the master-path nav's INNER switch-client FOLLOWS the peer's transport: for an http peer (api_addr set) it is carried over the daemon's TCP API (POST /v1/tmux/nav) with NO ssh hop — proved by a deliberately broken ssh dest (http-only.invalid) + the switch still landing; ssh peers keep the (now connection-multiplexed) ssh inner switch",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.work-conf",
 		Description: "SESH_TMUX_CONF: the WORK tmux server is started with `tmux -f <conf>` (carries sesh's own tmux UI, separate from the user's default ~/.tmux.conf) — proved by a sentinel option only that conf sets being live on the work socket",
 		Localities:  []Locality{Local},

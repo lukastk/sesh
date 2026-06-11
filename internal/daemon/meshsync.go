@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -201,22 +199,10 @@ func (s *meshSync) fetchPeerSnapshotSSH(ctx context.Context, p peers.Peer) ([]ap
 	return threads, nil
 }
 
-// sshMultiplexArgs returns ssh options that reuse one persistent connection per
-// peer (ControlMaster/ControlPersist) — so the 1s mesh sync pays a handshake once,
-// not every tick. ControlPath uses %C (a fixed-length hash) to stay within the unix
-// socket path limit regardless of how long $SESH_HOME is.
-func sshMultiplexArgs() []string {
-	dir := filepath.Join(os.TempDir(), "sesh-ssh-cm")
-	os.MkdirAll(dir, 0o700) //nolint:errcheck — best-effort; ssh falls back to no mux
-	return []string{
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "ConnectTimeout=6",
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(dir, "%C"),
-		"-o", "ControlPersist=60s",
-	}
-}
+// sshMultiplexArgs reuses one persistent connection per peer — see
+// peers.SSHMultiplexArgs. Kept as a thin alias so the daemon and the CLI share the
+// exact same ControlPath (the warm connection is reused across both).
+func sshMultiplexArgs() []string { return peers.SSHMultiplexArgs() }
 
 // handleMesh serves GET /v1/mesh: the merged cross-machine view — this machine's
 // live snapshot (always fresh) plus every cached peer (with staleness), read

@@ -177,6 +177,13 @@ func claimActionRename(t *testing.T) {
 	m = typeText(t, m, "newname77")
 	m = runSpecial(t, m, tea.KeyEnter) // submits: execs `thread rename` against the real daemon
 
+	// OPTIMISTIC: the new name shows IMMEDIATELY — runSpecial drains only the action
+	// command, so the reconcile fetch (which reads the lagging snapshot) has NOT run
+	// yet. The row can only show "newname77" here via the optimistic overlay.
+	if !strings.Contains(m.View(), "newname77") {
+		t.Errorf("rename not reflected optimistically (still waiting on the snapshot): %q", rowLine(m.View(), "newname77"))
+	}
+
 	renamed := false
 	for _, th2 := range sb.listThreads(t) {
 		if th2.ID == th.ID && th2.Name == "newname77" {
@@ -208,6 +215,11 @@ func claimActionTag(t *testing.T) {
 	}
 	m = typeText(t, m, "urgent9")
 	m = runSpecial(t, m, tea.KeyEnter)
+
+	// OPTIMISTIC: the tag shows immediately (the reconcile fetch hasn't run).
+	if !strings.Contains(m.View(), "urgent9") {
+		t.Errorf("tag not reflected optimistically: %q", rowLine(m.View(), "tagme"))
+	}
 
 	tagged := false
 	for _, th2 := range sb.listThreads(t) {
@@ -499,7 +511,13 @@ func claimNotifyToggle(t *testing.T) {
 	if threadByName(t, sb, "muteme").Notify {
 		t.Fatalf("n did not flip the gate off on the daemon")
 	}
-	// Muted → the bell disappears (blank, NOT a glyph).
+	// OPTIMISTIC: the bell disappears IMMEDIATELY — runKey drained only the action,
+	// so the reconcile fetch hasn't run; this is the optimistic overlay, not a
+	// snapshot refresh.
+	if strings.Contains(rowLine(m.View(), "muteme"), "▪") {
+		t.Errorf("NTF bell not cleared optimistically after muting: %q", rowLine(m.View(), "muteme"))
+	}
+	// And it STAYS cleared across reconciling fetches (sticky until the daemon agrees).
 	if !waitUntil(15*time.Second, func() bool {
 		m, _ = render(t, m)
 		return !strings.Contains(rowLine(m.View(), "muteme"), "▪")

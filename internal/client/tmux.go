@@ -38,6 +38,12 @@ func (c *Client) TmuxSendText(ctx context.Context, req api.SendTextRequest) erro
 	return c.postJSON(ctx, "http://unix/v1/tmux/send-text", req, nil)
 }
 
+// TmuxNav posts POST /v1/tmux/nav: the inner switch-client run by the daemon that
+// owns the work tmux server. Used by the http-transport nav path (no ssh hop).
+func (c *Client) TmuxNav(ctx context.Context, req api.NavRequest) error {
+	return c.postJSON(ctx, "http://unix/v1/tmux/nav", req, nil)
+}
+
 // TmuxStageFile posts POST /v1/tmux/stage-file and returns the staged path.
 func (c *Client) TmuxStageFile(ctx context.Context, name string, content []byte) (api.StageFileResponse, error) {
 	var out api.StageFileResponse

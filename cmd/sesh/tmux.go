@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -189,6 +191,27 @@ func tmuxNav(cfg config.Config, args []string) error {
 	if !ok {
 		return fmt.Errorf("nav: unknown machine %q (no peer registered)", machine)
 	}
+
+	// The inner switch FOLLOWS the peer's transport (same rule as every other
+	// cross-machine command). For an http peer the remote daemon runs the
+	// switch-client in-process — no ssh hop on this interactive hot path.
+	if peer.Transport() == "http" {
+		token, err := peer.ResolveAPIToken()
+		if err != nil {
+			return err
+		}
+		c := client.NewRemote(peer.ApiAddr, token)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := c.TmuxNav(ctx, api.NavRequest{Session: session, Origin: cfg.Machine}); err != nil {
+			return fmt.Errorf("nav inner switch on %s (http): %w", machine, err)
+		}
+		return nil
+	}
+
+	// ssh transport: run the inner script over a MULTIPLEXED ssh — it rides the
+	// warm ControlMaster the daemon's mesh-sync keeps open, so there's no cold
+	// handshake on this hot path.
 	if peer.TmuxSocket == "" {
 		return fmt.Errorf("nav: peer %q has no tmux socket registered (see `sesh peer add --tmux-socket`)", machine)
 	}
@@ -196,7 +219,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 		return fmt.Errorf("nav: peer %q has no home registered (see `sesh peer add --home`)", machine)
 	}
 	script := tmux.InnerSwitchScript(peer.TmuxSocket, session, tmux.MasterClientMarker(peer.Home, cfg.Machine))
-	navArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	navArgs := append(peers.SSHMultiplexArgs(), peer.SSHArgs()...)
 	navArgs = append(navArgs, peer.SSH, script)
 	out, err := exec.Command("ssh", navArgs...).CombinedOutput()
 	if err != nil {

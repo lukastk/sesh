@@ -131,3 +131,45 @@ func indexOfStr(s []string, v string) int {
 	}
 	return -1
 }
+
+func TestOptimisticPending(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "old", Notify: true, Tags: []string{"a"}}}
+	m := Model{rows: []api.ThreadRow{row}, pending: map[string]*rowPatch{}}
+
+	// Record a rename + a tag + a notify-off, all confirmed.
+	m.pending["t1"] = &rowPatch{name: sptr("new"), ttl: optimisticTTL}
+	m.pending["t1"].merge(&rowPatch{addTags: []string{"b"}, notify: bptr(false), ttl: optimisticTTL})
+	m.applyPending(false) // instant overlay, no GC
+	got := m.rows[0]
+	if got.Name != "new" || got.Notify != false || !containsStr(got.Tags, "b") {
+		t.Fatalf("optimistic overlay not applied: %+v", got)
+	}
+
+	// A reconcile fetch that's STILL STALE must NOT clobber the optimistic value.
+	m.rows = []api.ThreadRow{row} // server still shows old name/notify/tags
+	m.applyPending(true)
+	if m.rows[0].Name != "new" || m.rows[0].Notify != false {
+		t.Errorf("stale reconcile clobbered the optimistic patch: %+v", m.rows[0])
+	}
+	if len(m.pending) != 1 {
+		t.Errorf("patch dropped while still unconfirmed")
+	}
+
+	// Server catches up → patch is dropped (no longer needed).
+	m.rows = []api.ThreadRow{{Thread: api.Thread{ID: "t1", Name: "new", Notify: false, Tags: []string{"a", "b"}}}}
+	m.applyPending(true)
+	if len(m.pending) != 0 {
+		t.Errorf("satisfied patch not GC'd: %+v", m.pending)
+	}
+
+	// TTL expiry: a patch the server NEVER confirms is dropped after optimisticTTL cycles.
+	m.rows = []api.ThreadRow{row}
+	m.pending = map[string]*rowPatch{"t1": {name: sptr("never"), ttl: optimisticTTL}}
+	for i := 0; i < optimisticTTL; i++ {
+		m.rows = []api.ThreadRow{row}
+		m.applyPending(true)
+	}
+	if len(m.pending) != 0 {
+		t.Errorf("unconfirmed patch never expired (would mask a silent failure)")
+	}
+}

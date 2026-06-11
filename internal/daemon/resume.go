@@ -142,7 +142,12 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := d.tmux.CreateSessionCmd(session, thread.Cwd, env, agents.ResumeCommand(kind, sessionID)); err != nil {
+	mode, merr := d.resolveSpawnMode(kind, "")
+	if merr != nil {
+		writeError(w, http.StatusBadRequest, merr.Error())
+		return
+	}
+	if err := d.tmux.CreateSessionCmd(session, thread.Cwd, env, agents.ResumeCommand(kind, sessionID, mode, d.spawn.ArgsFor(string(kind)))); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

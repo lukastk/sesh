@@ -70,9 +70,16 @@ func testDelegate(t *testing.T, agent string, loc matrix.Locality) {
 	if _, _, err := sb.Runner.Run(t, "delegate", "--agent", "pi"); err == nil {
 		t.Errorf("delegate without a task succeeded")
 	}
+	// E3: --sandbox on a pi worker is the loud pi-cannot-sandbox refusal (and
+	// the worker is cleaned up, not leaked).
 	if _, stderr, err := sb.Runner.Run(t, "delegate", "--agent", "pi", "--sandbox", "task"); err == nil {
-		t.Errorf("--sandbox silently accepted (must be loud until E3)")
-	} else if !strings.Contains(stderr, "NOT IMPLEMENTED") {
-		t.Errorf("--sandbox error not the loud NOT IMPLEMENTED: %s", stderr)
+		t.Errorf("--sandbox pi delegate succeeded (pi cannot be sandboxed)")
+	} else if !strings.Contains(stderr, "cannot be sandboxed") {
+		t.Errorf("--sandbox pi error wrong: %s", stderr)
+	}
+	for _, th := range sb.listThreads(t) {
+		if strings.HasPrefix(th.Name, "delegate-") {
+			t.Errorf("sandbox-refused worker leaked: %s", th.ID)
+		}
 	}
 }

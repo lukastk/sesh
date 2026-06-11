@@ -98,6 +98,13 @@ type NewThreadRequest struct {
 	// that point. Headless-born; the source is untouched.
 	ForkFrom  string `json:"fork_from,omitempty"`
 	MessageID int    `json:"message_id,omitempty"`
+	// Mode overrides the [spawn] launch mode for this spawn (yolo|default|
+	// sandbox; '' = the config default).
+	Mode string `json:"mode,omitempty"`
+	// Msg, for headed spawns, is an initial prompt sent once the agent is
+	// READY (the daemon waits for the pane asynchronously — never the blank-
+	// pane race; a delivery failure is loud in the daemon log).
+	Msg string `json:"msg,omitempty"`
 }
 
 // ReparentThreadRequest re-parents a thread ('' = make it a root).
@@ -127,6 +134,8 @@ type ThreadListResponse struct {
 type ThreadSendRequest struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Mode overrides the [spawn] mode for a HEADLESS turn ('' = config).
+	Mode string `json:"mode,omitempty"`
 }
 
 // RenameThreadRequest is the body of POST /v1/threads/rename.

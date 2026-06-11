@@ -309,6 +309,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.spawn-mode",
+		Description: "[spawn] launch policy: yolo/default/sandbox per agent (+args passthrough, --yolo/--sandbox overrides, --msg ready-send); observable on the real process argv; pi sandbox loud; LOCAL-only (the owner's config; routing exercises the same path)",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.meta",
 		Description: "arbitrary per-thread KV (meta set/get/unset/list); feeds [[tui.views]] meta.<key> predicates; missing keys loud",
 		Localities:  bothLoc,

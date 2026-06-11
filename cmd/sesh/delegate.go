@@ -28,7 +28,8 @@ func runDelegate(cfg config.Config, args []string) error {
 	name := fs.String("name", "", "thread name (mostly for --keep; default delegate-<ts>)")
 	keep := fs.Bool("keep", false, "retain the worker thread instead of deleting it after the reply")
 	timeout := fs.Duration("timeout", 10*time.Minute, "give up after this long (the worker is still deleted unless --keep)")
-	sandbox := fs.Bool("sandbox", false, "restrict the worker's permissions (arrives with roadmap E3)")
+	sandbox := fs.Bool("sandbox", false, "restrict the worker (codex read-only; claude default-deny; pi: refused)")
+	yolo := fs.Bool("yolo", false, "bypass the worker's permissions (overrides [spawn] config)")
 	asJSON := fs.Bool("json", false, "emit {reply, id} as JSON")
 	// The task may be positional-first (v1's form): pop it before Parse.
 	task := ""
@@ -44,8 +45,15 @@ func runDelegate(cfg config.Config, args []string) error {
 	if *agent == "" || task == "" {
 		return errors.New("delegate: --agent and a task are required (sesh delegate --agent pi \"question\")")
 	}
+	if *sandbox && *yolo {
+		return errors.New("delegate: --sandbox and --yolo are mutually exclusive")
+	}
+	mode := ""
 	if *sandbox {
-		return errors.New("NOT IMPLEMENTED: delegate --sandbox arrives with roadmap E3 (spawn knobs)")
+		mode = "sandbox"
+	}
+	if *yolo {
+		mode = "yolo"
 	}
 	if *cwd == "" {
 		wd, err := os.Getwd()
@@ -79,7 +87,7 @@ func runDelegate(cfg config.Config, args []string) error {
 		}
 	}
 
-	if err := c.ThreadSendHeadless(ctx, id, task); err != nil {
+	if err := c.ThreadSendHeadlessMode(ctx, id, task, mode); err != nil {
 		cleanup()
 		return fmt.Errorf("delegate: start turn: %w", err)
 	}

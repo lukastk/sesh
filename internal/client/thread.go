@@ -136,6 +136,12 @@ func (c *Client) ThreadSendHeadless(ctx context.Context, id, text string) error 
 	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text}, nil)
 }
 
+// ThreadSendHeadlessMode is ThreadSendHeadless with a [spawn]-mode override
+// for the turn ('' = the config default).
+func (c *Client) ThreadSendHeadlessMode(ctx context.Context, id, text, mode string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text, Mode: mode}, nil)
+}
+
 // ThreadHeadlessReply fetches GET /v1/threads/headless-reply?id=.
 func (c *Client) ThreadHeadlessReply(ctx context.Context, id string) (api.HeadlessReplyResponse, error) {
 	var out api.HeadlessReplyResponse

@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
+	"github.com/lukastk/sesh/internal/config"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -122,7 +125,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		agentSessionID = uuid.NewString()
 	}
 
-	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind, agentSessionID)); err != nil {
+	mode, err := d.resolveSpawnMode(kind, req.Mode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -163,7 +171,42 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if req.Msg != "" {
+		go d.sendWhenReady(thread, req.Msg)
+	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})
+}
+
+// sendWhenReady delivers a spawn's --msg once the agent is READY: the pane's
+// agent process is up and the TUI has rendered (≥3 non-blank lines) — the
+// blank-pane race that loses keystrokes never happens. Loud log on timeout.
+func (d *Daemon) sendWhenReady(th api.Thread, text string) {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		loc, found, err := d.tmux.FindPaneByThreadID(th.ID)
+		if err == nil && found {
+			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && agent.Kind == th.AgentKind {
+				if cap, cerr := d.tmux.CapturePane(loc.Pane); cerr == nil && nonBlank(cap) >= 3 {
+					if serr := d.tmux.SendText(loc.Pane, text, true); serr != nil {
+						log.Printf("thread %s: --msg delivery failed: %v", th.ID, serr)
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	log.Printf("thread %s: --msg never delivered (agent not ready within 90s)", th.ID)
+}
+
+func nonBlank(s string) int {
+	n := 0
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func (d *Daemon) handleThreadList(w http.ResponseWriter, r *http.Request) {
@@ -384,4 +427,27 @@ func sanitizeName(name string) string {
 		s = "thread"
 	}
 	return s
+}
+
+// resolveSpawnMode resolves the launch mode: the request's override (a CLI
+// --yolo/--sandbox) wins over the [spawn] config. pi cannot be sandboxed —
+// loud (yolo ≡ default for pi: it is always full-access).
+func (d *Daemon) resolveSpawnMode(kind agents.Kind, override string) (string, error) {
+	mode := override
+	if mode == "" {
+		mode = d.spawn.ModeFor(string(kind))
+	}
+	valid := mode == ""
+	for _, m := range config.SpawnModes {
+		if mode == m {
+			valid = true
+		}
+	}
+	if !valid {
+		return "", fmt.Errorf("spawn: unknown mode %q (valid: %v)", mode, config.SpawnModes)
+	}
+	if kind == agents.Pi && mode == "sandbox" {
+		return "", fmt.Errorf("spawn: pi cannot be sandboxed (no permission system) — yolo/default only")
+	}
+	return mode, nil
 }

@@ -395,6 +395,9 @@ func threadNew(cfg config.Config, args []string) error {
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
 	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
+	yolo := fs.Bool("yolo", false, "launch with permissions bypassed (overrides [spawn] config)")
+	sandboxF := fs.Bool("sandbox", false, "launch restricted (codex read-only; claude default-deny headless; pi: refused)")
+	msg := fs.String("msg", "", "send this initial prompt once the agent is ready (headed spawns)")
 	messageID := fs.Int("message-id", 0, "fork after the Nth assistant turn (0 = the whole conversation)")
 	noParent := fs.Bool("no-parent", false, "force a root thread (suppress parent inference)")
 	asJSON := fs.Bool("json", false, "emit JSON")
@@ -445,10 +448,23 @@ func threadNew(cfg config.Config, args []string) error {
 			resolvedParent = rp
 		}
 	}
+	if *yolo && *sandboxF {
+		return errors.New("thread new: --yolo and --sandbox are mutually exclusive")
+	}
+	mode := ""
+	if *yolo {
+		mode = "yolo"
+	}
+	if *sandboxF {
+		mode = "sandbox"
+	}
+	if *msg != "" && *headless {
+		return errors.New("thread new: --msg is for headed spawns (use send-headless for a headless first turn)")
+	}
 	c := daemonClient(cfg)
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
-		ForkFrom: forkID, MessageID: *messageID,
+		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg,
 	})
 	if err != nil {
 		return err

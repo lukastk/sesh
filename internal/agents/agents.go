@@ -73,37 +73,73 @@ func ParseKind(s string) (Kind, error) {
 	return k, nil
 }
 
+// modeArgs maps a spawn mode to an agent's permission flags (E3). pi has no
+// permission system: yolo ≡ default (it IS full access); sandbox for pi is
+// refused upstream (config load / request validation), never silently dropped.
+func modeArgs(k Kind, mode string) []string {
+	switch k {
+	case Claude:
+		if mode == "yolo" {
+			return []string{"--dangerously-skip-permissions"}
+		}
+	case Codex:
+		switch mode {
+		case "yolo":
+			return []string{"--dangerously-bypass-approvals-and-sandbox"}
+		case "sandbox":
+			return []string{"--sandbox", "read-only"}
+		}
+	}
+	return nil
+}
+
+// LaunchArgs joins mode flags + the config's extra args into a command suffix.
+func LaunchArgs(k Kind, mode string, extra []string) string {
+	parts := append(modeArgs(k, mode), extra...)
+	out := ""
+	for _, p := range parts {
+		out += " " + ShellEscape(p)
+	}
+	return out
+}
+
+// ShellEscape single-quotes s for safe embedding in a shell command line.
+func ShellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'''`) + "'"
+}
+
 // HeadedCommand returns the shell command that launches the agent interactively
 // in a tmux pane, pinning the conversation to sessionID where the agent supports
 // it (pi/claude). codex cannot pre-assign its id, so it launches bare and its id
 // is discovered after the first turn (see DiscoverCodexSession) — which is what
 // lets a dead thread be resumed later. Working/waiting is still detected agent-
 // agnostically from pane content-diff.
-func HeadedCommand(k Kind, sessionID string) string {
+func HeadedCommand(k Kind, sessionID, mode string, extra []string) string {
+	base := string(k)
 	switch k {
 	case Pi:
 		if sessionID != "" {
-			return "pi --session-id " + sessionID
+			base = "pi --session-id " + sessionID
 		}
 	case Claude:
 		if sessionID != "" {
-			return "claude --session-id " + sessionID
+			base = "claude --session-id " + sessionID
 		}
 	}
-	return string(k) // codex (bare), or no session id
+	return base + LaunchArgs(k, mode, extra)
 }
 
 // ResumeCommand returns the shell command that RELAUNCHES the agent on an
 // existing conversation (for `resume`), continuing where it left off.
-func ResumeCommand(k Kind, sessionID string) string {
+func ResumeCommand(k Kind, sessionID, mode string, extra []string) string {
+	base := string(k)
 	switch k {
 	case Pi:
-		return "pi --session-id " + sessionID // --session-id resumes if it exists
+		base = "pi --session-id " + sessionID // --session-id resumes if it exists
 	case Claude:
-		return "claude --resume " + sessionID
+		base = "claude --resume " + sessionID
 	case Codex:
-		return "codex resume " + sessionID
-	default:
-		return string(k)
+		base = "codex resume " + sessionID
 	}
+	return base + LaunchArgs(k, mode, extra)
 }

@@ -8,7 +8,6 @@ package conformance
 // the turn into the LOCAL subscriber's pane via the routed send.
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -66,32 +65,31 @@ func testSubscribeLocal(t *testing.T) {
 		t.Errorf("delivery missing the subscribee's actual reply")
 	}
 
-	// The HEADLESS subscriber received the delivery as a turn: its transcript
-	// (none existed before) appears and carries the subscribee's reply.
-	var tr1 string
+	// The HEADLESS subscriber received the delivery: the formatted message (the
+	// subscribee's reply) lands in its transcript as a user turn. We assert on
+	// the DELIVERED MARKER, not the listener generating its own reply — the
+	// property under test is "delivered, exactly once", and not depending on a
+	// second real agent reply keeps this (already heavy) cell from being
+	// dominated by agent latency on a loaded box.
+	marker := "completed a turn"
 	if !waitUntil(90*time.Second, func() bool {
 		out, _, rerr := sb.Runner.Run(t, "thread", "transcript", "--id", listener.ID, "--json")
-		// The delivered text (the user message) lands in the transcript BEFORE
-		// the listener's own reply — settle on reply_count >= 1 (turn DONE),
-		// or the dedup check below would race the in-progress turn.
-		if rerr != nil || !strings.Contains(out, "MAGENTA") || replyCountOf(t, out) < 1 {
-			return false
-		}
-		tr1 = out
-		return true
+		return rerr == nil && strings.Contains(out, marker) && strings.Contains(out, "MAGENTA")
 	}) {
-		t.Fatalf("headless subscriber never processed the delivery turn")
+		t.Fatalf("headless subscriber never received the delivery")
 	}
-	// … and DEDUP is structural: extra eventer ticks must not start a second
-	// turn (the reply count would advance).
-	count1 := replyCountOf(t, tr1)
+	// DEDUP: the delivery marker appears EXACTLY once — extra eventer ticks and
+	// the deterministic completion-path trigger must not re-deliver. Give them
+	// time to (wrongly) fire, then count.
 	time.Sleep(6 * time.Second)
 	tr2, _, err := sb.Runner.Run(t, "thread", "transcript", "--id", listener.ID, "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c2 := replyCountOf(t, tr2); c2 != count1 {
-		t.Errorf("the same turn was re-delivered (reply count %d -> %d)", count1, c2)
+	// Count the DELIVERY MARKER, not MAGENTA — the marker appears only in
+	// delivered messages, whereas a verbose listener reply may repeat MAGENTA.
+	if n := strings.Count(tr2, marker); n != 1 {
+		t.Errorf("delivery not exactly-once: the delivery marker appears %d times in the listener transcript", n)
 	}
 
 	// Cycle refusal (watcher's turns would loop back into speaker), and
@@ -161,13 +159,4 @@ func testSubscribeCrossMachine(t *testing.T) {
 		cap, _ := local.rawTmux(t, "capture-pane", "-t", subPane, "-p", "-S", "-200")
 		t.Fatalf("cross-machine delivery never reached the local pane:\n%s", cap)
 	}
-}
-
-func replyCountOf(t *testing.T, transcriptJSONOut string) int {
-	t.Helper()
-	var tr transcriptJSON
-	if err := json.Unmarshal([]byte(strings.TrimSpace(transcriptJSONOut)), &tr); err != nil {
-		t.Fatalf("decode transcript: %v", err)
-	}
-	return tr.ReplyCount
 }

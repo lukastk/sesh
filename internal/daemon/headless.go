@@ -91,6 +91,15 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 	d.hlInFlight[req.ID] = true
 	d.hlMu.Unlock()
 
+	turnMode, err := d.resolveSpawnMode(agents.Kind(thread.AgentKind), req.Mode)
+	if err != nil {
+		d.hlMu.Lock()
+		delete(d.hlInFlight, req.ID)
+		d.hlMu.Unlock()
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	codexHome := ""
 	if thread.AgentKind == string(agents.Codex) {
 		codexHome, _ = agents.CodexHome(d.cfg.CodexHome)
@@ -125,7 +134,7 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, req.Text, codexHome)
+			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, req.Text, codexHome, turnMode)
 
 		d.hlMu.Lock()
 		delete(d.hlInFlight, req.ID)
@@ -139,6 +148,19 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		if runErr == nil {
 			// Persist the (possibly newly discovered) session id + started flag.
 			d.store.SetHeadlessSession(req.ID, newSessionID) //nolint:errcheck
+			// Deterministic subscription delivery: the daemon RAN this turn, so
+			// it knows precisely when it completed — trigger delivery directly
+			// instead of waiting for the eventer to (maybe) catch the busy→idle
+			// edge between its polling ticks. The Tracker dedups on the reply
+			// count, so the eventer path firing too is harmless. (Pane turns,
+			// which the daemon does NOT run, still rely on the eventer.)
+			if th, gerr := d.store.GetThread(req.ID); gerr == nil {
+				if sn, ok := d.maint.stateOf(req.ID); ok {
+					d.deliverSubscriptions(sn)
+				} else {
+					d.deliverSubscriptions(api.ThreadSnapshot{Thread: th, Head: api.Headless, Busy: api.BusyIdle})
+				}
+			}
 		}
 	}()
 

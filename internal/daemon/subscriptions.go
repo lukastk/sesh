@@ -55,7 +55,19 @@ func (d *Daemon) deliverSubscriptions(snap api.ThreadSnapshot) {
 		return
 	}
 	homes := agents.ResolveHomes(d.cfg.CodexHome)
-	reply, count, err := agents.LastReply(agents.Kind(snap.AgentKind), snap.AgentSessionID, snap.Cwd, homes)
+	// The reply is read from the transcript, which an agent may still be
+	// flushing the instant its turn process exits (the deterministic
+	// completion-path trigger races that flush). Retry briefly; the Tracker's
+	// dedup makes a later successful read idempotent if this one is early.
+	var reply string
+	var count int
+	for attempt := 0; attempt < 12; attempt++ {
+		reply, count, err = agents.LastReply(agents.Kind(snap.AgentKind), snap.AgentSessionID, snap.Cwd, homes)
+		if err == nil && reply != "" {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 	if err != nil || reply == "" {
 		if err != nil {
 			log.Printf("subscriptions: %s last-reply: %v", snap.ID, err)

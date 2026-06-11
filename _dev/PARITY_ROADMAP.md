@@ -30,9 +30,9 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **D4** `sesh backup` / `restore`
 - [x] **D5** Adopt/register foreign agents
 - [x] **D6** `meta` KV on threads
-- [ ] **E1** SESH_MACHINE: daemon refuses silent hostname fallback
+- [x] **E1** SESH_MACHINE: daemon refuses silent hostname fallback
 - [ ] **E2** `sesh doctor`
-- [ ] **E3** Spawn knobs: `--msg`, `--sandbox`, config.toml spawn defaults
+- [x] **E3** Spawn knobs: `--msg`, `--sandbox`, config.toml spawn defaults
 - [ ] **E4** v1→v2 records import (migration)
 
 Dropped by decision: **autoname** (Lukas 2026-06-10). Still deferred (revisit on

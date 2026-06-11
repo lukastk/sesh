@@ -56,6 +56,8 @@ type Daemon struct {
 	evt   *eventer
 	// defaults: [defaults] record-creation knobs (notify gate).
 	defaults config.Defaults
+	// spawn: the [spawn] launch policy (mode + extra args, per agent).
+	spawn config.Spawn
 	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
 	subTracker *subscribe.Tracker
 	// mmaint converges the master cockpit (one window per connected machine);
@@ -129,6 +131,11 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 	d.defaults = defaults
+	spawn, err := config.LoadSpawn(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [spawn] refuses the daemon loudly
+	}
+	d.spawn = spawn
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly

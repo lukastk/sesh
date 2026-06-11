@@ -20,7 +20,7 @@ import (
 //
 // codex cannot pre-assign its session id, so its first turn returns the id it
 // generated (newSessionID); pi and claude use the sessionID sesh pre-assigned.
-func HeadlessTurn(kind Kind, threadID, sessionID, cwd string, started bool, prompt, codexHome string) (reply, newSessionID string, err error) {
+func HeadlessTurn(kind Kind, threadID, sessionID, cwd string, started bool, prompt, codexHome, mode string) (reply, newSessionID string, err error) {
 	// The turn process carries the thread identity, exactly like a pane does:
 	// the agent (or anything it runs) can `sesh info` itself without being
 	// told who it is.
@@ -32,7 +32,7 @@ func HeadlessTurn(kind Kind, threadID, sessionID, cwd string, started bool, prom
 		return strings.TrimSpace(out), sessionID, err
 
 	case Claude:
-		args := []string{"--print"}
+		args := append([]string{"--print"}, modeArgs(Claude, mode)...)
 		if started {
 			args = append(args, "--resume", sessionID)
 		} else {
@@ -51,6 +51,7 @@ func HeadlessTurn(kind Kind, threadID, sessionID, cwd string, started bool, prom
 		if started {
 			args = append(args, "resume", sessionID)
 		}
+		args = append(args, modeArgs(Codex, mode)...)
 		args = append(args, "--json", "--skip-git-repo-check", prompt)
 		out, err := runHeadless(cwd, env, "codex", args...)
 		if err != nil {

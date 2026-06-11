@@ -36,13 +36,13 @@ unit/claim test → live-smoke.
   moved it onto the sesh work server (socket `sesh`, pane %0) — adopt is work-server-only,
   so it was impossible while the session ran on the `mysystem` server. Conformance
   thread.adopt claude branch gained the bare-claude-then-explicit-id case.
-DEPLOY STATE (2026-06-11): committed c14ef12, pushed. Schema-8 daemons LIVE on mymain +
-macstudio + termux (git pull → native go build → restart; termux relaunched from shell,
-pid-guarded). **macbook was OFFLINE — still on schema 7; redeploy it when it's back**
-(ssh lukas@macbook → cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new
-./cmd/sesh && mv -f …/sesh.new …/sesh && /opt/homebrew/bin/supervisorctl restart
-sesh-daemon). The cwd_rel field is additive/omitempty so the mixed-schema mesh is safe;
-macbook's own threads just render unlabeled cross-machine until it's updated. H5 PROVEN
+DEPLOY STATE (2026-06-11): committed c14ef12, pushed. Schema-8 daemons LIVE on ALL FOUR
+machines — mymain, macstudio, termux, and macbook (caught up later the same day once it
+came back online; HEAD 72eb901, API schema 8, mesh synced). Deploy recipe per machine:
+git pull → native go build (.new + mv, ETXTBSY/codesign-safe) → restart (supervisorctl
+restart sesh-daemon on mac/mymain; termux relaunched from shell, pid-guarded). The
+cwd_rel field is additive/omitempty so a mixed-schema mesh stays safe during a rollout.
+H5 PROVEN
 LIVE cross-home: a macstudio box thread (cwd /Users/cij/dev/2026…__cwdrel-demo) rendered
 as the box label "cwdrel-demo <zz9xcw>" in mymain's --all-machines TUI (was the raw path
 before).
@@ -56,7 +56,7 @@ via `resolveIDPrefix` (NOT resolveThreadID) — delete must still never INFER th
 thread (destructive + ambient = footgun), so an omitted --id stays the loud required
 error, an explicit prefix now resolves, an unknown prefix is loud. Client-side fix (binary
 only, no daemon restart). thread.delete cell (both localities) gained prefix + unknown-
-prefix assertions; live-smoked on mymain. macbook still pending (offline).
+prefix assertions; live-smoked on mymain. Deployed to all four machines.
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

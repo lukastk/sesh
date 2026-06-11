@@ -38,7 +38,7 @@ var skipReasons = map[string]string{
 	"thread.rename":             "rename a thread record",
 	"thread.tag":                "add/remove tags",
 	"thread.archive":            "park a thread (hidden from active list, record kept)",
-	"thread.delete":             "drop a record without touching the runtime",
+	"thread.delete":             "drop a record without touching the runtime; accepts an id PREFIX (resolved like every verb), unknown prefix loud, live thread refused without --force",
 	"thread.headful":            "revive a never-paned idle thread into a pane (== resume, unified model); codex-before-any-turn is N/A (separate test)",
 	"thread.headful-busy":       "reviving a thread mid-turn (headless turn in flight) is rejected with a conflict",
 	"thread.session-name":      "[[session_name]] config rules name the real tmux session from cwd (spawn + revival); default without a match; broken config = no daemon",

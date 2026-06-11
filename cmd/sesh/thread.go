@@ -175,10 +175,19 @@ func threadDelete(cfg config.Config, args []string) error {
 		return errors.New("thread delete: --id is required")
 	}
 	c := daemonClient(cfg)
-	if err := c.ThreadDelete(context.Background(), *id, *force); err != nil {
+	// Resolve an id PREFIX to the full uuid, like every other verb (the daemon's
+	// delete is an exact-match lookup, so a bare prefix would 404). delete uses
+	// resolveIDPrefix, NOT resolveThreadID: it must never INFER the current thread
+	// from $SESH_THREAD_ID / the calling pane (destructive + ambient = footgun) —
+	// an explicit prefix is fine, an omitted --id is the loud error above.
+	rid, err := resolveIDPrefix(c, *id)
+	if err != nil {
 		return err
 	}
-	fmt.Println("deleted", *id)
+	if err := c.ThreadDelete(context.Background(), rid, *force); err != nil {
+		return err
+	}
+	fmt.Println("deleted", rid)
 	return nil
 }
 

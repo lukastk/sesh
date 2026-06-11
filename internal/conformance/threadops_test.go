@@ -101,6 +101,20 @@ func testThreadDelete(t *testing.T, loc matrix.Locality) {
 	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
 
+	// Prefix resolution: delete by an 8-char id PREFIX resolves to the full uuid
+	// like every other verb (the daemon's delete is an exact-match lookup, so a bare
+	// prefix used to 404). An unknown prefix is loud — never a silent no-op.
+	pre := sb.newHeadlessThread(t, "pi", "delpre")
+	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", pre.ID[:8]); err != nil {
+		t.Fatalf("delete by id prefix failed: %v\n%s", err, stderr)
+	}
+	if hasThread(sb.listThreads(t), pre.ID) {
+		t.Errorf("prefix delete did not drop the record")
+	}
+	if _, _, err := sb.Runner.Run(t, "thread", "delete", "--id", "zzzzzzzz"); err == nil {
+		t.Errorf("delete of an unknown id prefix should be loud, not a silent no-op")
+	}
+
 	th := sb.newThread(t, "pi", "deleteme", "/tmp") // a live HEADED thread
 	var pid int
 	if !waitUntil(agentStartTimeout, func() bool {

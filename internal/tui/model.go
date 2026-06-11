@@ -99,6 +99,15 @@ const (
 	promptReparent            // set the selected thread's parent (paste a uuid; empty = root)
 )
 
+// confirmKind says which destructive action a y/n confirmation popup gates.
+type confirmKind int
+
+const (
+	confirmNone   confirmKind = iota
+	confirmDelete             // `d` — drop the record
+	confirmArchive            // `a` — archive/unarchive toggle
+)
+
 type Model struct {
 	client      *client.Client
 	allMachines bool
@@ -128,6 +137,18 @@ type Model struct {
 	// one-line status (e.g. "UUID copied"), shown dim under the title.
 	uuidPopup bool
 	note      string
+
+	// confirming, when non-zero, means a y/n confirmation popup is open for a
+	// destructive action (delete / archive); confirmRow is the row it acts on
+	// (captured when the popup opened). `y` runs it, anything else cancels.
+	confirming confirmKind
+	confirmRow api.ThreadRow
+
+	// actionErr is the last in-app ACTION error (reparent/delete/tag/…). Unlike
+	// lastErr (fetch/daemon reachability), it PERSISTS across reconcile fetches so a
+	// failed mutation stays on screen — it is cleared only by the next action. (A
+	// reconcile fetch silently clearing it was the "no warning on a bad reparent" bug.)
+	actionErr error
 
 	// tagPopup: `T` opens a picker over the selected thread's tags; ↑/↓ (or j/k) move,
 	// enter removes the highlighted tag (routed to the owner), esc/q closes. tagPopupRow
@@ -338,7 +359,7 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen}
+				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, CwdRel: t.CwdRel}
 				if pred != nil {
 					// A custom view sees EVERYTHING its predicate admits
 					// (archived included — `not archived` is the user's call).
@@ -427,20 +448,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		m.note = ""
 		if msg.err != nil {
-			m.lastErr = msg.err
-		} else if msg.patch != nil && msg.id != "" {
-			// The mutation is CONFIRMED (no error). Record it as an optimistic patch
-			// and apply it now, so the value updates instantly instead of waiting for
-			// the snapshot/mesh-sync read path to catch up.
-			if m.pending == nil {
-				m.pending = map[string]*rowPatch{}
+			// Action errors live in actionErr, NOT lastErr: the reconcile fetch below
+			// clears lastErr on success, which would instantly erase this warning.
+			m.actionErr = msg.err
+		} else {
+			m.actionErr = nil
+			if msg.patch != nil && msg.id != "" {
+				// The mutation is CONFIRMED (no error). Record it as an optimistic patch
+				// and apply it now, so the value updates instantly instead of waiting for
+				// the snapshot/mesh-sync read path to catch up.
+				if m.pending == nil {
+					m.pending = map[string]*rowPatch{}
+				}
+				if cur, ok := m.pending[msg.id]; ok {
+					cur.merge(msg.patch)
+				} else {
+					m.pending[msg.id] = msg.patch
+				}
+				m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
 			}
-			if cur, ok := m.pending[msg.id]; ok {
-				cur.merge(msg.patch)
-			} else {
-				m.pending[msg.id] = msg.patch
-			}
-			m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
 		}
 		if msg.err == nil && msg.preselect != "" {
 			m.preselectID = msg.preselect // land the cursor on the moved node once the refetch lands
@@ -676,6 +702,9 @@ type attachMsg struct{ target string }
 type navDoneMsg struct{}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.confirming != confirmNone {
+		return m.handleConfirmKey(msg)
+	}
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
 	}
@@ -757,11 +786,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		return m, m.stopSelected()
 	case "d":
-		return m, m.deleteSelected()
+		// Destructive: confirm before dropping the record (y/n popup).
+		if row, ok := m.Selected(); ok {
+			m.confirming, m.confirmRow = confirmDelete, row
+		}
 	case "a":
-		return m, m.archiveSelected()
+		// Archive/unarchive toggle: confirm before parking the thread.
+		if row, ok := m.Selected(); ok {
+			m.confirming, m.confirmRow = confirmArchive, row
+		}
 	case "enter":
 		return m, m.navSelected()
+	}
+	return m, nil
+}
+
+// handleConfirmKey drives the y/n confirmation popup for a destructive action:
+// `y` (or `Y`) runs it on the captured row, ANY other key cancels (so a stray
+// keystroke never deletes/archives). Routed to the owner like the direct verbs.
+func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	kind, row := m.confirming, m.confirmRow
+	m.confirming = confirmNone
+	if s := msg.String(); s == "y" || s == "Y" {
+		switch kind {
+		case confirmDelete:
+			return m, m.deleteRow(row)
+		case confirmArchive:
+			return m, m.archiveRow(row)
+		}
 	}
 	return m, nil
 }
@@ -1077,12 +1129,17 @@ func (m Model) stopSelected() tea.Cmd {
 }
 
 // deleteSelected drops the selected thread's record. The daemon refuses a live
-// thread (orphan guard); stop it first. Surfaced as an error in lastErr.
+// thread (orphan guard); stop it first. Surfaced as an error in actionErr.
 func (m Model) deleteSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
+	return m.deleteRow(row)
+}
+
+// deleteRow drops a specific thread's record (routed to the owner).
+func (m Model) deleteRow(row api.ThreadRow) tea.Cmd {
 	return m.routedVerb(row, nil, "delete")
 }
 
@@ -1108,6 +1165,11 @@ func (m Model) archiveSelected() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	return m.archiveRow(row)
+}
+
+// archiveRow toggles a specific thread's archived state (routed to the owner).
+func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
 	if row.Archived {
 		return m.routedVerb(row, nil, "archive", "--unarchive")
 	}
@@ -1137,8 +1199,15 @@ func (m Model) HOffset() int { return m.hOffset }
 // Prompting reports whether the line-prompt is open (for tests).
 func (m Model) Prompting() bool { return m.prompting != promptNone }
 
-// LastErr exposes the most recent fetch/action error (for tests).
+// LastErr exposes the most recent fetch/daemon-reachability error (for tests).
 func (m Model) LastErr() error { return m.lastErr }
+
+// ActionErr exposes the most recent in-app ACTION error (reparent/delete/…),
+// which persists across reconcile fetches (for tests).
+func (m Model) ActionErr() error { return m.actionErr }
+
+// Confirming reports whether a y/n destructive-action popup is open (for tests).
+func (m Model) Confirming() bool { return m.confirming != confirmNone }
 
 func max(a, b int) int {
 	if a > b {
@@ -1154,7 +1223,28 @@ var (
 	styleSelected = lipgloss.NewStyle().Reverse(true)
 	styleDim      = lipgloss.NewStyle().Faint(true)
 	styleMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
 )
+
+// legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
+// width rather than clipping — see renderLegend.
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
+
+// renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
+// soft-wraps on spaces) so every binding stays visible instead of being clipped at
+// the right edge. Width unknown (no WindowSizeMsg yet — tests) renders one line.
+func (m Model) renderLegend() string {
+	if m.width > 1 {
+		return styleDim.Width(m.width).Render(legendText)
+	}
+	return styleDim.Render(legendText)
+}
+
+// legendLines is the wrapped legend's height in lines (for the scroll budget —
+// chromeLines). 1 when the width is unknown (unwrapped).
+func (m *Model) legendLines() int {
+	return strings.Count(m.renderLegend(), "\n") + 1
+}
 
 // Glyph maps a row's live state to a status glyph. These are part of the contract
 // the TUI conformance asserts against REAL state.
@@ -1195,8 +1285,24 @@ func (m Model) View() string {
 	if m.lastErr != nil {
 		b.WriteString(styleDim.Render("(daemon unreachable: "+m.lastErr.Error()+")") + "\n")
 	}
+	// Action errors are LOUD and persist until the next action (unlike the dim
+	// daemon-reachability note) — a failed reparent/delete must not vanish silently.
+	if m.actionErr != nil {
+		b.WriteString(styleErr.Render("✗ "+m.actionErr.Error()) + "\n")
+	}
 	if m.note != "" {
 		b.WriteString(styleDim.Render(m.note) + "\n")
+	}
+	if m.confirming != confirmNone {
+		verb := "delete"
+		if m.confirming == confirmArchive {
+			verb = "archive"
+			if m.confirmRow.Archived {
+				verb = "unarchive"
+			}
+		}
+		b.WriteString(styleHeader.Render(fmt.Sprintf("┃ %s %q? ┃", verb, m.confirmRow.Name)) + "\n")
+		b.WriteString(styleDim.Render("  y to confirm · any other key to cancel") + "\n")
 	}
 	if m.uuidPopup {
 		if row, ok := m.Selected(); ok {
@@ -1301,9 +1407,9 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(m.renderLegend() + "\n")
 	default:
-		b.WriteString(styleDim.Render("\n  ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString("\n" + m.renderLegend() + "\n")
 	}
 	return b.String()
 }

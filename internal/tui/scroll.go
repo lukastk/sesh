@@ -20,8 +20,14 @@ func (m *Model) chromeLines() int {
 	if m.lastErr != nil {
 		n++
 	}
+	if m.actionErr != nil {
+		n++ // persistent loud action-error line
+	}
 	if m.note != "" {
 		n++
+	}
+	if m.confirming != confirmNone {
+		n += 2 // confirm header + help
 	}
 	if m.tagPopup {
 		n += 2 + len(m.tagPopupRow.Tags) // header + tags + help
@@ -38,13 +44,16 @@ func (m *Model) chromeLines() int {
 			n++ // per-peer freshness line
 		}
 	}
+	// The legend OVERFLOWS (wraps) to the width, so its height is variable — count
+	// the wrapped lines, not a fixed 1, or the row budget drifts on narrow widths.
+	legendH := m.legendLines()
 	switch {
 	case m.filtering:
-		n += 2
+		n += 2 // blank + filter prompt
 	case m.filter != "":
-		n += 3
+		n += 2 + legendH // blank + filter-status + wrapped legend
 	default:
-		n += 2
+		n += 1 + legendH // blank + wrapped legend
 	}
 	n += 2 // reserve for the ▲/▼ scroll indicators (always, to keep budgeting simple)
 	return n

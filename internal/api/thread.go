@@ -237,6 +237,9 @@ type ThreadRow struct {
 	// TicketsOpen is the number of bound, still-open tickets (not done/dropped)
 	// — the TUI's `ticketed` predicate and TICKETS column read it.
 	TicketsOpen int `json:"tickets_open"`
+	// CwdRel mirrors ThreadSnapshot.CwdRel: Cwd ~-relative to the OWNING machine's
+	// home, so the CWD column / cwd_label rules render correctly cross-machine.
+	CwdRel string `json:"cwd_rel,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -262,6 +265,12 @@ type ThreadSnapshot struct {
 	TicketsOpen    int        `json:"tickets_open"`
 	AgentRunning   bool       `json:"agent_running"`
 	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion
+	// CwdRel is Cwd rendered ~-relative to the OWNING machine's home, stamped by
+	// that machine's maintainer (the home is owner data the viewer cannot know). A
+	// viewer applies its own [[cwd_label]] rules to this, so the CWD column labels
+	// correctly even cross-machine — without it, a viewer with a different home
+	// shows the raw absolute path. '' only if the owner's home is unknown.
+	CwdRel string `json:"cwd_rel,omitempty"`
 }
 
 // MachineSnapshot is one machine's full live thread state, returned by
@@ -314,6 +323,11 @@ type NotifyThreadRequest struct {
 type AdoptThreadRequest struct {
 	Pane string `json:"pane"`
 	Name string `json:"name"`
+	// SessionID, when set, is the agent's conversation id supplied EXPLICITLY by the
+	// caller — used when auto-detection can't find it (e.g. claude launched with a
+	// bare `-r`, no id in argv). It bypasses the per-agent detection (the caller
+	// asserts the identity); the pane must still hold a live agent.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // MetaThreadRequest sets ('' value = deletes) one meta key.

@@ -82,12 +82,17 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
 /            filter mode (fuzzy; ^t cycles the search target; esc applies)
 tab          cycle views (active / archived / all / custom [[tui.views]])
 r            rename (line prompt)   t          add tag        T   remove tag (picker)
-P            set parent (paste a parent uuid; empty = root)
+P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
+             are refused with a persistent on-screen warning)
 n            toggle notify          i          toggle the ID column
 y            show full UUID (c copies)         R   force refresh
-x            stop      d  delete    a  archive/unarchive
+x            stop      d  delete    a  archive/unarchive   (d and a ask y/n first)
 q / esc      quit
 ```
+
+`d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
+other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
+width instead of clipping, so every binding stays visible on a narrow pane.
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
 green by default (tunable via `[[tui.column_color]]`). Wide grids clip and scroll
@@ -115,10 +120,14 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 
 ## Creating, lifecycle, navigating
 
+`--cwd` accepts a **relative path or `~`** (expanded against the directory where you run
+the command — the daemon stores an absolute path); pass an absolute path for a
+cross-`--machine` spawn, where the target dir lives on the remote.
+
 ```bash
 sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)
-sesh thread new --agent pi --name notes --cwd /tmp --headless        # headless conversation
-sesh thread new --agent codex --name sub --cwd ~/proj --parent <id>  # a child thread
+sesh thread new --agent pi --name notes --cwd . --headless           # headless; cwd = $PWD
+sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child thread
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation
 
 sesh thread stop --id <id>           # end runtime (agent + session), keep the record (revivable)
@@ -130,6 +139,13 @@ sesh thread rename --id <id> --name <new>
 sesh thread tag --id <id> --add wip --remove stale     # repeatable --add/--remove
 sesh thread reparent --id <id> --parent <p>            # or --root to detach
 sesh thread notify --id <id> --off                     # mute this thread's notification hooks
+
+# Adopt a manually-launched agent (a pane on sesh's WORK server) into a thread.
+# The conversation id is auto-detected (claude from argv, pi from its RPC socket,
+# codex from its rollout) — pass --session-id when it can't be (e.g. a claude
+# started with a bare `-r`, which carries no id in its argv):
+sesh thread adopt --name here                                  # current pane ($TMUX_PANE)
+sesh thread adopt --name here --session-id <conversation-uuid> # explicit id
 
 # Spawn on another machine (real cross-machine spawn over the mesh):
 sesh thread new --agent claude --name x --cwd ~/proj --machine macbook

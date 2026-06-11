@@ -72,7 +72,7 @@ var skipReasons = map[string]string{
 	"ticket.needs-input":        "derived view active && waiting",
 	"thread.spawn-mode":         "config yolo on real argv per agent; --sandbox override (codex read-only argv); pi sandbox loud; args passthrough; --msg reaches the conversation",
 	"thread.meta":               "KV set/get/unset round-trip + wire; meta.<key> predicates see real values; missing key loud; remote routed",
-	"thread.adopt":              "a manual real agent adopted with its TRUE session id (argv/socket/rollout); becomes a managed headful thread; non-agent/managed/unknown panes loud",
+	"thread.adopt":              "a manual real agent adopted with its TRUE session id (argv/socket/rollout, or an explicit --session-id when undetectable); becomes a managed headful thread; non-agent/managed/unknown panes loud",
 	"thread.fork":               "fork@turn-1 carries A not B (real divergence); the branch CONTINUES with memory; the source byte-untouched; loud out-of-range/turn-less",
 	"thread.backup":             "backup→wipe→restore byte-equal per agent; claude native restore + RESUMED memory; idempotent; copy composes; loud guards; remote routed",
 	"thread.subscribe":          "a real turn lands formatted in the subscriber's REAL pane exactly once; cycle refused/--allow-cycle; unsubscribe stops; remote = peer-owned delivery into a local pane",

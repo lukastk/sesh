@@ -154,8 +154,8 @@ func claimActionNavRemoteDead(t *testing.T) {
 	// "waiting" snapshot in the mesh; Enter on it would skip the revival).
 	m, _ = renderUntilRowState(t, m, "rdead", api.Headless, api.BusyIdle)
 
-	if m = runKey(t, m, "enter"); m.LastErr() != nil {
-		t.Fatalf("nav on remote dead thread errored: %v", m.LastErr())
+	if m = runKey(t, m, "enter"); m.ActionErr() != nil {
+		t.Fatalf("nav on remote dead thread errored: %v", m.ActionErr())
 	}
 	// The thread was REVIVED on the peer (its session exists again — it was gone)
 	// and entered (a client landed on it, master flipped to the peer's window).
@@ -225,8 +225,8 @@ func claimActionNavInClient(t *testing.T) {
 		WithTmux(fakeTmux).
 		WithClient(bClient)
 	m, _ = renderUntilRow(t, m, "icnav")
-	if m = runKey(t, m, "enter"); m.LastErr() != nil {
-		t.Fatalf("in-client nav errored: %v", m.LastErr())
+	if m = runKey(t, m, "enter"); m.ActionErr() != nil {
+		t.Fatalf("in-client nav errored: %v", m.ActionErr())
 	}
 
 	// B (the TUI's client) is on the thread; the other client did not move.
@@ -279,8 +279,8 @@ func claimActionNavQuits(t *testing.T) {
 
 	// Success direction: the nav lands -> the model requests quit.
 	m, after := step(m)
-	if m.LastErr() != nil {
-		t.Fatalf("nav errored: %v", m.LastErr())
+	if m.ActionErr() != nil {
+		t.Fatalf("nav errored: %v", m.ActionErr())
 	}
 	if after == nil {
 		t.Fatalf("successful nav produced no follow-up command (expected quit)")
@@ -293,7 +293,7 @@ func claimActionNavQuits(t *testing.T) {
 	// with the error (quitting would eat it).
 	mustTmux(t, master, "kill-server")
 	m, after = step(m)
-	if m.LastErr() == nil {
+	if m.ActionErr() == nil {
 		t.Errorf("failed nav reported no error")
 	}
 	if after != nil {
@@ -366,8 +366,8 @@ func claimActionNavHeadless(t *testing.T) {
 	m, _ = renderUntilRowState(t, m, "hlnav", api.Headless, api.BusyIdle)
 
 	// Enter -> promote then enter.
-	if m = runKey(t, m, "enter"); m.LastErr() != nil {
-		t.Fatalf("nav-on-headless errored: %v", m.LastErr())
+	if m = runKey(t, m, "enter"); m.ActionErr() != nil {
+		t.Fatalf("nav-on-headless errored: %v", m.ActionErr())
 	}
 	// The promotion created a real session (headless threads NEVER have one) and the nav
 	// landed a client on it — the observable proof of promote-then-enter.
@@ -414,8 +414,8 @@ func claimActionNav(t *testing.T) {
 	m, _ = renderUntilRow(t, m, "navme") // wait for the mesh sync to replicate it
 
 	// Enter -> nav. Asserts on the REAL servers:
-	if m = runKey(t, m, "enter"); m.LastErr() != nil {
-		t.Fatalf("nav action errored: %v", m.LastErr())
+	if m = runKey(t, m, "enter"); m.ActionErr() != nil {
+		t.Fatalf("nav action errored: %v", m.ActionErr())
 	}
 	// outer: the master switched to the peer's window.
 	if got := activeWindowOf(t, master); got != peer.Machine {
@@ -484,8 +484,8 @@ func claimActionStop(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "stopme") // single thread => cursor on it
-	if m = runKey(t, m, "x"); m.LastErr() != nil {
-		t.Fatalf("stop action errored: %v", m.LastErr())
+	if m = runKey(t, m, "x"); m.ActionErr() != nil {
+		t.Fatalf("stop action errored: %v", m.ActionErr())
 	}
 	// The REAL runtime is dead...
 	if !waitUntil(10*time.Second, func() bool { return !pidAlive(pid) }) {
@@ -503,8 +503,9 @@ func claimActionStop(t *testing.T) {
 	}
 }
 
-// claimActionDelete: the delete key really drops the record. (The daemon's orphan
-// guard refuses a live delete, so we stop first — the realistic flow.)
+// claimActionDelete: `d` opens a y/n confirmation; cancelling keeps the record,
+// confirming with `y` really drops it. (The daemon's orphan guard refuses a live
+// delete, so the thread is dead-by-construction.)
 func claimActionDelete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -517,17 +518,30 @@ func claimActionDelete(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "delme")
-	if m = runKey(t, m, "d"); m.LastErr() != nil {
-		t.Fatalf("delete action errored: %v", m.LastErr())
+	// `d` opens the confirmation; it must NOT delete on its own, and a non-y key cancels.
+	m = runKey(t, m, "d")
+	if !m.Confirming() {
+		t.Fatalf("d did not open the delete confirmation")
 	}
-	// Observable effect: the record is gone from the daemon.
+	m = runKey(t, m, "n")
+	if m.Confirming() {
+		t.Fatalf("n did not dismiss the confirmation")
+	}
+	if !threadInList(t, sb, th.ID) {
+		t.Fatalf("a cancelled delete still dropped the record")
+	}
+	// Confirm with `y` → the record is really gone from the daemon.
+	m = runKey(t, m, "d")
+	if m = runKey(t, m, "y"); m.ActionErr() != nil {
+		t.Fatalf("delete action errored: %v", m.ActionErr())
+	}
 	if threadInList(t, sb, th.ID) {
-		t.Errorf("delete did not drop the record")
+		t.Errorf("delete did not drop the record after confirmation")
 	}
 }
 
-// claimActionArchive: the archive key really parks the thread (record kept, hidden
-// from the active grid).
+// claimActionArchive: `a` opens a y/n confirmation; confirming with `y` really
+// parks the thread (record kept, hidden from the active grid).
 func claimActionArchive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -540,7 +554,12 @@ func claimActionArchive(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "parkme")
+	// `a` opens the confirmation; confirm with `y`.
 	m = runKey(t, m, "a")
+	if !m.Confirming() {
+		t.Fatalf("a did not open the archive confirmation")
+	}
+	m = runKey(t, m, "y")
 
 	// Record kept but hidden from the active list (the daemon truth)...
 	if hasThread(sb.listThreads(t), th.ID) {

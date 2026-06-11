@@ -279,8 +279,8 @@ func claimActionUntag(t *testing.T) {
 	}
 	m = runSpecial(t, m, tea.KeyDown)
 	m = runSpecial(t, m, tea.KeyEnter)
-	if m.LastErr() != nil {
-		t.Fatalf("untag action errored: %v", m.LastErr())
+	if m.ActionErr() != nil {
+		t.Fatalf("untag action errored: %v", m.ActionErr())
 	}
 	m = runKey(t, m, "q") // close the popup so rowLine reads the grid row, not the popup header
 
@@ -345,8 +345,8 @@ func claimActionReparent(t *testing.T) {
 	}
 	m = typeText(t, m, alpha.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
-	if m.LastErr() != nil {
-		t.Fatalf("reparent errored: %v", m.LastErr())
+	if m.ActionErr() != nil {
+		t.Fatalf("reparent errored: %v", m.ActionErr())
 	}
 	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == alpha.ID }) {
 		t.Fatalf("daemon did not set beta.parent = alpha (%s); got %q", alpha.ID, threadParentOf(t, sb, beta.ID))
@@ -366,15 +366,43 @@ func claimActionReparent(t *testing.T) {
 	m = runKey(t, m, "P")
 	m = typeText(t, m, beta.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
-	if m.LastErr() == nil {
+	if m.ActionErr() == nil {
 		t.Errorf("reparenting alpha under its descendant beta was NOT refused")
+	}
+	// The warning PERSISTS across reconcile fetches (the bug: action errors used to be
+	// cleared by the very next poll, so a failed reparent flashed and vanished).
+	m, _ = render(t, m)
+	if m.ActionErr() == nil {
+		t.Errorf("the cycle-rejection warning vanished after a reconcile fetch (should persist)")
 	}
 	if p := threadParentOf(t, sb, alpha.ID); p != "" {
 		t.Errorf("alpha.parent changed despite the cycle rejection: %q", p)
 	}
 
+	// Self-parent: reparenting beta under ITSELF is refused LOUDLY, record untouched.
+	beforeParent := threadParentOf(t, sb, beta.ID)
+	m = selectRowByName(t, m, "beta")
+	m = runKey(t, m, "P")
+	m = typeText(t, m, beta.ID)
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.ActionErr() == nil {
+		t.Errorf("reparenting beta under itself was NOT refused")
+	}
+	if p := threadParentOf(t, sb, beta.ID); p != beforeParent {
+		t.Errorf("beta.parent changed despite the self-parent rejection: %q", p)
+	}
+
+	// A non-existent parent uuid is refused LOUDLY (no silent no-op).
+	m = selectRowByName(t, m, "beta")
+	m = runKey(t, m, "P")
+	m = typeText(t, m, "ffffffff-ffff-ffff-ffff-ffffffffffff")
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.ActionErr() == nil {
+		t.Errorf("reparenting under a non-existent uuid was NOT refused (silent no-op)")
+	}
+
 	// Detach: an empty submit makes beta a root again (asserted via daemon truth — a
-	// stale UI error from the cycle test may linger in lastErr, which is fine).
+	// stale UI error from the prior rejections may linger in actionErr, which is fine).
 	m = selectRowByName(t, m, "beta")
 	m = runKey(t, m, "P")
 	m = runSpecial(t, m, tea.KeyEnter) // empty input = root
@@ -808,8 +836,8 @@ func claimActionMutateRemote(t *testing.T) {
 	// 'n' on the REMOTE row must flip the gate ON THE PEER (routed). The pre-fix
 	// direct-client call hit self's daemon, which doesn't own the thread → no-op.
 	m = runKey(t, m, "n")
-	if m.LastErr() != nil {
-		t.Fatalf("remote notify errored: %v", m.LastErr())
+	if m.ActionErr() != nil {
+		t.Fatalf("remote notify errored: %v", m.ActionErr())
 	}
 	if !waitUntil(15*time.Second, func() bool { return !threadByName(t, peer, "remote-notif").Notify }) {
 		t.Errorf("notify did not route to the owner (peer still shows notify on) — the remote-mutation bug")
@@ -820,9 +848,14 @@ func claimActionMutateRemote(t *testing.T) {
 	}
 
 	// 'a' (archive) on the remote row also routes — the peer's record becomes archived.
+	// Archive opens a y/n confirmation; confirm with `y`.
 	m = runKey(t, m, "a")
-	if m.LastErr() != nil {
-		t.Fatalf("remote archive errored: %v", m.LastErr())
+	if !m.Confirming() {
+		t.Fatalf("a did not open the archive confirmation")
+	}
+	m = runKey(t, m, "y")
+	if m.ActionErr() != nil {
+		t.Fatalf("remote archive errored: %v", m.ActionErr())
 	}
 	if !waitUntil(15*time.Second, func() bool {
 		for _, x := range peer.listThreadsArchived(t) {

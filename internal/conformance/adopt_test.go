@@ -119,6 +119,33 @@ func testAdopt(t *testing.T, agent string) {
 		t.Errorf("re-adopt error wrong: %s", stderr)
 	}
 
+	// Explicit --session-id override: a claude launched WITHOUT an id in its argv
+	// (a bare `-r` in real life) can't be auto-detected — but an explicitly-supplied
+	// id adopts it with that exact identity. (Auto-detect must still fail loudly.)
+	if agent == "claude" {
+		barePane := manualAgentPane(t, sb, "bare-claude", "claude")
+		if !waitUntil(30*time.Second, func() bool {
+			_, stderr, err := sb.Runner.Run(t, "thread", "adopt", "--pane", barePane, "--name", "bare-auto")
+			return err != nil && strings.Contains(stderr, "carries no --session-id")
+		}) {
+			t.Errorf("bare claude (no id in argv) auto-adopt did not fail loudly")
+		}
+		bareSession := uuid.NewString()
+		out, _, err := sb.Runner.Run(t, "thread", "adopt", "--pane", barePane, "--name", "bare-explicit", "--session-id", bareSession, "--json")
+		if err != nil {
+			t.Fatalf("explicit --session-id adopt failed: %v", err)
+		}
+		var bt struct {
+			AgentSessionID string `json:"agent_session_id"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &bt); err != nil {
+			t.Fatalf("decode explicit adopt: %v\n%s", err, out)
+		}
+		if bt.AgentSessionID != bareSession {
+			t.Errorf("explicit adopt session = %s, want %s (the supplied id)", bt.AgentSessionID, bareSession)
+		}
+	}
+
 	if agent != "pi" {
 		return
 	}

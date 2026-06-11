@@ -88,7 +88,7 @@ func (m *Model) matchRow(row api.ThreadRow) (rowMatch, bool) {
 		pos[ColName] = res.pos
 		best = res.score
 	}
-	if res := fuzzyScore(q, m.cwdDisplay(row.Cwd)); res.ok {
+	if res := fuzzyScore(q, m.cwdDisplay(row)); res.ok {
 		ok = true
 		pos[ColCwd] = res.pos
 		if res.score > best {

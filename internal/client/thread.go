@@ -171,10 +171,11 @@ func (c *Client) ThreadTranscript(ctx context.Context, id string, tail int) (api
 	return out, c.getJSON(ctx, url, &out)
 }
 
-// ThreadAdopt posts POST /v1/threads/adopt.
-func (c *Client) ThreadAdopt(ctx context.Context, pane, name string) (api.ThreadResponse, error) {
+// ThreadAdopt posts POST /v1/threads/adopt. sessionID, when non-empty, supplies
+// the agent's conversation id explicitly (bypassing auto-detection).
+func (c *Client) ThreadAdopt(ctx context.Context, pane, name, sessionID string) (api.ThreadResponse, error) {
 	var out api.ThreadResponse
-	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name}, &out)
+	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name, SessionID: sessionID}, &out)
 }
 
 // ThreadMeta posts POST /v1/threads/meta ('' value deletes the key).

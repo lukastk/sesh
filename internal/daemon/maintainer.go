@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
@@ -37,10 +39,14 @@ type maintainer struct {
 	started bool
 	stop    chan struct{}
 	done    chan struct{}
+	// home is THIS daemon's user home dir, used to stamp each thread's CwdRel
+	// (~-relative cwd) so cross-machine viewers can label it. "" if undeterminable.
+	home string
 }
 
 func newMaintainer(d *Daemon) *maintainer {
-	return &maintainer{d: d, st: map[string]*liveState{}, stop: make(chan struct{}), done: make(chan struct{})}
+	home, _ := os.UserHomeDir() // "" => CwdRel stays absolute (viewer shows the raw path)
+	return &maintainer{d: d, st: map[string]*liveState{}, stop: make(chan struct{}), done: make(chan struct{}), home: home}
 }
 
 // start launches the maintainer loop.
@@ -120,7 +126,10 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 	}
 	m.mu.Unlock()
 
-	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID]}
+	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID],
+		// Stamp the owner-relative cwd so cross-machine viewers (with a different home)
+		// can apply their cwd_label rules — they cannot know this machine's home.
+		CwdRel: config.TildeRelative(th.Cwd, m.home)}
 
 	// The two axes are PROBED, never read from the record: head from pane
 	// presence, busy from the pane content-diff (headful) or the turn registry

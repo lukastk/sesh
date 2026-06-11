@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 )
 
@@ -69,9 +70,9 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 // the maintainer has not ticked yet (just created) — correctness without a tick.
 func (d *Daemon) resolveRow(th api.Thread, tickets map[string]int) api.ThreadRow {
 	if snap, ok := d.maint.stateOf(th.ID); ok {
-		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment, TicketsOpen: tickets[th.ID]}
+		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment, TicketsOpen: tickets[th.ID], CwdRel: snap.CwdRel}
 	}
-	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID]}
+	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID], CwdRel: config.TildeRelative(th.Cwd, d.maint.home)}
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		head, busy = api.Headless, api.BusyIdle

@@ -55,7 +55,7 @@ var colOrder = []colSpec{
 	{name: ColName, header: "NAME", fullWidth: true,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.Name }},
 	{name: ColCwd, header: "CWD", fullWidth: true,
-		cell: func(m *Model, r api.ThreadRow) string { return m.cwdDisplay(r.Cwd) }},
+		cell: func(m *Model, r api.ThreadRow) string { return m.cwdDisplay(r) }},
 	{name: ColAgent, header: "AGENT", fixedW: 7,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.AgentKind }},
 	{name: ColMachine, header: "MACHINE", fixedW: 12,
@@ -353,16 +353,30 @@ func createdLabel(unix int64) string {
 	return t.Format("2006-01-02")
 }
 
-// cwdDisplay renders a thread's cwd for the CWD column: the [[cwd_label]]
-// transform when configured, else ~-relative.
-func (m *Model) cwdDisplay(cwd string) string {
-	if m.cwdLabeler != nil {
-		return m.cwdLabeler(cwd)
+// cwdDisplay renders a thread's cwd for the CWD column. It works on the
+// OWNER-relative path (row.CwdRel, stamped by the owning machine's daemon) so a
+// cross-machine thread labels correctly — the viewer cannot know a peer's home.
+// CwdRel is already ~-relative, so the labeler/fallback need no further home
+// stripping. A pre-CwdRel peer (rolling deploy) falls back to viewer-home
+// relativization of the absolute cwd.
+func (m *Model) cwdDisplay(r api.ThreadRow) string {
+	disp := r.CwdRel
+	if disp == "" {
+		disp = tildeRelative(r.Cwd, m.userHome) // pre-schema-8 peer, or owner home unknown
 	}
-	if m.userHome != "" {
-		if rel, ok := strings.CutPrefix(cwd, strings.TrimRight(m.userHome, "/")); ok {
+	if m.cwdLabeler != nil {
+		return m.cwdLabeler(disp)
+	}
+	return disp
+}
+
+// tildeRelative renders path ~-relative to home (the viewer-side fallback when an
+// owner-relative path is unavailable).
+func tildeRelative(path, home string) string {
+	if home != "" {
+		if rel, ok := strings.CutPrefix(path, strings.TrimRight(home, "/")); ok {
 			return "~" + rel
 		}
 	}
-	return cwd
+	return path
 }

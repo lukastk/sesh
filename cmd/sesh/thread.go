@@ -7,11 +7,32 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
 )
+
+// absCwd expands a --cwd value to an absolute path relative to the process's
+// working directory — i.e. WHERE the command was invoked — so a relative path
+// (or a leading ~) just works (the daemon requires absolute). Empty stays empty
+// (the caller's own required-check handles that). Note: for a cross-machine
+// (--machine) spawn the expansion is still against the LOCAL cwd, so pass an
+// absolute path when the target dir only exists on the remote.
+func absCwd(cwd string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	if cwd == "~" || strings.HasPrefix(cwd, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		cwd = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(cwd, "~"), "/"))
+	}
+	return filepath.Abs(cwd)
+}
 
 // runThread implements `sesh thread <new|list|kill|pane>`. Mutations route to
 // the local daemon (this machine is the thread's owner).
@@ -393,7 +414,7 @@ func threadNew(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	agent := fs.String("agent", "", "agent: claude|codex|pi (required)")
 	name := fs.String("name", "", "thread name (required)")
-	cwd := fs.String("cwd", "", "absolute start directory (required)")
+	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (required; expanded against the invocation dir)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
 	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
@@ -431,6 +452,12 @@ func threadNew(cfg config.Config, args []string) error {
 	if *agent == "" || *name == "" || *cwd == "" {
 		return errors.New("thread new: --agent, --name and --cwd are required")
 	}
+	// Relative --cwd expands against the invocation dir (the daemon needs absolute).
+	abs, err := absCwd(*cwd)
+	if err != nil {
+		return fmt.Errorf("thread new: --cwd: %w", err)
+	}
+	*cwd = abs
 	// Parent (v1 semantics, on the F1 resolver): an explicit --parent resolves
 	// (prefix ok, loud unknown); otherwise a `new` run INSIDE a thread defaults
 	// to it as parent. Inference failure here is a LEGITIMATE root, not an
@@ -683,6 +710,7 @@ func threadAdopt(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
 	pane := fs.String("pane", "", "tmux pane id on the work server (default: $TMUX_PANE)")
 	name := fs.String("name", "", "thread name (required)")
+	sessionID := fs.String("session-id", "", "agent conversation id, supplied explicitly when it can't be auto-detected (e.g. a claude launched with a bare -r)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -693,7 +721,7 @@ func threadAdopt(cfg config.Config, args []string) error {
 	if *pane == "" || *name == "" {
 		return errors.New("thread adopt: --name and a pane (--pane or $TMUX_PANE) are required")
 	}
-	resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), *pane, *name)
+	resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), *pane, *name, *sessionID)
 	if err != nil {
 		return err
 	}

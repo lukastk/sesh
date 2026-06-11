@@ -62,6 +62,12 @@ func runDelegate(cfg config.Config, args []string) error {
 		}
 		*cwd = wd
 	}
+	// A relative --cwd expands against the invocation dir (the daemon needs absolute).
+	if abs, err := absCwd(*cwd); err != nil {
+		return fmt.Errorf("delegate: --cwd: %w", err)
+	} else {
+		*cwd = abs
+	}
 	if *name == "" {
 		*name = fmt.Sprintf("delegate-%d", time.Now().Unix())
 	}

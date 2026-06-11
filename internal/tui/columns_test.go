@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -41,6 +42,68 @@ func TestFullWidthColumnsSizeToLongestCell(t *testing.T) {
 	line := m.renderCells(cols, widths, vis[1], nil, false)
 	if !strings.Contains(line, "a-much-longer-thread-name-that-must-not-truncate") {
 		t.Errorf("full-width NAME truncated: %q", line)
+	}
+}
+
+// TestCwdDisplayUsesOwnerRelative proves the cross-machine cwd-label fix: the CWD
+// column relativizes against row.CwdRel (stamped by the OWNING machine), so a
+// thread whose absolute cwd lives under a DIFFERENT home than the viewer's still
+// gets ~-relativized and labeled. Without CwdRel the viewer would show the raw
+// /home/owner/... path because stripping its own home can't match.
+func TestCwdDisplayUsesOwnerRelative(t *testing.T) {
+	// Viewer home is /Users/laptop; the thread lives under the owner's /home/server.
+	m := Model{userHome: "/Users/laptop"}
+	row := api.ThreadRow{
+		Thread: api.Thread{Cwd: "/home/server/dev/proj"},
+		CwdRel: "~/dev/proj", // owner-stamped (owner home = /home/server)
+	}
+	// No labeler: the owner-relative path is shown verbatim (not the raw absolute).
+	if got := m.cwdDisplay(row); got != "~/dev/proj" {
+		t.Errorf("cwdDisplay = %q, want owner-relative ~/dev/proj", got)
+	}
+	// With a labeler keyed on ~-form, the rule matches even though the viewer's home
+	// would never have stripped /home/server.
+	m.cwdLabeler = func(cwd string) string {
+		if cwd == "~/dev/proj" {
+			return "proj-label"
+		}
+		return "MISS:" + cwd
+	}
+	if got := m.cwdDisplay(row); got != "proj-label" {
+		t.Errorf("cwdDisplay = %q, want proj-label (labeler ran on the owner-relative path)", got)
+	}
+	// Fallback: a pre-schema-8 peer (no CwdRel) under the viewer's OWN home still
+	// relativizes; one under a foreign home shows the raw path (honest degradation).
+	self := api.ThreadRow{Thread: api.Thread{Cwd: "/Users/laptop/notes"}}
+	m.cwdLabeler = nil
+	if got := m.cwdDisplay(self); got != "~/notes" {
+		t.Errorf("fallback self cwdDisplay = %q, want ~/notes", got)
+	}
+}
+
+// TestLegendOverflowsNotClips proves feature 1: the keymap legend WRAPS to the
+// terminal width instead of being clipped at the right edge — so every binding
+// (including the trailing ones) stays visible, just across more lines.
+func TestLegendOverflowsNotClips(t *testing.T) {
+	strip := regexp.MustCompile("\x1b\\[[0-9;]*m")
+	m := Model{width: 60}
+	out := m.renderLegend()
+	if !strings.Contains(out, "\n") {
+		t.Fatalf("legend did not wrap at width 60:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := len([]rune(strings.TrimRight(strip.ReplaceAllString(line, ""), " "))); w > 60 {
+			t.Errorf("legend line exceeds width 60 (%d cols): %q", w, line)
+		}
+	}
+	// The LAST binding survives — overflow keeps it, clipping would have dropped it.
+	if !strings.Contains(strip.ReplaceAllString(out, ""), "q/esc quit") {
+		t.Errorf("legend dropped its trailing bindings (clipped, not wrapped):\n%s", out)
+	}
+	// Unknown width (no WindowSizeMsg): single line (unwrapped) so size-less tests
+	// keep their existing layout.
+	if strings.Contains((Model{}).renderLegend(), "\n") {
+		t.Errorf("legend wrapped with width unset (should be one line)")
 	}
 }
 

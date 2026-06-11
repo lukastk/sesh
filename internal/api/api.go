@@ -16,7 +16,10 @@ package api
 // 6: `notify` added to the thread record (per-thread notification gate;
 // hooks receive SESH_NOTIFY).
 // 7: `meta` (arbitrary per-thread KV) added to the thread record.
-const SchemaVersion = 7
+// 8: `cwd_rel` added to row/snapshot — Cwd ~-relative to the OWNING machine's
+// home (stamped by that machine's maintainer) so the TUI's CWD column / cwd_label
+// rules render correctly cross-machine (the viewer cannot know a peer's home).
+const SchemaVersion = 8
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

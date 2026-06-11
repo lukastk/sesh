@@ -107,9 +107,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
-		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference",
+		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (or ~), expanded against the invocation directory",
 		usage:    "sesh thread new --agent <claude|codex|pi> --name <name> --cwd <dir> [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--machine <m>] [--json]",
-		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd /tmp --headless"},
+		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless"},
 	},
 	"thread list": {
 		summary:  "list threads (id, agent, name, session, cwd); optionally archived and/or fanned out across the mesh",
@@ -162,9 +162,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread info --id 1a2b3c4d"},
 	},
 	"thread adopt": {
-		summary:  "bring a manually-launched agent (a work-server pane) under sesh management",
-		usage:    "sesh thread adopt --name <name> [--pane <pane>] [--machine <m>] [--json]",
-		examples: []string{"sesh thread adopt --name adopted-claude --pane %42", "sesh thread adopt --name here"},
+		summary:  "bring a manually-launched agent (a work-server pane) under sesh management; --session-id supplies the conversation id when it can't be auto-detected (e.g. a claude launched with a bare -r)",
+		usage:    "sesh thread adopt --name <name> [--pane <pane>] [--session-id <uuid>] [--machine <m>] [--json]",
+		examples: []string{"sesh thread adopt --name adopted-claude --pane %42", "sesh thread adopt --name here", "sesh thread adopt --name here --session-id 9b8fccb0-e57a-484c-9c3d-353489f26d67"},
 	},
 	"thread transcript": {
 		summary:  "print a thread conversation's raw transcript lines (owner-side read; current thread inferred when no id)",

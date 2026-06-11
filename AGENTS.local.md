@@ -1,5 +1,46 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## TUI/CLI batch H1–H6 (2026-06-11; api schema 7→8; mymain daemon redeployed)
+Six fixes from Lukas's feature list + two live requests. Each: research → impl →
+unit/claim test → live-smoke.
+- **H1 legend overflow**: the TUI keymap legend now WRAPS to width (`renderLegend` =
+  `styleDim.Width(m.width)`) instead of clipping at the right edge — every binding stays
+  visible. Variable height, so `scroll.go chromeLines` counts the wrapped line count
+  (`legendLines()`), or the row budget drifts on narrow panes. Unit `TestLegendOverflowsNotClips`.
+- **H2 reparent visibility bug — the ROOT CAUSE**: action errors lived in `lastErr`, which
+  `meshMsg` clears on every successful fetch → a failed reparent (bad/self/cycle/unknown
+  uuid) flashed and the reconcile fetch ERASED the warning within ms = "nothing happened,
+  no warning". Fix: separate persistent `actionErr` (loud red ✗ line, survives fetches,
+  cleared only by the next action). ALL action errors moved lastErr→actionErr (nav/stop/
+  delete/tag/reparent/notify/archive); tests use `m.ActionErr()`. Daemon already refused
+  self-parent + cycle + non-existent — they just weren't visible. claimActionReparent now
+  asserts the warning PERSISTS across a render, + self-parent + non-existent cases.
+- **H3 destructive confirm**: `d`/`a` open a y/n popup (`confirmKind`/`handleConfirmKey`);
+  `y` runs it, any other key cancels. claims action-delete/archive press d/n (cancel keeps
+  record) then d/y.
+- **H4 relative --cwd**: `absCwd()` in cmd/sesh expands relative/`~` cwd against the
+  invocation dir (filepath.Abs) for `thread new` + `delegate` (daemon still requires
+  absolute). Cross-`--machine` still needs absolute (expands locally). Unit TestAbsCwd.
+- **H5 cwd_label cross-machine — the real bug**: the labeler stripped the VIEWER's home, but
+  a mesh thread carries the OWNER's absolute cwd → a different-home viewer (laptop→mymain)
+  saw the raw `/home/lukastk/...` path, no label. Fix: the OWNING daemon's maintainer stamps
+  `CwdRel` (= `config.TildeRelative(cwd, ownerHome)`) into every ThreadSnapshot/ThreadRow
+  (api schema 7→8, additive omitempty; flows over BOTH http + ssh snapshot transports). The
+  TUI's `cwdDisplay(row)` applies label rules to `row.CwdRel` (home = OWNER data, rules =
+  VIEWER policy). Unit TestCwdDisplayUsesOwnerRelative; live-verified the daemon emits
+  `cwd_rel=~/dev/...`. Local-only (same-home) was always fine — confirmed via live render.
+- **H6 adopt --session-id**: `thread adopt` couldn't adopt a claude launched with a bare
+  `-r` (no id in argv). Added explicit `--session-id <uuid>` to AdoptThreadRequest/client/
+  CLI/daemon (bypasses per-agent detection; pane must still hold a live agent). USED IT to
+  adopt THIS very Claude Code session (id 7e108848, claude session 9b8fccb0-…) once Lukas
+  moved it onto the sesh work server (socket `sesh`, pane %0) — adopt is work-server-only,
+  so it was impossible while the session ran on the `mysystem` server. Conformance
+  thread.adopt claude branch gained the bare-claude-then-explicit-id case.
+DEPLOY STATE: mymain daemon restarted onto the new binary (schema 8) to enable H6 + H5.
+macbook/macstudio/termux daemons + cross-host partner binaries still on schema 7 — need
+redeploy for cross-machine cwd labels (additive field, so mixed-schema mesh is safe meanwhile).
+
+
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)
 tmux CANNOT map a popup pty, a pane pty, or a piped subprocess back to the attached
 client that triggered it. `display-message -p '#{client_name}'` from any such context

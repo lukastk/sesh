@@ -60,40 +60,45 @@ func (d *Daemon) handleThreadAdopt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := ""
-	switch agents.Kind(agent.Kind) {
-	case agents.Claude:
-		m := argvSessionIDRe.FindStringSubmatch(agent.Command)
-		if m == nil {
-			writeError(w, http.StatusConflict, "adopt: the claude in "+req.Pane+" carries no --session-id/--resume in its argv — its conversation can't be identified (relaunch it with --session-id, then adopt)")
+	// An EXPLICIT --session-id bypasses per-agent detection: the caller asserts the
+	// conversation id (e.g. a claude launched with a bare `-r`, where the id is not
+	// in argv). The pane must still hold a live agent (checked above).
+	sessionID := req.SessionID
+	if sessionID == "" {
+		switch agents.Kind(agent.Kind) {
+		case agents.Claude:
+			m := argvSessionIDRe.FindStringSubmatch(agent.Command)
+			if m == nil {
+				writeError(w, http.StatusConflict, "adopt: the claude in "+req.Pane+" carries no --session-id/--resume in its argv — its conversation can't be identified (pass --session-id <uuid> explicitly, or relaunch it with --session-id)")
+				return
+			}
+			sessionID = m[1]
+		case agents.Pi:
+			id, err := pi.ResolveUUIDByPane(pi.DefaultSocketsDir(), info.Pane, d.tmux.SocketPath())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if id == "" {
+				writeError(w, http.StatusConflict, "adopt: no live pi RPC socket reports pane "+req.Pane+" — can't identify its conversation")
+				return
+			}
+			sessionID = id
+		case agents.Codex:
+			id, found, err := codex.ResolveUUIDByPID(agent.PID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !found {
+				writeError(w, http.StatusConflict, "adopt: the codex in "+req.Pane+" holds no rollout file open (no turn yet) — take a turn, then adopt")
+				return
+			}
+			sessionID = id
+		default:
+			writeError(w, http.StatusBadRequest, "adopt: unknown agent kind "+agent.Kind)
 			return
 		}
-		sessionID = m[1]
-	case agents.Pi:
-		id, err := pi.ResolveUUIDByPane(pi.DefaultSocketsDir(), info.Pane, d.tmux.SocketPath())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if id == "" {
-			writeError(w, http.StatusConflict, "adopt: no live pi RPC socket reports pane "+req.Pane+" — can't identify its conversation")
-			return
-		}
-		sessionID = id
-	case agents.Codex:
-		id, found, err := codex.ResolveUUIDByPID(agent.PID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if !found {
-			writeError(w, http.StatusConflict, "adopt: the codex in "+req.Pane+" holds no rollout file open (no turn yet) — take a turn, then adopt")
-			return
-		}
-		sessionID = id
-	default:
-		writeError(w, http.StatusBadRequest, "adopt: unknown agent kind "+agent.Kind)
-		return
 	}
 
 	id := uuid.NewString()

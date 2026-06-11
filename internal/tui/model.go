@@ -161,6 +161,9 @@ type Model struct {
 	columns    []string
 	userHome   string
 	cwdLabeler func(cwd string) string
+	// colColors tints individual columns ([[tui.column_color]] + built-in defaults).
+	// Applied to non-selected, non-highlighted cells only (see renderCells).
+	colColors map[string]lipgloss.Style
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -266,6 +269,13 @@ func (m Model) WithLocal(machine, tmuxSocket string) Model {
 // is total). Unset = ~-relative paths.
 func (m Model) WithCwdLabeler(f func(string) string) Model {
 	m.cwdLabeler = f
+	return m
+}
+
+// WithColumnColors sets the per-column colour styles (already validated +
+// defaults-merged via ResolveColumnColors). Unset = no per-column tint.
+func (m Model) WithColumnColors(c map[string]lipgloss.Style) Model {
+	m.colColors = c
 	return m
 }
 
@@ -1199,12 +1209,12 @@ func (m Model) View() string {
 			att = "*" // a client is attached
 		}
 		if i == m.cursor {
-			// The selected row uses reverse video; matched-rune styling inside it
-			// would reset the reverse — selection is the dominant cue.
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, nil)
+			// The selected row uses reverse video; matched-rune styling AND per-column
+			// colour inside it would reset the reverse — selection is the dominant cue.
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, tr.pos)
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

@@ -288,7 +288,11 @@ func (m *Model) renderHeader(cols []colSpec, widths []int) string {
 // Full-width cells are padded (they never truncate); fixed cells truncate.
 // hl, when non-nil, maps column names to matched rune positions (the filter's
 // highlight); positions are styled AFTER padding so widths stay rune-true.
-func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[string][]int) string {
+// colorize applies the per-column [[tui.column_color]] tint; the caller passes
+// false for a selected row (its reverse-video wins) so colour never fights it. A
+// filter-matched cell shows the match styling instead of the column tint (match
+// wins over colour) — both keep widths rune-true (ANSI is zero-width).
+func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[string][]int, colorize bool) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
 		cell := c.cell(m, tr.row)
@@ -310,6 +314,10 @@ func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[str
 				pos = shifted
 			}
 			cell = highlight(cell, pos)
+		} else if colorize {
+			if st, ok := m.colColors[c.name]; ok {
+				cell = st.Render(cell)
+			}
 		}
 		parts[i] = cell
 	}

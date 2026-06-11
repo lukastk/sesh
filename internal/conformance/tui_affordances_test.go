@@ -8,6 +8,7 @@ package conformance
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/lukastk/sesh/internal/config"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/lukastk/sesh/internal/matrix"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -28,6 +31,7 @@ func init() {
 	registerTUIClaim("action-tag", claimActionTag)
 	registerTUIClaim("action-untag", claimActionUntag)
 	registerTUIClaim("action-reparent", claimActionReparent)
+	registerTUIClaim("column-colors", claimColumnColors)
 	registerTUIClaim("cursor-wrap", claimCursorWrap)
 	registerTUIClaim("id-toggle", claimIDToggle)
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
@@ -376,6 +380,68 @@ func claimActionReparent(t *testing.T) {
 	m = runSpecial(t, m, tea.KeyEnter) // empty input = root
 	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == "" }) {
 		t.Errorf("empty submit did not detach beta to a root; parent=%q", threadParentOf(t, sb, beta.ID))
+	}
+}
+
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+
+// claimColumnColors: the per-column colour system (NAME/CWD defaults +
+// [[tui.column_color]]) actually tints cells — and, crucially, the colour is purely
+// cosmetic: stripping the ANSI from a coloured row yields the SAME text/layout as an
+// uncoloured render, so colour never shifts a column. A non-selected row is used (a
+// selected row is reverse-video, which suppresses the per-column tint by design).
+func claimColumnColors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	// Force a colour profile: under `go test` stdout isn't a TTY, so lipgloss would
+	// otherwise strip all colour and the assertion would be vacuous.
+	prof := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prof)
+
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "colorme")
+	sb.newHeadlessThread(t, "pi", "cursor-here")
+
+	colors, err := tui.ResolveColumnColors(nil) // defaults: NAME blue, CWD green
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols := []string{tui.ColMachine, tui.ColName, tui.ColCwd}
+	mkModel := func() tui.Model {
+		return tui.New(sb.Home+"/daemon.sock", false).WithLocal(sb.Machine, sb.TmuxSocket).WithColumns(cols)
+	}
+	mc := mkModel().WithColumnColors(colors) // coloured
+	mp := mkModel()                          // control: no colours
+	if !waitUntil(20*time.Second, func() bool {
+		mc, _ = render(t, mc)
+		mp, _ = render(t, mp)
+		return len(mc.Rows()) == 2 && len(mp.Rows()) == 2
+	}) {
+		t.Fatalf("2 rows never appeared")
+	}
+	// Park the cursor on the OTHER row so "colorme" renders non-selected (coloured).
+	mc = selectRowByName(t, mc, "cursor-here")
+	mp = selectRowByName(t, mp, "cursor-here")
+
+	colored := rowLine(mc.View(), "colorme")
+	plain := rowLine(mp.View(), "colorme")
+
+	// Colour really emitted on the coloured render, and absent on the control.
+	if !strings.Contains(colored, "\x1b[") {
+		t.Errorf("no ANSI colour in the coloured row: %q", colored)
+	}
+	if strings.Contains(plain, "\x1b[") {
+		t.Errorf("control row unexpectedly carries ANSI: %q", plain)
+	}
+	// Cosmetic only: stripping the colour yields the identical layout — colour must
+	// not change column widths or content.
+	if stripANSI(colored) != plain {
+		t.Errorf("colour shifted the layout:\n colored(stripped)=%q\n plain          =%q", stripANSI(colored), plain)
 	}
 }
 

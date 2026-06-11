@@ -65,7 +65,19 @@ func runTUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled)
+	// Per-column colours: built-in defaults (NAME blue, CWD green) overlaid by any
+	// [[tui.column_color]] entries. Unknown column / bad colour is loud here.
+	var colorSpecs []tui.ColumnColorSpec
+	if tcfg != nil {
+		for _, c := range tcfg.ColumnColors {
+			colorSpecs = append(colorSpecs, tui.ColumnColorSpec{Name: c.Name, Color: c.Color})
+		}
+	}
+	colColors, err := tui.ResolveColumnColors(colorSpecs)
+	if err != nil {
+		return fmt.Errorf("tui colors: %w", err)
+	}
+	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors)
 	// CWD column labels: compiled ONCE here, loud on a broken rule; per-cwd
 	// label errors (unknown placeholder in a matching rule) are loud at startup
 	// too — never a silently-wrong column. Inside the labeler a rule error is

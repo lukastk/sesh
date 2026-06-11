@@ -24,6 +24,13 @@ type TUIConfig struct {
 	//	name   = "notify"
 	//	before = "machine"
 	ColumnMoves []ColumnMove `toml:"column"`
+	// ColumnColors tint individual columns. Built-in defaults (NAME blue, CWD
+	// green) apply unless overridden; an entry with an empty colour clears one.
+	//
+	//	[[tui.column_color]]
+	//	name  = "cwd"
+	//	color = "green"   # a name, a 0-255 number, or #rrggbb
+	ColumnColors []ColumnColor `toml:"column_color"`
 	// ExpandChildren makes tree nodes start EXPANDED (default false: children
 	// start collapsed under their parent, per v1).
 	ExpandChildren bool `toml:"expand_children"`
@@ -40,6 +47,13 @@ type TUIConfig struct {
 type TUIView struct {
 	Name   string `toml:"name"`
 	Filter string `toml:"filter"`
+}
+
+// ColumnColor tints one column. Color is a name (green/blue/…), a 0-255 palette
+// number, or a #rrggbb hex; empty clears the column's colour (incl. a default).
+type ColumnColor struct {
+	Name  string `toml:"name"`
+	Color string `toml:"color"`
 }
 
 // ColumnMove repositions one column, applied over the base set. Exactly one

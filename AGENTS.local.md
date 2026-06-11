@@ -173,6 +173,38 @@ mine to kill): new work conf + bindings were `source-file`d onto the RUNNING ser
 (status line + carrier bindings live), but a true `-f` start applies only on its next
 cycle. macstudio: still no v2 (master windows exclude it via --machines).
 
+### DONE: CLI/TUI feature batch G1–G6 (_dev/CLI_TUI_FEATURES.md, 2026-06-11; deployed both machines)
+Six features, each researched→cells/claims→gate→deploy→live-smoke→commit:
+- **G1 `thread capture`** (v1 pane-capture port): GET /v1/threads/capture → CapturePaneLines
+  (lines>0 = `capture-pane -S -N`); dead pane = LOUD 409 (no empty-string fallback); routed
+  cross-machine over the OWNER's transport (http/ssh) — strictly better than v1's local-only.
+  Cell `thread.capture` (agentic × both loc, 6 green). Live-smoked both machines incl.
+  mymain→macbook http-routed capture (real pi pane content + 409).
+- **G2 remove-tag** (`T`): tag-picker popup → `thread tag --remove`; rowPatch.removeTags
+  optimistic. Claim `action-untag`.
+- **G3 set-parent** (`P`): paste parent uuid → `thread reparent` (empty=root); NO optimistic
+  structural patch (refetch + preselect + actionMsg.expand the new parent to dodge the
+  orphan-promote/propagation race); daemon cycle-guard surfaces loud. Claim `action-reparent`.
+- **G4 per-column colours**: `[[tui.column_color]]` (name + colour name/0-255/#rrggbb) over
+  built-in defaults NAME=blue/CWD=green; empty colour clears. renderCells colorize flag,
+  precedence selected-reverse > match-highlight > colour. Unit tests + claim `column-colors`
+  (forces termenv profile since `go test` stdout strips colour; asserts colour emitted +
+  strip-ANSI == plain layout). myrig config.toml.jinja got a commented example.
+- **G5 scrolling**: vOffset/hOffset; `ctrl+j/k` half-page viewport scroll (cursor-follow),
+  `h/l` horizontal column pan, **fold moved to ←/→** (Lukas-confirmed). ▲/▼ + ‹/› indicators.
+  Inactive until a WindowSizeMsg (height/width 0 ⇒ render-all, so non-size tests unchanged).
+  Frozen-NAME DROPPED (simple whole-column pan — recorded cut). Claims scroll-vertical/
+  scroll-horizontal. New scroll.go. Also hardened claimMasterCursor's pre-existing publish race.
+- **G6 CLI help**: cmd/sesh/help.go registry (every command+subcommand: summary, usage with all
+  flags, examples) + main.go intercepts `-h`/`--help`/`help <cmd> <sub>` BEFORE routing (stdout,
+  exit 0; survives a stray --machine). help_test.go meta-test = no-silent-gap guard.
+KEY LESSONS: (1) `cp` over a running binary = ETXTBSY (Linux) → build to `.new` + `mv -f`
+(atomic rename, same fs, running inode untouched). macOS: scp into ~/.local/bin/ + `codesign
+--force --sign -` + same-dir `mv -f` (cross-fs mv re-invalidates the signature). (2) macbook
+ssh user is **lukas@macbook** (home /Users/lukas), NOT lukastk — wrong user = "too many auth
+failures". (3) supervised v2 daemon restart = `supervisorctl restart sesh-v2-daemon` (NOT the v1
+`sesh-daemon`). G1 needed daemon restart; G2–G6 are binary-only (TUI/CLI exec the binary).
+
 ## Build status: ALL GREEN
 
 Feature matrix: **120 cells** (added `master.*`, `tmux.work-conf`, `tmux.nav-in-client-multi`,

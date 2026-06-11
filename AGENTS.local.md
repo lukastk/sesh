@@ -100,7 +100,7 @@ picker routed. DEPLOY NOTE: the healer lives in the DAEMON → daemon restart re
 window supervisors keep old binaries until their window is K'd (healer recreates with
 the new one — a poor-man's rolling supervisor upgrade).
 
-### IN PROGRESS: the PARITY ROADMAP (_dev/PARITY_ROADMAP.md — THE working contract)
+### DONE: the PARITY ROADMAP (_dev/PARITY_ROADMAP.md — COMPLETE 2026-06-11)
 21 features from the (b)-list discussion, built FULL-FEATURED (Lukas's explicit
 no-scarcity directive, saved in auto-memory), each: v1 research → cells/claims →
 full gate → deploy both → live smoke → tick. DONE so far (2026-06-10): A1 columns
@@ -108,7 +108,17 @@ full gate → deploy both → live smoke → tick. DONE so far (2026-06-10): A1 
 filter, A4 predicates+[[tui.views]] (schema v4 tickets_open join), A5 parent/child
 +tree (schema v5, migration 7), F1 current-thread inference + sesh info (+ id-PREFIX
 resolution; SESH_THREAD_ID now also in headless turns). Matrix 129 cells, 33 TUI
-claims. NEXT: B1 hooks → B2 notifications → C1 await → C2 delegate → C3 subscribe →
+COMPLETE: A1 columns, A2 [[cwd_label]], A3 fzf filter, A4 predicates+views, A5
+parent/child tree, F1 inference+info, B1 hooks, B2 notifications, C1 await, C2
+delegate, C3 subscribe, D0 transcript layer, D1 tail, D2 copy, D3 fork, D4
+backup/restore, D5 adopt, D6 meta, E1 SESH_MACHINE-refusal, E2 doctor, E3 spawn
+knobs (yolo default), E4 v1-import. Schema v7; 175 cells. Deploy E2/E4 pending
+final gate (suite31). KEY late lessons: migrations are APPEND-ONLY (mid-insert
+desyncs deployed DBs); subscribe delivery is now DETERMINISTIC (daemon triggers
+on headless turn completion, not the polled eventer) + marker-based dedup test;
+the box is Lukas's SHARED working machine (load ~5 from his live sessions + the
+v1 sesh-daemon at 31%% CPU) so the heaviest cells need generous waits, not
+tighter ones. Cleaned 5275 dead test tmux sockets.
 D0-D6 transcript layer → E1-E4 hygiene. Testing lesson (bit twice): NEVER settle a
 claim on row ABSENCE alone — vacuously true pre-publish; settle on PRESENCE first.
 

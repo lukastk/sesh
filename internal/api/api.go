@@ -113,3 +113,20 @@ type SubscriptionsResponse struct {
 	Schema        int                `json:"schema"`
 	Subscriptions []SubscriptionInfo `json:"subscriptions"`
 }
+
+// --- doctor (PARITY_ROADMAP E2) ---
+
+// DoctorCheck is one diagnostic line. Status: "ok" | "warn" | "fail".
+type DoctorCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+
+// DoctorResponse is GET /v1/doctor — the DAEMON-side checks (the daemon's own
+// environment is what runs agents/tmux, and it differs from the caller's
+// shell — the deploy-env failure class).
+type DoctorResponse struct {
+	Schema int           `json:"schema"`
+	Checks []DoctorCheck `json:"checks"`
+}

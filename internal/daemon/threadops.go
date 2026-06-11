@@ -16,6 +16,7 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
 	mux.HandleFunc("POST /v1/threads/notify", d.handleThreadNotify)
 	mux.HandleFunc("GET /v1/threads/transcript", d.handleThreadTranscript)
+	mux.HandleFunc("POST /v1/threads/import", d.handleThreadImport)
 	mux.HandleFunc("POST /v1/threads/meta", d.handleThreadMeta)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
@@ -312,6 +313,44 @@ func (d *Daemon) handleThreadMeta(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+}
+
+// handleThreadImport inserts a pre-built thread record (v1 migration). No
+// agent is spawned — the record points at an existing on-disk conversation
+// (resume materializes it). A duplicate id is a loud conflict (re-import is
+// guarded client-side, but the store is the source of truth).
+func (d *Daemon) handleThreadImport(w http.ResponseWriter, r *http.Request) {
+	var th api.Thread
+	if err := decodeJSON(r, &th); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if th.ID == "" || th.AgentKind == "" {
+		writeError(w, http.StatusBadRequest, "import: id and agent are required")
+		return
+	}
+	if _, err := d.store.GetThread(th.ID); err == nil {
+		writeError(w, http.StatusConflict, "import: thread "+th.ID+" already exists")
+		return
+	}
+	if th.Machine == "" {
+		th.Machine = d.cfg.Machine
+	}
+	if th.Tags == nil {
+		th.Tags = []string{}
+	}
+	if err := d.store.InsertThread(th); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// InsertThread always lands un-archived; persist the imported archived flag.
+	if th.Archived {
+		if err := d.store.SetThreadArchived(th.ID, true); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
 }

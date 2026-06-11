@@ -147,6 +147,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh hooks:", err)
 			os.Exit(1)
 		}
+	case "import":
+		if err := runImport(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh import:", err)
+			os.Exit(1)
+		}
+	case "doctor":
+		if err := runDoctor(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh doctor:", err)
+			os.Exit(1)
+		}
 	case "cwd-label":
 		if err := runCwdLabel(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh cwd-label:", err)

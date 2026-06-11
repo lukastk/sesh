@@ -366,6 +366,16 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.import",
+		Description: "sesh import --from-v1: bring v1 records into v2 (uuid→id+session_id so resume works; per-machine; tags/parent/archived/created mapped; idempotent; --dry-run); transcripts untouched",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "daemon.doctor",
+		Description: "sesh doctor: client checks (binary, config parse, SESH_MACHINE) + DAEMON-side checks (agents on the daemon's $SHELL PATH — the deploy-env failure class — tmux, peers); fail = non-zero exit",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "daemon.hooks",
 		Description: "[[hooks]] event hooks: observed busy/head/lifecycle edges run user commands ($SHELL -c, event env); observer-bound across the mesh; list/enable/disable/test",
 		Localities:  bothLoc,

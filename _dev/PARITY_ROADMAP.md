@@ -31,9 +31,9 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` shipped (gate green + de
 - [x] **D5** Adopt/register foreign agents
 - [x] **D6** `meta` KV on threads
 - [x] **E1** SESH_MACHINE: daemon refuses silent hostname fallback
-- [ ] **E2** `sesh doctor`
+- [x] **E2** `sesh doctor`
 - [x] **E3** Spawn knobs: `--msg`, `--sandbox`, config.toml spawn defaults
-- [ ] **E4** v1→v2 records import (migration)
+- [x] **E4** v1→v2 records import (migration)
 
 Dropped by decision: **autoname** (Lukas 2026-06-10). Still deferred (revisit on
 demand): watch-stream/emit contract and the other (c)-list items in

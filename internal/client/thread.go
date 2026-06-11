@@ -170,3 +170,8 @@ func (c *Client) ThreadMeta(ctx context.Context, id, key, value string) (api.Thr
 	var out api.ThreadResponse
 	return out, c.postJSON(ctx, "http://unix/v1/threads/meta", api.MetaThreadRequest{ID: id, Key: key, Value: value}, &out)
 }
+
+// ThreadImport posts POST /v1/threads/import (raw record insert; v1 migration).
+func (c *Client) ThreadImport(ctx context.Context, th api.Thread) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/import", th, nil)
+}

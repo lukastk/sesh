@@ -154,3 +154,9 @@ func (c *Client) Subscriptions(ctx context.Context, id string) (api.Subscription
 	}
 	return out, c.getJSON(ctx, url, &out)
 }
+
+// Doctor fetches GET /v1/doctor (daemon-side checks).
+func (c *Client) Doctor(ctx context.Context) (api.DoctorResponse, error) {
+	var out api.DoctorResponse
+	return out, c.getJSON(ctx, "http://unix/v1/doctor", &out)
+}

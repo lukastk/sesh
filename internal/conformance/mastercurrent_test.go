@@ -57,6 +57,12 @@ func testMasterCurrent(t *testing.T) {
 		out, _, _ := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine)
 		t.Errorf("master-current did not return the shown thread %s; got %q", tgt.ID, strings.TrimSpace(out))
 	}
+	// --session returns the SESSION name the window shows (the prefix+a picker preselect).
+	if out, _, err := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine, "--session"); err != nil {
+		t.Errorf("master-current --session: %v", err)
+	} else if strings.TrimSpace(out) != tgt.SessionName {
+		t.Errorf("master-current --session = %q, want the shown session %q", strings.TrimSpace(out), tgt.SessionName)
+	}
 
 	// Track the change: nav the window to the FIRST thread (sesh_peerw) and re-resolve.
 	peerw := threadByName(t, peer, "peerw")

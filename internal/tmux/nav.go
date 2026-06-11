@@ -7,26 +7,26 @@ import (
 	"strings"
 )
 
-// MarkerClientThreadID resolves the @sesh-thread-id of the pane the marker's recorded
-// client is CURRENTLY viewing — i.e. the thread the master window at markerPath is
-// showing. Returns "" (NOT an error) when there's nothing to preselect: the marker is
-// absent or malformed, the recorded client is gone (stale tty), or the viewed pane is
-// a plain shell with no thread mark. It is LOUD only on a real tmux failure. The
-// client is verified by name AND pid (a recycled tty must not be mistaken for it) —
-// the same liveness contract as nav's inner switch.
-func (s *Server) MarkerClientThreadID(markerPath string) (string, error) {
+// MarkerClientCurrent resolves what the marker's recorded client is CURRENTLY
+// viewing — i.e. what the master window at markerPath is showing: its active-pane
+// @sesh-thread-id (the thread, "" for a plain-shell pane) AND its session name. Both
+// are "" (NOT an error) when there's nothing to resolve: the marker is absent or
+// malformed, or the recorded client is gone (stale tty). It is LOUD only on a real
+// tmux failure. The client is verified by name AND pid (a recycled tty must not be
+// mistaken for it) — the same liveness contract as nav's inner switch.
+func (s *Server) MarkerClientCurrent(markerPath string) (session, threadID string, err error) {
 	b, err := os.ReadFile(markerPath)
 	if err != nil {
-		return "", nil // no master client here → nothing to preselect
+		return "", "", nil // no master client here → nothing to resolve
 	}
 	f := strings.Fields(string(b))
 	if len(f) != 2 {
-		return "", nil
+		return "", "", nil
 	}
 	name, pid := f[0], f[1]
 	clients, err := s.run("list-clients", "-F", "#{client_name} #{client_pid}")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	live := false
 	for _, ln := range strings.Split(strings.TrimSpace(clients), "\n") {
@@ -36,16 +36,26 @@ func (s *Server) MarkerClientThreadID(markerPath string) (string, error) {
 		}
 	}
 	if !live {
-		return "", nil // stale marker (the recorded client is gone)
+		return "", "", nil // stale marker (the recorded client is gone)
 	}
-	// The pane the client is CURRENTLY on (its active pane) — exactly what the user
-	// sees in that master window. Its @sesh-thread-id is the current thread ("" =
-	// a plain shell, a legitimate no-preselect).
+	// What the client is CURRENTLY on (its active pane + session) — exactly what the
+	// user sees in that master window.
 	tid, err := s.run("display-message", "-p", "-c", name, "-F", "#{"+ThreadIDOption+"}")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return strings.TrimSpace(tid), nil
+	sess, err := s.run("display-message", "-p", "-c", name, "-F", "#{client_session}")
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(sess), strings.TrimSpace(tid), nil
+}
+
+// MarkerClientThreadID is the thread-only view of MarkerClientCurrent (the TUI
+// master-cursor preselect; prefix+a uses the session via the full resolver).
+func (s *Server) MarkerClientThreadID(markerPath string) (string, error) {
+	_, tid, err := s.MarkerClientCurrent(markerPath)
+	return tid, err
 }
 
 // SelectWindow makes window (by name) the active window — the OUTER half of

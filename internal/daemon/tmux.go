@@ -22,12 +22,12 @@ func (d *Daemon) handleTmuxMasterCurrent(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "master-current: origin is required")
 		return
 	}
-	tid, err := d.tmux.MarkerClientThreadID(tmux.MasterClientMarker(d.cfg.Home, origin))
+	session, tid, err := d.tmux.MarkerClientCurrent(tmux.MasterClientMarker(d.cfg.Home, origin))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid})
+	writeJSON(w, http.StatusOK, api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid, Session: session})
 }
 
 // handleTmuxNav serves POST /v1/tmux/nav: the INNER switch-client, run in-process

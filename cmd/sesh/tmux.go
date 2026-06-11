@@ -58,17 +58,22 @@ func runTmux(args []string) error {
 func tmuxMasterCurrent(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("master-current", flag.ContinueOnError)
 	origin := fs.String("origin", "", "the master's machine (whose marker to read) (required)")
+	asSession := fs.Bool("session", false, "print the current SESSION name instead of the thread id (for the prefix+a picker)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *origin == "" {
 		return errors.New("master-current: --origin is required")
 	}
-	tid, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
+	session, tid, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
 	if err != nil {
 		return err
 	}
-	fmt.Println(tid)
+	if *asSession {
+		fmt.Println(session)
+	} else {
+		fmt.Println(tid)
+	}
 	return nil
 }
 

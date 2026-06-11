@@ -390,12 +390,12 @@ var helpRegistry = map[string]cmdHelp{
 	"master": {
 		summary:  "master-tmux cockpit — one window per machine, each an auto-reconnecting attach into that machine's work server (up | window | attach | down | ensure | watchers). NOT --machine routable",
 		usage:    "sesh master <up|window|attach|down|ensure|watchers>",
-		examples: []string{"sesh master up --tmux-conf ~/.sesh-v2/myrig/tmux.master.conf", "sesh master attach"},
+		examples: []string{"sesh master up --tmux-conf ~/.sesh/myrig/tmux.master.conf", "sesh master attach"},
 	},
 	"master up": {
 		summary:  "build the master server (one window per machine, each running the per-window supervisor); loudly refuses if already up",
 		usage:    "sesh master up [--machines <m1,m2,…>] [--tmux-conf <file>]",
-		examples: []string{"sesh master up", "sesh master up --machines self,macbook --tmux-conf ~/.sesh-v2/myrig/tmux.master.conf"},
+		examples: []string{"sesh master up", "sesh master up --machines self,macbook --tmux-conf ~/.sesh/myrig/tmux.master.conf"},
 	},
 	"master window": {
 		summary:  "the per-window supervisor: attach into a machine's work server and self-heal with backoff on every drop (never returns)",
@@ -426,12 +426,12 @@ var helpRegistry = map[string]cmdHelp{
 	"peer": {
 		summary:  "local mesh registry of remote machines (add | list | remove). NOT --machine routable",
 		usage:    "sesh peer <add|list|remove>",
-		examples: []string{"sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh-v2", "sesh peer list"},
+		examples: []string{"sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh", "sesh peer list"},
 	},
 	"peer add": {
 		summary:  "register a remote machine; an --api-addr (with a token) opts the peer into HTTP transport, otherwise ssh",
 		usage:    "sesh peer add --machine <m> --ssh <user@host> --home <remote-home> [--port <p>] [--binary <path>] [--tmux-socket <name>] [--codex-home <dir>] [--tmux-conf <file>] [--api-addr <host:port> (--api-token <t>|--api-token-file <file>)]",
-		examples: []string{"sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh-v2 --tmux-socket mytmux", "sesh peer add --machine work --ssh lukas@work --home ~/.sesh-v2 --api-addr 100.x.y.z:7070 --api-token-file ~/.sesh-v2/token"},
+		examples: []string{"sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh --tmux-socket mytmux", "sesh peer add --machine work --ssh lukas@work --home ~/.sesh --api-addr 100.x.y.z:7070 --api-token-file ~/.sesh/token"},
 	},
 	"peer list": {
 		summary:  "list registered peers (machine, transport, ssh/api target, home)",

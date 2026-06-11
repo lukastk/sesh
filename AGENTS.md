@@ -39,6 +39,7 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
 - **Tests may live outside the matrix.** Not every test maps to a cell — unit tests, regression tests, and helper tests are free. The per-cell expectation applies *only* to features registered as conformant in the matrix.
 - **`sesh` is mechanism, not UX.** Keep the CLI explicit (no magic defaults) and machine-readable (`--json`, stable/versioned schema). Ergonomics belong in `myrig` shell wrappers, not here. Do not grow a shell-glue layer inside this repo.
 - **If you find yourself implementing a hack to get something to work, stop.** It usually means a bug to fix or a design decision for Lukas. Surface it in your summary rather than papering over it.
+- **The CLI skill must stay in sync.** `skills/sesh-cli/SKILL.md` is the user-facing guide to the CLI/TUI. Any change to the CLI surface — a new or removed command, a renamed/added flag, changed semantics, new TUI keys or columns, new env vars — MUST be accompanied by an update to that skill file in the same change. A CLI change without a corresponding skill update is incomplete. (The skill documents *using* sesh, not developing it.) The same applies to the `--help` registry in `cmd/sesh/help.go` (its meta-test enforces a help entry per command).
 - **Commit messages are prompts.** Write each commit message so another agent could recreate the work from it.
 
 ---

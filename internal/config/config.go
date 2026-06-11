@@ -60,7 +60,7 @@ type Config struct {
 
 // Load resolves config from the environment:
 //
-//	SESH_HOME     base dir (default ~/.sesh-v2)
+//	SESH_HOME     base dir (default ~/.sesh)
 //	SESH_MACHINE  machine identity (default hostname)
 //
 // It panics only on a truly broken environment (no home dir AND no SESH_HOME,
@@ -73,10 +73,10 @@ func Load() Config {
 		if err != nil {
 			panic("config: SESH_HOME unset and cannot resolve user home dir: " + err.Error())
 		}
-		// ~/.sesh-v2, NOT ~/.sesh: the live v1 installation owns ~/.sesh on
-		// Lukas's machines — a bare v2 invocation must never read or write v1's
-		// store/config. Revisit when v1 retires.
-		home = filepath.Join(uh, ".sesh-v2")
+		// ~/.sesh — the canonical home now that the old (v1) sesh has retired and
+		// this is THE sesh. (Until 2026-06-11 this defaulted to ~/.sesh-v2 to avoid
+		// clobbering the live v1 install; v1 is gone, so sesh owns ~/.sesh.)
+		home = filepath.Join(uh, ".sesh")
 	}
 
 	machine := os.Getenv("SESH_MACHINE")

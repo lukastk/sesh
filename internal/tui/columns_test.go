@@ -81,3 +81,53 @@ func TestColumnsRenderInConfiguredOrder(t *testing.T) {
 		t.Errorf("i did not prepend ID: %v", cols)
 	}
 }
+
+func TestApplyColumnMoves(t *testing.T) {
+	base := []string{ColMachine, ColAgent, ColName, ColCwd, ColTags, ColNotify}
+
+	// Absolute: notify → position 1 (first), rest keep order.
+	got, err := ApplyColumnMoves(base, []ColumnMove{{Name: ColNotify, Position: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0] != ColNotify || got[1] != ColMachine {
+		t.Errorf("absolute move: %v", got)
+	}
+
+	// Relative: created inserted just after name (not in base → added).
+	got, err = ApplyColumnMoves(base, []ColumnMove{{Name: ColCreated, After: ColName}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := indexOfStr(got, ColCreated); i < 1 || got[i-1] != ColName {
+		t.Errorf("after move: %v", got)
+	}
+
+	// before.
+	got, _ = ApplyColumnMoves(base, []ColumnMove{{Name: ColTags, Before: ColMachine}})
+	if got[0] != ColTags {
+		t.Errorf("before move: %v", got)
+	}
+
+	// Loud: unknown column, no anchor, both anchors, unknown anchor.
+	for _, mv := range []ColumnMove{
+		{Name: "bogus", Position: 1},
+		{Name: ColTags},
+		{Name: ColTags, After: ColName, Position: 2},
+		{Name: ColTags, After: "nope"},
+		{Name: ColTags, Position: 0, Before: ""},
+	} {
+		if _, err := ApplyColumnMoves(base, []ColumnMove{mv}); err == nil {
+			t.Errorf("move %+v should be loud", mv)
+		}
+	}
+}
+
+func indexOfStr(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}

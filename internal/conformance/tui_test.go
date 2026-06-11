@@ -45,6 +45,7 @@ var declaredTUIClaims = []string{
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
 	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME never truncates
 	"cwd-label-column",          // the CWD column renders a real thread's real cwd through the [[cwd_label]] rules; unconfigured = ~-relative
+	"columns-reorder",           // [[tui.column]] position/after/before reposition columns over the default set (config→render)
 	"filter-narrow",             // / + typing narrows to matching real rows with a live matched/total count
 	"filter-rank",               // fuzzy ranking: a word-boundary match outranks a mid-word match
 	"filter-caret",              // caret editing: arrows/home position, runes insert AT the caret

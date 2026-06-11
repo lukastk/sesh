@@ -32,6 +32,7 @@ func init() {
 	registerTUIClaim("uuid-popup-copy", claimUUIDPopupCopy)
 	registerTUIClaim("columns-config", claimColumnsConfig)
 	registerTUIClaim("cwd-label-column", claimCwdLabelColumn)
+	registerTUIClaim("columns-reorder", claimColumnsReorder)
 	registerTUIClaim("notify-toggle", claimNotifyToggle)
 }
 
@@ -491,7 +492,7 @@ func claimNotifyToggle(t *testing.T) {
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	m, _ = renderUntilRow(t, m, "muteme")
 	// Default notify=on → the NTF bell ◉ is shown.
-	if !strings.Contains(rowLine(m.View(), "muteme"), "◉") {
+	if !strings.Contains(rowLine(m.View(), "muteme"), "▪") {
 		t.Errorf("NTF column missing the bell for a notify-on thread: %q", rowLine(m.View(), "muteme"))
 	}
 	m = runKey(t, m, "n")
@@ -501,7 +502,7 @@ func claimNotifyToggle(t *testing.T) {
 	// Muted → the bell disappears (blank, NOT a glyph).
 	if !waitUntil(15*time.Second, func() bool {
 		m, _ = render(t, m)
-		return !strings.Contains(rowLine(m.View(), "muteme"), "◉")
+		return !strings.Contains(rowLine(m.View(), "muteme"), "▪")
 	}) {
 		t.Errorf("NTF bell still shown after muting: %q", rowLine(m.View(), "muteme"))
 	}
@@ -512,9 +513,77 @@ func claimNotifyToggle(t *testing.T) {
 	// Re-enabled → the bell returns.
 	if !waitUntil(15*time.Second, func() bool {
 		m, _ = render(t, m)
-		return strings.Contains(rowLine(m.View(), "muteme"), "◉")
+		return strings.Contains(rowLine(m.View(), "muteme"), "▪")
 	}) {
 		t.Errorf("NTF bell did not return after re-enabling: %q", rowLine(m.View(), "muteme"))
 	}
 	_ = th
+}
+
+// claimColumnsReorder: [[tui.column]] moves (absolute position + relative
+// anchor) reposition columns over the default set, end-to-end through the
+// config loader, rendered against a real thread.
+func claimColumnsReorder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "ordered")
+
+	// Move NOTIFY to absolute position 1, and CREATED to just after NAME.
+	conf := "[[tui.column]]\nname = \"notify\"\nposition = 1\n[[tui.column]]\nname = \"created\"\nafter = \"name\"\n"
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tcfg, err := config.LoadTUI(sb.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err := tui.ResolveColumns(nil) // default set
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moves []tui.ColumnMove
+	for _, mv := range tcfg.ColumnMoves {
+		moves = append(moves, tui.ColumnMove{Name: mv.Name, After: mv.After, Before: mv.Before, Position: mv.Position})
+	}
+	cols, err = tui.ApplyColumnMoves(cols, moves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NOTIFY first, CREATED immediately after NAME.
+	if cols[0] != tui.ColNotify {
+		t.Errorf("notify not first after position=1: %v", cols)
+	}
+	ni, ci := -1, -1
+	for i, c := range cols {
+		if c == tui.ColName {
+			ni = i
+		}
+		if c == tui.ColCreated {
+			ci = i
+		}
+	}
+	if ci != ni+1 {
+		t.Errorf("created not right after name: %v", cols)
+	}
+
+	// The header row renders in that order (NTF column header before MACHINE).
+	m := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols)
+	m, view := renderUntilRowView(t, m, "ordered")
+	header := firstHeaderLine(view)
+	if strings.Index(header, "NTF") > strings.Index(header, "MACHINE") {
+		t.Errorf("NTF header not before MACHINE: %q", header)
+	}
+}
+
+// firstHeaderLine returns the column-header line (the one with MACHINE).
+func firstHeaderLine(view string) string {
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "MACHINE") {
+			return l
+		}
+	}
+	return ""
 }

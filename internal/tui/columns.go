@@ -74,7 +74,7 @@ var colOrder = []colSpec{
 	{name: ColNotify, header: "NTF", fixedW: 3,
 		cell: func(_ *Model, r api.ThreadRow) string {
 			if r.Notify {
-				return "◉" // notifications on; blank = off
+				return "▪" // notifications on; blank = off
 			}
 			return ""
 		}},
@@ -126,6 +126,87 @@ func ResolveColumns(names []string) ([]string, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("empty column set")
+	}
+	return out, nil
+}
+
+
+// ColumnMove repositions one column over the base set (see config.ColumnMove).
+type ColumnMove struct {
+	Name     string
+	After    string
+	Before   string
+	Position int // 1-based; 0 = unset
+}
+
+// ApplyColumnMoves applies the moves to a base column list, in order. Each
+// move removes its column (if present) and re-inserts it: relative to an
+// anchor (after/before) or at an absolute 1-based position. A column not in
+// the base is inserted. Validation is LOUD: an unknown column/anchor, more
+// than one of after/before/position, or none, is an error the user must fix.
+func ApplyColumnMoves(base []string, moves []ColumnMove) ([]string, error) {
+	known := map[string]bool{}
+	for _, c := range colOrder {
+		known[c.name] = true
+	}
+	out := append([]string(nil), base...)
+	indexOf := func(name string) int {
+		for i, n := range out {
+			if n == name {
+				return i
+			}
+		}
+		return -1
+	}
+	for i, mv := range moves {
+		if mv.Name == "" {
+			return nil, fmt.Errorf("[tui.column] %d: name is required", i+1)
+		}
+		if !known[mv.Name] {
+			return nil, fmt.Errorf("[tui.column] %q: unknown column (valid: %s)", mv.Name, strings.Join(ValidColumnNames(), ", "))
+		}
+		set := 0
+		if mv.After != "" {
+			set++
+		}
+		if mv.Before != "" {
+			set++
+		}
+		if mv.Position != 0 {
+			set++
+		}
+		if set != 1 {
+			return nil, fmt.Errorf("[tui.column] %q: set exactly one of after / before / position", mv.Name)
+		}
+		// Remove the column from its current spot (a move, not a duplicate).
+		if cur := indexOf(mv.Name); cur >= 0 {
+			out = append(out[:cur], out[cur+1:]...)
+		}
+		// Resolve the insertion index.
+		var at int
+		switch {
+		case mv.Position != 0:
+			if mv.Position < 1 {
+				return nil, fmt.Errorf("[tui.column] %q: position must be >= 1 (1 = first)", mv.Name)
+			}
+			at = mv.Position - 1
+		case mv.After != "":
+			anchor := indexOf(mv.After)
+			if anchor < 0 {
+				return nil, fmt.Errorf("[tui.column] %q: anchor %q (after) is not in the column set", mv.Name, mv.After)
+			}
+			at = anchor + 1
+		default: // before
+			anchor := indexOf(mv.Before)
+			if anchor < 0 {
+				return nil, fmt.Errorf("[tui.column] %q: anchor %q (before) is not in the column set", mv.Name, mv.Before)
+			}
+			at = anchor
+		}
+		if at > len(out) {
+			at = len(out)
+		}
+		out = append(out[:at], append([]string{mv.Name}, out[at:]...)...)
 	}
 	return out, nil
 }

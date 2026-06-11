@@ -45,6 +45,16 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui columns: %w", err)
 	}
+	// [[tui.column]] moves reposition individual columns over the base set.
+	if tcfg != nil && len(tcfg.ColumnMoves) > 0 {
+		var moves []tui.ColumnMove
+		for _, mv := range tcfg.ColumnMoves {
+			moves = append(moves, tui.ColumnMove{Name: mv.Name, After: mv.After, Before: mv.Before, Position: mv.Position})
+		}
+		if cols, err = tui.ApplyColumnMoves(cols, moves); err != nil {
+			return fmt.Errorf("tui columns: %w", err)
+		}
+	}
 	var views []tui.ViewSpec
 	if tcfg != nil {
 		for _, v := range tcfg.Views {

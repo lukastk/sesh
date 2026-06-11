@@ -16,6 +16,14 @@ import (
 //	columns = ["machine", "agent", "name", "cwd", "tags"]
 type TUIConfig struct {
 	Columns []string `toml:"columns"`
+	// ColumnMoves reposition INDIVIDUAL columns relative to an anchor, applied
+	// on top of the base set (the default, or `columns`) — so you can move one
+	// column without enumerating them all.
+	//
+	//	[[tui.column]]
+	//	name   = "notify"
+	//	before = "machine"
+	ColumnMoves []ColumnMove `toml:"column"`
 	// ExpandChildren makes tree nodes start EXPANDED (default false: children
 	// start collapsed under their parent, per v1).
 	ExpandChildren bool `toml:"expand_children"`
@@ -32,6 +40,18 @@ type TUIConfig struct {
 type TUIView struct {
 	Name   string `toml:"name"`
 	Filter string `toml:"filter"`
+}
+
+// ColumnMove repositions one column, applied over the base set. Exactly one
+// of After/Before (relative to an anchor column) or Position (absolute,
+// 1-based: position 1 = the first column) is set. A column not already in the
+// base set is INSERTED at that position (so you can add e.g. `created` without
+// re-listing the set).
+type ColumnMove struct {
+	Name     string `toml:"name"`
+	After    string `toml:"after"`
+	Before   string `toml:"before"`
+	Position int    `toml:"position"`
 }
 
 type tuiConfigFile struct {

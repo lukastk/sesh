@@ -128,6 +128,15 @@ type Model struct {
 	uuidPopup bool
 	note      string
 
+	// tagPopup: `T` opens a picker over the selected thread's tags; ↑/↓ (or j/k) move,
+	// enter removes the highlighted tag (routed to the owner), esc/q closes. tagPopupRow
+	// holds the tag list captured at open and is decremented optimistically as tags are
+	// removed, so several can be stripped without reopening; the popup closes when the
+	// last tag goes.
+	tagPopup       bool
+	tagPopupRow    api.ThreadRow
+	tagPopupCursor int
+
 	// customViews are the compiled [[tui.views]] entries (after the built-ins
 	// in the Tab cycle).
 	customViews []customView
@@ -505,10 +514,11 @@ const optimisticTTL = 4
 
 // rowPatch is a set of optimistic field overrides for one row (nil/empty = untouched).
 type rowPatch struct {
-	name    *string
-	notify  *bool
-	addTags []string
-	ttl     int
+	name       *string
+	notify     *bool
+	addTags    []string
+	removeTags []string
+	ttl        int
 }
 
 func (p *rowPatch) merge(o *rowPatch) {
@@ -519,6 +529,7 @@ func (p *rowPatch) merge(o *rowPatch) {
 		p.notify = o.notify
 	}
 	p.addTags = append(p.addTags, o.addTags...)
+	p.removeTags = append(p.removeTags, o.removeTags...)
 	if o.ttl > p.ttl {
 		p.ttl = o.ttl
 	}
@@ -536,6 +547,11 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 			r.Tags = append(append([]string(nil), r.Tags...), t)
 		}
 	}
+	for _, t := range p.removeTags {
+		if containsStr(r.Tags, t) {
+			r.Tags = removeStr(r.Tags, t)
+		}
+	}
 }
 
 // satisfied reports whether the server row already reflects every override.
@@ -548,6 +564,11 @@ func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 	}
 	for _, t := range p.addTags {
 		if !containsStr(r.Tags, t) {
+			return false
+		}
+	}
+	for _, t := range p.removeTags {
+		if containsStr(r.Tags, t) {
 			return false
 		}
 	}
@@ -599,6 +620,17 @@ func containsStr(s []string, v string) bool {
 	return false
 }
 
+// removeStr returns a copy of s with every occurrence of v dropped.
+func removeStr(s []string, v string) []string {
+	out := make([]string, 0, len(s))
+	for _, x := range s {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 func sptr(s string) *string { return &s }
 func bptr(b bool) *bool     { return &b }
 
@@ -613,6 +645,9 @@ type navDoneMsg struct{}
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
+	}
+	if m.tagPopup {
+		return m.handleTagPopupKey(msg)
 	}
 	if m.prompting != promptNone {
 		return m.handlePromptKey(msg)
@@ -658,6 +693,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput = promptTag, row, nil
 		}
+	case "T":
+		if row, ok := m.Selected(); ok {
+			if len(row.Tags) == 0 {
+				m.note = "no tags to remove"
+			} else {
+				m.tagPopup, m.tagPopupRow, m.tagPopupCursor = true, row, 0
+			}
+		}
 	case "x":
 		return m, m.stopSelected()
 	case "d":
@@ -684,6 +727,53 @@ func (m Model) handleUUIDKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// handleTagPopupKey drives the remove-tag picker: ↑/↓ (or j/k) move, enter removes
+// the highlighted tag from the thread (routed to the owner) and drops it from the
+// list, esc/q closes. The popup closes when the last tag is removed.
+func (m Model) handleTagPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	tags := m.tagPopupRow.Tags
+	switch msg.String() {
+	case "esc", "ctrl+c", "q":
+		m.tagPopup = false
+		return m, nil
+	case "up", "k":
+		if m.tagPopupCursor > 0 {
+			m.tagPopupCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.tagPopupCursor < len(tags)-1 {
+			m.tagPopupCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.tagPopupCursor < 0 || m.tagPopupCursor >= len(tags) {
+			m.tagPopup = false
+			return m, nil
+		}
+		tag := tags[m.tagPopupCursor]
+		cmd := m.removeTagRow(m.tagPopupRow, tag)
+		// Drop the tag from the popup's own list optimistically so several can be
+		// stripped in one sitting; close when none remain, clamp the cursor otherwise.
+		remaining := removeStr(tags, tag)
+		m.tagPopupRow.Tags = remaining
+		if len(remaining) == 0 {
+			m.tagPopup = false
+		} else if m.tagPopupCursor >= len(remaining) {
+			m.tagPopupCursor = len(remaining) - 1
+		}
+		return m, cmd
+	}
+	return m, nil
+}
+
+// removeTagRow removes a tag from a thread via the `thread tag --remove` verb,
+// routed to the owning machine, with an optimistic patch so the TAGS column drops
+// it instantly.
+func (m Model) removeTagRow(row api.ThreadRow, tag string) tea.Cmd {
+	return m.routedVerb(row, &rowPatch{removeTags: []string{tag}, ttl: optimisticTTL}, "tag", "--remove", tag)
 }
 
 // handlePromptKey edits the line-prompt: Enter submits, Esc cancels, Backspace
@@ -1025,6 +1115,17 @@ func (m Model) View() string {
 			b.WriteString(styleDim.Render("  c to copy · any other key to close") + "\n")
 		}
 	}
+	if m.tagPopup {
+		b.WriteString(styleHeader.Render("┃ remove tag · "+m.tagPopupRow.Name+" ┃") + "\n")
+		for i, tag := range m.tagPopupRow.Tags {
+			if i == m.tagPopupCursor {
+				b.WriteString(styleSelected.Render("  > "+tag) + "\n")
+			} else {
+				b.WriteString("    " + tag + "\n")
+			}
+		}
+		b.WriteString(styleDim.Render("  ↑/↓ move · enter remove · esc close") + "\n")
+	}
 	if m.prompting != promptNone {
 		label := "rename"
 		if m.prompting == promptTag {
@@ -1074,9 +1175,9 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · T untag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	default:
-		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · T untag · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	}
 	return b.String()
 }

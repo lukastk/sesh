@@ -39,6 +39,7 @@ var declaredTUIClaims = []string{
 	"view-cycle-tab",            // Tab cycles active/archived/all against REAL archived state; the title names the view
 	"action-rename",             // the r line-prompt really renames the thread on the daemon
 	"action-tag",                // the t line-prompt really adds a tag on the daemon
+	"action-untag",              // T opens a picker over the thread's tags; enter removes the highlighted one on the daemon, others survive
 	"cursor-wrap",               // up/down wrap around the row list
 	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
 	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it

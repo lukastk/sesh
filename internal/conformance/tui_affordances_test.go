@@ -26,6 +26,7 @@ func init() {
 	registerTUIClaim("view-cycle-tab", claimViewCycleTab)
 	registerTUIClaim("action-rename", claimActionRename)
 	registerTUIClaim("action-tag", claimActionTag)
+	registerTUIClaim("action-untag", claimActionUntag)
 	registerTUIClaim("cursor-wrap", claimCursorWrap)
 	registerTUIClaim("id-toggle", claimIDToggle)
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
@@ -236,6 +237,79 @@ func claimActionTag(t *testing.T) {
 	if !tagged {
 		t.Fatalf("daemon record did not gain tag urgent9 (TUI tag did not act)")
 	}
+}
+
+// claimActionUntag: `T` opens a picker over the selected thread's tags; navigating
+// to one and pressing enter REMOVES exactly that tag on the daemon (the other tags
+// survive), and the TAGS column drops it optimistically. The mirror of action-tag.
+func claimActionUntag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "untagme")
+	// Seed two tags (append order: keepme1, dropme2).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "tag", "--id", th.ID, "--add", "keepme1", "--add", "dropme2"); err != nil {
+		t.Fatalf("seed tags: %v\n%s", err, stderr)
+	}
+
+	bin := seshBin(t)
+	env := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "untagme")
+	// Wait for both tags to land in the rendered row (the maintainer must publish them).
+	if !waitUntil(15*time.Second, func() bool {
+		m, _ = render(t, m)
+		line := rowLine(m.View(), "untagme")
+		return strings.Contains(line, "keepme1") && strings.Contains(line, "dropme2")
+	}) {
+		t.Fatalf("tags never appeared in the row: %q", rowLine(m.View(), "untagme"))
+	}
+
+	// Open the picker, move to the SECOND tag (dropme2), remove it.
+	m = runKey(t, m, "T")
+	if !strings.Contains(m.View(), "remove tag") {
+		t.Fatalf("T did not open the remove-tag popup: %q", m.View())
+	}
+	m = runSpecial(t, m, tea.KeyDown)
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.LastErr() != nil {
+		t.Fatalf("untag action errored: %v", m.LastErr())
+	}
+	m = runKey(t, m, "q") // close the popup so rowLine reads the grid row, not the popup header
+
+	// OPTIMISTIC: the removed tag is gone from the row, the kept one remains.
+	line := rowLine(m.View(), "untagme")
+	if strings.Contains(line, "dropme2") {
+		t.Errorf("removed tag still shown optimistically: %q", line)
+	}
+	if !strings.Contains(line, "keepme1") {
+		t.Errorf("kept tag vanished optimistically: %q", line)
+	}
+
+	// DAEMON TRUTH: the record dropped exactly dropme2.
+	var tags []string
+	for _, th2 := range sb.listThreads(t) {
+		if th2.ID == th.ID {
+			tags = th2.Tags
+		}
+	}
+	if containsStrTest(tags, "dropme2") {
+		t.Errorf("daemon record still has dropme2: %v", tags)
+	}
+	if !containsStrTest(tags, "keepme1") {
+		t.Errorf("daemon record lost keepme1 (over-removed): %v", tags)
+	}
+}
+
+func containsStrTest(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // claimCursorWrap: up from the top wraps to the bottom row, down from the bottom

@@ -51,6 +51,7 @@ var skipReasons = map[string]string{
 	"route.parity":              "--machine routing over ssh: thread/ticket/tmux ops land on the peer's daemon",
 	"route.parity.http":         "--machine routing over the peer's TCP API (http) — SSH↔HTTP routing parity twin",
 	"tmux.nav-in-client":        "nav --in-client switches the current client to a local session (no master); loud on remote target / off-socket",
+	"tmux.nav-window":           "nav --thread lands on the WINDOW holding the thread's @sesh-thread-id pane, not the session's last-active window (multi-window session); a session-level nav without --thread stays put",
 	"master.up":                 "sesh master up builds a window per machine, each attached into that machine's work server (peer over ssh)",
 	"master.reconnect":          "the per-window supervisor re-establishes a dropped attach (local + ssh-localhost peer)",
 	"master.holding":            "an empty work server's master window falls back to a holding 'scratch' shell, not a 'no sessions' loop",

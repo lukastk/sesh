@@ -92,6 +92,10 @@ type SendTextRequest struct {
 type NavRequest struct {
 	Session string `json:"session"`
 	Origin  string `json:"origin"`
+	// ThreadID, when set, makes the inner switch land on the WINDOW holding that
+	// thread's @sesh-thread-id pane (resolved on the daemon's own work server), not
+	// the session's last-active window. Empty = a plain session-level switch.
+	ThreadID string `json:"thread_id,omitempty"`
 }
 
 // MasterCurrentResponse returns what the daemon's work server is currently showing

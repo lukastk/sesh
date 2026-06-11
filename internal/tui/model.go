@@ -237,8 +237,10 @@ type Model struct {
 
 	// attachTarget, when set, means the TUI quit in order to ATTACH the terminal to a
 	// thread (Enter from a plain shell, outside tmux). The caller reads PendingAttach
-	// after Run() and execs the attach. "" = quit normally.
+	// after Run() and execs the attach. "" = quit normally. attachThread carries the
+	// thread id so the attach lands on the window holding its pane.
 	attachTarget string
+	attachThread string
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -274,7 +276,11 @@ func (m Model) PendingAttach() ([]string, bool) {
 	if m.attachTarget == "" {
 		return nil, false
 	}
-	return []string{m.binaryPath, "tmux", "nav", "--to", m.attachTarget, "--attach"}, true
+	argv := []string{m.binaryPath, "tmux", "nav", "--to", m.attachTarget, "--attach"}
+	if m.attachThread != "" {
+		argv = append(argv, "--thread", m.attachThread)
+	}
+	return argv, true
 }
 
 // WithClient sets the tmux client this TUI renders on (for in-client nav's --client).
@@ -485,7 +491,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case attachMsg:
 		// Quit so the terminal is restored, then runTUI execs the attach.
-		m.attachTarget = msg.target
+		m.attachTarget, m.attachThread = msg.target, msg.thread
 		return m, tea.Quit
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -694,8 +700,9 @@ func sptr(s string) *string { return &s }
 func bptr(b bool) *bool     { return &b }
 
 // attachMsg asks the TUI to quit and have the caller attach the terminal to target
-// (<machine>:<session>) — used when Enter is pressed outside tmux.
-type attachMsg struct{ target string }
+// (<machine>:<session>) — used when Enter is pressed outside tmux. thread carries the
+// thread id so the attach lands on the WINDOW holding its pane.
+type attachMsg struct{ target, thread string }
 
 // navDoneMsg reports a successful nav: the user is where they asked to be, so the
 // TUI quits. (A FAILED nav stays an actionMsg with the error, keeping the TUI open.)
@@ -1044,9 +1051,11 @@ func (m Model) navSelected() tea.Cmd {
 		// `tmux nav --attach` (which, unlike the TUI, can reach the peer registry for a
 		// remote attach). Inside tmux: switch in place / via the master.
 		if m.tmux == "" {
-			return attachMsg{target: target}
+			return attachMsg{target: target, thread: row.ID}
 		}
-		args := []string{"tmux", "nav", "--to", target}
+		// --thread makes nav land on the WINDOW holding this thread's pane (not the
+		// session's last-active window) — resolved on the owner's work server.
+		args := []string{"tmux", "nav", "--to", target, "--thread", row.ID}
 		if useInClient {
 			args = append(args, "--in-client")
 			if m.clientName != "" {

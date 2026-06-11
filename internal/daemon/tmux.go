@@ -45,7 +45,7 @@ func (d *Daemon) handleTmuxNav(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "nav: session and origin are required")
 		return
 	}
-	script := tmux.InnerSwitchScript(d.cfg.TmuxSocket, req.Session, tmux.MasterClientMarker(d.cfg.Home, req.Origin))
+	script := tmux.InnerSwitchScript(d.cfg.TmuxSocket, req.Session, req.ThreadID, tmux.MasterClientMarker(d.cfg.Home, req.Origin))
 	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("nav inner switch: %v: %s", err, out))
 		return

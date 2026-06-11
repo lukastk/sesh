@@ -95,7 +95,7 @@ func MasterClientMarker(home, origin string) string {
 // clients are NOT — fail loudly (an old attach predating the marker needs a
 // master restart) rather than moving someone else's view, which is exactly
 // the bug the old `list-clients | head -1` resolution had.
-func InnerSwitchScript(socket, session, marker string) string {
+func InnerSwitchScript(socket, session, threadID, marker string) string {
 	s := shArg(socket)
 	tgt := shArg("=" + session)
 	mk := shArg(marker)
@@ -105,7 +105,21 @@ func InnerSwitchScript(socket, session, marker string) string {
 	// nothing) — switch-client does — so the attach target is the bare name.
 	attach := fmt.Sprintf("env -u TMUX tmux -L %s attach -t %s", socket, session)
 	kick := fmt.Sprintf("tmux -L %s new-session -d -s _seshnavkick %s", s, shArg(attach))
+	// Window targeting: a thread's session can hold several windows (the user opens
+	// more), and switch-client to a bare session lands on the session's LAST-ACTIVE
+	// window — not necessarily the one holding the thread's pane. When a thread id is
+	// given, resolve the window of the @sesh-thread-id-marked pane and switch to
+	// `=session:window` so nav always lands on the thread's own window. Unresolvable
+	// (no marked pane) falls back to the bare session. `w` is also reused by the
+	// no-client kick branch so a fresh attach lands on the right window too.
+	resolveWin := `w=''`
+	if threadID != "" {
+		filter := shArg(fmt.Sprintf("#{==:#{%s},%s}", ThreadIDOption, threadID))
+		resolveWin = fmt.Sprintf(`w=$(tmux -L %[1]s list-panes -s -t %[2]s -f %[3]s -F '#{window_index}' 2>/dev/null | head -n1); [ -n "$w" ] && tgt="=%[4]s:$w"`,
+			s, tgt, filter, session)
+	}
 	return fmt.Sprintf(`tmux -L %[1]s has-session -t %[6]s 2>/dev/null || { echo "nav: no session %[7]s on work socket %[2]s (it may have just died — re-check and revive it)" >&2; exit 1; }; `+
+		`tgt=%[6]s; %[8]s; `+
 		`sel=""; `+
 		`mk=$(cat %[4]s 2>/dev/null); `+
 		`if [ -n "$mk" ] && tmux -L %[1]s list-clients -F '#{client_name} #{client_pid}' 2>/dev/null | grep -Fxq "$mk"; then sel="${mk%% *}"; fi; `+
@@ -113,11 +127,11 @@ func InnerSwitchScript(socket, session, marker string) string {
 		`cls=$(tmux -L %[1]s list-clients -F '#{client_name}' 2>/dev/null); `+
 		`n=$(printf '%%s' "$cls" | grep -c .); `+
 		`if [ "$n" -eq 1 ]; then sel="$cls"; `+
-		`elif [ "$n" -eq 0 ]; then %[3]s; exit 0; `+
+		`elif [ "$n" -eq 0 ]; then [ -n "$w" ] && tmux -L %[1]s select-window -t "=%[7]s:$w" 2>/dev/null; %[3]s; exit 0; `+
 		`else echo "nav: $n clients on work socket %[2]s and no live master marker (%[5]s) — restart the master so its attach records itself" >&2; exit 1; fi; `+
 		`fi; `+
-		`exec tmux -L %[1]s switch-client -c "$sel" -t %[6]s`,
-		s, socket, kick, mk, marker, tgt, session)
+		`exec tmux -L %[1]s switch-client -c "$sel" -t "$tgt"`,
+		s, socket, kick, mk, marker, tgt, session, resolveWin)
 }
 
 // NOTE: the --in-client switch is implemented directly in cmd/sesh (tmuxNav), not as

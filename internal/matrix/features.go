@@ -171,6 +171,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-window",
+		Description: "`tmux nav --thread <id>` lands on the WINDOW holding the thread's @sesh-thread-id pane (resolved on the owner's work server), not the session's last-active window — so entering a thread whose session has extra windows returns to the thread's own window; a session-level nav (no --thread) stays put",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "master.up",
 		Description: "`sesh master up` builds the cross-machine cockpit: one window per machine (name == machine), each GENUINELY attached into that machine's work server (peer over a real ssh hop)",
 		Localities:  []Locality{Remote},

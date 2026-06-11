@@ -207,6 +207,12 @@ type Model struct {
 	lastErr   error
 	width     int
 	height    int
+	// vOffset is the index of the first row in the vertical viewport; hOffset is the
+	// number of leading data columns scrolled past (horizontal pan). Both are 0 when
+	// nothing is clipped. Only active when width/height are known (a WindowSizeMsg has
+	// arrived) — with them unset the whole grid renders unclipped.
+	vOffset int
+	hOffset int
 
 	// attachTarget, when set, means the TUI quit in order to ATTACH the terminal to a
 	// thread (Enter from a plain shell, outside tmux). The caller reads PendingAttach
@@ -370,6 +376,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.ensureCursorVisible() // a resize can shrink the viewport under the cursor
+		if m.hOffset > m.maxHOffset() {
+			m.hOffset = m.maxHOffset()
+		}
 		return m, nil
 	case meshMsg:
 		if msg.err != nil {
@@ -386,6 +396,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if vis := len(m.visibleMatches()); m.cursor >= vis {
 				m.cursor = max(0, vis-1)
 			}
+			m.ensureCursorVisible() // the row set changed: keep the viewport over the cursor
 		}
 		// Bootstrap the SINGLE poll timer exactly once (on the first successful
 		// fetch). Subsequent meshMsgs — including those from action/reconcile
@@ -684,15 +695,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "up", "k":
 		m.moveCursor(-1) // wraps (fzf --cycle feel), over the VISIBLE (filtered) rows
+		m.ensureCursorVisible()
 	case "down", "j":
 		m.moveCursor(1)
+		m.ensureCursorVisible()
+	case "ctrl+k":
+		m.scrollRows(-m.halfPage()) // scroll the viewport up a half-page (cursor follows into view)
+	case "ctrl+j":
+		m.scrollRows(m.halfPage())
 	case "/":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
-	case "right", "l":
+	// Fold/unfold the tree is on the ARROW keys; h/l pan the columns horizontally so
+	// clipped columns can be brought into view (Lukas, 2026-06-11).
+	case "right":
 		m.foldSelected(true)
-	case "left", "h":
+	case "left":
 		m.foldSelected(false)
+	case "l":
+		if m.hOffset < m.maxHOffset() {
+			m.hOffset++
+		}
+	case "h":
+		if m.hOffset > 0 {
+			m.hOffset--
+		}
 	case "tab":
 		m.view = (m.view + 1) % View(m.viewCount())
 		m.cursor = 0
@@ -1103,6 +1130,10 @@ func (m Model) CurrentView() View { return m.view }
 // Cursor exposes the cursor index (for tests).
 func (m Model) Cursor() int { return m.cursor }
 
+// VOffset / HOffset expose the scroll offsets (for tests).
+func (m Model) VOffset() int { return m.vOffset }
+func (m Model) HOffset() int { return m.hOffset }
+
 // Prompting reports whether the line-prompt is open (for tests).
 func (m Model) Prompting() bool { return m.prompting != promptNone }
 
@@ -1197,12 +1228,43 @@ func (m Model) View() string {
 	cols := m.activeColumns()
 	vis := m.visibleMatches()
 	widths := m.colWidths(cols, vis)
-	b.WriteString(styleHeader.Render("  HB  "+m.renderHeader(cols, widths)) + "\n")
+
+	// Horizontal column window: pan with h/l. Unknown width (no WindowSizeMsg) shows
+	// every column. ‹/› in the header flag columns clipped off the left/right.
+	hStart, hEnd := 0, len(cols)
+	if m.width > 0 {
+		hStart, hEnd = horizontalWindow(cols, widths, m.hOffset, m.width-gutterWidth)
+	}
+	vcols, vwidths := cols[hStart:hEnd], widths[hStart:hEnd]
+	hdr := "  HB  " + m.renderHeader(vcols, vwidths)
+	if hStart > 0 {
+		hdr = "‹" + hdr[1:] // a column is clipped to the left
+	}
+	if hEnd < len(cols) {
+		hdr += " ›"
+	}
+	b.WriteString(styleHeader.Render(hdr) + "\n")
 
 	if len(vis) == 0 {
 		b.WriteString(styleDim.Render("  (no threads)") + "\n")
 	}
-	for i, tr := range vis {
+	// Vertical row window: the viewport [start:end). Unknown height shows every row.
+	start, end := 0, len(vis)
+	if m.height > 0 {
+		start = m.vOffset
+		if start > len(vis) {
+			start = len(vis)
+		}
+		end = start + m.bodyHeight()
+		if end > len(vis) {
+			end = len(vis)
+		}
+	}
+	if start > 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▲ %d more", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		tr := vis[i]
 		row := tr.row
 		att := " "
 		if row.Attachment == api.Attached {
@@ -1211,12 +1273,15 @@ func (m Model) View() string {
 		if i == m.cursor {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, nil, false)
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(cols, widths, tr, tr.pos, true)
+			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
+	}
+	if end < len(vis) {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▼ %d more", len(vis)-end)) + "\n")
 	}
 	// Per-machine freshness (offline browsing): show every peer's staleness, and
 	// flag any that are offline (their last-known threads are still listed above).
@@ -1236,9 +1301,9 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderFilterPrompt(len(vis), len(m.rows)) + "\n")
 	case m.filter != "":
 		b.WriteString(styleDim.Render(fmt.Sprintf("\n  filter: %s (%d/%d) · / to edit", m.filter, len(vis), len(m.rows))) + "\n")
-		b.WriteString(styleDim.Render("  ↑/↓ move · ←/→ fold · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("  ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	default:
-		b.WriteString(styleDim.Render("\n  ↑/↓ move · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
+		b.WriteString(styleDim.Render("\n  ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit") + "\n")
 	}
 	return b.String()
 }

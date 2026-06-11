@@ -858,6 +858,15 @@ func claimMasterCursor(t *testing.T) {
 	}
 	grand := threadByName(t, sb, "mc-grand")
 
+	// Wait until the daemon has PUBLISHED all three rows, so the preselecting model's
+	// FIRST fetch already has the complete parent←child←grand chain. Otherwise mc-grand
+	// can momentarily orphan-promote to a root (before mc-child publishes), consuming the
+	// one-shot preselect prematurely and leaving mc-parent collapsed (a load-only flake).
+	probe := tui.New(sb.Home+"/daemon.sock", false)
+	if !waitUntil(25*time.Second, func() bool { probe, _ = render(t, probe); return len(probe.Rows()) == 3 }) {
+		t.Fatalf("the parent/child/grand tree never fully published (got %d rows)", len(probe.Rows()))
+	}
+
 	// Children collapsed by default → the grandchild is hidden until its ancestors
 	// are expanded. Preselect it (what the async master-cursor resolve feeds).
 	m := tui.New(sb.Home+"/daemon.sock", false).WithPreselect(grand.ID)

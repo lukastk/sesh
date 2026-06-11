@@ -59,6 +59,8 @@ var declaredTUIClaims = []string{
 	"tree-render-fold",          // children collapse under their parent by default; →/← fold with ▾/▸ + rails over real threads
 	"tree-config-expand",        // [tui] expand_children / --expand starts nodes expanded
 	"tree-orphan-promotes",      // a child whose parent left the view promotes to top level
+	"scroll-vertical",           // ctrl+j/k scroll the viewport + j/k cursor-follow over a >screenful row set; ▲/▼ indicators flag clipped rows
+	"scroll-horizontal",         // h/l pan columns when the row is wider than the window; ‹/› flag clipped columns; a clipped column is brought into view
 	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
 	"action-mutate-remote",      // notify/stop/archive on a thread owned by ANOTHER machine ROUTE to the owner (the local daemon doesn't own it) — the cross-machine gap that direct-client calls silently missed
 	"master-cursor",             // preselecting a NESTED CHILD (the master prefix+s jump path) auto-expands its ancestors so the collapsed child becomes the visible cursor target

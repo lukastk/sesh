@@ -284,17 +284,17 @@ top row changes and the "more" indicator appears/clears at the ends) and **`scro
 (narrow pane so columns clip, `l`, assert a previously-clipped right-hand column becomes
 visible and a left one scrolls off; `h` reverses).
 
-**Open decisions:**
-1. **`h`/`l` repurpose** — move fold/unfold to **arrow keys only** and give `h`/`l` to
-   horizontal scroll (my default, matches the request literally). The alternative is keeping
-   `h`/`l` as fold and binding horizontal scroll to something else (e.g. `H`/`L` or
-   `ctrl+h`/`ctrl+l`) — but that contradicts "h and l should work for moving left and right".
-   I'll go with the repurpose unless Lukas wants fold kept on `h/l`.
-2. **Frozen columns** — keep the state-glyph gutter + NAME (with its tree rails) pinned while
-   the rest scroll horizontally (my default — scrolling the tree column away makes the
-   hierarchy unreadable), vs scroll everything uniformly. Confirm.
-3. **`ctrl+j/k` semantics** — half-page viewport scroll (my default) vs single-line scroll vs
-   full-page. Half-page is the common pager feel.
+**Decisions (resolved):**
+1. **`h`/`l` repurpose** — CONFIRMED by Lukas: fold/unfold moved to the **arrow keys**,
+   `h`/`l` are horizontal column pan.
+2. **Frozen columns** — DROPPED (built simple whole-column panning instead). The state-glyph
+   gutter stays pinned (it isn't a column), but data columns — including NAME/tree — pan as a
+   group. Rationale: freezing a middle NAME column interacts badly with column reordering and
+   adds real complexity for a nicety the user didn't ask for; panning back with `h` restores
+   the tree immediately. Frozen-NAME can be revisited if Lukas wants it. (Recorded as a
+   deliberate scope cut, not a silent drop.)
+3. **`ctrl+j/k` semantics** — SHIPPED as half-page viewport scroll (cursor pulled into the
+   new window), the common pager feel.
 
 ---
 

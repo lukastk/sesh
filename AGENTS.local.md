@@ -45,8 +45,18 @@ sesh-daemon). The cwd_rel field is additive/omitempty so the mixed-schema mesh i
 macbook's own threads just render unlabeled cross-machine until it's updated. H5 PROVEN
 LIVE cross-home: a macstudio box thread (cwd /Users/cij/dev/2026…__cwdrel-demo) rendered
 as the box label "cwdrel-demo <zz9xcw>" in mymain's --all-machines TUI (was the raw path
-before). Minor pre-existing quirk seen: `thread delete --id <prefix>` 404'd on a headless
-thread; the full uuid worked.
+before).
+
+## H7 — `thread delete` now resolves an id PREFIX (2026-06-11, commit 88e6214; deployed mymain/macstudio/termux)
+Found while cleaning up the H5 demo: `thread delete --id <prefix>` 404'd because
+threadDelete was the ONLY single-id verb that passed the raw --id to the daemon's
+exact-match lookup instead of resolving it (every other verb calls resolveThreadID; the
+SKILL already promised "almost every --id accepts an unambiguous prefix"). Fix: resolve
+via `resolveIDPrefix` (NOT resolveThreadID) — delete must still never INFER the current
+thread (destructive + ambient = footgun), so an omitted --id stays the loud required
+error, an explicit prefix now resolves, an unknown prefix is loud. Client-side fix (binary
+only, no daemon restart). thread.delete cell (both localities) gained prefix + unknown-
+prefix assertions; live-smoked on mymain. macbook still pending (offline).
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

@@ -19,6 +19,14 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Help is intercepted BEFORE routing/dispatch so `sesh <cmd> [sub] --help`,
+	// `sesh -h`, and `sesh help <cmd> [sub]` all print the registry's help (stdout,
+	// exit 0) regardless of any other flags (e.g. a stray --machine).
+	if path, ok := resolveHelpRequest(os.Args[1:]); ok {
+		printCommandHelp(path)
+		return
+	}
+
 	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X is
 	// a remote peer, forward the command there over the peer's EXPLICIT transport —
 	// ssh (a real ssh hop) or http (the peer's TCP API). Local-only meta commands
@@ -177,8 +185,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh peer:", err)
 			os.Exit(1)
 		}
-	case "-h", "--help", "help":
-		usage()
 	default:
 		fmt.Fprintf(os.Stderr, "sesh: unknown command %q\n", os.Args[1])
 		usage()
@@ -186,24 +192,10 @@ func main() {
 	}
 }
 
+// usage is the BRIEF error-path message (stderr). Rich help (stdout, exit 0) is the
+// help registry, reached via `sesh help` / `sesh <cmd> --help` (see help.go).
 func usage() {
-	fmt.Fprintln(os.Stderr, `sesh — multi-machine coding-agent session management
-
-usage: sesh <command> [args]
-
-commands:
-  daemon    per-machine daemon (run | start | stop | status)
-  tmux      tmux layer (current|info|create-session|create-pane|send-text|stage-file|nav)
-  thread    thread layer (new|list|stop|delete|resume|rename|tag|archive|pane|status|send|send-headless|headless-reply)
-  ticket    ticket layer (create | list | set-status | needs-input | send-prompt)
-  tui       cross-machine TUI (--all-machines)
-  mesh      print the merged cross-machine view
-  master    master-tmux cockpit (up | window | attach | down)
-  peer      mesh registry (add | list)
-  matrix    report the feature-matrix state (grid | skips)
-
-global:
-  --machine X   route the command to remote machine X via a real ssh hop
-
-(more commands land as the development plan progresses)`)
+	fmt.Fprintln(os.Stderr, "sesh — multi-machine coding-agent session management")
+	fmt.Fprintln(os.Stderr, "\nusage: sesh <command> [args]")
+	fmt.Fprintln(os.Stderr, "run `sesh help` for the command list, or `sesh <command> --help` for one command.")
 }

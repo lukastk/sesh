@@ -14,12 +14,15 @@ arrow keys**, `h`/`l` become horizontal column scroll. G2 key = `T`, G3 key = `P
 
 ## Checklist (suggested dependency / size order — small & self-contained first)
 
-- [ ] **G1** `thread capture` — live tmux pane capture (v1 `pane-capture` port)
-- [ ] **G2** TUI remove-tag action (popup tag picker → `thread tag --remove`)
-- [ ] **G3** TUI set-parent action (key → paste parent UUID → `thread reparent`)
-- [ ] **G4** Per-column colours (`[tui]` config; default green CWD, blue NAME)
-- [ ] **G5** TUI scrolling: `ctrl+j/k` vertical viewport scroll + `h/l` horizontal column scroll
-- [ ] **G6** CLI help: flesh out every command/subcommand description + real `--help`
+- [x] **G1** `thread capture` — live tmux pane capture (v1 `pane-capture` port)
+- [x] **G2** TUI remove-tag action (popup tag picker → `thread tag --remove`)
+- [x] **G3** TUI set-parent action (key → paste parent UUID → `thread reparent`)
+- [x] **G4** Per-column colours (`[tui]` config; default green CWD, blue NAME)
+- [x] **G5** TUI scrolling: `ctrl+j/k` vertical viewport scroll + `h/l` horizontal column scroll
+- [x] **G6** CLI help: flesh out every command/subcommand description + real `--help`
+
+**ALL SHIPPED 2026-06-11** (gate green; deploy pending — G1 needs a daemon restart on both
+machines, G2–G6 are binary-only). See per-feature commits.
 
 Each section below is self-contained: **Want → Research (current state) → Design →
 Files → Tests → Open decisions**. The "Open decisions" are the forks I want Lukas to

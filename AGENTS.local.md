@@ -36,9 +36,17 @@ unit/claim test → live-smoke.
   moved it onto the sesh work server (socket `sesh`, pane %0) — adopt is work-server-only,
   so it was impossible while the session ran on the `mysystem` server. Conformance
   thread.adopt claude branch gained the bare-claude-then-explicit-id case.
-DEPLOY STATE: mymain daemon restarted onto the new binary (schema 8) to enable H6 + H5.
-macbook/macstudio/termux daemons + cross-host partner binaries still on schema 7 — need
-redeploy for cross-machine cwd labels (additive field, so mixed-schema mesh is safe meanwhile).
+DEPLOY STATE (2026-06-11): committed c14ef12, pushed. Schema-8 daemons LIVE on mymain +
+macstudio + termux (git pull → native go build → restart; termux relaunched from shell,
+pid-guarded). **macbook was OFFLINE — still on schema 7; redeploy it when it's back**
+(ssh lukas@macbook → cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new
+./cmd/sesh && mv -f …/sesh.new …/sesh && /opt/homebrew/bin/supervisorctl restart
+sesh-daemon). The cwd_rel field is additive/omitempty so the mixed-schema mesh is safe;
+macbook's own threads just render unlabeled cross-machine until it's updated. H5 PROVEN
+LIVE cross-home: a macstudio box thread (cwd /Users/cij/dev/2026…__cwdrel-demo) rendered
+as the box label "cwdrel-demo <zz9xcw>" in mymain's --all-machines TUI (was the raw path
+before). Minor pre-existing quirk seen: `thread delete --id <prefix>` 404'd on a headless
+thread; the full uuid worked.
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

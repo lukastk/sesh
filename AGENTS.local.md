@@ -94,8 +94,22 @@ scroll-vertical/scroll-horizontal claims now ALSO drive real tea.MouseMsg wheel 
 through Update and assert the same VOffset/HOffset move (no new cell — the wheel is just
 another driver of the same offsets). Live-verified the TUI emits the SGR mouse-enable
 sequences (?1002h/?1006h) and renders fine. TUI-only (binary) change — no daemon restart.
-Live on mymain/macstudio/termux. **macbook OFFLINE again — pending 7ef6767** (last caught
-up to 11eebdb).
+Live on mymain/macstudio/termux. macbook OFFLINE at first.
+**Follow-up (commit 7d348ee):** Lukas — "doesn't work on termux" + "vertical scroll should
+scroll between the SELECTED rows." Changed wheel up/down from `scrollRows` (viewport) to
+`moveCursor(±1)`+ensureCursorVisible (move the SELECTION, viewport follows). This was the
+real ask AND fixes termux: viewport-only scroll is a NO-OP when the grid already fits the
+(small phone) screen, so it looked dead; moving the selection always does something.
+Dropped mouseWheelStep. PROVEN end-to-end by injecting real SGR wheel bytes
+(`ESC[<65;col;rowM` down / `<64` up) into a live TUI in BOTH a plain pane AND a
+display-popup (the prefix+s path) on tmux 3.5a — selection moved row→row. KEY GOTCHA when
+testing popup mouse: the SGR coords are SCREEN coords; an event in the popup's margin
+(col 5) is NOT routed to the popup program — must be INSIDE the popup (col 30) → then tmux
+3.5a forwards it. So mouse-in-popup WORKS (mouse on is in tmux.common.conf, sourced by
+work+master confs). Remaining termux caveat (SKILL-documented, not a sesh bug): the Termux
+terminal app captures two-finger touch-scroll for its own scrollback — a hardware mouse
+generates real wheel events. Deployed 7d348ee to mymain/macstudio/termux. **macbook still
+OFFLINE — pending 7d348ee** (last caught up to 11eebdb; needs binary only, no daemon restart).
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

@@ -108,8 +108,25 @@ testing popup mouse: the SGR coords are SCREEN coords; an event in the popup's m
 3.5a forwards it. So mouse-in-popup WORKS (mouse on is in tmux.common.conf, sourced by
 work+master confs). Remaining termux caveat (SKILL-documented, not a sesh bug): the Termux
 terminal app captures two-finger touch-scroll for its own scrollback — a hardware mouse
-generates real wheel events. Deployed 7d348ee to mymain/macstudio/termux. **macbook still
-OFFLINE — pending 7d348ee** (last caught up to 11eebdb; needs binary only, no daemon restart).
+generates real wheel events. Deployed 7d348ee to mymain/macstudio/termux.
+**Follow-up 2 (sesh 88fcf90 + myrig 372d4b0):** Lukas — "horizontal doesn't work" + make
+h/v sensitivity configurable. (1) HORIZONTAL: many terminals don't emit native
+horizontal-wheel (btn 66/67), so added Shift+vertical-wheel as the reliable pan (kept
+native wheel-left/right). bubbletea MouseEvent has `.Shift`. PROVEN live by SGR injection
+into a clipped TUI: native wheel-right (btn 67) AND Shift+wheel-down (btn 69) both pan;
+Shift+wheel-up (btn 68) pans back. (2) SENSITIVITY: `[tui] mouse_scroll_v/h` (notches per
+step; 1=every notch default, higher=less sensitive). `wheelTick` accumulator (wheelAccV/H)
+steps every Nth notch, resets carry on direction flip. config.LoadTUI validates (negatives
+loud); Model.WithMouseScroll wired in cmd/sesh/tui.go. Tests: unit TestWheelTick,
+TestMouseWheelSensitivityVertical, TestMouseWheelHorizontalPan + config TestLoadTUIMouseScroll
+(coexists with [[tui.views]]/[[tui.column_color]]); scroll-horizontal claim asserts the
+Shift+wheel path. myrig config.toml.jinja got an active `[tui] mouse_scroll_v/h = 2` (mild
+dampening, before [[tui.views]] — TOML scalar-keys-before-subtables). DEPLOY: sesh binary
+(TUI-only, no daemon restart) — horizontal works from the binary alone (shift+wheel, no
+config). Config VALUES need the rendered config.toml updated: did it SURGICALLY (python
+insert of the [tui] block before [[tui.views]], idempotent) on mymain/macstudio/termux
+rather than a full install-home (lighter, no re-symlink). **macbook OFFLINE — pending both**
+(last caught up to 11eebdb; needs binary + the config insert).
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

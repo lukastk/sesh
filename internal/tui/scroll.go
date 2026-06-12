@@ -12,6 +12,48 @@ package tui
 // gutterWidth is the fixed leading state gutter: "> "/"  " + head + busy + att + " ".
 const gutterWidth = 6
 
+// wheelTick applies one wheel notch in direction dir (-1/+1) to the accumulator acc,
+// returning the net step (-1/0/+1) once `div` notches accumulate in one direction. A
+// direction flip resets the accumulator so reversing is immediate; div<=1 always steps
+// (the default, every notch). This is how mouse_scroll_v/h dampen fast scrolling.
+func wheelTick(acc *int, dir, div int) int {
+	if div <= 1 {
+		return dir
+	}
+	if (*acc > 0) != (dir > 0) {
+		*acc = 0 // reversed direction — start fresh
+	}
+	*acc += dir
+	if *acc >= div {
+		*acc = 0
+		return 1
+	}
+	if *acc <= -div {
+		*acc = 0
+		return -1
+	}
+	return 0
+}
+
+// wheelMoveV moves the selection by one row in dir once the vertical divisor is met.
+func (m *Model) wheelMoveV(dir int) {
+	if s := wheelTick(&m.wheelAccV, dir, m.scrollDivV); s != 0 {
+		m.moveCursor(s)
+		m.ensureCursorVisible()
+	}
+}
+
+// wheelPanH pans the columns by one in dir once the horizontal divisor is met
+// (clamped to [0, maxHOffset]).
+func (m *Model) wheelPanH(dir int) {
+	s := wheelTick(&m.wheelAccH, dir, m.scrollDivH)
+	if s < 0 && m.hOffset > 0 {
+		m.hOffset--
+	} else if s > 0 && m.hOffset < m.maxHOffset() {
+		m.hOffset++
+	}
+}
+
 // chromeLines counts the non-row lines View emits in the current state, so the row
 // budget (bodyHeight) leaves room for the header, footers, popups, prompts and the
 // scroll indicators. Mirrors View's structure — keep in sync.

@@ -177,7 +177,9 @@ func claimScrollHorizontal(t *testing.T) {
 		t.Errorf("leftmost column not restored after panning back:\n%s", m.View())
 	}
 
-	// The MOUSE WHEEL pans columns too: wheel-right advances hOffset, wheel-left restores.
+	// The MOUSE WHEEL pans columns too: native wheel-right advances hOffset, wheel-left
+	// restores. (Many terminals don't emit horizontal wheel events — the Shift path below
+	// is the reliable one.)
 	m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelRight})
 	if m.HOffset() == 0 {
 		t.Errorf("mouse wheel-right did not pan the columns")
@@ -187,5 +189,18 @@ func claimScrollHorizontal(t *testing.T) {
 	}
 	if m.HOffset() != 0 {
 		t.Errorf("mouse wheel-left did not return to offset 0: hOffset=%d", m.HOffset())
+	}
+
+	// Shift+vertical-wheel ALSO pans (the cross-terminal-reliable horizontal path):
+	// shift+wheel-down advances hOffset, shift+wheel-up restores it.
+	m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, Shift: true})
+	if m.HOffset() == 0 {
+		t.Errorf("Shift+wheel-down did not pan the columns")
+	}
+	for i := 0; i < len(cols)+2 && m.HOffset() > 0; i++ {
+		m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, Shift: true})
+	}
+	if m.HOffset() != 0 {
+		t.Errorf("Shift+wheel-up did not return to offset 0: hOffset=%d", m.HOffset())
 	}
 }

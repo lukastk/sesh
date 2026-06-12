@@ -41,6 +41,27 @@ type TUIConfig struct {
 	//	name   = "ticketed"
 	//	filter = "ticketed and not archived"
 	Views []TUIView `toml:"views"`
+	// MouseScrollV / MouseScrollH set mouse-wheel SENSITIVITY: how many wheel
+	// notches it takes to move one row (vertical) or pan one column (horizontal).
+	// 1 (the default) moves on every notch; higher = LESS sensitive (dampens fast
+	// trackpad scrolling). 0/unset = 1; negatives are a loud error.
+	//
+	//	[tui]
+	//	mouse_scroll_v = 3
+	//	mouse_scroll_h = 2
+	MouseScrollV int `toml:"mouse_scroll_v"`
+	MouseScrollH int `toml:"mouse_scroll_h"`
+}
+
+// ScrollV / ScrollH resolve the effective wheel divisor (unset/0 → 1).
+func (c *TUIConfig) ScrollV() int { return scrollDiv(c.MouseScrollV) }
+func (c *TUIConfig) ScrollH() int { return scrollDiv(c.MouseScrollH) }
+
+func scrollDiv(v int) int {
+	if v < 1 {
+		return 1
+	}
+	return v
 }
 
 // TUIView is one custom view definition.
@@ -87,6 +108,11 @@ func LoadTUI(home string) (*TUIConfig, error) {
 	var f tuiConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+	}
+	if f.TUI != nil {
+		if f.TUI.MouseScrollV < 0 || f.TUI.MouseScrollH < 0 {
+			return nil, fmt.Errorf("config: [tui] mouse_scroll_v / mouse_scroll_h must be >= 1 (1 = move every notch, higher = less sensitive)")
+		}
 	}
 	return f.TUI, nil
 }

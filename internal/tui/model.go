@@ -234,6 +234,11 @@ type Model struct {
 	// arrived) — with them unset the whole grid renders unclipped.
 	vOffset int
 	hOffset int
+	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h, default 1): how many wheel
+	// notches move one row / pan one column. wheelAccV/H accumulate notches between
+	// steps so a higher divisor dampens fast trackpad scrolling.
+	scrollDivV, scrollDivH int
+	wheelAccV, wheelAccH   int
 
 	// attachTarget, when set, means the TUI quit in order to ATTACH the terminal to a
 	// thread (Enter from a plain shell, outside tmux). The caller reads PendingAttach
@@ -251,7 +256,21 @@ func New(socketPath string, allMachines bool) Model {
 	}
 	home, _ := os.UserHomeDir()
 	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
-		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home}
+		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home,
+		scrollDivV: 1, scrollDivH: 1}
+}
+
+// WithMouseScroll sets the wheel sensitivity divisors ([tui] mouse_scroll_v/h): how
+// many notches move one row / pan one column. Values < 1 clamp to 1.
+func (m Model) WithMouseScroll(v, h int) Model {
+	if v < 1 {
+		v = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	m.scrollDivV, m.scrollDivH = v, h
+	return m
 }
 
 // WithTmux overrides the captured $TMUX value (tests set it to drive the Enter path
@@ -409,26 +428,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseMsg:
-		// The mouse wheel moves the SELECTION between rows (up/down, like ↑/↓, with the
-		// viewport following so the cursor stays visible — this works even when the whole
-		// grid fits the screen, unlike a viewport-only scroll). Wheel left/right pan the
-		// columns (like h/l) so a clipped column comes into view. Other mouse events are
-		// ignored.
+		// The mouse wheel moves the SELECTION between rows (up/down, like ↑/↓, viewport
+		// following — works even when the grid fits the screen, unlike a viewport-only
+		// scroll). Horizontal pan (like h/l) comes from a native wheel-left/right OR
+		// Shift+vertical-wheel — the reliable cross-terminal path, since many terminals
+		// don't emit horizontal wheel events. Sensitivity divisors ([tui] mouse_scroll_*)
+		// dampen fast scrolling: a notch acts only every Nth event.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			m.moveCursor(-1)
-			m.ensureCursorVisible()
+			if msg.Shift {
+				m.wheelPanH(-1)
+			} else {
+				m.wheelMoveV(-1)
+			}
 		case tea.MouseButtonWheelDown:
-			m.moveCursor(1)
-			m.ensureCursorVisible()
+			if msg.Shift {
+				m.wheelPanH(1)
+			} else {
+				m.wheelMoveV(1)
+			}
 		case tea.MouseButtonWheelLeft:
-			if m.hOffset > 0 {
-				m.hOffset--
-			}
+			m.wheelPanH(-1)
 		case tea.MouseButtonWheelRight:
-			if m.hOffset < m.maxHOffset() {
-				m.hOffset++
-			}
+			m.wheelPanH(1)
 		}
 		return m, nil
 	case meshMsg:

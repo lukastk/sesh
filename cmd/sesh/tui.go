@@ -78,6 +78,10 @@ func runTUI(args []string) error {
 		return fmt.Errorf("tui colors: %w", err)
 	}
 	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors)
+	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
+	if tcfg != nil {
+		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())
+	}
 	// CWD column labels: compiled ONCE here, loud on a broken rule; per-cwd
 	// label errors (unknown placeholder in a matching rule) are loud at startup
 	// too — never a silently-wrong column. Inside the labeler a rule error is

@@ -12,9 +12,6 @@ package tui
 // gutterWidth is the fixed leading state gutter: "> "/"  " + head + busy + att + " ".
 const gutterWidth = 6
 
-// mouseWheelStep is how many rows one mouse-wheel notch scrolls the viewport.
-const mouseWheelStep = 3
-
 // chromeLines counts the non-row lines View emits in the current state, so the row
 // budget (bodyHeight) leaves room for the header, footers, popups, prompts and the
 // scroll indicators. Mirrors View's structure — keep in sync.

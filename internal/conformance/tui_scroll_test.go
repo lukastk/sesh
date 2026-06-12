@@ -1,9 +1,10 @@
 package conformance
 
-// G5 scroll claims: a vertical viewport (ctrl+j/k + cursor-follow + mouse wheel) and
-// horizontal column pan (h/l + mouse wheel left/right), over REAL threads in a
-// fixed-size window. The TUI clips to the window and the offsets/indicators move
-// honestly — proven by VOffset/HOffset and the ▲/▼/‹/› markers, not internal mocks.
+// G5 scroll claims: a vertical viewport (ctrl+j/k + cursor-follow; the mouse wheel
+// moves the SELECTION with the viewport following) and horizontal column pan (h/l +
+// mouse wheel left/right), over REAL threads in a fixed-size window. The TUI clips to
+// the window and the offsets/indicators move honestly — proven by Cursor/VOffset/HOffset
+// and the ▲/▼/‹/› markers, not internal mocks.
 
 import (
 	"fmt"
@@ -98,17 +99,21 @@ func claimScrollVertical(t *testing.T) {
 		t.Errorf("up indicator missing after scrolling down:\n%s", m.View())
 	}
 
-	// The MOUSE WHEEL drives the SAME viewport: wheel-up returns to the top, wheel-down
-	// scrolls down (the wheel is just another driver of vOffset, like ^k/^j).
-	for i := 0; i < n && m.VOffset() > 0; i++ {
+	// The MOUSE WHEEL moves the SELECTION between rows (like ↑/↓), with the viewport
+	// following — so it works even when the grid fits the screen. Wheel up to the first
+	// row, then wheel down advances the cursor one row.
+	for i := 0; i < 3*n && m.Cursor() > 0; i++ {
 		m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
 	}
+	if m.Cursor() != 0 {
+		t.Errorf("mouse wheel-up did not move the selection to the first row: cursor=%d", m.Cursor())
+	}
 	if m.VOffset() != 0 {
-		t.Errorf("mouse wheel-up did not return to the top: vOffset=%d", m.VOffset())
+		t.Errorf("viewport did not follow the cursor back to the top: vOffset=%d", m.VOffset())
 	}
 	m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
-	if m.VOffset() == 0 {
-		t.Errorf("mouse wheel-down did not scroll the viewport")
+	if m.Cursor() != 1 {
+		t.Errorf("mouse wheel-down did not move the selection down one row: cursor=%d", m.Cursor())
 	}
 }
 

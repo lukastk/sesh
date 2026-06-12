@@ -409,15 +409,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseMsg:
-		// The mouse wheel scrolls the grid: up/down move the viewport (cursor follows,
-		// like ^k/^j but a smaller step), left/right pan the columns (like h/l) so a
-		// clipped column comes into view. Other mouse events are ignored. Popups/prompts
-		// keep the grid underneath scrollable — harmless, and there's nothing else to do.
+		// The mouse wheel moves the SELECTION between rows (up/down, like ↑/↓, with the
+		// viewport following so the cursor stays visible — this works even when the whole
+		// grid fits the screen, unlike a viewport-only scroll). Wheel left/right pan the
+		// columns (like h/l) so a clipped column comes into view. Other mouse events are
+		// ignored.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			m.scrollRows(-mouseWheelStep)
+			m.moveCursor(-1)
+			m.ensureCursorVisible()
 		case tea.MouseButtonWheelDown:
-			m.scrollRows(mouseWheelStep)
+			m.moveCursor(1)
+			m.ensureCursorVisible()
 		case tea.MouseButtonWheelLeft:
 			if m.hOffset > 0 {
 				m.hOffset--

@@ -82,6 +82,21 @@ this change). DEPLOY: daemon RESTART needed (http nav handler reads ThreadID). L
 ALL FOUR machines (mymain/macstudio/termux deployed first; macbook caught up + daemon
 restarted once it came back online — HEAD 11eebdb, schema 8, mesh synced).
 
+## H9 — TUI mouse-wheel scrolling (2026-06-12, commit 7ef6767)
+Lukas: the TUI should respond to mouse scrolling, vertical + horizontal. Enabled mouse
+reporting on the program (`tea.WithMouseCellMotion()` in cmd/sesh/tui.go) and added a
+`tea.MouseMsg` case to Model.Update: wheel up/down → `scrollRows(±mouseWheelStep=3)`
+(viewport scroll, cursor follows — same as ^k/^j, smaller step); wheel left/right →
+hOffset pan (same as h/l). bubbletea v1.3.10 API = `msg.Button` ∈ {MouseButtonWheelUp/
+Down/Left/Right}. Trade-off (documented in code + SKILL): mouse capture means
+terminal-native drag-select needs Shift while the TUI is up. Tests: the existing
+scroll-vertical/scroll-horizontal claims now ALSO drive real tea.MouseMsg wheel events
+through Update and assert the same VOffset/HOffset move (no new cell — the wheel is just
+another driver of the same offsets). Live-verified the TUI emits the SGR mouse-enable
+sequences (?1002h/?1006h) and renders fine. TUI-only (binary) change — no daemon restart.
+Live on mymain/macstudio/termux. **macbook OFFLINE again — pending 7ef6767** (last caught
+up to 11eebdb).
+
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)
 tmux CANNOT map a popup pty, a pane pty, or a piped subprocess back to the attached

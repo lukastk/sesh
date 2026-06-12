@@ -79,8 +79,8 @@ master-path script against a live tmux. All 7 nav cells + action-nav TUI claims 
 in-client test moved a client window 1→0. Full suite 182/184 (the 2 reds are the known
 master-current flake + a codex headless-send flake that PASSES in isolation — neither from
 this change). DEPLOY: daemon RESTART needed (http nav handler reads ThreadID). Live on
-mymain/macstudio/termux (daemons restarted). **macbook OFFLINE again — pending 26c4395 +
-restart** (last caught up to 72eb901 earlier).
+ALL FOUR machines (mymain/macstudio/termux deployed first; macbook caught up + daemon
+restarted once it came back online — HEAD 11eebdb, schema 8, mesh synced).
 
 
 ## THE WHICH-CLIENT LAW (2026-06-10, the deepest tmux lesson of this project)

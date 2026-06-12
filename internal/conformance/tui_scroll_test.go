@@ -1,9 +1,9 @@
 package conformance
 
-// G5 scroll claims: a vertical viewport (ctrl+j/k + cursor-follow) and horizontal
-// column pan (h/l), over REAL threads in a fixed-size window. The TUI clips to the
-// window and the offsets/indicators move honestly — proven by VOffset/HOffset and
-// the ▲/▼/‹/› markers, not internal mocks.
+// G5 scroll claims: a vertical viewport (ctrl+j/k + cursor-follow + mouse wheel) and
+// horizontal column pan (h/l + mouse wheel left/right), over REAL threads in a
+// fixed-size window. The TUI clips to the window and the offsets/indicators move
+// honestly — proven by VOffset/HOffset and the ▲/▼/‹/› markers, not internal mocks.
 
 import (
 	"fmt"
@@ -97,6 +97,19 @@ func claimScrollVertical(t *testing.T) {
 	if !strings.Contains(m.View(), "▲") {
 		t.Errorf("up indicator missing after scrolling down:\n%s", m.View())
 	}
+
+	// The MOUSE WHEEL drives the SAME viewport: wheel-up returns to the top, wheel-down
+	// scrolls down (the wheel is just another driver of vOffset, like ^k/^j).
+	for i := 0; i < n && m.VOffset() > 0; i++ {
+		m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	}
+	if m.VOffset() != 0 {
+		t.Errorf("mouse wheel-up did not return to the top: vOffset=%d", m.VOffset())
+	}
+	m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	if m.VOffset() == 0 {
+		t.Errorf("mouse wheel-down did not scroll the viewport")
+	}
 }
 
 // claimScrollHorizontal: when the row is wider than the window, h/l pan the columns.
@@ -157,5 +170,17 @@ func claimScrollHorizontal(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "MACHINE") {
 		t.Errorf("leftmost column not restored after panning back:\n%s", m.View())
+	}
+
+	// The MOUSE WHEEL pans columns too: wheel-right advances hOffset, wheel-left restores.
+	m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelRight})
+	if m.HOffset() == 0 {
+		t.Errorf("mouse wheel-right did not pan the columns")
+	}
+	for i := 0; i < len(cols)+2 && m.HOffset() > 0; i++ {
+		m = sendMsg(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelLeft})
+	}
+	if m.HOffset() != 0 {
+		t.Errorf("mouse wheel-left did not return to offset 0: hOffset=%d", m.HOffset())
 	}
 }

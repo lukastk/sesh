@@ -408,6 +408,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hOffset = m.maxHOffset()
 		}
 		return m, nil
+	case tea.MouseMsg:
+		// The mouse wheel scrolls the grid: up/down move the viewport (cursor follows,
+		// like ^k/^j but a smaller step), left/right pan the columns (like h/l) so a
+		// clipped column comes into view. Other mouse events are ignored. Popups/prompts
+		// keep the grid underneath scrollable — harmless, and there's nothing else to do.
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollRows(-mouseWheelStep)
+		case tea.MouseButtonWheelDown:
+			m.scrollRows(mouseWheelStep)
+		case tea.MouseButtonWheelLeft:
+			if m.hOffset > 0 {
+				m.hOffset--
+			}
+		case tea.MouseButtonWheelRight:
+			if m.hOffset < m.maxHOffset() {
+				m.hOffset++
+			}
+		}
+		return m, nil
 	case meshMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err

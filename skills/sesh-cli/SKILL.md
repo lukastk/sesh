@@ -79,6 +79,7 @@ Keymap (normal mode):
 ```
 ↑/↓ or j/k   move cursor          ^j / ^k    scroll viewport a half-page
 ←/→          fold / unfold tree    h / l      pan columns left/right (when clipped)
+mouse wheel  scroll vertically; wheel left/right (trackpad) pans columns
 enter        nav: switch your tmux client to the thread (or attach from a plain shell;
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ^t cycles the search target; esc applies)
@@ -98,7 +99,10 @@ width instead of clipping, so every binding stays visible on a narrow pane.
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
 green by default (tunable via `[[tui.column_color]]`). Wide grids clip and scroll
-horizontally (`h`/`l`); long grids scroll vertically (`^j`/`^k`, with `▲/▼` markers).
+horizontally (`h`/`l` or wheel-left/right); long grids scroll vertically (`^j`/`^k` or
+the mouse wheel, with `▲/▼` markers). The mouse wheel works in any terminal that reports
+mouse events; while the TUI is up it captures the mouse, so terminal-native drag-select
+needs Shift.
 
 ## Entering, listing, inspecting
 

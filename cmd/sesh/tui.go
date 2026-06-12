@@ -139,7 +139,10 @@ func runTUI(args []string) error {
 	if *expand || (tcfg != nil && tcfg.ExpandChildren) {
 		m = m.WithExpand(true)
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// WithMouseCellMotion enables mouse reporting so the grid responds to the wheel
+	// (vertical scroll + horizontal pan — see Model.Update's tea.MouseMsg case). Trade-off:
+	// the app captures the mouse, so plain-drag text selection needs Shift (terminal-native).
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
 	if err != nil {
 		return err

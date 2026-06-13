@@ -124,6 +124,32 @@ func testAPITcpAuth(t *testing.T) {
 	} else if !strings.Contains(stderr, "unauthenticated") {
 		t.Errorf("expected a loud refusal mentioning the unauthenticated API, got: %q", stderr)
 	}
+
+	// A transient/unbindable API address (e.g. the tailscale name not resolving yet at
+	// boot) must NOT kill the daemon: the LOCAL unix socket is the primary surface and
+	// stays up while the API bind retries in the background. (Regression — a hard-fail
+	// here took the whole daemon down, so prefix+s and the mesh broke on that machine.)
+	badSock := fmt.Sprintf("sesh-test-apibad-%d", time.Now().UnixNano())
+	bad := &localRunner{bin: bin, env: map[string]string{
+		"SESH_HOME":          t.TempDir(),
+		"SESH_MACHINE":       "api-badaddr",
+		"SESH_TMUX_SOCKET":   badSock,
+		"SESH_MASTER_SOCKET": badSock + "-m",
+		"SESH_API_ADDR":      "sesh-nonexistent.invalid:7878", // .invalid never resolves (RFC 6761)
+		"SESH_API_TOKEN":     "tok",
+	}}
+	if _, stderr, err := bad.Run(t, "daemon", "start"); err != nil {
+		t.Fatalf("daemon with an unbindable API addr should still START (local socket up): %v\n%s", err, stderr)
+	}
+	t.Cleanup(func() {
+		bad.Run(t, "daemon", "stop")                             //nolint:errcheck
+		exec.Command("tmux", "-L", badSock, "kill-server").Run() //nolint:errcheck
+	})
+	// The LOCAL surface works (a thread list round-trips over the unix socket) even
+	// though the TCP API cannot bind.
+	if _, stderr, err := bad.Run(t, "thread", "list"); err != nil {
+		t.Errorf("the local socket should work despite the unbindable API: %v\n%s", err, stderr)
+	}
 }
 
 // testAPITcpParity drives EVERY layer over the TCP API with a token, proving the

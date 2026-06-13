@@ -66,8 +66,9 @@ type Daemon struct {
 
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
-	// is set.
-	apiSrv *http.Server
+	// is set. apiStop stops the background bind-retry loop on shutdown.
+	apiSrv  *http.Server
+	apiStop chan struct{}
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses
@@ -170,8 +171,10 @@ func (d *Daemon) Serve() error {
 		d.mmaint.start() // converge the master cockpit to one window per connected machine
 	}
 
-	// Optional network API (remote clients / mobile). A bind failure is fatal — do
-	// not silently fall back to unix-only when the user asked to expose the API.
+	// Optional network API (remote clients / mobile). Only a MISCONFIGURATION (API
+	// addr set without a token) is fatal here; a transient bind failure (e.g. the
+	// tailscale name not resolving yet at boot) is retried in the background so it
+	// never takes the local socket down with it — see startAPI / serveAPIWithRetry.
 	if err := d.startAPI(); err != nil {
 		if d.mmaint != nil {
 			d.mmaint.stopAndWait()

@@ -602,3 +602,29 @@ api.http-json; daemon.mesh-read.
   separator (passed through verbatim) and treat a wrong field count as a loud error.
 - Nested `tmux attach` works headlessly via `env -u TMUX tmux attach` in a viewer
   session (used to test the attached state).
+
+## H10 — prefix+L "last window" toggle + master prefix+a/s swap (2026-06-13, sesh 73f198d, myrig bc98f70)
+Lukas wanted (1) master prefix+a=sesh tui / prefix+s=tmux-session picker (swap; was a/s),
+(2) prefix+L = jump to the last WINDOW he was on, cross-machine, including same-session
+windows (sesh tui can move you between windows in one session). Native tmux last-window/
+last-session can't express this (fragmented across the 3 cockpit layers). So sesh tracks
+it: tmuxNav records the from-location (machine,session,window) into <home>/nav-prev on
+every MASTER-path nav — resolved via the carrier ($SESH_NAV_CLIENT → master active window
+machine) + routed `master-current` (extended to return the window). `tmux nav --last`
+replays nav-prev (recording current in turn → toggle). Scope CONFIRMED by Lukas:
+sesh-nav-anchored (a purely-native prefix n/p switch isn't tracked). Wire: schema 8→9
+(MasterCurrentResponse.Window + NavRequest.Window as *int so a pre-window client that omits
+it is "unset", not window 0). InnerSwitchScript + threadWindowTarget gained an explicit
+window index (overrides thread resolution) so --last lands on the EXACT recorded window.
+VALIDATED LIVE on an isolated master+work cockpit: alpha<->beta toggle AND same-session
+(manually on alpha:1 → nav beta → prefix+L returns to alpha WINDOW 1, not the thread's
+window 0). KEY: recording needs the carrier; the bind L uses run-shell (expands
+#{client_name}), display-popup would NOT. Master conf is a SYMLINK into the myrig repo, so
+a `git -C ~/mysetup/myrig pull` updates ~/.sesh/myrig/tmux.master.conf; the RUNNING master
+still needs mt-reload-conf (or mt-kill && mt-start) for the new bindings. DEPLOY: schema 9 =
+daemon restart. Live on mymain/macstudio/termux (sesh + myrig pulled, daemons restarted).
+**macbook OFFLINE (asleep) — pending sesh 73f198d + daemon restart + myrig pull + master
+reload.** Conformance: all touched cells pass (nav-window/in-client/api/mesh); the lone
+master-current/-/remote FAIL is the known pre-existing flake (fails on clean HEAD all
+session). The full suite's other 18 fails were claude-account flakes (every claude turn cell
+— "source turns missing" — under load), NOT this change.

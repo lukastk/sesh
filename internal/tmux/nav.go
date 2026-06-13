@@ -14,19 +14,19 @@ import (
 // malformed, or the recorded client is gone (stale tty). It is LOUD only on a real
 // tmux failure. The client is verified by name AND pid (a recycled tty must not be
 // mistaken for it) — the same liveness contract as nav's inner switch.
-func (s *Server) MarkerClientCurrent(markerPath string) (session, threadID string, err error) {
+func (s *Server) MarkerClientCurrent(markerPath string) (session, threadID string, window int, err error) {
 	b, err := os.ReadFile(markerPath)
 	if err != nil {
-		return "", "", nil // no master client here → nothing to resolve
+		return "", "", -1, nil // no master client here → nothing to resolve
 	}
 	f := strings.Fields(string(b))
 	if len(f) != 2 {
-		return "", "", nil
+		return "", "", -1, nil
 	}
 	name, pid := f[0], f[1]
 	clients, err := s.run("list-clients", "-F", "#{client_name} #{client_pid}")
 	if err != nil {
-		return "", "", err
+		return "", "", -1, err
 	}
 	live := false
 	for _, ln := range strings.Split(strings.TrimSpace(clients), "\n") {
@@ -36,25 +36,26 @@ func (s *Server) MarkerClientCurrent(markerPath string) (session, threadID strin
 		}
 	}
 	if !live {
-		return "", "", nil // stale marker (the recorded client is gone)
+		return "", "", -1, nil // stale marker (the recorded client is gone)
 	}
-	// What the client is CURRENTLY on (its active pane + session) — exactly what the
-	// user sees in that master window.
-	tid, err := s.run("display-message", "-p", "-c", name, "-F", "#{"+ThreadIDOption+"}")
+	// What the client is CURRENTLY on (its active pane + session + window) — exactly
+	// what the user sees in that master window.
+	out, err := s.run("display-message", "-p", "-c", name, "-F",
+		"#{"+ThreadIDOption+"}"+fieldSep+"#{client_session}"+fieldSep+"#{window_index}")
 	if err != nil {
-		return "", "", err
+		return "", "", -1, err
 	}
-	sess, err := s.run("display-message", "-p", "-c", name, "-F", "#{client_session}")
-	if err != nil {
-		return "", "", err
+	fields := strings.Split(strings.TrimRight(out, "\n"), fieldSep)
+	if len(fields) < 3 {
+		return "", "", -1, fmt.Errorf("tmux: unexpected master-current output %q", out)
 	}
-	return strings.TrimSpace(sess), strings.TrimSpace(tid), nil
+	return strings.TrimSpace(fields[1]), strings.TrimSpace(fields[0]), atoi(strings.TrimSpace(fields[2])), nil
 }
 
 // MarkerClientThreadID is the thread-only view of MarkerClientCurrent (the TUI
 // master-cursor preselect; prefix+a uses the session via the full resolver).
 func (s *Server) MarkerClientThreadID(markerPath string) (string, error) {
-	_, tid, err := s.MarkerClientCurrent(markerPath)
+	_, tid, _, err := s.MarkerClientCurrent(markerPath)
 	return tid, err
 }
 
@@ -95,7 +96,7 @@ func MasterClientMarker(home, origin string) string {
 // clients are NOT — fail loudly (an old attach predating the marker needs a
 // master restart) rather than moving someone else's view, which is exactly
 // the bug the old `list-clients | head -1` resolution had.
-func InnerSwitchScript(socket, session, threadID, marker string) string {
+func InnerSwitchScript(socket, session, threadID, windowIndex, marker string) string {
 	s := shArg(socket)
 	tgt := shArg("=" + session)
 	mk := shArg(marker)
@@ -107,13 +108,15 @@ func InnerSwitchScript(socket, session, threadID, marker string) string {
 	kick := fmt.Sprintf("tmux -L %s new-session -d -s _seshnavkick %s", s, shArg(attach))
 	// Window targeting: a thread's session can hold several windows (the user opens
 	// more), and switch-client to a bare session lands on the session's LAST-ACTIVE
-	// window — not necessarily the one holding the thread's pane. When a thread id is
-	// given, resolve the window of the @sesh-thread-id-marked pane and switch to
-	// `=session:window` so nav always lands on the thread's own window. Unresolvable
-	// (no marked pane) falls back to the bare session. `w` is also reused by the
-	// no-client kick branch so a fresh attach lands on the right window too.
+	// window. An EXPLICIT windowIndex (prefix+L replaying a recorded location) wins;
+	// otherwise, with a thread id, resolve the window of the @sesh-thread-id-marked pane
+	// and switch to `=session:window`. Unresolvable falls back to the bare session. `w`
+	// is reused by the no-client kick branch so a fresh attach lands on the right window.
 	resolveWin := `w=''`
-	if threadID != "" {
+	switch {
+	case windowIndex != "":
+		resolveWin = fmt.Sprintf(`w=%s; tgt="=%s:$w"`, shArg(windowIndex), session)
+	case threadID != "":
 		filter := shArg(fmt.Sprintf("#{==:#{%s},%s}", ThreadIDOption, threadID))
 		resolveWin = fmt.Sprintf(`w=$(tmux -L %[1]s list-panes -s -t %[2]s -f %[3]s -F '#{window_index}' 2>/dev/null | head -n1); [ -n "$w" ] && tgt="=%[4]s:$w"`,
 			s, tgt, filter, session)

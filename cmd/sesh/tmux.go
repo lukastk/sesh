@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -59,19 +60,23 @@ func tmuxMasterCurrent(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("master-current", flag.ContinueOnError)
 	origin := fs.String("origin", "", "the master's machine (whose marker to read) (required)")
 	asSession := fs.Bool("session", false, "print the current SESSION name instead of the thread id (for the prefix+a picker)")
+	asJSON := fs.Bool("json", false, "emit the full {thread_id, session, window} (the prefix+L 'last window' recorder)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *origin == "" {
 		return errors.New("master-current: --origin is required")
 	}
-	session, tid, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
+	session, tid, window, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
 	if err != nil {
 		return err
 	}
-	if *asSession {
+	switch {
+	case *asJSON:
+		return emitJSON(api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid, Session: session, Window: window})
+	case *asSession:
 		fmt.Println(session)
-	} else {
+	default:
 		fmt.Println(tid)
 	}
 	return nil
@@ -88,12 +93,40 @@ func tmuxNav(cfg config.Config, args []string) error {
 	clientFlag := fs.String("client", "", "with --in-client: the exact tmux client to switch (e.g. the TUI resolves its own client before grabbing the terminal); required when stdin is not a tty")
 	attach := fs.Bool("attach", false, "ATTACH this terminal to the target thread (for use from a plain shell outside tmux); REPLACES the process")
 	thread := fs.String("thread", "", "the thread id whose pane to land on: nav targets the WINDOW holding its @sesh-thread-id pane, not just the session's last-active window (omit for a plain session nav)")
+	last := fs.Bool("last", false, "switch to the PREVIOUS sesh-nav location — the cross-machine 'last window' toggle (ignores --to)")
+	windowFlag := fs.Int("window", -1, "explicit window index to land on (internal: prefix+L replays a recorded location)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	windowTarget := *windowFlag
+	// prefix+L: target the previously-recorded location instead of --to. Read it BEFORE
+	// recording the current location below (which overwrites it) so the two swap = toggle.
+	if *last {
+		m, s, w, ok := readNavPrev(cfg.Home)
+		if !ok {
+			return errors.New("nav --last: no previous sesh-nav location yet (navigate somewhere first)")
+		}
+		*to = m + ":" + s
+		windowTarget = w
+		*thread = "" // an explicit recorded window overrides thread-window resolution
 	}
 	machine, session, ok := strings.Cut(*to, ":")
 	if !ok || machine == "" || session == "" {
 		return errors.New("nav: --to must be <machine>:<session>")
+	}
+	// Record where the cockpit is NOW (the "from"), so the NEXT prefix+L returns here.
+	// Master-path only (the cockpit carries SESH_NAV_CLIENT); best-effort — a failure to
+	// resolve just skips the history update and never blocks the nav.
+	if !*attach && !*inClient {
+		if cm, cs, cw, ok := resolveMasterLocation(cfg); ok {
+			writeNavPrev(cfg.Home, cm, cs, cw)
+		}
+	}
+	// windowStr is the explicit window index (recorded location), "" when unset — it
+	// overrides the thread-window resolution in the switch below.
+	windowStr := ""
+	if windowTarget >= 0 {
+		windowStr = strconv.Itoa(windowTarget)
 	}
 
 	// Attach: from a plain shell (no tmux client to switch), make this terminal BECOME
@@ -108,7 +141,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 			// Land on the thread's WINDOW: attach shows the session's active window, so
 			// set it to the thread's pane's window first (best-effort; a plain session
 			// nav with no --thread leaves the active window as-is).
-			if tgt := threadWindowTarget(cfg.TmuxSocket, session, *thread); tgt != "="+session {
+			if tgt := threadWindowTarget(cfg.TmuxSocket, session, *thread, windowStr); tgt != "="+session {
 				exec.Command("tmux", "-L", cfg.TmuxSocket, "select-window", "-t", tgt).Run() //nolint:errcheck — best-effort
 			}
 			// attach -t does NOT honor the "=" exact-match prefix, so use the bare name.
@@ -208,7 +241,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 		// Target the thread's WINDOW (=session:window) so a multi-window session lands
 		// on the thread's pane, not the session's last-active window. Falls back to the
 		// bare session when no thread id is given or its pane can't be resolved.
-		target := threadWindowTarget(cfg.TmuxSocket, session, *thread)
+		target := threadWindowTarget(cfg.TmuxSocket, session, *thread, windowStr)
 		if out, err := exec.Command("tmux", "-L", cfg.TmuxSocket, "switch-client", "-c", client, "-t", target).CombinedOutput(); err != nil {
 			return fmt.Errorf("nav --in-client: switch-client %s: %v: %s", client, err, out)
 		}
@@ -225,7 +258,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 	// client this master's window recorded in its marker (see MasterClientMarker),
 	// so a direct attach or another master's window is never the one moved.
 	if machine == cfg.Machine {
-		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session, *thread, tmux.MasterClientMarker(cfg.Home, cfg.Machine))
+		script := tmux.InnerSwitchScript(cfg.TmuxSocket, session, *thread, windowStr, tmux.MasterClientMarker(cfg.Home, cfg.Machine))
 		out, err := exec.Command("sh", "-c", script).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("nav inner switch (local): %v: %s", err, out)
@@ -252,7 +285,11 @@ func tmuxNav(cfg config.Config, args []string) error {
 		c := client.NewRemote(peer.ApiAddr, token)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := c.TmuxNav(ctx, api.NavRequest{Session: session, Origin: cfg.Machine, ThreadID: *thread}); err != nil {
+		var wptr *int
+		if windowTarget >= 0 {
+			wptr = &windowTarget
+		}
+		if err := c.TmuxNav(ctx, api.NavRequest{Session: session, Origin: cfg.Machine, ThreadID: *thread, Window: wptr}); err != nil {
 			return fmt.Errorf("nav inner switch on %s (http): %w", machine, err)
 		}
 		return nil
@@ -267,7 +304,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 	if peer.Home == "" {
 		return fmt.Errorf("nav: peer %q has no home registered (see `sesh peer add --home`)", machine)
 	}
-	script := tmux.InnerSwitchScript(peer.TmuxSocket, session, *thread, tmux.MasterClientMarker(peer.Home, cfg.Machine))
+	script := tmux.InnerSwitchScript(peer.TmuxSocket, session, *thread, windowStr, tmux.MasterClientMarker(peer.Home, cfg.Machine))
 	navArgs := append(peers.SSHMultiplexArgs(), peer.SSHArgs()...)
 	navArgs = append(navArgs, peer.SSH, script)
 	out, err := exec.Command("ssh", navArgs...).CombinedOutput()
@@ -277,13 +314,16 @@ func tmuxNav(cfg config.Config, args []string) error {
 	return nil
 }
 
-// threadWindowTarget returns a switch-client / select-window target for a thread:
-// "=session:window" — the window holding the thread's @sesh-thread-id pane — when the
-// thread id is given and its pane is resolvable on socket, else the bare "=session".
-// This is what makes nav land on the thread's OWN window in a multi-window session
-// instead of the session's last-active window.
-func threadWindowTarget(socket, session, threadID string) string {
+// threadWindowTarget returns a switch-client / select-window target for a session:
+// "=session:window". An EXPLICIT windowIndex (prefix+L replaying a recorded location)
+// wins; otherwise it resolves the window holding the thread's @sesh-thread-id pane (so
+// nav lands on the thread's OWN window in a multi-window session); else the bare
+// "=session".
+func threadWindowTarget(socket, session, threadID, windowIndex string) string {
 	base := "=" + session
+	if windowIndex != "" {
+		return base + ":" + windowIndex
+	}
 	if threadID == "" {
 		return base
 	}

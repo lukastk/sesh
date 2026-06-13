@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+// TestInnerSwitchScriptExplicitWindow checks that an EXPLICIT window index (prefix+L
+// replaying a recorded location) overrides the thread-window resolution: the switch
+// target becomes =session:<window> directly, skipping the list-panes marker lookup.
+func TestInnerSwitchScriptExplicitWindow(t *testing.T) {
+	script := InnerSwitchScript("sock", "sesh_x", "some-thread", "2", "/marker")
+	if !strings.Contains(script, `w='2'; tgt="=sesh_x:$w"`) {
+		t.Errorf("explicit window 2 not wired into the switch target:\n%s", script)
+	}
+	if strings.Contains(script, "list-panes -s") {
+		t.Errorf("explicit window should SKIP the thread marker resolution:\n%s", script)
+	}
+}
+
 // TestInnerSwitchScriptLandsOnThreadWindow runs the REAL generated switch script
 // against a REAL tmux server and proves it lands the client on the WINDOW holding
 // the thread's @sesh-thread-id pane — not the session's last-active window. This
@@ -67,7 +80,7 @@ func TestInnerSwitchScriptLandsOnThreadWindow(t *testing.T) {
 	}
 
 	// Run the real generated script (no live marker → single-client branch switches).
-	script := InnerSwitchScript(sock, "sesh_x", tid, "/nonexistent-marker")
+	script := InnerSwitchScript(sock, "sesh_x", tid, "", "/nonexistent-marker")
 	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("script: %v\n%s", err, out)
 	}

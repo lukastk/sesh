@@ -96,6 +96,10 @@ type NavRequest struct {
 	// thread's @sesh-thread-id pane (resolved on the daemon's own work server), not
 	// the session's last-active window. Empty = a plain session-level switch.
 	ThreadID string `json:"thread_id,omitempty"`
+	// Window, when non-nil, is an EXPLICIT window index to land on (prefix+L replaying a
+	// recorded location) — it overrides ThreadID resolution. A POINTER (not an int) so a
+	// pre-window client that omits it is unambiguously "unset" rather than window 0.
+	Window *int `json:"window,omitempty"`
 }
 
 // MasterCurrentResponse returns what the daemon's work server is currently showing
@@ -106,6 +110,10 @@ type MasterCurrentResponse struct {
 	Schema   int    `json:"schema"`
 	ThreadID string `json:"thread_id"`
 	Session  string `json:"session"`
+	// Window is the window index the marker client is currently on (-1 when there's
+	// nothing to resolve). It lets the cockpit record a full (machine, session, window)
+	// location for prefix+L's "last window" toggle, not just the session.
+	Window int `json:"window"`
 }
 
 // StageFileRequest is the body of POST /v1/tmux/stage-file. Content is the raw

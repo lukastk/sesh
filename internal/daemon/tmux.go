@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -22,12 +23,12 @@ func (d *Daemon) handleTmuxMasterCurrent(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "master-current: origin is required")
 		return
 	}
-	session, tid, err := d.tmux.MarkerClientCurrent(tmux.MasterClientMarker(d.cfg.Home, origin))
+	session, tid, window, err := d.tmux.MarkerClientCurrent(tmux.MasterClientMarker(d.cfg.Home, origin))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid, Session: session})
+	writeJSON(w, http.StatusOK, api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid, Session: session, Window: window})
 }
 
 // handleTmuxNav serves POST /v1/tmux/nav: the INNER switch-client, run in-process
@@ -45,7 +46,11 @@ func (d *Daemon) handleTmuxNav(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "nav: session and origin are required")
 		return
 	}
-	script := tmux.InnerSwitchScript(d.cfg.TmuxSocket, req.Session, req.ThreadID, tmux.MasterClientMarker(d.cfg.Home, req.Origin))
+	windowStr := ""
+	if req.Window != nil && *req.Window >= 0 {
+		windowStr = strconv.Itoa(*req.Window)
+	}
+	script := tmux.InnerSwitchScript(d.cfg.TmuxSocket, req.Session, req.ThreadID, windowStr, tmux.MasterClientMarker(d.cfg.Home, req.Origin))
 	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("nav inner switch: %v: %s", err, out))
 		return

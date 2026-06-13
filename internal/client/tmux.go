@@ -46,14 +46,15 @@ func (c *Client) TmuxNav(ctx context.Context, req api.NavRequest) error {
 
 // TmuxMasterCurrent fetches GET /v1/tmux/master-current?origin=X — what the origin
 // master's window is currently showing on this daemon's work server: the active
-// pane's thread id and the client's session name (both "" = no live master client).
-func (c *Client) TmuxMasterCurrent(ctx context.Context, origin string) (session, threadID string, err error) {
+// pane's thread id, the client's session name, and its window index (session "" / window
+// -1 = no live master client).
+func (c *Client) TmuxMasterCurrent(ctx context.Context, origin string) (session, threadID string, window int, err error) {
 	var out api.MasterCurrentResponse
 	u := "http://unix/v1/tmux/master-current?origin=" + url.QueryEscape(origin)
 	if err := c.getJSON(ctx, u, &out); err != nil {
-		return "", "", err
+		return "", "", -1, err
 	}
-	return out.Session, out.ThreadID, nil
+	return out.Session, out.ThreadID, out.Window, nil
 }
 
 // TmuxStageFile posts POST /v1/tmux/stage-file and returns the staged path.

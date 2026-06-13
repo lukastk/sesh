@@ -628,3 +628,25 @@ reload.** Conformance: all touched cells pass (nav-window/in-client/api/mesh); t
 master-current/-/remote FAIL is the known pre-existing flake (fails on clean HEAD all
 session). The full suite's other 18 fails were claude-account flakes (every claude turn cell
 — "source turns missing" — under load), NOT this change.
+
+## H11 — mt-enter-box + master prefix+c (2026-06-13, myrig 53ab727)
+Lukas: prefix+c fzf over ALL boxyard boxes, start/enter a tmux session in the box on the
+machine where it lives (multi-machine → 2nd fzf). boxyard's local index has remote boxes,
+so no remote poll for the list. mt-enter-box (shell.sh.jinja): `boxyard list
+--output-format json` → per box, machines = `ctx/<machine>` groups ∩ {self + peers}; fzf
+the 436 (of 481) boxes on a known machine; 2nd fzf if several; create-or-enter a plain
+session named after the box at <home>/dev/<index> (index = ts_subid__name; boxdir is
+ABSOLUTE — derived per machine: $HOME locally, else peers.json home minus /.sesh — because
+`sesh tmux create-session --dir` does NOT expand ~) on that machine's work server, then
+_mt_nav_to. bind c = run-shell+display-popup (carries $SESH_NAV_CLIENT). VALIDATED on
+mymain: 436-box list, index→~/dev/<index> (matches real dirs), field extraction, machine
+pick, peer-home derivation (macbook→/Users/lukas/dev), create-in-box-dir + existence-check
+reuse. Per-machine box counts: macbook 431, macstudio 3, mymain 2 (45 boxes have no
+known-machine ctx group → hidden, can't be entered). DEPLOY: shell.sh is a RENDERED jinja
+(not symlinked) → needs `install-home.py` render per machine (no daemon/binary). master.conf
+is symlinked → myrig pull updates it, but the RUNNING master needs source-file (prefix+c).
+Done: mymain/macstudio/termux (myrig pulled + shell.sh rendered; termux uv→python3
+fallback). **macbook (the master machine) PENDING — kept sleeping; needs: git -C
+~/mysetup/myrig pull && (uv run|python3) scripts/install-home.py $MYRIG_TARGETS && tmux -L
+sesh-master source-file ~/.sesh/myrig/tmux.master.conf.** termux likely lacks boxyard
+(python deps) so mt-enter-box there would no-op; the master normally runs on macbook.

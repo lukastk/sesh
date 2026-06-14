@@ -517,6 +517,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.pending[msg.id] = msg.patch
 				}
 				m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
+				// An optimistic hide can drop the row under/below the cursor — keep it in range.
+				if vis := len(m.visibleMatches()); m.cursor >= vis {
+					m.cursor = max(0, vis-1)
+				}
+				m.ensureCursorVisible()
 			}
 		}
 		if msg.err == nil && msg.preselect != "" {
@@ -628,7 +633,12 @@ type rowPatch struct {
 	notify     *bool
 	addTags    []string
 	removeTags []string
-	ttl        int
+	// hide drops the row from the CURRENT view instantly (archive/unarchive/delete
+	// remove it from this view; the mesh read path lags the write by up to one
+	// maintainer tick). Unlike the field overlays, it removes the row rather than
+	// editing it. A pure hide patch carries no field overrides.
+	hide bool
+	ttl  int
 }
 
 func (p *rowPatch) merge(o *rowPatch) {
@@ -637,6 +647,9 @@ func (p *rowPatch) merge(o *rowPatch) {
 	}
 	if o.notify != nil {
 		p.notify = o.notify
+	}
+	if o.hide {
+		p.hide = true
 	}
 	p.addTags = append(p.addTags, o.addTags...)
 	p.removeTags = append(p.removeTags, o.removeTags...)
@@ -666,6 +679,12 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 
 // satisfied reports whether the server row already reflects every override.
 func (p *rowPatch) satisfied(r api.ThreadRow) bool {
+	if p.hide {
+		// satisfied() is only consulted for a row STILL present in the fetch — i.e.
+		// the read path still shows it in this view, so the hide hasn't landed.
+		// (When it has landed, the row is absent and the patch is GC'd in applyPending.)
+		return false
+	}
 	if p.name != nil && r.Name != *p.name {
 		return false
 	}
@@ -698,6 +717,7 @@ func (m *Model) applyPending(gc bool) {
 	for i := range m.rows {
 		idx[m.rows[i].ID] = i
 	}
+	hidden := map[string]bool{}
 	for id, p := range m.pending {
 		i, ok := idx[id]
 		if !ok {
@@ -717,7 +737,20 @@ func (m *Model) applyPending(gc bool) {
 				continue
 			}
 		}
-		p.apply(&m.rows[i])
+		if p.hide {
+			hidden[id] = true // drop it from the view until the read path catches up (or TTL resurrects it)
+		} else {
+			p.apply(&m.rows[i])
+		}
+	}
+	if len(hidden) > 0 {
+		kept := m.rows[:0]
+		for _, r := range m.rows {
+			if !hidden[r.ID] {
+				kept = append(kept, r)
+			}
+		}
+		m.rows = kept
 	}
 }
 
@@ -1192,9 +1225,31 @@ func (m Model) deleteSelected() tea.Cmd {
 	return m.deleteRow(row)
 }
 
-// deleteRow drops a specific thread's record (routed to the owner).
+// deleteRow drops a specific thread's record (routed to the owner). Delete removes
+// the record from EVERY view, so hide it instantly (the mesh read path lags the
+// write by up to one maintainer tick).
 func (m Model) deleteRow(row api.ThreadRow) tea.Cmd {
-	return m.routedVerb(row, nil, "delete")
+	return m.routedVerb(row, &rowPatch{hide: true, ttl: optimisticTTL}, "delete")
+}
+
+// leavesCurrentView reports whether setting row.Archived = newArchived removes the
+// row from the CURRENTLY displayed view — i.e. whether an archive/unarchive should
+// optimistically hide it.
+func (m Model) leavesCurrentView(row api.ThreadRow, newArchived bool) bool {
+	switch m.view {
+	case ViewActive:
+		return newArchived // active hides archived rows
+	case ViewArchived:
+		return !newArchived // archived view hides un-archived rows
+	case ViewAll:
+		return false // all shows both
+	}
+	if i := int(m.view - viewBuiltins); i >= 0 && i < len(m.customViews) {
+		r := row
+		r.Archived = newArchived
+		return !m.customViews[i].pred.Eval(r) // the predicate no longer admits it
+	}
+	return false
 }
 
 // notifySelected TOGGLES the selected thread's notification gate (routed to the
@@ -1222,12 +1277,19 @@ func (m Model) archiveSelected() tea.Cmd {
 	return m.archiveRow(row)
 }
 
-// archiveRow toggles a specific thread's archived state (routed to the owner).
+// archiveRow toggles a specific thread's archived state (routed to the owner). When
+// the toggle removes the row from the current view it is hidden optimistically, so
+// it disappears at once instead of after the next mesh read.
 func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
-	if row.Archived {
-		return m.routedVerb(row, nil, "archive", "--unarchive")
+	newArchived := !row.Archived
+	var patch *rowPatch
+	if m.leavesCurrentView(row, newArchived) {
+		patch = &rowPatch{hide: true, ttl: optimisticTTL}
 	}
-	return m.routedVerb(row, nil, "archive")
+	if row.Archived {
+		return m.routedVerb(row, patch, "archive", "--unarchive")
+	}
+	return m.routedVerb(row, patch, "archive")
 }
 
 // Selected returns the VISIBLE row under the cursor, if any (the filter and

@@ -535,6 +535,12 @@ func claimActionDelete(t *testing.T) {
 	if m = runKey(t, m, "y"); m.ActionErr() != nil {
 		t.Fatalf("delete action errored: %v", m.ActionErr())
 	}
+	// OPTIMISTIC: the row is gone from the grid IMMEDIATELY — runKey ran the delete
+	// + its actionMsg but NOT the reconcile fetch, so this proves the row dropped
+	// without waiting for the mesh read path (the latency fix), not a slow refetch.
+	if _, ok := rowByName(m, "delme"); ok {
+		t.Errorf("deleted row still rendered immediately after confirm (optimistic hide missing)")
+	}
 	if threadInList(t, sb, th.ID) {
 		t.Errorf("delete did not drop the record after confirmation")
 	}
@@ -560,6 +566,13 @@ func claimActionArchive(t *testing.T) {
 		t.Fatalf("a did not open the archive confirmation")
 	}
 	m = runKey(t, m, "y")
+
+	// OPTIMISTIC: the row leaves the active grid IMMEDIATELY — runKey ran the archive
+	// + its actionMsg but NOT the reconcile fetch, so the row dropped without waiting
+	// for the mesh read path to reflect the archived flag (the latency fix).
+	if _, ok := rowByName(m, "parkme"); ok {
+		t.Errorf("archived row still rendered immediately after confirm (optimistic hide missing)")
+	}
 
 	// Record kept but hidden from the active list (the daemon truth)...
 	if hasThread(sb.listThreads(t), th.ID) {

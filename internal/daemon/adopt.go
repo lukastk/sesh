@@ -116,12 +116,19 @@ func (d *Daemon) handleThreadAdopt(w http.ResponseWriter, r *http.Request) {
 		// The conversation exists (the agent is live in the pane).
 		HeadlessStarted: true,
 	}
-	if err := d.tmux.StampPaneThreadID(info.Pane, id); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("adopt: stamp pane: %v", err))
-		return
-	}
+	// Insert the record BEFORE stamping the pane: a failed insert must never
+	// leave a pane stamped with an id that has no row (the partial-state bug).
+	// session_name is no longer unique (a pane may join a session that already
+	// hosts threads), so the only collision left is the pane already being
+	// marked — caught loudly above as a clean 409, never a raw DB error.
 	if err := d.store.InsertThread(thread); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := d.tmux.StampPaneThreadID(info.Pane, id); err != nil {
+		// Roll the record back so store and runtime stay consistent.
+		d.store.DeleteThread(id) //nolint:errcheck
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("adopt: stamp pane: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})

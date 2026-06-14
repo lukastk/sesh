@@ -24,11 +24,18 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/delete", d.handleThreadDelete)
 }
 
-// handleThreadStop ends the thread's runtime — kills its tmux session (which
+// handleThreadStop ends the thread's runtime — kills the thread's PANE (which
 // kills the agent) — but KEEPS the record, which becomes a normal dead thread
 // (resumable via `resume`). This is the runtime half of the old `kill`; dropping
-// the record is a separate `delete`. Stopping a thread whose session is already
-// gone is not an error (the runtime was already down) — it is idempotent.
+// the record is a separate `delete`.
+//
+// It targets the pane (resolved from the @sesh-thread-id marker), NOT the
+// session: a session may host several threads (their own windows, or splits in
+// one window), and killing the session would take the siblings with it. When
+// the thread owns its whole session (1 pane / 1 window) tmux tears the empty
+// session down anyway, so the common case is unchanged. Stopping a thread whose
+// pane is already gone is not an error (the runtime was already down) — it is
+// idempotent.
 func (d *Daemon) handleThreadStop(w http.ResponseWriter, r *http.Request) {
 	var req api.StopThreadRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -44,8 +51,13 @@ func (d *Daemon) handleThreadStop(w http.ResponseWriter, r *http.Request) {
 		d.threadOpErr(w, err)
 		return
 	}
-	if d.tmux.HasSession(thread.SessionName) {
-		if err := d.tmux.KillSession(thread.SessionName); err != nil {
+	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if found {
+		if err := d.tmux.KillPane(loc.Pane); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

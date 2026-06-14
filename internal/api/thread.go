@@ -105,6 +105,16 @@ type NewThreadRequest struct {
 	// READY (the daemon waits for the pane asynchronously — never the blank-
 	// pane race; a delivery failure is loud in the daemon log).
 	Msg string `json:"msg,omitempty"`
+	// Placement (headed only; mutually exclusive; empty = own new session).
+	// A session may host many threads — runtime identity is the pane's marker.
+	//   IntoSession: add the thread as a new WINDOW of an existing session.
+	//   IntoWindow:  split target (pane/window) — the thread is a new pane beside it.
+	//   IntoPane:    register-then-exec — bind the thread to an EXISTING shell pane
+	//                and return LaunchCommand/LaunchEnv for the caller to exec in
+	//                place (the daemon does NOT spawn). The pane must hold no agent.
+	IntoSession string `json:"into_session,omitempty"`
+	IntoWindow  string `json:"into_window,omitempty"`
+	IntoPane    string `json:"into_pane,omitempty"`
 }
 
 // ReparentThreadRequest re-parents a thread ('' = make it a root).
@@ -113,10 +123,14 @@ type ReparentThreadRequest struct {
 	Parent string `json:"parent"`
 }
 
-// ThreadResponse wraps a single thread.
+// ThreadResponse wraps a single thread. For an `--into-pane` (register-then-exec)
+// spawn the daemon does NOT launch the agent — it returns the exact command and
+// env for the caller to exec in place; LaunchCommand is empty for every other spawn.
 type ThreadResponse struct {
-	Schema int    `json:"schema"`
-	Thread Thread `json:"thread"`
+	Schema        int               `json:"schema"`
+	Thread        Thread            `json:"thread"`
+	LaunchCommand string            `json:"launch_command,omitempty"`
+	LaunchEnv     map[string]string `json:"launch_env,omitempty"`
 }
 
 // ThreadListResponse is returned by GET /v1/threads.

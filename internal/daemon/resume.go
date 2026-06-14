@@ -104,11 +104,6 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 			return
 		}
 	}
-	if d.tmux.HasSession(session) {
-		writeError(w, http.StatusConflict, "revive: a tmux session "+session+" already exists")
-		return
-	}
-
 	kind := agents.Kind(thread.AgentKind)
 	sessionID := thread.AgentSessionID
 	// codex mints its session id on the first turn; recover it from rollouts, and if
@@ -147,27 +142,52 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		writeError(w, http.StatusBadRequest, merr.Error())
 		return
 	}
-	if err := d.tmux.CreateSessionCmd(session, thread.Cwd, env, agents.ResumeCommand(kind, sessionID, mode, d.spawn.ArgsFor(string(kind)))); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	resumeCmd := agents.ResumeCommand(kind, sessionID, mode, d.spawn.ArgsFor(string(kind)))
+
+	// If the session still exists, a SIBLING thread is keeping it alive — revive
+	// into a new WINDOW of it rather than colliding on the name (multiple threads
+	// per session). Otherwise mint the session fresh. teardown undoes exactly what
+	// we created (kill the whole session only if WE made it; else just our pane,
+	// so siblings survive).
+	var pane string
+	createdSession := false
+	if d.tmux.HasSession(session) {
+		var werr error
+		if pane, werr = d.tmux.CreateWindowCmd(session, thread.Cwd, env, resumeCmd); werr != nil {
+			writeError(w, http.StatusInternalServerError, werr.Error())
+			return
+		}
+	} else {
+		if err := d.tmux.CreateSessionCmd(session, thread.Cwd, env, resumeCmd); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		createdSession = true
+		var perr error
+		if pane, perr = d.tmux.SessionFirstPane(session); perr != nil {
+			d.tmux.KillSession(session) //nolint:errcheck
+			writeError(w, http.StatusInternalServerError, perr.Error())
+			return
+		}
 	}
-	pane, err := d.tmux.SessionFirstPane(session)
-	if err != nil {
-		d.tmux.KillSession(session) //nolint:errcheck
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	teardown := func() {
+		if createdSession {
+			d.tmux.KillSession(session) //nolint:errcheck
+		} else if pane != "" {
+			d.tmux.KillPane(pane) //nolint:errcheck
+		}
 	}
 	if err := d.tmux.SetPaneThreadID(pane, id); err != nil {
-		d.tmux.KillSession(session) //nolint:errcheck
+		teardown()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Persist the (possibly newly minted) session name; reviving also marks the
-	// conversation begun. On failure tear the pane down — store and runtime stay
-	// consistent.
+	// conversation begun. On failure tear down exactly what we created — store
+	// and runtime stay consistent, siblings untouched.
 	if err := d.store.SetThreadHeaded(id, session); err != nil {
-		d.tmux.KillSession(session) //nolint:errcheck
+		teardown()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -89,6 +89,16 @@ func (s *Server) KillSession(name string) error {
 	return err
 }
 
+// KillPane kills a single pane by id. When it is the last pane of its window
+// the window dies, and the last window's death takes the session — so for a
+// 1-pane/1-window/1-session thread this is equivalent to KillSession, but for a
+// thread sharing a session (its own window, or a split) it ends ONLY that
+// thread's runtime and leaves its siblings alive.
+func (s *Server) KillPane(pane string) error {
+	_, err := s.run("kill-pane", "-t", pane)
+	return err
+}
+
 func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

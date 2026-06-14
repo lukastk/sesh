@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
@@ -432,6 +433,10 @@ func threadNew(cfg config.Config, args []string) error {
 	msg := fs.String("msg", "", "send this initial prompt once the agent is ready (headed spawns)")
 	messageID := fs.Int("message-id", 0, "fork after the Nth assistant turn (0 = the whole conversation)")
 	noParent := fs.Bool("no-parent", false, "force a root thread (suppress parent inference)")
+	intoSession := fs.String("into-session", "", "place the thread as a new WINDOW of an existing session (shared session)")
+	intoWindow := fs.String("into-window", "", "place the thread as a SPLIT pane of target (a pane id or session:window)")
+	intoPane := fs.String("into-pane", "", "bind the thread to an EXISTING shell pane and run the agent in place (register-then-exec; with --exec)")
+	doExec := fs.Bool("exec", false, "with --into-pane: replace THIS process with the agent (run it in the calling pane)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -458,15 +463,26 @@ func threadNew(cfg config.Config, args []string) error {
 			}
 		}
 	}
-	if *agent == "" || *name == "" || *cwd == "" {
+	// Placement modes are mutually exclusive; --exec is for --into-pane only.
+	if nSet(*intoSession != "", *intoWindow != "", *intoPane != "") > 1 {
+		return errors.New("thread new: --into-session, --into-window and --into-pane are mutually exclusive")
+	}
+	if *doExec && *intoPane == "" {
+		return errors.New("thread new: --exec requires --into-pane")
+	}
+	// --into-pane inherits the pane's cwd when none is given; every other mode
+	// needs an explicit (absolute) cwd.
+	if *agent == "" || *name == "" || (*cwd == "" && *intoPane == "") {
 		return errors.New("thread new: --agent, --name and --cwd are required")
 	}
-	// Relative --cwd expands against the invocation dir (the daemon needs absolute).
-	abs, err := absCwd(*cwd)
-	if err != nil {
-		return fmt.Errorf("thread new: --cwd: %w", err)
+	if *cwd != "" {
+		// Relative --cwd expands against the invocation dir (the daemon needs absolute).
+		abs, err := absCwd(*cwd)
+		if err != nil {
+			return fmt.Errorf("thread new: --cwd: %w", err)
+		}
+		*cwd = abs
 	}
-	*cwd = abs
 	// Parent (v1 semantics, on the F1 resolver): an explicit --parent resolves
 	// (prefix ok, loud unknown); otherwise a `new` run INSIDE a thread defaults
 	// to it as parent. Inference failure here is a LEGITIMATE root, not an
@@ -503,15 +519,69 @@ func threadNew(cfg config.Config, args []string) error {
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
 		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg,
+		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
 	})
 	if err != nil {
 		return err
 	}
+	// --into-pane is register-then-exec: the daemon registered the thread + marked
+	// the pane and returned the exact agent command; with --exec we replace THIS
+	// process with the agent so it runs in the calling pane.
+	if *doExec {
+		if resp.LaunchCommand == "" {
+			return errors.New("thread new: --exec: daemon returned no launch command")
+		}
+		return execAgent(resp.Thread.Cwd, resp.LaunchCommand, resp.LaunchEnv)
+	}
 	if *asJSON {
+		// Normal/placement spawns keep emitting the bare thread (stable `.id`);
+		// --into-pane additionally carries launch_command/launch_env.
+		if resp.LaunchCommand != "" {
+			return emitJSON(resp)
+		}
 		return emitJSON(resp.Thread)
 	}
 	fmt.Println(resp.Thread.ID)
+	if resp.LaunchCommand != "" {
+		// Registered but not exec'd — surface the command the caller must run.
+		fmt.Fprintln(os.Stderr, "launch:", resp.LaunchCommand)
+	}
 	return nil
+}
+
+// execAgent replaces the current process with the agent command (run through the
+// login shell so PATH/mise shims resolve), chdir'd to cwd, env extended with the
+// thread's launch env. Used by `thread new --into-pane --exec` so the agent takes
+// over the calling pane. It only returns on failure (success replaces the image).
+func execAgent(cwd, command string, extra map[string]string) error {
+	if cwd != "" {
+		if err := os.Chdir(cwd); err != nil {
+			return fmt.Errorf("thread new: --exec: chdir %s: %w", cwd, err)
+		}
+	}
+	env := os.Environ()
+	for k, v := range extra {
+		env = append(env, k+"="+v)
+	}
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	if err := syscall.Exec(shell, []string{shell, "-lc", command}, env); err != nil {
+		return fmt.Errorf("thread new: --exec %s: %w", command, err)
+	}
+	return nil
+}
+
+// nSet counts the true booleans (placement modes are mutually exclusive).
+func nSet(bs ...bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n
 }
 
 func threadList(cfg config.Config, args []string) error {

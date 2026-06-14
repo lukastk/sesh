@@ -21,7 +21,10 @@ package api
 // rules render correctly cross-machine (the viewer cannot know a peer's home).
 // 9: `window` added to master-current response + nav request — the cockpit records a
 // full (machine, session, window) location for the prefix+L "last window" toggle.
-const SchemaVersion = 9
+// 10: thread placement — `into_session`/`into_window`/`into_pane` on the new-thread
+// request (a session may host many threads); `launch_command`/`launch_env` on the
+// thread response carry the register-then-exec command for `--into-pane`.
+const SchemaVersion = 10
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

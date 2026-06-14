@@ -9,8 +9,10 @@ Use this skill when the user wants to **use** `sesh` — the multi-machine codin
 session manager — not develop it. `sesh` is one Go binary plus a per-machine daemon.
 
 Mental model: each machine runs a **daemon** that owns a local SQLite store, drives a
-tmux "work" server (one session per thread), and maintains a background probe of every
-local thread's live state. Daemons are linked into a **mesh** (peers, over ssh or an
+tmux "work" server, and maintains a background probe of every local thread's live state.
+A thread's runtime identity is its **pane** (a `@sesh-thread-id` marker), so a tmux
+session may host many threads (their own windows, or splits) — by default a new thread
+gets its own session, but see `--into-session`/`--into-window`/`--into-pane`. Daemons are linked into a **mesh** (peers, over ssh or an
 HTTP API) so any machine can see and route to threads on any other. The CLI/TUI is a
 thin client over the local daemon's HTTP+JSON surface; `--machine <m>` routes a command
 to machine `m`. **`sesh` is mechanism, not UX** — it is explicit and machine-readable
@@ -148,7 +150,16 @@ sesh thread new --agent pi --name notes --cwd . --headless           # headless;
 sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child thread
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation
 
-sesh thread stop --id <id>           # end runtime (agent + session), keep the record (revivable)
+# Placement — a tmux session may host MANY threads (identity is the pane marker,
+# not the session). Default = own new session; otherwise:
+sesh thread new --agent pi --name win  --cwd . --into-session <name>   # a new WINDOW of an existing session
+sesh thread new --agent pi --name beside --cwd . --into-window <pane>  # a SPLIT beside a pane (or session:window)
+exec sesh thread new --agent claude --name here --into-pane "$TMUX_PANE" --exec  # run the agent IN the current shell pane
+#   --into-pane is register-then-exec: sesh records the thread + marks the pane,
+#   then (with --exec) replaces THIS process with the agent so it takes over the
+#   pane. cwd defaults to the pane's. Without --exec it prints the launch command.
+
+sesh thread stop --id <id>           # end runtime (kills the thread's PANE; a session shared with siblings survives), keep the record (revivable)
 sesh thread resume --id <id>         # revive a dead thread into a fresh pane (restores convo)
 sesh thread headful --id <id>        # promote a live HEADLESS thread into a pane
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first)

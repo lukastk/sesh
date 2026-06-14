@@ -48,15 +48,31 @@ func TestThreadCRUD(t *testing.T) {
 	}
 }
 
-func TestThreadDuplicateSessionRejected(t *testing.T) {
+// Many threads may share one tmux session (own windows, or splits in one
+// window) — runtime identity is the pane's @sesh-thread-id marker, not the
+// session name. So session_name is no longer unique (migration 12).
+func TestThreadDuplicateSessionAllowed(t *testing.T) {
 	s := openTestStore(t)
 	a := api.Thread{ID: "a", Machine: "m", SessionName: "dup", Cwd: "/x", AgentKind: "pi", Name: "a", Tags: []string{}}
 	b := api.Thread{ID: "b", Machine: "m", SessionName: "dup", Cwd: "/x", AgentKind: "pi", Name: "b", Tags: []string{}}
 	if err := s.InsertThread(a); err != nil {
 		t.Fatalf("insert a: %v", err)
 	}
-	if err := s.InsertThread(b); err == nil {
-		t.Fatal("expected duplicate session_name to be rejected, got nil")
+	if err := s.InsertThread(b); err != nil {
+		t.Fatalf("two threads in one session must be allowed, got: %v", err)
+	}
+	all, err := s.ListThreads(true)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	n := 0
+	for _, th := range all {
+		if th.SessionName == "dup" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("want 2 threads sharing session 'dup', got %d", n)
 	}
 }
 

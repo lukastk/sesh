@@ -78,10 +78,36 @@ var migrations = []string{
 	// meta.<key> predicates and future dynamic columns). APPENDED last:
 	// migrations apply by index, inserting mid-list desyncs deployed DBs.
 	`ALTER TABLE threads ADD COLUMN meta TEXT NOT NULL DEFAULT '{}';`,
-
-
-
-
+	// 12: drop UNIQUE(session_name). A thread's runtime identity is its pane's
+	// @sesh-thread-id marker, not its session — so MANY threads may share one
+	// tmux session (own windows, or splits in one window). session_name is now
+	// descriptive, not a key. SQLite can't ALTER...DROP CONSTRAINT, so rebuild
+	// the table: same columns, no UNIQUE, copy rows, swap. Multiple statements
+	// in one element => the whole rebuild is atomic in this migration's tx.
+	`CREATE TABLE threads_new (
+		id               TEXT PRIMARY KEY,
+		machine          TEXT NOT NULL,
+		session_name     TEXT NOT NULL,
+		cwd              TEXT NOT NULL,
+		agent_kind       TEXT NOT NULL,
+		name             TEXT NOT NULL,
+		tags             TEXT NOT NULL DEFAULT '[]',
+		headless         INTEGER NOT NULL DEFAULT 0,
+		created_at       INTEGER NOT NULL,
+		agent_session_id TEXT NOT NULL DEFAULT '',
+		headless_started INTEGER NOT NULL DEFAULT 0,
+		archived         INTEGER NOT NULL DEFAULT 0,
+		parent           TEXT NOT NULL DEFAULT '',
+		notify           INTEGER NOT NULL DEFAULT 1,
+		meta             TEXT NOT NULL DEFAULT '{}'
+	);
+	INSERT INTO threads_new SELECT
+		id, machine, session_name, cwd, agent_kind, name, tags, headless,
+		created_at, agent_session_id, headless_started, archived, parent,
+		notify, meta
+	FROM threads;
+	DROP TABLE threads;
+	ALTER TABLE threads_new RENAME TO threads;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

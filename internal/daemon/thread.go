@@ -84,7 +84,14 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread: name is required")
 		return
 	}
-	if req.Cwd == "" || !strings.HasPrefix(req.Cwd, "/") {
+	// cwd is required (absolute) for every mode EXCEPT --into-pane, which inherits
+	// the existing pane's cwd when none is given.
+	if req.IntoPane == "" {
+		if req.Cwd == "" || !strings.HasPrefix(req.Cwd, "/") {
+			writeError(w, http.StatusBadRequest, "thread: cwd must be an absolute path")
+			return
+		}
+	} else if req.Cwd != "" && !strings.HasPrefix(req.Cwd, "/") {
 		writeError(w, http.StatusBadRequest, "thread: cwd must be an absolute path")
 		return
 	}
@@ -102,17 +109,17 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		d.newHeadlessThread(w, kind, req)
 		return
 	}
+	// Placement modes are headed-only and mutually exclusive.
+	if nSet(req.IntoSession != "", req.IntoWindow != "", req.IntoPane != "") > 1 {
+		writeError(w, http.StatusBadRequest, "thread: --into-session, --into-window and --into-pane are mutually exclusive")
+		return
+	}
+	if req.IntoPane != "" {
+		d.newThreadIntoPane(w, kind, req)
+		return
+	}
 
 	id := uuid.NewString()
-	session, err := d.sessionNameFor(req.Cwd, id, req.Name)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if d.tmux.HasSession(session) {
-		writeError(w, http.StatusConflict, "thread: tmux session "+session+" already exists")
-		return
-	}
 
 	env := map[string]string{agents.EnvThreadID: id}
 	if err := d.prepCodexEnv(kind, env, req.Cwd); err != nil {
@@ -132,21 +139,71 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := d.tmux.CreateSessionCmd(session, req.Cwd, env, agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	command := agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))
+
+	// Resolve placement -> the thread's session_name + its (marked) pane. teardown
+	// undoes ONLY what THIS spawn created (its own session, or its window/split
+	// pane), so threads sharing a session are never harmed.
+	var session, pane string
+	teardown := func() {}
+	switch {
+	case req.IntoSession != "":
+		if !d.tmux.HasSession(req.IntoSession) {
+			writeError(w, http.StatusNotFound, "thread: --into-session "+req.IntoSession+" does not exist")
+			return
+		}
+		session = req.IntoSession
+		p, werr := d.tmux.CreateWindowCmd(session, req.Cwd, env, command)
+		if werr != nil {
+			writeError(w, http.StatusInternalServerError, werr.Error())
+			return
+		}
+		pane = p
+		teardown = func() { d.tmux.KillPane(pane) } //nolint:errcheck
+	case req.IntoWindow != "":
+		p, serr := d.tmux.SplitWindowCmd(req.IntoWindow, req.Cwd, env, command)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		pane = p
+		teardown = func() { d.tmux.KillPane(pane) } //nolint:errcheck
+		info, found, ferr := d.tmux.FindPaneByID(pane)
+		if ferr != nil || !found {
+			teardown()
+			writeError(w, http.StatusInternalServerError, "thread: cannot resolve the session of split pane "+pane)
+			return
+		}
+		session = info.Session
+	default:
+		s, serr := d.sessionNameFor(req.Cwd, id, req.Name)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		if d.tmux.HasSession(s) {
+			writeError(w, http.StatusConflict, "thread: tmux session "+s+" already exists")
+			return
+		}
+		if err := d.tmux.CreateSessionCmd(s, req.Cwd, env, command); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		session = s
+		teardown = func() { d.tmux.KillSession(session) } //nolint:errcheck
+		p, perr := d.tmux.SessionFirstPane(session)
+		if perr != nil {
+			teardown()
+			writeError(w, http.StatusInternalServerError, perr.Error())
+			return
+		}
+		pane = p
 	}
 
-	// Stamp the marker on the session's pane so the thread's pane is resolvable
-	// at runtime (never stored).
-	pane, err := d.tmux.SessionFirstPane(session)
-	if err != nil {
-		d.tmux.KillSession(session) // don't leak a half-spawned session
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// Stamp the marker on the thread's pane so it is resolvable at runtime
+	// (never stored).
 	if err := d.tmux.SetPaneThreadID(pane, id); err != nil {
-		d.tmux.KillSession(session)
+		teardown()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -169,7 +226,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		HeadlessStarted: true,
 	}
 	if err := d.store.InsertThread(thread); err != nil {
-		d.tmux.KillSession(session) // keep store and runtime consistent
+		teardown() // keep store and runtime consistent
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -177,6 +234,94 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		go d.sendWhenReady(thread, req.Msg)
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})
+}
+
+// nSet counts the true booleans (placement modes are mutually exclusive).
+func nSet(bs ...bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n
+}
+
+// newThreadIntoPane implements `thread new --into-pane`: register-then-exec. The
+// daemon does NOT spawn — it binds the thread to an EXISTING shell pane (record +
+// pre-minted session id + pane marker) and returns the exact agent command + env
+// for the caller to exec in place, so the agent becomes that pane's own process.
+// The pane must be a live work-server pane holding no agent and no thread.
+func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req api.NewThreadRequest) {
+	info, found, err := d.tmux.FindPaneByID(req.IntoPane)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "thread: --into-pane "+req.IntoPane+" is not on sesh's work server (placement is work-server-only)")
+		return
+	}
+	if info.ThreadID != "" {
+		writeError(w, http.StatusConflict, "thread: pane "+req.IntoPane+" already belongs to thread "+info.ThreadID)
+		return
+	}
+	if agent, running := tmux.AgentUnderPane(info.PanePID); running {
+		writeError(w, http.StatusConflict, "thread: pane "+req.IntoPane+" already has a "+agent.Kind+" running — use `thread adopt` to manage it")
+		return
+	}
+
+	cwd := req.Cwd
+	if cwd == "" {
+		cwd = info.Cwd
+	}
+	id := uuid.NewString()
+	env := map[string]string{agents.EnvThreadID: id}
+	if err := d.prepCodexEnv(kind, env, cwd); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	agentSessionID := ""
+	if kind == agents.Pi || kind == agents.Claude {
+		agentSessionID = uuid.NewString()
+	}
+	mode, err := d.resolveSpawnMode(kind, req.Mode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	command := agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))
+
+	thread := api.Thread{
+		ID:              id,
+		Machine:         d.cfg.Machine,
+		SessionName:     info.Session,
+		Cwd:             cwd,
+		AgentKind:       string(kind),
+		Name:            req.Name,
+		Tags:            []string{},
+		CreatedAtUnix:   time.Now().Unix(),
+		AgentSessionID:  agentSessionID,
+		Parent:          req.Parent,
+		Notify:          d.defaults.NotifyDefault(),
+		HeadlessStarted: true,
+	}
+	// Insert before stamping (no stamped-but-rowless pane on failure).
+	if err := d.store.InsertThread(thread); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := d.tmux.SetPaneThreadID(info.Pane, id); err != nil {
+		d.store.DeleteThread(id) //nolint:errcheck
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{
+		Schema:        api.SchemaVersion,
+		Thread:        thread,
+		LaunchCommand: command,
+		LaunchEnv:     env,
+	})
 }
 
 // sendWhenReady delivers a spawn's --msg once the agent is READY: the pane's

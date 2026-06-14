@@ -36,6 +36,61 @@ func (s *Server) CreateSessionCmd(name, dir string, env map[string]string, comma
 	return err
 }
 
+// CreateWindowCmd adds a new window running command to an EXISTING session and
+// returns the new window's pane id. Used to place a thread (its own window) into
+// a session that already hosts other threads — e.g. reviving a thread whose
+// session a sibling keeps alive. env is injected into the new window.
+func (s *Server) CreateWindowCmd(session, dir string, env map[string]string, command string) (string, error) {
+	if session == "" {
+		return "", fmt.Errorf("tmux: create-window-cmd: empty session")
+	}
+	if command == "" {
+		return "", fmt.Errorf("tmux: create-window-cmd: empty command")
+	}
+	if !s.HasSession(session) {
+		return "", fmt.Errorf("tmux: session %q does not exist", session)
+	}
+	args := []string{"new-window", "-t", "=" + session, "-P", "-F", "#{pane_id}"}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	for _, k := range sortedKeys(env) {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	args = append(args, command)
+	out, err := s.run(args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// SplitWindowCmd splits target (a pane or window) running command in the new
+// pane, and returns the new pane's id. Used to place a thread as a SPLIT beside
+// an existing pane (`thread new --into-window`). env is injected into the new
+// pane.
+func (s *Server) SplitWindowCmd(target, dir string, env map[string]string, command string) (string, error) {
+	if target == "" {
+		return "", fmt.Errorf("tmux: split-window-cmd: empty target")
+	}
+	if command == "" {
+		return "", fmt.Errorf("tmux: split-window-cmd: empty command")
+	}
+	args := []string{"split-window", "-t", target, "-P", "-F", "#{pane_id}"}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	for _, k := range sortedKeys(env) {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	args = append(args, command)
+	out, err := s.run(args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // FindPaneByThreadID walks the server and returns the live pane bearing the
 // given @sesh-thread-id marker. found=false means no such pane (the thread is
 // dead). This is thread.resolve-pane: pane resolution from the marker, never a

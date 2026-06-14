@@ -81,6 +81,29 @@ func init() {
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
+	// H13: a tmux session may host MANY threads (runtime identity is the pane's
+	// marker). Placement/sharing cells are agent-agnostic tmux topology and
+	// LOCAL-only by design (per-server pane ids — the thread.adopt precedent).
+	Register(Feature{
+		ID:          "thread.placement",
+		Description: "spawn a thread INTO an existing session (--into-session = own window) or window (--into-window = split): many threads per session",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "thread.placement-pane",
+		Description: "--into-pane register-then-exec: bind a thread to an EXISTING shell pane (record + marker + returned launch command; daemon does NOT spawn), then the agent runs in place",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "thread.stop-shared",
+		Description: "stop kills only the thread's PANE, not its session — a sibling thread sharing the session survives (KillSession would take both)",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "thread.adopt-shared",
+		Description: "adopt a 2nd agent into a session that already hosts a managed thread — both coexist (the dropped UNIQUE(session_name) constraint); same-pane re-adopt is a clean 409",
+		Localities:  []Locality{Local},
+	})
 	Register(Feature{
 		ID:          "thread.send.headful",
 		Description: "send a message into a thread's live pane",

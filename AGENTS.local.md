@@ -668,3 +668,20 @@ on a later retry) — retry the pull, or pull interactively; do NOT hack the sym
 file (leaves the repo dirty). Deployed d210881 + sourced on termux (clean pull) + mymain +
 macstudio; mt-enter-box lists 223 boxes on termux. **macbook (primary master) still PENDING
 — asleep; pull + source there when up.**
+
+## H12 — mmt-*/mt-* command split (2026-06-14, myrig 9af58ee)
+Lukas refactored the cockpit command namespace (mirrors V1 mms-/ms-): **mmt-*** = the
+mymastertmux cockpit (sesh-master server): mmt-start/attach/kill/ensure/reload-conf +
+clipboard relay mmt-send-clipboard/mmt-copy-to-master (+ helpers _mmt_clear_master /
+_mmt_send_clipboard_and_paste / _mmt_clip_get_*). **mt-*** = the inner mytmux work server
+(sesh): mt-enter-session/mt-enter-tmux-session/mt-enter-box (+ _mt_nav_to). mt-set-clipboard
+→ sesh-set-clipboard (generic, not tmux-level; both ambiguous calls — reload-conf and the
+clipboard relay — Lukas put under mmt). Alias -g groups: mmt / mt / sesh. Ref sites updated:
+shell.sh.jinja, tmux.master.conf (R→mmt-ensure, P→_mmt_send_clipboard_and_paste, mmt-start
+comment), termux widgets 0/1-master (mmt-start), mysetup-navigator SKILL + myrig AGENTS.md.
+tmux.work.conf UNCHANGED (a/A bind mt-enter-session, stays mt). Deploy = render shell.sh
+(install-home, it's a rendered jinja) + re-source the master conf on running masters. Live
+on all four (macbook/termux/mymain masters re-sourced; macstudio no master). LESSON (bit me):
+`git add -A` swept Lukas's uncommitted voice-agent-bridge/config.json edit into the refactor
+commit — reverted it out (4aaf8ec) and restored it as an uncommitted local change on mymain.
+ALWAYS stage specific files in myrig (it has live uncommitted local edits), never `git add -A`.

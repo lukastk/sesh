@@ -685,3 +685,65 @@ on all four (macbook/termux/mymain masters re-sourced; macstudio no master). LES
 `git add -A` swept Lukas's uncommitted voice-agent-bridge/config.json edit into the refactor
 commit — reverted it out (4aaf8ec) and restored it as an uncommitted local change on mymain.
 ALWAYS stage specific files in myrig (it has live uncommitted local edits), never `git add -A`.
+
+## H13 — multiple threads per tmux session (pane = thread identity) (2026-06-14, sesh 675aca8, myrig a584056; api schema 9→10; deployed ALL FOUR)
+Lukas: "session_name shouldn't be unique — should be able to have multiple threads on
+the same tmux session." Audit showed runtime identity had ALREADY migrated to the per-pane
+`@sesh-thread-id` marker (maintainer/nav/probe all resolve FindPaneByThreadID); only
+`stop`(=KillSession) and `resume`/`new`(=CreateSession-by-name) still treated the session
+as the thread's exclusive handle, plus the `UNIQUE(session_name)` constraint. So the
+constraint was vestigial — dropping it + making those two ops pane-level unlocks sharing.
+This also fixed the adopt bug that triggered the discussion: adopting a 2nd agent into a
+session that already had a thread hit a raw `UNIQUE constraint failed: threads.session_name
+(HTTP 500)` (the pane-marker pre-check passed because the pane's marker was missing —
+session/pane recreated after the original adopt — so the DB caught it instead of a clean
+409). Changes:
+- **store migration 12**: rebuild `threads` WITHOUT UNIQUE(session_name) (SQLite can't
+  ALTER DROP CONSTRAINT → CREATE threads_new/INSERT SELECT/DROP/RENAME as ONE multi-
+  statement element = atomic in its tx; modernc.org/sqlite runs multi-statement Exec).
+- **stop → KillPane** (FindPaneByThreadID → kill the thread's PANE), not KillSession: a
+  sibling sharing the session survives; last pane gone ⇒ tmux tears the session down, so
+  1:1 is unchanged. Also fixes stop nuking extra windows in a thread's session.
+- **adopt**: InsertThread BEFORE StampPaneThreadID (no stamped-but-rowless pane; rollback
+  on stamp fail). Session collision gone; same-pane re-adopt stays a clean 409.
+- **resume**: if the session still exists (sibling alive), revive into a NEW WINDOW
+  (CreateWindowCmd); teardown kills only what it created (session if it made it, else the
+  pane) so siblings are untouched.
+- **placement** (NewThreadRequest.into_session/into_window/into_pane; ThreadResponse.
+  launch_command/launch_env; schema 9→10): default = own new session; `--into-session
+  <name>` = new window of an existing session; `--into-window <target>` = split a pane;
+  `--into-pane <pane>` = REGISTER-THEN-EXEC — daemon records + marks the EXISTING shell
+  pane and returns the agent command (no spawn); the CLI's `--exec` syscall.Execs it in
+  place so the agent takes over the pane. KEY DESIGN (Lukas asked "why not just run the
+  regular agent command?"): it DOES — register-then-exec runs the identical HeadedCommand
+  the daemon would, just exec'd by the client because the pane already has a shell. The
+  only sesh-added bits are the pre-minted `--session-id` (claude/pi; codex mints on first
+  turn = its normal late-id behavior), SESH_THREAD_ID, the pane marker, and the record —
+  exactly what makes a bare agent trackable/resumable (the morning's adopt saga). tmux
+  CreateWindowCmd/SplitWindowCmd added. `--into-window`=split-beside is the "which window"
+  knob — forced explicit because the detached daemon can't know "current".
+- **myrig mt-enter-new-thread** (`-g mt`) + work-conf `bind N`: `exec sesh thread new
+  --into-pane "$TMUX_PANE" --exec ...` — turns your current shell into a managed agent
+  right here (vs mt-enter-session/-tmux-session/-box which NAV). Binding send-keys's it
+  into the focused pane (must run IN the pane; it execs) so $TMUX_PANE is real.
+- **conformance** (LOCAL, agent-agnostic, real pi): thread.placement (into-session own-
+  window + into-window split topology), thread.placement-pane (register-then-exec: daemon
+  doesn't spawn, returns command, then running it brings the agent up under the marked
+  pane), thread.stop-shared (sibling survives, last-thread tears the session down),
+  thread.adopt-shared (2nd agent into a shared session; same-pane re-adopt 409). LOCAL-only
+  per the per-server-pane-id rule (thread.adopt precedent); routing covered by route.parity
+  + thread.stop/remote. All 4 green; no regressions in stop/resume/adopt/new.headed (pi);
+  store/api/cmd/tmux/config units + vet clean. SPEC §3 model rewritten, sesh-cli SKILL +
+  help registry updated.
+DEPLOY (2026-06-14): schema 10 = daemon RESTART. LIVE on ALL FOUR (mymain/macstudio/
+termux/macbook — macbook was awake this time). Each: sesh git pull → native build (.new+mv;
+mac auto-signs) → restart (supervisorctl restart sesh-daemon on mac/mymain; termux kill +
+relaunch with full SESH_* env, the zshenv launch block is interactive-gated so `zsh -lc`
+doesn't fire it — pass the env explicitly). myrig: pull → install-home (macs/termux need
+`uv run --with jinja2`; system python3 lacks jinja2 on macs) → source-file tmux.work.conf on
+the running work server (symlinked conf, bind N picked up live). Schema 10 is mixed-mesh-safe
+(snapshot fields unchanged; into_*/launch_* are request/response-only, omitempty). LIVE
+SMOKE on the real supervised mymain daemon: host + sib --into-session share one session, stop
+sib → host pane survives + session intact, stop host → session torn down. PROVEN. myrig
+staged SPECIFICALLY (shell.sh.jinja + tmux.work.conf only — Lukas's voice-agent-bridge/
+config.json + .claude/settings.json stayed uncommitted local edits, per the H12 lesson).

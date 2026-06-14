@@ -650,3 +650,21 @@ fallback). **macbook (the master machine) PENDING — kept sleeping; needs: git 
 ~/mysetup/myrig pull && (uv run|python3) scripts/install-home.py $MYRIG_TARGETS && tmux -L
 sesh-master source-file ~/.sesh/myrig/tmux.master.conf.** termux likely lacks boxyard
 (python deps) so mt-enter-box there would no-op; the master normally runs on macbook.
+
+### H11 fix — prefix+c was wiped by `unbind c` (myrig d210881)
+prefix+c did nothing on ANY master. ROOT CAUSE: the master conf's neutralize-defaults
+block still had `unbind c` (originally to kill the default c=new-window), and source-file
+runs TOP-TO-BOTTOM, so it ran AFTER the new `bind c` mt-enter-box and removed it. Fix:
+drop the `unbind c` (the bind c override already supersedes the default). Verified:
+removing it → prefix_c_bound flips 0→1. LESSON: when adding a `bind <key>` to a conf, check
+the neutralize-defaults block for a stale `unbind <key>` below it. TERMUX DNS GOTCHA seen
+while deploying: termux's git pull failed with "Could not resolve hostname github.com" — NOT
+auth (the "access rights" line is git's generic fallback). The Termux:Boot **sshd-spawned
+shell has no DNS**: network is up (ping 8.8.8.8 ok) and $PREFIX/etc/resolv.conf has
+nameservers, but Android's bionic resolver takes DNS from the foreground-app network context
+(net.dns1/2 empty for the sshd child), so public-name resolution intermittently fails over
+ssh while the user's INTERACTIVE termux session resolves fine. It's intermittent (came back
+on a later retry) — retry the pull, or pull interactively; do NOT hack the symlinked conf
+file (leaves the repo dirty). Deployed d210881 + sourced on termux (clean pull) + mymain +
+macstudio; mt-enter-box lists 223 boxes on termux. **macbook (primary master) still PENDING
+— asleep; pull + source there when up.**

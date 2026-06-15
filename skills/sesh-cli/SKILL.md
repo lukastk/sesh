@@ -72,8 +72,24 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 - **Parent/child** threads form a tree (a supervisor thread and its sub-agents); the TUI
   renders it collapsibly. **`thread new` defaults to childing the new thread to the current
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
-- **Tickets** are work items optionally bound to a thread (`needs-input` derives from the
-  thread's axes). **Subscriptions** deliver one thread's completed turns into another.
+- **Tickets** are work items (a name + a prompt) optionally bound to a thread (`needs-input`
+  derives from the thread's axes). Single-owner: every ticket command auto-routes to the
+  configured ticket owner. CLI:
+
+  ```bash
+  sesh ticket create --name <name> [--prompt <text>]      # starts in triage
+  sesh ticket list [--thread <id>] [--current]            # --current = the calling pane's thread
+  sesh ticket get --id <id> [--field prompt] [--json]     # --field prints one field raw (clipboard/agents)
+  sesh ticket set --id <id> [--name <t>] [--prompt <t>]   # partial text-field update
+  sesh ticket set-status --id <id> --status <s> [--thread <id>]   # active requires --thread
+  sesh ticket send-prompt --id <id>                       # deliver the prompt to the bound thread's pane
+  sesh ticket needs-input --id <id>                       # derived: active && thread headful·idle
+  sesh ticket delete --id <id>
+  ```
+
+  `ticket list --current` is the agent self-check ("what am I assigned?") — it resolves the
+  current thread from `$SESH_THREAD_ID`/the pane marker. **Subscriptions** deliver one
+  thread's completed turns into another.
 
 ## The TUI (`sesh tui`)
 
@@ -95,6 +111,7 @@ P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/un
              are refused with a persistent on-screen warning)
 n            toggle notify          i          toggle the ID column
 y            show full UUID (c copies)         R   force refresh
+K            tickets view (the selected thread's tickets — see below)
 x            stop      d  delete    a  archive/unarchive   (d and a ask y/n first)
 q / esc      quit
 ```
@@ -102,6 +119,18 @@ q / esc      quit
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
 width instead of clipping, so every binding stays visible on a narrow pane.
+
+**Tickets view (`K`)** is a full-screen takeover listing the selected thread's tickets.
+Enter drills into one ticket: its fields (name, prompt) + a small action menu. Enter on
+**name**/**prompt** edits it in your editor (suspend → save); **status** opens a picker
+(triage/ready/active/done/dropped); **thread** opens an fzf-style picker to (re)bind the
+ticket to another thread (type to filter by name or uuid); **send prompt to thread**
+delivers the prompt to the thread's live pane; **delete ticket** asks y/n. `↑/↓` move,
+`enter`/`l` drill in, `h`/`esc` back, `q` back to the grid. The field editor is
+`sesh tui --editor <cmd>`, else `[tui] editor`, else `$EDITOR` (a loud error if none).
+Two opt-in columns surface ticket state per thread: **`ticket_name`** (the newest open
+ticket's name, `+N` if more) and **`ticket_input`** (a `!` when an active ticket sits on a
+headful·idle thread — i.e. it needs your input).
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
 green by default (tunable via `[[tui.column_color]]`). Wide grids clip and scroll

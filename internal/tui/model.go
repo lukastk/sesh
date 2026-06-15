@@ -407,7 +407,7 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, CwdRel: t.CwdRel}
+				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel}
 				if pred != nil {
 					// A custom view sees EVERYTHING its predicate admits
 					// (archived included — `not archived` is the user's call).

@@ -481,6 +481,17 @@ func (m Model) ticketThreadPickView() string {
 	return b.String()
 }
 
+// ---- test accessors ----
+
+// TicketViewOpen reports whether the tickets view is active (for tests).
+func (m Model) TicketViewOpen() bool { return m.ticketMode != ticketNone }
+
+// Tickets exposes the loaded ticket list (for tests).
+func (m Model) Tickets() []api.Ticket { return m.tickets }
+
+// TicketErr exposes the last tickets-view error (for tests).
+func (m Model) TicketErr() error { return m.ticketErr }
+
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexByte(s, '\n'); i >= 0 {

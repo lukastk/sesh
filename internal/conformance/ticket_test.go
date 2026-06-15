@@ -21,6 +21,10 @@ func init() {
 			func(t *testing.T) { testTicketListByThread(t, loc) })
 		matrix.RegisterTest("ticket.needs-input", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTicketNeedsInput(t, loc) })
+		matrix.RegisterTest("ticket.get", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTicketGet(t, loc) })
+		matrix.RegisterTest("ticket.set", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTicketSet(t, loc) })
 		// ticket.send-prompt touches the agent send path; all three agents now
 		// spawn deterministically (codex cwd pre-trusted at spawn).
 		for _, a := range matrix.AllAgents {
@@ -30,6 +34,120 @@ func init() {
 		}
 	}
 	matrix.RegisterTest("ticket.ownership", matrix.AgentAgnostic, matrix.Remote, testTicketOwnership)
+	// list --current auto-detects the calling pane's thread; the inference is a
+	// local-pane concept (Local only — routing is covered by route.parity).
+	matrix.RegisterTest("ticket.list-current", matrix.AgentAgnostic, matrix.Local, testTicketListCurrent)
+}
+
+// testTicketGet asserts `ticket get` returns the full record and that --field
+// prints a single field RAW (the clipboard/agent path) — and that there is no
+// description field anymore.
+func testTicketGet(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	id := sb.ticketCreate(t, "investigate flake", "the retry test is flaky under load")
+	stdout, stderr, err := sb.Runner.Run(t, "ticket", "get", "--id", id, "--json")
+	if err != nil {
+		t.Fatalf("ticket get: %v\n%s", err, stderr)
+	}
+	var tk api.Ticket
+	if err := json.Unmarshal([]byte(stdout), &tk); err != nil {
+		t.Fatalf("decode get: %v\nraw: %s", err, stdout)
+	}
+	if tk.ID != id || tk.Name != "investigate flake" || tk.Prompt != "the retry test is flaky under load" {
+		t.Errorf("get returned wrong record: %+v", tk)
+	}
+	// --field prompt prints the raw prompt (no JSON, no extra newline) — exactly
+	// what the clipboard command pipes.
+	stdout, stderr, err = sb.Runner.Run(t, "ticket", "get", "--id", id, "--field", "prompt")
+	if err != nil {
+		t.Fatalf("ticket get --field prompt: %v\n%s", err, stderr)
+	}
+	if stdout != "the retry test is flaky under load" {
+		t.Errorf("get --field prompt = %q, want the raw prompt with no decoration", stdout)
+	}
+	// An unknown field is loud.
+	if _, _, err := sb.Runner.Run(t, "ticket", "get", "--id", id, "--field", "description"); err == nil {
+		t.Errorf("get --field description was accepted (description is gone)")
+	}
+}
+
+// testTicketSet asserts a partial text-field update: only the flags passed are
+// applied (name/prompt independently), and an empty update is a loud no-op.
+func testTicketSet(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	id := sb.ticketCreate(t, "old name", "old prompt")
+	// Set only the name — the prompt must be untouched.
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--name", "new name"); err != nil {
+		t.Fatalf("set --name: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, id); tk.Name != "new name" || tk.Prompt != "old prompt" {
+		t.Errorf("after set --name: %+v (prompt must be unchanged)", tk)
+	}
+	// Set only the prompt — the (new) name must be untouched.
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--prompt", "new prompt"); err != nil {
+		t.Fatalf("set --prompt: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, id); tk.Name != "new name" || tk.Prompt != "new prompt" {
+		t.Errorf("after set --prompt: %+v (name must be unchanged)", tk)
+	}
+	// An empty update is loud (nothing to change).
+	if _, _, err := sb.Runner.Run(t, "ticket", "set", "--id", id); err == nil {
+		t.Errorf("ticket set with no fields was accepted")
+	}
+}
+
+// testTicketListCurrent asserts `ticket list --current` resolves the calling
+// thread (via $SESH_THREAD_ID here) and returns exactly its tickets.
+func testTicketListCurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, "pi", "cur", "/tmp")
+	bound := sb.ticketCreate(t, "mine", "")
+	_ = sb.ticketCreate(t, "someone else's", "") // unbound; must NOT appear
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", bound, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+
+	// Inference path: a runner whose env carries SESH_THREAD_ID = the thread, as a
+	// spawned pane/headless turn would (resolveThreadID validates it against the daemon).
+	lr := sb.Runner.(*localRunner)
+	env := map[string]string{"SESH_THREAD_ID": th.ID}
+	for k, v := range lr.env {
+		env[k] = v
+	}
+	cur := &localRunner{bin: lr.bin, env: env}
+	stdout, stderr, err := cur.Run(t, "ticket", "list", "--current", "--json")
+	if err != nil {
+		t.Fatalf("ticket list --current: %v\n%s", err, stderr)
+	}
+	var got []api.Ticket
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var tk api.Ticket
+		if err := json.Unmarshal([]byte(line), &tk); err != nil {
+			t.Fatalf("decode: %v\nline: %s", err, line)
+		}
+		got = append(got, tk)
+	}
+	if len(got) != 1 || got[0].ID != bound {
+		t.Fatalf("list --current = %v, want only the bound ticket %s", ticketIDs(got), bound)
+	}
 }
 
 // testTicketOwnership asserts the single-writer ownership model: a NON-owner

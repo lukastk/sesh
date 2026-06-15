@@ -64,6 +64,8 @@ var declaredTUIClaims = []string{
 	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
 	"action-mutate-remote",      // notify/stop/archive on a thread owned by ANOTHER machine ROUTE to the owner (the local daemon doesn't own it) — the cross-machine gap that direct-client calls silently missed
 	"master-cursor",             // preselecting a NESTED CHILD (the master prefix+s jump path) auto-expands its ancestors so the collapsed child becomes the visible cursor target
+	"tickets-view",              // K opens the tickets view, lists the thread's REAL bound tickets, and the status-change + delete actions land on the daemon
+	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -109,6 +111,112 @@ func init() {
 	registerTUIClaim("action-nav-quits", claimActionNavQuits)
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
+	registerTUIClaim("tickets-view", claimTicketsView)
+	registerTUIClaim("tickets-columns", claimTicketsColumns)
+}
+
+// claimTicketsView: K opens the tickets view for the selected thread, lists its
+// REAL bound tickets, and the in-view status-change + delete actions land on the
+// daemon (they exec `sesh ticket …`, which routes to the owner). The $EDITOR field
+// edit is not driven here — tea.ExecProcess needs a live Program — but its save
+// path is `ticket set`, itself a green conformance cell.
+func claimTicketsView(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "tkthread")
+	id := sb.ticketCreate(t, "fix-the-thing", "do it")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "tkthread")
+
+	// K opens the view and loads the thread's bound tickets (a real `ticket list`).
+	m = runKey(t, m, "K")
+	if !m.TicketViewOpen() {
+		t.Fatalf("K did not open the tickets view")
+	}
+	if tks := m.Tickets(); len(tks) != 1 || tks[0].ID != id {
+		t.Fatalf("tickets view listed %v, want the bound ticket %s", ticketIDs(m.Tickets()), id)
+	}
+
+	// Drill in → status item → change active→done (a real set-status on the daemon).
+	m = runKey(t, m, "enter") // detail (cursor on name)
+	m = runKey(t, m, "down")  // prompt
+	m = runKey(t, m, "down")  // status
+	m = runKey(t, m, "enter") // status picker (cursor on the current status, active)
+	m = runKey(t, m, "down")  // → done
+	m = runKey(t, m, "enter") // set-status done
+	if m.TicketErr() != nil {
+		t.Fatalf("status change errored: %v", m.TicketErr())
+	}
+	if got := sb.ticketByID(t, id).Status; got != api.StatusDone {
+		t.Fatalf("status change via the tickets view did not land: status=%q, want done", got)
+	}
+
+	// Delete through the view (detail → delete → y) — really gone from the daemon.
+	m = runKey(t, m, "down")  // status(2) → thread(3)
+	m = runKey(t, m, "down")  // → send(4)
+	m = runKey(t, m, "down")  // → delete(5)
+	m = runKey(t, m, "enter") // confirm popup
+	m = runKey(t, m, "y")     // delete
+	if m.TicketErr() != nil {
+		t.Fatalf("delete via the tickets view errored: %v", m.TicketErr())
+	}
+	for _, tk := range sb.allTickets(t) {
+		if tk.ID == id {
+			t.Fatalf("ticket still present after delete via the tickets view")
+		}
+	}
+}
+
+// claimTicketsColumns: the ticket_name + ticket_input columns render a thread's
+// REAL ticket summary — the newest open ticket's name, and a "!" when an active
+// ticket sits on a headful·idle thread (the maintainer-derived needs-input).
+func claimTicketsColumns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newThread(t, "pi", "colthread", "/tmp") // headful; idle after ready
+	sb.waitThreadReady(t, th.ID, "pi")
+	id := sb.ticketCreate(t, "review-pr", "")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+
+	cols, err := tui.ResolveColumns([]string{"name", "ticket_name", "ticket_input"})
+	if err != nil {
+		t.Fatalf("resolve columns: %v", err)
+	}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols).WithLocal(sb.Machine, sb.TmuxSocket)
+
+	// Poll the rendered grid until the owning daemon's maintainer has stamped the
+	// ticket summary onto the row (an active ticket on a headful·idle thread).
+	var row api.ThreadRow
+	if !waitUntil(25*time.Second, func() bool {
+		m, _ = render(t, m)
+		r, ok := rowByName(m, "colthread")
+		if ok {
+			row = r
+		}
+		return ok && r.TicketName == "review-pr" && r.TicketNeedsInput
+	}) {
+		t.Fatalf("ticket columns never reflected the active ticket: name=%q needsInput=%v", row.TicketName, row.TicketNeedsInput)
+	}
+	_, view := render(t, m)
+	for _, want := range []string{"TKT-NAME", "TKT!", "review-pr"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("rendered grid is missing %q:\n%s", want, view)
+		}
+	}
 }
 
 // claimActionNavRemoteDead: Enter on a thread that is DEAD on ANOTHER machine must

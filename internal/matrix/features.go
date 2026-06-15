@@ -345,6 +345,21 @@ func init() {
 		Description: "derived view = active && thread waiting; incl. dead != needs-input",
 		Localities:  bothLoc,
 	})
+	Register(Feature{
+		ID:          "ticket.get",
+		Description: "fetch one ticket (ticket get --id); --field prints a single field raw (prompt for clipboard/agents); the description field is gone",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "ticket.set",
+		Description: "partial text-field update (ticket set --name/--prompt); only passed flags apply (status/thread go through set-status)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "ticket.list-current",
+		Description: "ticket list --current auto-detects the calling pane's thread ($SESH_THREAD_ID / @sesh-thread-id marker) and lists its tickets — for agents checking their assignment; resolved client-side before owner-routing (Local: a local-pane concept; routing covered by route.parity)",
+		Localities:  []Locality{Local},
+	})
 
 	// ---- daemon / API ----
 	Register(Feature{

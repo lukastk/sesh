@@ -847,7 +847,26 @@ DEPLOY (schema 11 = daemon RESTART): LIVE on mymain (live-smoked create/get/set/
 `description` in output, migration 13 clean), macstudio, macbook. **macbook had a local
 uncommitted menus.sh edit (he'd added mt-enter-new-thread-here to MT_QUICK_CMDS) — stashed →
 pulled → re-applied his -here precisely → re-rendered, so his customization survived.**
-**termux PENDING** (not in mymain's peers — peers via macbook, often offline; same runbook
-when up). Native build per machine (.new+mv; mac auto-signs); supervisorctl restart
-sesh-daemon; install-home render (macs need `uv run --with jinja2`); source-file work+master
-confs on the running servers.
+**termux** then PENDING (not in mymain's peers; reached as `lukas@android-main:8022`).
+Native build per machine (.new+mv; mac auto-signs); supervisorctl restart sesh-daemon
+(mymain/macs); install-home render (macs/termux need `uv run --with jinja2`); source-file
+work+master confs on the running servers.
+
+### Follow-up: create-a-ticket from the editors + termux caught up (sesh 9e96522, myrig 73d072a)
+Lukas: add "create new ticket" to the various editors. (1) TUI K view list: `n` →
+ticketNewPrompt sub-mode (type a name) → `createTicket` (exec `ticket create --json`, parse
+id, `set-status active --thread`) so the new ticket is bound to the thread and joins the
+list. tickets-view claim extended (n + typed name lands a bound active ticket). (2) myrig:
+`_mt_pick_ticket <thread> [allow-new]` prepends a `＋ new ticket` row (id `__NEW__`) — present
+even with zero tickets; `_mt_ticket_edit` (mt/mmt) offers it and creates BOUND to the current
+thread, `mmt-ticket-browse` offers `＋ new ticket (unbound)` (global = no current thread); new
+`_mt_ticket_create [thread]` helper (read name → create [+bind active]). No daemon API change
+(reuses create/set-status) ⇒ for schema-11 machines this is BINARY+myrig only, NO daemon
+restart. DEPLOY: mymain/macstudio/macbook (binary + render + source, no restart); **termux got
+the FULL H15 (was still schema 10) + this** — pulled (DNS-retry guard), native android build,
+**daemon relaunched the termux way** (pkill 'sesh daemon run' + `SESH_HOME/MACHINE/TMUX_SOCKET/
+MASTER_SOCKET setsid nohup ~/.local/bin/sesh daemon run` per the zshenv launch block — NOT
+supervisor), migration 13 clean, live-smoked create/get --field/no-description/delete. GOTCHA:
+termux `/tmp` is UNWRITABLE — use `$TMPDIR`/`$HOME` in remote smokes. macbook's local
+uncommitted menus.sh edit (his mt-enter-new-thread-here) did NOT block this pull (the create
+commit only touched shell.sh.jinja, not menus.sh). ALL FOUR now on the ticket-editor feature.

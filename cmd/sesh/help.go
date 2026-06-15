@@ -108,7 +108,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread new": {
 		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (or ~), expanded against the invocation directory. Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
-		usage:    "sesh thread new --agent <claude|codex|pi> --name <name> --cwd <dir> [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		usage:    "sesh thread new --agent <claude|codex|pi> --cwd <dir> [--name <name>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent claude --name beside --cwd . --into-window %12", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec"},
 	},
 	"thread list": {

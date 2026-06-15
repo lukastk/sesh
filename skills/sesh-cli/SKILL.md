@@ -146,6 +146,7 @@ cross-`--machine` spawn, where the target dir lives on the remote.
 
 ```bash
 sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)
+sesh thread new --agent pi --cwd ~/proj                              # --name is OPTIONAL (a nameless thread)
 sesh thread new --agent pi --name notes --cwd . --headless           # headless; cwd = $PWD
 sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child thread
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation

@@ -80,10 +80,9 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "thread: name is required")
-		return
-	}
+	// An empty name is allowed (a nameless thread): the session name comes from a
+	// [[session_name]] rule or the cwd, not the name; sanitizeName falls back to
+	// "thread" for the default sesh_<name>. The name is display-only otherwise.
 	// cwd is required (absolute) for every mode EXCEPT --into-pane, which inherits
 	// the existing pane's cwd when none is given.
 	if req.IntoPane == "" {

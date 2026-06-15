@@ -38,6 +38,8 @@ func runTmux(args []string) error {
 		return tmuxInfo(cfg, rest)
 	case "create-session":
 		return tmuxCreateSession(cfg, rest)
+	case "kill-session":
+		return tmuxKillSession(cfg, rest)
 	case "create-pane":
 		return tmuxCreatePane(cfg, rest)
 	case "send-text":
@@ -384,6 +386,23 @@ func tmuxInfo(cfg config.Config, args []string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func tmuxKillSession(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("kill-session", flag.ContinueOnError)
+	target := fs.String("target", "", "session name to kill (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *target == "" {
+		return errors.New("kill-session: --target is required")
+	}
+	c := daemonClient(cfg)
+	if err := c.TmuxKillSession(context.Background(), *target); err != nil {
+		return err
+	}
+	fmt.Println("killed", *target)
 	return nil
 }
 

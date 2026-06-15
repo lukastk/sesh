@@ -58,8 +58,8 @@ var helpRegistry = map[string]cmdHelp{
 	},
 
 	"tmux": {
-		summary:  "tmux orchestration layer (current | info | create-session | create-pane | send-text | stage-file | nav | master-current)",
-		usage:    "sesh tmux <current|info|create-session|create-pane|send-text|stage-file|nav|master-current>",
+		summary:  "tmux orchestration layer (current | info | create-session | kill-session | create-pane | send-text | stage-file | nav | master-current)",
+		usage:    "sesh tmux <current|info|create-session|kill-session|create-pane|send-text|stage-file|nav|master-current>",
 		examples: []string{"sesh tmux current --json", "sesh tmux nav --to macbook:sesh_fix-bug"},
 	},
 	"tmux current": {
@@ -76,6 +76,11 @@ var helpRegistry = map[string]cmdHelp{
 		summary:  "create a tmux session on the work server with an optional start dir and env",
 		usage:    "sesh tmux create-session --name <name> [--dir <dir>] [--env <KEY=VALUE>]... [--machine <m>]",
 		examples: []string{"sesh tmux create-session --name scratch --dir ~/proj", "sesh tmux create-session --name w --env FOO=bar --env BAZ=qux"},
+	},
+	"tmux kill-session": {
+		summary:  "kill one session (by exact name) on the work server; routes cross-machine. A non-existent session is a loud error",
+		usage:    "sesh tmux kill-session --target <name> [--machine <m>]",
+		examples: []string{"sesh tmux kill-session --target scratch", "sesh tmux kill-session --target sesh_old --machine macbook"},
 	},
 	"tmux create-pane": {
 		summary:  "split a tmux target into a new pane with an optional start dir",
@@ -109,8 +114,8 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
-		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (or ~), expanded against the invocation directory. Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
-		usage:    "sesh thread new --agent <claude|codex|pi> --cwd <dir> [--name <name>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (or ~), expanded against the invocation directory, and defaults to the current dir '.'. Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
+		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent claude --name beside --cwd . --into-window %12", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec"},
 	},
 	"thread list": {

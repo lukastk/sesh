@@ -216,7 +216,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread new": {
 		{"--agent", "agent to spawn: claude | codex | pi (required)"},
-		{"--cwd", "start directory; relative or ~ ok, expanded against the invocation dir (required)"},
+		{"--cwd", "start directory; relative or ~ ok, expanded against the invocation dir (default: the current dir '.')"},
 		{"--name", "thread name (optional; empty = a nameless thread)"},
 		{"--headless", "spawn headless (a durable conversation with no tmux window)"},
 		{"--parent", "parent thread id/prefix (default: the CURRENT thread when run inside one)"},
@@ -359,6 +359,10 @@ var flagDocs = map[string][]flagDoc{
 		{"--name", "name of the tmux session to create (required)"},
 		{"--dir", "start directory for the new session (not ~-expanded)"},
 		{"--env", "environment variable KEY=VALUE for the session; repeatable"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"tmux kill-session": {
+		{"--target", "name of the tmux session to kill (required)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"tmux current": {

@@ -19,6 +19,7 @@ func (d *Daemon) routes() http.Handler {
 	mux.HandleFunc("POST /v1/shutdown", d.handleShutdown)
 	mux.HandleFunc("GET /v1/tmux/info", d.handleTmuxInfo)
 	mux.HandleFunc("POST /v1/tmux/sessions", d.handleTmuxCreateSession)
+	mux.HandleFunc("POST /v1/tmux/kill-session", d.handleTmuxKillSession)
 	mux.HandleFunc("POST /v1/tmux/panes", d.handleTmuxCreatePane)
 	mux.HandleFunc("POST /v1/tmux/send-text", d.handleTmuxSendText)
 	mux.HandleFunc("POST /v1/tmux/nav", d.handleTmuxNav)

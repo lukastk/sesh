@@ -29,6 +29,8 @@ func init() {
 			func(t *testing.T) { testTmuxInfo(t, loc) })
 		matrix.RegisterTest("tmux.create-session", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTmuxCreateSession(t, loc) })
+		matrix.RegisterTest("tmux.kill-session", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTmuxKillSession(t, loc) })
 		matrix.RegisterTest("tmux.create-pane", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTmuxCreatePane(t, loc) })
 		matrix.RegisterTest("tmux.send-text", matrix.AgentAgnostic, loc,
@@ -164,6 +166,34 @@ func testTmuxCreateSession(t *testing.T, loc matrix.Locality) {
 	}
 	if !strings.Contains(env, "SESH_THREAD_ID=thr_xyz") {
 		t.Errorf("injected env missing; got %q", strings.TrimSpace(env))
+	}
+}
+
+// testTmuxKillSession creates a session and kills it via sesh, asserting the real
+// session is gone afterward (the cleanup behind myrig's kill-empty-sessions) and
+// that killing a non-existent session is a loud error.
+func testTmuxKillSession(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	if out, err := sb.rawTmux(t, "new-session", "-d", "-s", "doomed"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := sb.rawTmux(t, "has-session", "-t", "=doomed"); err != nil {
+		t.Fatalf("session 'doomed' should exist pre-kill: %v\n%s", err, out)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "tmux", "kill-session", "--target", "doomed"); err != nil {
+		t.Fatalf("kill-session: %v\n%s", err, stderr)
+	}
+	if _, err := sb.rawTmux(t, "has-session", "-t", "=doomed"); err == nil {
+		t.Errorf("session 'doomed' still exists after kill-session")
+	}
+	// Killing a session that doesn't exist is loud (no silent success).
+	if _, _, err := sb.Runner.Run(t, "tmux", "kill-session", "--target", "never-existed"); err == nil {
+		t.Errorf("kill-session of a non-existent session was accepted")
 	}
 }
 

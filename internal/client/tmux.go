@@ -27,6 +27,11 @@ func (c *Client) TmuxCreateSession(ctx context.Context, req api.CreateSessionReq
 	return out, c.postJSON(ctx, "http://unix/v1/tmux/sessions", req, &out)
 }
 
+// TmuxKillSession posts POST /v1/tmux/kill-session.
+func (c *Client) TmuxKillSession(ctx context.Context, name string) error {
+	return c.postJSON(ctx, "http://unix/v1/tmux/kill-session", api.KillSessionRequest{Name: name}, nil)
+}
+
 // TmuxCreatePane posts POST /v1/tmux/panes.
 func (c *Client) TmuxCreatePane(ctx context.Context, req api.CreatePaneRequest) (api.CreatePaneResponse, error) {
 	var out api.CreatePaneResponse

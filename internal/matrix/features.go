@@ -32,6 +32,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "tmux.kill-session",
+		Description: "kill one session by name on the work server (routed); non-existent session is loud — the mechanism behind myrig's kill-empty-sessions cleanup",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "tmux.create-pane",
 		Description: "create a pane within a session",
 		Localities:  bothLoc,

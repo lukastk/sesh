@@ -89,6 +89,26 @@ func (d *Daemon) handleTmuxCreateSession(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, api.CreateSessionResponse{Schema: api.SchemaVersion, Session: req.Name})
 }
 
+// handleTmuxKillSession kills one session (by exact name) on this daemon's work
+// tmux server — the mechanism behind myrig's kill-empty-sessions cleanup. A pure
+// tmux op; a non-existent session surfaces the tmux error loudly (409).
+func (d *Daemon) handleTmuxKillSession(w http.ResponseWriter, r *http.Request) {
+	var req api.KillSessionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "kill-session: name is required")
+		return
+	}
+	if err := d.tmux.KillSession(req.Name); err != nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("kill-session %q: %v", req.Name, err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "killed": req.Name})
+}
+
 func (d *Daemon) handleTmuxCreatePane(w http.ResponseWriter, r *http.Request) {
 	var req api.CreatePaneRequest
 	if err := decodeJSON(r, &req); err != nil {

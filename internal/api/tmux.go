@@ -63,6 +63,13 @@ type CreateSessionResponse struct {
 	Session string `json:"session"`
 }
 
+// KillSessionRequest is the body of POST /v1/tmux/kill-session — kill one session
+// (by exact name) on this daemon's work tmux server. Used by the myrig
+// kill-empty-sessions cleanup; a non-existent session is a loud error.
+type KillSessionRequest struct {
+	Name string `json:"name"`
+}
+
 // CreatePaneRequest is the body of POST /v1/tmux/panes. Target is a tmux target
 // (session, window, or pane).
 type CreatePaneRequest struct {

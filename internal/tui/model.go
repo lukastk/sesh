@@ -124,10 +124,12 @@ type Model struct {
 	showID      bool // `i` toggles an ID column (tid8) — the only id surface in the TUI
 
 	// Line-prompt input mode (rename / tag-add). While prompting, ordinary keys
-	// edit the input; Enter submits, Esc cancels.
-	prompting   promptKind
-	promptInput []rune
-	promptRow   api.ThreadRow // the row the prompt acts on (captured at open)
+	// edit the input; Enter submits, Esc cancels. promptCursor is the insertion
+	// point within promptInput (0..len) so ←/→ can edit in place.
+	prompting    promptKind
+	promptInput  []rune
+	promptCursor int
+	promptRow    api.ThreadRow // the row the prompt acts on (captured at open)
 
 	// preselectID: when set, the first successful fetch moves the cursor to this
 	// thread (the `--cursor` start-on-current-thread affordance), then clears it.
@@ -928,11 +930,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "r":
 		if row, ok := m.Selected(); ok {
+			// Prefill with the current name, cursor at the end so you can edit in place.
 			m.prompting, m.promptRow, m.promptInput = promptRename, row, []rune(row.Name)
+			m.promptCursor = len(m.promptInput)
 		}
 	case "t":
 		if row, ok := m.Selected(); ok {
-			m.prompting, m.promptRow, m.promptInput = promptTag, row, nil
+			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptTag, row, nil, 0
 		}
 	case "T":
 		if row, ok := m.Selected(); ok {
@@ -944,7 +948,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "P":
 		if row, ok := m.Selected(); ok {
-			m.prompting, m.promptRow, m.promptInput = promptReparent, row, nil
+			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptReparent, row, nil, 0
 		}
 	case "x":
 		return m, m.stopSelected()
@@ -1049,16 +1053,21 @@ func (m Model) removeTagRow(row api.ThreadRow, tag string) tea.Cmd {
 	return m.routedVerb(row, &rowPatch{removeTags: []string{tag}, ttl: optimisticTTL}, "tag", "--remove", tag)
 }
 
-// handlePromptKey edits the line-prompt: Enter submits, Esc cancels, Backspace
-// deletes, printable runes append.
+// handlePromptKey edits the line-prompt: Enter submits, Esc cancels; ←/→ move the
+// insertion point, Home/End jump to the ends, Backspace/Delete remove around it, and
+// printable runes insert AT the cursor — so the prefilled name is editable in place.
 func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Clamp the cursor defensively (a prompt opened before this field existed).
+	if m.promptCursor > len(m.promptInput) {
+		m.promptCursor = len(m.promptInput)
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.prompting, m.promptInput = promptNone, nil
+		m.prompting, m.promptInput, m.promptCursor = promptNone, nil, 0
 		return m, nil
 	case "enter":
 		kind, row, input := m.prompting, m.promptRow, strings.TrimSpace(string(m.promptInput))
-		m.prompting, m.promptInput = promptNone, nil
+		m.prompting, m.promptInput, m.promptCursor = promptNone, nil, 0
 		switch kind {
 		case promptRename:
 			if input == "" {
@@ -1075,19 +1084,63 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.reparentRow(row, input)
 		}
 		return m, nil
+	case "left", "ctrl+b":
+		if m.promptCursor > 0 {
+			m.promptCursor--
+		}
+		return m, nil
+	case "right", "ctrl+f":
+		if m.promptCursor < len(m.promptInput) {
+			m.promptCursor++
+		}
+		return m, nil
+	case "home", "ctrl+a":
+		m.promptCursor = 0
+		return m, nil
+	case "end", "ctrl+e":
+		m.promptCursor = len(m.promptInput)
+		return m, nil
 	case "backspace":
-		if len(m.promptInput) > 0 {
-			m.promptInput = m.promptInput[:len(m.promptInput)-1]
+		if m.promptCursor > 0 {
+			m.promptInput = append(m.promptInput[:m.promptCursor-1], m.promptInput[m.promptCursor:]...)
+			m.promptCursor--
+		}
+		return m, nil
+	case "delete":
+		if m.promptCursor < len(m.promptInput) {
+			m.promptInput = append(m.promptInput[:m.promptCursor], m.promptInput[m.promptCursor+1:]...)
 		}
 		return m, nil
 	}
+	var ins []rune
 	switch msg.Type {
 	case tea.KeyRunes:
-		m.promptInput = append(m.promptInput, msg.Runes...)
+		ins = msg.Runes
 	case tea.KeySpace:
-		m.promptInput = append(m.promptInput, ' ')
+		ins = []rune{' '}
+	}
+	if len(ins) > 0 {
+		// Insert at the cursor (copy to avoid aliasing the backing array).
+		out := make([]rune, 0, len(m.promptInput)+len(ins))
+		out = append(out, m.promptInput[:m.promptCursor]...)
+		out = append(out, ins...)
+		out = append(out, m.promptInput[m.promptCursor:]...)
+		m.promptInput = out
+		m.promptCursor += len(ins)
 	}
 	return m, nil
+}
+
+// renderPromptInput draws the line-prompt value with a block cursor at the insertion
+// point (a trailing block when the cursor is at the end), so ←/→ editing is visible.
+func renderPromptInput(input []rune, cursor int) string {
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(input) {
+		cursor = len(input)
+	}
+	return string(input[:cursor]) + "█" + string(input[cursor:])
 }
 
 // renameRow renames a thread via the CLI verb (uniform local/remote: the CLI's
@@ -1531,7 +1584,7 @@ func (m Model) View() string {
 		case promptReparent:
 			label = "parent uuid (empty=root)"
 		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s█", label, m.promptRow.Name, string(m.promptInput))) + "\n")
+		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, m.promptRow.Name, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
 	}
 	cols := m.activeColumns()
 	vis := m.visibleMatches()

@@ -32,7 +32,10 @@ package api
 // /v1/tickets/unbind` (detach from thread, active→ready). A ticket is now relocated
 // to its bound thread's machine so the live join stays co-located. Additive
 // endpoints (no existing wire shape changed) → mixed-mesh safe during rollout.
-const SchemaVersion = 12
+// 13: `POST /v1/tmux/kill-session` (kill one work-server session by name, routed) —
+// the mechanism behind myrig's kill-empty-sessions cleanup. Additive endpoint
+// (no existing wire shape changed) → mixed-mesh safe.
+const SchemaVersion = 13
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

@@ -424,7 +424,7 @@ func threadNew(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	agent := fs.String("agent", "", "agent: claude|codex|pi (required)")
 	name := fs.String("name", "", "thread name (optional; empty = a nameless thread)")
-	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (required; expanded against the invocation dir)")
+	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (default: the current dir '.'; expanded against the invocation dir)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
 	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
@@ -470,10 +470,15 @@ func threadNew(cfg config.Config, args []string) error {
 	if *doExec && *intoPane == "" {
 		return errors.New("thread new: --exec requires --into-pane")
 	}
-	// --into-pane inherits the pane's cwd when none is given; every other mode
-	// needs an explicit (absolute) cwd. --name is OPTIONAL (empty = a nameless thread).
-	if *agent == "" || (*cwd == "" && *intoPane == "") {
-		return errors.New("thread new: --agent and --cwd are required")
+	// --name is OPTIONAL (empty = a nameless thread). --agent is required.
+	if *agent == "" {
+		return errors.New("thread new: --agent is required")
+	}
+	// --cwd defaults to the current dir ('.'); --into-pane inherits the pane's cwd
+	// (leave it empty so the daemon takes the pane's path); a fork already defaulted
+	// it to the source's cwd above.
+	if *cwd == "" && *intoPane == "" {
+		*cwd = "."
 	}
 	if *cwd != "" {
 		// Relative --cwd expands against the invocation dir (the daemon needs absolute).

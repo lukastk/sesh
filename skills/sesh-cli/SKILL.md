@@ -44,8 +44,12 @@ watchers`, `matrix`, `doctor`, `tmux current|info`, `cwd-label`, `meta get|list`
 **Mutating** (think first): `new`, `stop`, `delete`, `resume`, `headful`, `send`,
 `send-headless`, `rename`, `tag`, `reparent`, `archive`, `notify`, `meta set|unset`,
 `adopt`, `subscribe`/`unsubscribe`, `delegate`, `backup`/`restore`/`copy`, `import`,
-`ticket *`, `tmux nav|send-text|stage-file|create-*`, `master up|down|ensure`, `peer
-add|remove`, `daemon start|stop|restart`.
+`ticket *`, `tmux nav|send-text|stage-file|create-*|kill-session`, `master up|down|ensure`,
+`peer add|remove`, `daemon start|stop|restart`.
+
+`sesh tmux kill-session --target <name> [--machine <m>]` kills one work-server session by
+exact name (routes cross-machine; a non-existent session is a loud error) — the mechanism
+behind myrig's "kill empty sessions" cleanup.
 
 Extra care: `delete` (drops a record; refuses a live thread unless `--force`, which
 orphans the agent — `stop` first), `send`/`send-headless` (injects into a real agent's
@@ -122,7 +126,8 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ^t cycles the search target; esc applies)
 tab          cycle views (active / archived / all / custom [[tui.views]])
-r            rename (line prompt)   t          add tag        T   remove tag (picker)
+r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
+t            add tag                T          remove tag (picker)
 P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
              are refused with a persistent on-screen warning)
 n            toggle notify          i          toggle the ID column
@@ -207,8 +212,9 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 > - `--no-parent` — force a **root** thread regardless of context.
 
 `--cwd` accepts a **relative path or `~`** (expanded against the directory where you run
-the command — the daemon stores an absolute path); pass an absolute path for a
-cross-`--machine` spawn, where the target dir lives on the remote.
+the command — the daemon stores an absolute path) and **defaults to the current dir
+(`.`)** when omitted; pass an absolute path for a cross-`--machine` spawn, where the
+target dir lives on the remote.
 
 ```bash
 sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)

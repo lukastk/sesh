@@ -49,7 +49,7 @@ func TestHelpFlagsCoverUsageExactly(t *testing.T) {
 // every declared subcommand has a help entry — the "no silent gap" guard for help.
 var subcommandSets = map[string][]string{
 	"daemon": {"run", "start", "stop", "restart", "status"},
-	"tmux":   {"current", "info", "create-session", "create-pane", "send-text", "stage-file", "nav", "master-current"},
+	"tmux":   {"current", "info", "create-session", "kill-session", "create-pane", "send-text", "stage-file", "nav", "master-current"},
 	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "send-headless",
 		"headless-reply", "rename", "info", "adopt", "transcript", "notify", "reparent",
 		"tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},

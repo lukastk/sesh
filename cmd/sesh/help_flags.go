@@ -317,6 +317,33 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
+	"blob add": {
+		{"--name", "stored filename (default: the basename of <path>; required with --stdin)"},
+		{"--stdin", "read the bytes from stdin instead of a file path (requires --name)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON instead of the @blob token + summary"},
+	},
+	"blob ls": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON (one blob per line)"},
+	},
+	"blob get": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"blob rm": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"blob path": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"blob expand": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"ticket move": {
+		{"--id", "ticket id/prefix to move (required)"},
+		{"--to", "destination machine the ticket relocates to (required)"},
+		{"--from", "source machine the ticket currently lives on (default: this machine)"},
+	},
 	"ticket import": {
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--id", "(in the piped `ticket get` half) the ticket to read; import itself reads the record from stdin"},

@@ -58,7 +58,13 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
 		return
 	}
-	if err := d.tmux.SendText(loc.Pane, req.Text, true); err != nil {
+	// Expand @blob(…) references to absolute paths; an unknown blob is a loud 400.
+	text, err := d.expandPrompt(req.Text)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := d.tmux.SendText(loc.Pane, text, true); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

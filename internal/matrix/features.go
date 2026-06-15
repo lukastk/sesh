@@ -372,8 +372,18 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "ticket.move",
-		Description: "cross-machine ticket relocation: `ticket get --json | ticket import --machine DST` lands the record on another daemon PRESERVING its id (binding cleared, active→ready), then it deletes from the source — so a ticket can bind to a thread on any machine (the co-located ticket↔thread live join is preserved). Real ssh hop; id-collision on the target is loud",
+		Description: "daemon-coordinated cross-machine ticket relocation (`sesh ticket move --from --to`): the INVOKED daemon pulls the record + every @blob() the prompt references from SRC and pushes them to DST, then deletes the source — so a ticket binds to a thread on any machine with its blobs carried along (co-located live join preserved). Real ssh hops; id-collision on the target is loud",
 		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "blob.store",
+		Description: "content-addressed file store (`blob add/ls/get/rm`): add→ls→get round-trips the bytes, identical bytes dedup to one hash, prefix resolution, rm removes, a missing/ambiguous ref is loud. Routes per --machine",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "blob.expand",
+		Description: "prompt blob-token expansion (`blob expand`): @blob(<hex>) → the blob's absolute path on the serving daemon; @@blob() escapes to a literal; a token referencing no blob is a LOUD error (never a silent passthrough). Routes per --machine",
+		Localities:  bothLoc,
 	})
 
 	// ---- daemon / API ----

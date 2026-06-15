@@ -87,6 +87,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh ticket:", err)
 			os.Exit(1)
 		}
+	case "blob":
+		if err := runBlob(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh blob:", err)
+			os.Exit(1)
+		}
 	case "tui":
 		if err := runTUI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh tui:", err)

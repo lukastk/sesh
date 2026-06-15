@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"encoding/json"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -194,87 +193,76 @@ func testTicketUnbind(t *testing.T, loc matrix.Locality) {
 	}
 }
 
-// testTicketMove is the cross-machine relocation behind "bind a ticket to a thread
-// on ANY machine". A ticket↔thread live join only works co-located, so binding a
-// ticket on machine A to a thread on machine B RELOCATES the ticket to B:
-// `ticket get --json | ticket import --machine B` (preserving the id, dropping the
-// binding, active→ready), then delete on A, then bind on B. Real ssh hops both ways.
+// testTicketMove drives the first-class, daemon-coordinated `sesh ticket move`: a
+// HUB daemon (neither source nor destination) that peers with both ends pulls the
+// ticket AND the blob its prompt references from SRC and pushes them to DST, then
+// deletes the source — all over REAL ssh hops. This proves the principled design:
+// cross-daemon movement is the daemon's job, and only the invoked (hub) daemon must
+// reach both ends (SRC and DST never peer with each other here).
 func testTicketMove(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
 	ensureSSHLocalhost(t)
 
-	src := newSandbox(t, matrix.Local) // machine A (the ticket's origin)
-	src.startDaemon(t)
-	dst := newSandbox(t, matrix.Local) // machine B (where the target thread lives)
-	dst.startDaemon(t)
-
-	// A client that peers with BOTH daemons — the cockpit machine doing the move.
 	bin := seshBin(t)
-	client := &localRunner{bin: bin, env: map[string]string{
-		"SESH_HOME":    t.TempDir(),
-		"SESH_MACHINE": "mover-client",
-	}}
+	src := newSandbox(t, matrix.Local) // SRC — the ticket's origin
+	src.startDaemon(t)
+	dst := newSandbox(t, matrix.Local) // DST — where the target thread lives
+	dst.startDaemon(t)
+	hub := newSandbox(t, matrix.Local) // HUB — the coordinator, neither SRC nor DST
+	hub.startDaemon(t)
+
+	// Only the HUB peers with both ends (SRC and DST do NOT peer with each other).
 	for _, p := range []*Sandbox{src, dst} {
-		if _, stderr, err := client.Run(t, "peer", "add", "--machine", p.Machine, "--ssh", "localhost", "--home", p.Home, "--binary", bin); err != nil {
-			t.Fatalf("peer add %s: %v\n%s", p.Machine, err, stderr)
+		if _, stderr, err := hub.Runner.Run(t, "peer", "add", "--machine", p.Machine, "--ssh", "localhost", "--home", p.Home, "--binary", bin); err != nil {
+			t.Fatalf("hub peer add %s: %v\n%s", p.Machine, err, stderr)
 		}
 	}
 
-	// A thread on each daemon; the ticket starts ACTIVE bound to A's thread (the
-	// realistic case: it was being worked on A, now we want it on B).
+	// A blob on SRC + a ticket whose prompt REFERENCES it, bound active to a SRC thread.
+	blobHash := src.blobAdd(t, "diagram.txt", "SENTINEL-BLOB-BODY")
+	token := "@blob(" + blobHash[:12] + ")"
 	thA := src.newThread(t, "pi", "mvA", "/tmp")
-	thB := dst.newThread(t, "pi", "mvB", "/tmp")
-	id := src.ticketCreate(t, "relocate me", "the cross-machine work")
+	id := src.ticketCreate(t, "relocate me", "fix the layout in "+token)
 	if _, stderr, err := src.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", thA.ID); err != nil {
-		t.Fatalf("bind active on A: %v\n%s", err, stderr)
+		t.Fatalf("bind active on SRC: %v\n%s", err, stderr)
 	}
 
-	// 1) Read the full record from A and import it onto B (preserving the id). The
-	//    import arrives UNATTACHED: binding dropped, active→ready.
-	rec, stderr, err := client.Run(t, "ticket", "get", "--machine", src.Machine, "--id", id, "--json")
-	if err != nil {
-		t.Fatalf("ticket get --machine A: %v\n%s", err, stderr)
-	}
-	importCmd := exec.Command(bin, "ticket", "import", "--machine", dst.Machine)
-	importCmd.Env = sandboxEnv(client.env)
-	importCmd.Stdin = strings.NewReader(rec)
-	if out, ierr := importCmd.CombinedOutput(); ierr != nil {
-		t.Fatalf("ticket import --machine B: %v\n%s", ierr, out)
-	}
-	if tk := dst.ticketByID(t, id); tk.ID != id || tk.ThreadID != "" || tk.Status != api.StatusReady {
-		t.Fatalf("imported record wrong (want same id, unbound, ready): %+v", tk)
-	}
-	if tk := dst.ticketByID(t, id); tk.Name != "relocate me" || tk.Prompt != "the cross-machine work" {
-		t.Errorf("import dropped text fields: %+v", tk)
+	// Move SRC→DST, coordinated by the HUB (the invoked daemon).
+	if _, stderr, err := hub.Runner.Run(t, "ticket", "move", "--id", id, "--from", src.Machine, "--to", dst.Machine); err != nil {
+		t.Fatalf("ticket move (hub-coordinated): %v\n%s", err, stderr)
 	}
 
-	// 2) Delete from A, then bind to B's thread — the ticket now lives WITH its thread.
-	if _, stderr, err := client.Run(t, "ticket", "delete", "--machine", src.Machine, "--id", id); err != nil {
-		t.Fatalf("delete on A: %v\n%s", err, stderr)
+	// The record landed on DST: same id, UNATTACHED (active→ready), text + token intact.
+	tk := dst.ticketByID(t, id)
+	if tk.ID != id || tk.ThreadID != "" || tk.Status != api.StatusReady {
+		t.Fatalf("moved record wrong (want same id, unbound, ready): %+v", tk)
 	}
-	if _, stderr, err := client.Run(t, "ticket", "set-status", "--machine", dst.Machine, "--id", id, "--status", "active", "--thread", thB.ID); err != nil {
-		t.Fatalf("bind active on B: %v\n%s", err, stderr)
+	if tk.Name != "relocate me" || tk.Prompt != "fix the layout in "+token {
+		t.Errorf("move altered the ticket text: %+v", tk)
+	}
+	// The blob was CARRIED: it now resolves on DST (same content hash), and the token
+	// expands to a real path there — the whole point of carrying blobs along.
+	gotBytes, stderr, err := dst.Runner.Run(t, "blob", "get", blobHash[:12])
+	if err != nil || gotBytes != "SENTINEL-BLOB-BODY" {
+		t.Fatalf("blob not carried to DST: get=%q err=%v\n%s", gotBytes, err, stderr)
+	}
+	expanded, _, err := dst.Runner.RunStdin(t, tk.Prompt, "blob", "expand")
+	if err != nil || strings.Contains(expanded, "@blob(") || !strings.Contains(expanded, blobHash) {
+		t.Errorf("moved prompt does not expand on DST: %q (err %v)", expanded, err)
 	}
 
-	// Final: present + active + bound to B's thread on B, and GONE from A.
-	if tk := dst.ticketByID(t, id); tk.Status != api.StatusActive || tk.ThreadID != thB.ID {
-		t.Fatalf("ticket not active-bound on B: %+v", tk)
-	}
+	// The ticket is GONE from SRC (the move is destructive on the source record).
 	for _, tk := range src.allTickets(t) {
 		if tk.ID == id {
-			t.Fatalf("ticket %s still on A after the move (should be gone)", id)
+			t.Fatalf("ticket %s still on SRC after the move", id)
 		}
 	}
 
-	// Loud collision: importing an id that already exists on the target is refused
-	// (so a half-done move never silently overwrites).
-	dup := exec.Command(bin, "ticket", "import", "--machine", dst.Machine)
-	dup.Env = sandboxEnv(client.env)
-	dup.Stdin = strings.NewReader(rec)
-	if out, derr := dup.CombinedOutput(); derr == nil {
-		t.Errorf("importing a colliding id was accepted (want loud conflict); out=%s", out)
+	// A second move of the same id (now on DST, not SRC) is loud, not a silent no-op.
+	if _, _, err := hub.Runner.Run(t, "ticket", "move", "--id", id, "--from", src.Machine, "--to", dst.Machine); err == nil {
+		t.Errorf("moving an id no longer on SRC was accepted")
 	}
 }
 

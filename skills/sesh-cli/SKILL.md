@@ -44,8 +44,8 @@ watchers`, `matrix`, `doctor`, `tmux current|info`, `cwd-label`, `meta get|list`
 **Mutating** (think first): `new`, `stop`, `delete`, `resume`, `headful`, `send`,
 `send-headless`, `rename`, `tag`, `reparent`, `archive`, `notify`, `meta set|unset`,
 `adopt`, `subscribe`/`unsubscribe`, `delegate`, `backup`/`restore`/`copy`, `import`,
-`ticket *`, `tmux nav|send-text|stage-file|create-*|kill-session`, `master up|down|ensure`,
-`peer add|remove`, `daemon start|stop|restart`.
+`ticket *`, `blob add|rm`, `tmux nav|send-text|stage-file|create-*|kill-session`,
+`master up|down|ensure`, `peer add|remove`, `daemon start|stop|restart`.
 
 `sesh tmux kill-session --target <name> [--machine <m>]` kills one work-server session by
 exact name (routes cross-machine; a non-existent session is a loud error) — the mechanism
@@ -102,14 +102,37 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 
   **A ticket lives on the same daemon as its bound thread** (the live `needs-input`/`TKT`
   join is computed per-daemon). To bind a ticket to a thread on **another machine**, the
-  ticket is *relocated* to that thread's machine first — `ticket get --json` piped into
-  `ticket import` on the target (preserving the id, binding cleared, `active`→`ready`), then
-  `ticket delete` on the source, then `set-status active --thread` on the target. The
-  `mt-`/`mmt-` ticket cockpit does this automatically; `ticket import` is the mechanism:
+  ticket is *relocated* to that thread's machine first by **`sesh ticket move`** (which also
+  carries the prompt's blobs — see below):
 
   ```bash
-  sesh ticket get --machine <src> --id <id> --json | sesh ticket import --machine <dst>
+  sesh ticket move --id <id> --to <machine> [--from <machine>]   # default --from: this machine
   ```
+
+  `ticket move` is **daemon-coordinated**: the daemon you invoke it on pulls the record (and
+  every `@blob()` its prompt references) from `--from` and pushes them to `--to`, then deletes
+  the source — over its own peer transport, so only the invoked machine must reach both ends.
+  The `mt-`/`mmt-` ticket cockpit does this automatically on a cross-machine bind.
+
+## Blobs & files in prompts (`sesh blob`)
+
+A prompt (a ticket prompt, a `thread send`, a headless turn) is **text**, so a file — an
+image, a log, anything — is **referenced** by a token and expanded to a real path on
+delivery. The store is content-addressed under `<SESH_HOME>/blobs`.
+
+```bash
+sesh blob add ~/shot.png            # store a file → prints the token  @blob(9f3ac1b2d4e5)
+pngpaste - | sesh blob add --stdin --name shot.png   # store piped bytes (clipboard)
+sesh blob ls | get | rm | path      # housekeeping (manual GC via rm; get = raw bytes to stdout)
+sesh blob expand                    # stdin→stdout: replace every @blob(<hex>) with its path
+```
+
+Paste the printed **`@blob(<hex>)`** token anywhere in a prompt. On **send** (`ticket
+send-prompt`, `thread send`, `send-headless`) and on **copy** (the cockpit's copy-prompt),
+sesh expands each token to the blob's absolute path on the thread's machine — the agent then
+reads the file (image → vision, etc.). A token referencing **no blob is a LOUD error**, never
+sent verbatim. Escape a literal with `@@blob(…)`. Every `blob` op takes `--machine` like
+tickets; `ticket move` carries a prompt's referenced blobs to the destination automatically.
 
 ## The TUI (`sesh tui`)
 

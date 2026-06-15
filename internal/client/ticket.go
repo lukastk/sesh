@@ -59,6 +59,12 @@ func (c *Client) TicketUnbind(ctx context.Context, id string) (api.TicketRespons
 	return out, c.postJSON(ctx, "http://unix/v1/tickets/unbind", api.UnbindTicketRequest{ID: id}, &out)
 }
 
+// TicketMove posts POST /v1/tickets/move — the coordinating daemon relocates a
+// ticket (and its prompt's blobs) from one machine to another.
+func (c *Client) TicketMove(ctx context.Context, req api.MoveTicketRequest) error {
+	return c.postJSON(ctx, "http://unix/v1/tickets/move", req, nil)
+}
+
 // TicketNeedsInput fetches GET /v1/tickets/needs-input?id=.
 func (c *Client) TicketNeedsInput(ctx context.Context, id string) (api.TicketNeedsInput, error) {
 	var out api.TicketNeedsInput

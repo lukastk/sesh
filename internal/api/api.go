@@ -35,7 +35,12 @@ package api
 // 13: `POST /v1/tmux/kill-session` (kill one work-server session by name, routed) —
 // the mechanism behind myrig's kill-empty-sessions cleanup. Additive endpoint
 // (no existing wire shape changed) → mixed-mesh safe.
-const SchemaVersion = 13
+// 14: content-addressed blob store — `/v1/blobs` (add/list/get/delete/path/expand)
+// for files referenced from prompts by an @blob(<hex>) token (expanded to a path on
+// send/copy); plus `POST /v1/tickets/move` (daemon-coordinated cross-machine ticket
+// relocation that carries the prompt's referenced blobs). Additive endpoints →
+// mixed-mesh safe.
+const SchemaVersion = 14
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

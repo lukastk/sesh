@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lukastk/sesh/internal/agents"
+	"github.com/lukastk/sesh/internal/blobs"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/subscribe"
@@ -28,6 +29,7 @@ const Version = "0.1.0-dev"
 type Daemon struct {
 	cfg     config.Config
 	store   *store.Store
+	blobs   *blobs.Store
 	tmux    *tmux.Server
 	srv     *http.Server
 	ln      net.Listener
@@ -121,6 +123,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		cfg:        cfg,
 		naming:     naming,
 		store:      st,
+		blobs:      blobs.New(cfg.Home),
 		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		hlInFlight: map[string]bool{},
 		hlReply:    map[string]string{},

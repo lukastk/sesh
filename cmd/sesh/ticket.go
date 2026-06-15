@@ -62,6 +62,8 @@ func runTicket(args []string) error {
 		return ticketImport(cfg, rest)
 	case "unbind":
 		return ticketUnbind(cfg, rest)
+	case "move":
+		return ticketMove(cfg, rest)
 	case "needs-input":
 		return ticketNeedsInput(cfg, rest)
 	case "send-prompt":
@@ -324,6 +326,28 @@ func ticketUnbind(cfg config.Config, args []string) error {
 		return emitJSON(resp.Ticket)
 	}
 	fmt.Printf("%s -> %s (unbound)\n", resp.Ticket.ID, resp.Ticket.Status)
+	return nil
+}
+
+// ticketMove relocates a ticket (and its prompt's blobs) to another machine. It runs
+// against the LOCAL daemon, which COORDINATES the move over its own peer transport
+// (pull from --from, push to --to, delete source) — so only this machine must reach
+// both ends. --from defaults to this machine.
+func ticketMove(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("move", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id/prefix to move (required)")
+	to := fs.String("to", "", "destination machine (required)")
+	from := fs.String("from", "", "source machine (default: this machine)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || *to == "" {
+		return errors.New("ticket move: --id and --to are required")
+	}
+	if err := daemonClient(cfg).TicketMove(context.Background(), api.MoveTicketRequest{ID: *id, From: *from, To: *to}); err != nil {
+		return err
+	}
+	fmt.Printf("moved %s to %s\n", *id, *to)
 	return nil
 }
 

@@ -229,6 +229,41 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh ticket <create|list|get|set|delete|set-status|import|unbind|needs-input|send-prompt>",
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
+	"blob": {
+		summary:  "content-addressed file store (add | ls | get | rm | path | expand). Files are referenced from prompts by an @blob(<hex>) token (from `blob add`) and expanded to absolute paths on send/copy. Routes per --machine like tickets",
+		usage:    "sesh blob <add|ls|get|rm|path|expand>",
+		examples: []string{"sesh blob add ~/shot.png", "cat prompt.txt | sesh blob expand"},
+	},
+	"blob add": {
+		summary:  "store a file (or --stdin bytes); prints the @blob(<hex>) token to paste into a prompt. Idempotent (content-addressed: identical bytes dedup)",
+		usage:    "sesh blob add <path> [--name <n>] [--machine <m>] [--json]   |   sesh blob add --stdin --name <n> [--machine <m>]",
+		examples: []string{"sesh blob add ~/Pictures/bug.png", "pngpaste - | sesh blob add --stdin --name shot.png"},
+	},
+	"blob ls": {
+		summary:  "list stored blobs (token, size, name)",
+		usage:    "sesh blob ls [--machine <m>] [--json]",
+		examples: []string{"sesh blob ls", "sesh blob ls --machine macbook --json"},
+	},
+	"blob get": {
+		summary:  "write a blob's raw bytes to stdout (by hash or unambiguous prefix)",
+		usage:    "sesh blob get <hash> [--machine <m>]",
+		examples: []string{"sesh blob get 9f3ac1b2d4e5 > out.png"},
+	},
+	"blob rm": {
+		summary:  "delete a blob (manual GC; no reference check — a prompt still pointing at it will fail loudly on expand)",
+		usage:    "sesh blob rm <hash> [--machine <m>]",
+		examples: []string{"sesh blob rm 9f3ac1b2d4e5"},
+	},
+	"blob path": {
+		summary:  "print a blob's absolute path on the targeted daemon (what its token expands to there)",
+		usage:    "sesh blob path <hash> [--machine <m>]",
+		examples: []string{"sesh blob path 9f3ac1b2d4e5"},
+	},
+	"blob expand": {
+		summary:  "stdin→stdout filter: replace every @blob(<hex>) with the blob's absolute path on the targeted daemon; an unknown blob is a loud error",
+		usage:    "sesh blob expand [--machine <m>]",
+		examples: []string{"sesh ticket get --id t1 --field prompt | sesh blob expand"},
+	},
 	"ticket create": {
 		summary:  "create a ticket with a name and optional prompt",
 		usage:    "sesh ticket create --name <name> [--prompt <text>] [--machine <m>] [--json]",
@@ -268,6 +303,11 @@ var helpRegistry = map[string]cmdHelp{
 		summary:  "detach a ticket from its thread (clears the binding; an active ticket becomes ready) — 'remove from thread'",
 		usage:    "sesh ticket unbind --id <id> [--machine <m>] [--json]",
 		examples: []string{"sesh ticket unbind --id t1"},
+	},
+	"ticket move": {
+		summary:  "relocate a ticket to another machine's daemon, carrying every blob its prompt references (so a cross-machine bind keeps the ticket co-located with its thread). Daemon-coordinated by the invoked daemon; aborts loudly before deleting the source on any failure",
+		usage:    "sesh ticket move --id <id> --to <machine> [--from <machine>]",
+		examples: []string{"sesh ticket move --id t1 --to macbook", "sesh ticket move --id t1 --from macstudio --to macbook"},
 	},
 	"ticket needs-input": {
 		summary:  "report whether a ticket needs input or a restart, with its status and the bound thread's head/busy axes",
@@ -502,7 +542,7 @@ var helpRegistry = map[string]cmdHelp{
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "tui", "info",
+	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

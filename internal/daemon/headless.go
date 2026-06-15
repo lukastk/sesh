@@ -80,6 +80,14 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Expand @blob(…) references before the turn; an unknown blob is a loud 400 here
+	// (before claiming the in-flight slot), never a dangling token sent to the agent.
+	text, err := d.expandPrompt(req.Text)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Refuse to overlap turns (two concurrent resumes of one session fork the
 	// conversation) — a loud conflict, not a silent race.
 	d.hlMu.Lock()
@@ -134,7 +142,7 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, req.Text, codexHome, turnMode)
+			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, text, codexHome, turnMode)
 
 		d.hlMu.Lock()
 		delete(d.hlInFlight, req.ID)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -20,6 +21,7 @@ func (d *Daemon) routesTickets(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tickets/status", d.handleTicketSetStatus)
 	mux.HandleFunc("POST /v1/tickets/import", d.handleTicketImport)
 	mux.HandleFunc("POST /v1/tickets/unbind", d.handleTicketUnbind)
+	mux.HandleFunc("POST /v1/tickets/move", d.handleTicketMove)
 	mux.HandleFunc("GET /v1/tickets/needs-input", d.handleTicketNeedsInput)
 	mux.HandleFunc("POST /v1/tickets/send-prompt", d.handleTicketSendPrompt)
 }
@@ -36,33 +38,54 @@ func (d *Daemon) handleTicketImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	t := req.Ticket
-	if t.ID == "" || t.Name == "" {
-		writeError(w, http.StatusBadRequest, "ticket import: id and name are required")
+	t, err := d.importTicketLocal(req.Ticket)
+	if err != nil {
+		writeError(w, importStatus(err), err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, api.TicketResponse{Schema: api.SchemaVersion, Ticket: t})
+}
+
+// errTicketIDExists is the sentinel for an import id collision (a half-done move
+// must never silently overwrite) — mapped to 409 over the wire.
+var errTicketIDExists = errors.New("ticket import: id already exists on this daemon")
+
+func importStatus(err error) int {
+	switch {
+	case errors.Is(err, errTicketIDExists):
+		return http.StatusConflict
+	case errors.Is(err, errImportInvalid):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+var errImportInvalid = errors.New("ticket import: invalid record")
+
+// importTicketLocal lands a ticket on THIS daemon, preserving its id but arriving
+// UNATTACHED (binding dropped, active→ready). Shared by the import endpoint and the
+// daemon-coordinated move. A colliding id is errTicketIDExists (never overwritten).
+func (d *Daemon) importTicketLocal(t api.Ticket) (api.Ticket, error) {
+	if t.ID == "" || t.Name == "" {
+		return api.Ticket{}, fmt.Errorf("%w: id and name are required", errImportInvalid)
 	}
 	if !api.ValidTicketStatus(t.Status) {
-		writeError(w, http.StatusBadRequest, "ticket import: invalid status "+t.Status)
-		return
+		return api.Ticket{}, fmt.Errorf("%w: invalid status %q", errImportInvalid, t.Status)
 	}
-	// Arrive unattached: the source binding is meaningless here, and `active`
-	// requires a local binding the importer does not have yet.
 	t.ThreadID = ""
 	if t.Status == api.StatusActive {
 		t.Status = api.StatusReady
 	}
 	if _, err := d.store.GetTicket(t.ID); err == nil {
-		writeError(w, http.StatusConflict, "ticket import: id already exists on this daemon: "+t.ID)
-		return
+		return api.Ticket{}, fmt.Errorf("%w: %s", errTicketIDExists, t.ID)
 	} else if !errors.Is(err, store.ErrTicketNotFound) {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return api.Ticket{}, err
 	}
 	if err := d.store.InsertTicket(t); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return api.Ticket{}, err
 	}
-	writeJSON(w, http.StatusOK, api.TicketResponse{Schema: api.SchemaVersion, Ticket: t})
+	return t, nil
 }
 
 // handleTicketUnbind detaches a ticket from its thread (clears thread_id) and, if
@@ -135,7 +158,14 @@ func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "bound thread has no live pane (dead); cannot send prompt")
 		return
 	}
-	if err := d.tmux.SendText(loc.Pane, ticket.Prompt, true); err != nil {
+	// Expand @blob(…) references to absolute paths before delivery; a token pointing
+	// at no blob is a loud 400 (never type a dangling token at the agent).
+	prompt, err := d.expandPrompt(ticket.Prompt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := d.tmux.SendText(loc.Pane, prompt, true); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -71,6 +71,8 @@ func cleanupHarness() {
 type Runner interface {
 	// Run executes `sesh <args...>` and returns combined stdout, stderr, error.
 	Run(t *testing.T, args ...string) (stdout, stderr string, err error)
+	// RunStdin is Run with bytes fed on stdin (for `blob add --stdin`, `ticket import`).
+	RunStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error)
 	Locality() matrix.Locality
 }
 
@@ -474,6 +476,14 @@ func (l *localRunner) Run(t *testing.T, args ...string) (string, string, error) 
 	return runCmd(cmd)
 }
 
+func (l *localRunner) RunStdin(t *testing.T, stdin string, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := exec.Command(l.bin, args...)
+	cmd.Env = sandboxEnv(l.env)
+	cmd.Stdin = strings.NewReader(stdin)
+	return runCmd(cmd)
+}
+
 // routingRunner drives OPERATIONS against a remote peer by running the local
 // sesh client (as a separate client machine) with `--machine peer` appended, so
 // main's global router forwards the command to the peer over a real ssh hop.
@@ -494,6 +504,14 @@ func (r *routingRunner) Run(t *testing.T, args ...string) (string, string, error
 	return runCmd(cmd)
 }
 
+func (r *routingRunner) RunStdin(t *testing.T, stdin string, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := exec.Command(r.bin, append(args, "--machine", r.peerMachine)...)
+	cmd.Env = sandboxEnv(r.env)
+	cmd.Stdin = strings.NewReader(stdin)
+	return runCmd(cmd)
+}
+
 // sshRunner runs sesh ON the far machine via a real ssh hop into localhost — used
 // for daemon.lifecycle/remote, where the honest test is to MANAGE the remote
 // daemon directly (you reach a machine to manage its daemon; there is no
@@ -506,6 +524,10 @@ type sshRunner struct {
 func (r *sshRunner) Locality() matrix.Locality { return matrix.Remote }
 
 func (r *sshRunner) Run(t *testing.T, args ...string) (string, string, error) {
+	return r.RunStdin(t, "", args...)
+}
+
+func (r *sshRunner) RunStdin(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
 	parts := []string{"env"}
 	for _, k := range sortedEnvKeys(r.env) {
@@ -521,6 +543,9 @@ func (r *sshRunner) Run(t *testing.T, args ...string) (string, string, error) {
 		"localhost",
 		strings.Join(parts, " "),
 	)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	return runCmd(cmd)
 }
 

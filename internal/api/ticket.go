@@ -82,6 +82,17 @@ type ImportTicketRequest struct {
 	Ticket Ticket `json:"ticket"`
 }
 
+// MoveTicketRequest is the body of POST /v1/tickets/move. The daemon it is sent to
+// COORDINATES the relocation: it pulls the ticket (and every blob its prompt
+// references) from From and pushes them to To, then deletes the source — using its
+// own peer transport, so only the coordinator must reach both ends. From defaults to
+// the coordinator's own machine.
+type MoveTicketRequest struct {
+	ID   string `json:"id"`
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+}
+
 // UnbindTicketRequest is the body of POST /v1/tickets/unbind — it detaches a
 // ticket from its thread (clears thread_id) and, if it was `active` (a status that
 // requires a binding), downgrades it to `ready` (unattached, prompt presumed

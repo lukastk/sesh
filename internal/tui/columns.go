@@ -24,17 +24,19 @@ import (
 
 // Column names (flag- and config-facing).
 const (
-	ColID      = "id"
-	ColMachine = "machine"
-	ColAgent   = "agent"
-	ColHead    = "head"
-	ColBusy    = "busy"
-	ColName    = "name"
-	ColCwd     = "cwd"
-	ColTags    = "tags"
-	ColTickets = "tickets"
-	ColNotify  = "notify"
-	ColCreated = "created"
+	ColID          = "id"
+	ColMachine     = "machine"
+	ColAgent       = "agent"
+	ColHead        = "head"
+	ColBusy        = "busy"
+	ColName        = "name"
+	ColCwd         = "cwd"
+	ColTags        = "tags"
+	ColTickets     = "tickets"
+	ColTicketName  = "ticket_name"
+	ColTicketInput = "ticket_input"
+	ColNotify      = "notify"
+	ColCreated     = "created"
 )
 
 // colSpec is a column's static metadata. fullWidth columns size to the longest
@@ -70,6 +72,24 @@ var colOrder = []colSpec{
 				return ""
 			}
 			return strconv.Itoa(r.TicketsOpen)
+		}},
+	{name: ColTicketName, header: "TKT-NAME", fullWidth: true,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			// Newest open ticket's name; +N when the thread has more open tickets.
+			if r.TicketName == "" {
+				return ""
+			}
+			if r.TicketsOpen > 1 {
+				return fmt.Sprintf("%s +%d", r.TicketName, r.TicketsOpen-1)
+			}
+			return r.TicketName
+		}},
+	{name: ColTicketInput, header: "TKT!", fixedW: 4,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if r.TicketNeedsInput {
+				return "!" // a bound ticket is active on a headful·idle thread
+			}
+			return ""
 		}},
 	{name: ColNotify, header: "NTF", fixedW: 3,
 		cell: func(_ *Model, r api.ThreadRow) string {
@@ -129,7 +149,6 @@ func ResolveColumns(names []string) ([]string, error) {
 	}
 	return out, nil
 }
-
 
 // ColumnMove repositions one column over the base set (see config.ColumnMove).
 type ColumnMove struct {

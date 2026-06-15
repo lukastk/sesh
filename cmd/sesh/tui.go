@@ -24,6 +24,7 @@ func runTUI(args []string) error {
 	filter := fs.Bool("filter", false, "start in filter mode (type-to-narrow immediately)")
 	expand := fs.Bool("expand", false, "start with tree nodes expanded (default from [tui] expand_children)")
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
+	editorFlag := fs.String("editor", "", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -77,7 +78,16 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui colors: %w", err)
 	}
-	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors)
+	// Ticket-editor precedence: --editor flag > [tui] editor config > $EDITOR. Empty
+	// is allowed (a loud error only fires if you try to edit a ticket field with none).
+	editor := *editorFlag
+	if editor == "" && tcfg != nil {
+		editor = tcfg.Editor
+	}
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

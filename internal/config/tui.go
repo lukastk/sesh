@@ -16,6 +16,9 @@ import (
 //	columns = ["machine", "agent", "name", "cwd", "tags"]
 type TUIConfig struct {
 	Columns []string `toml:"columns"`
+	// Editor is the command used to edit a ticket's text field in the tickets view
+	// (K). Overridden by `sesh tui --editor`; falls back to $EDITOR when unset.
+	Editor string `toml:"editor"`
 	// ColumnMoves reposition INDIVIDUAL columns relative to an anchor, applied
 	// on top of the base set (the default, or `columns`) — so you can move one
 	// column without enumerating them all.

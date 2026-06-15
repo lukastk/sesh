@@ -255,6 +255,20 @@ type Model struct {
 	// thread id so the attach lands on the window holding its pane.
 	attachTarget string
 	attachThread string
+
+	// Tickets view (K): a full-screen takeover listing the selected thread's tickets,
+	// drilling into one ticket's fields + actions, editing a field in $EDITOR. See
+	// tickets.go. ticketMode == ticketNone means the view is closed.
+	ticketMode         ticketMode
+	ticketThread       api.ThreadRow // the thread whose tickets are shown
+	tickets            []api.Ticket
+	ticketCursor       int    // selection in the list
+	ticketDetail       int    // selection in the detail item list
+	ticketErr          error  // loud ticket-view error (load/action)
+	ticketStatusCursor int    // selection in the status picker
+	ticketPickQuery    []rune // change-thread picker query (search by name/uuid)
+	ticketPickCursor   int
+	editor             string // editor for in-TUI field edits (--editor / [tui] editor / $EDITOR)
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -563,6 +577,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Quit so the terminal is restored, then runTUI execs the attach.
 		m.attachTarget, m.attachThread = msg.target, msg.thread
 		return m, tea.Quit
+	case ticketsLoadedMsg:
+		// Ignore a stale load (the user backed out / switched threads).
+		if m.ticketMode == ticketNone || msg.thread.ID != m.ticketThread.ID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ticketErr = msg.err
+			return m, nil
+		}
+		m.ticketErr = nil
+		m.tickets = msg.tickets
+		if m.ticketCursor >= len(m.tickets) {
+			m.ticketCursor = max(0, len(m.tickets)-1)
+		}
+		return m, nil
+	case ticketEditDoneMsg:
+		return m, m.applyTicketEdit(msg)
+	case ticketActionMsg:
+		if msg.err != nil {
+			m.ticketErr = msg.err
+			return m, nil
+		}
+		m.ticketErr = nil
+		m.note = msg.note
+		if msg.reload != "" {
+			return m, m.loadTickets(m.ticketThread)
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -817,6 +859,9 @@ type attachMsg struct{ target, thread string }
 type navDoneMsg struct{}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.ticketMode != ticketNone {
+		return m.handleTicketKey(msg)
+	}
 	if m.confirming != confirmNone {
 		return m.handleConfirmKey(msg)
 	}
@@ -909,6 +954,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Archive/unarchive toggle: confirm before parking the thread.
 		if row, ok := m.Selected(); ok {
 			m.confirming, m.confirmRow = confirmArchive, row
+		}
+	case "K":
+		// Tickets view: a full-screen takeover of the selected thread's tickets.
+		if row, ok := m.Selected(); ok {
+			return m, m.openTicketView(row)
 		}
 	case "enter":
 		return m, m.navSelected()
@@ -1374,7 +1424,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
@@ -1426,6 +1476,9 @@ func BusyGlyph(row api.ThreadRow) string {
 // View renders the grid. Kept pure (Model -> string) so a snapshot test can assert
 // the rendered output reflects the model's REAL rows.
 func (m Model) View() string {
+	if m.ticketMode != ticketNone {
+		return m.ticketView() // full-screen takeover
+	}
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")
 	if m.lastErr != nil {

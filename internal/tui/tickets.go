@@ -31,6 +31,7 @@ const (
 	ticketThreadPick      // choosing a thread to (re)bind (fzf-style, search by uuid)
 	ticketConfirmDel      // y/n delete confirmation
 	ticketNewPrompt       // typing a name to create a new ticket (bound to this thread)
+	ticketFilterPick      // choosing which status to show (Tab)
 )
 
 // detail item indices (the navigable rows of the detail view, in render order).
@@ -46,6 +47,27 @@ const (
 
 // ticketStatuses is the status picker's options, in lifecycle order.
 var ticketStatuses = []string{api.StatusTriage, api.StatusReady, api.StatusActive, api.StatusDone, api.StatusDropped}
+
+// ticketFilterAll shows every status; ticketFilters is the Tab status-filter
+// picker's options (lifecycle order + "all"). The view defaults to "active".
+const ticketFilterAll = "all"
+
+var ticketFilters = []string{api.StatusTriage, api.StatusReady, api.StatusActive, api.StatusDone, api.StatusDropped, ticketFilterAll}
+
+// filterIndex is the picker cursor position for a filter (the active row if unknown).
+func filterIndex(f string) int {
+	for i, x := range ticketFilters {
+		if x == f {
+			return i
+		}
+	}
+	for i, x := range ticketFilters {
+		if x == api.StatusActive {
+			return i
+		}
+	}
+	return 0
+}
 
 // ---- messages ----
 
@@ -80,14 +102,40 @@ func (m Model) WithEditor(editor string) Model {
 	return m
 }
 
-// openTicketView enters the tickets view for a thread and loads its tickets.
+// openTicketView enters the tickets view for a thread and loads its tickets. The
+// list defaults to showing ACTIVE tickets (Tab opens the status-filter picker).
 func (m *Model) openTicketView(row api.ThreadRow) tea.Cmd {
 	m.ticketMode = ticketList
 	m.ticketThread = row
 	m.tickets = nil
 	m.ticketCursor, m.ticketDetail = 0, 0
+	m.ticketFilter = api.StatusActive
 	m.ticketErr = nil
 	return m.loadTickets(row)
+}
+
+// visibleTickets is m.tickets narrowed to the current status filter ("all" = no
+// filter). The list cursor and detail/actions operate over THIS slice.
+func (m Model) visibleTickets() []api.Ticket {
+	if m.ticketFilter == "" || m.ticketFilter == ticketFilterAll {
+		return m.tickets
+	}
+	out := make([]api.Ticket, 0, len(m.tickets))
+	for _, tk := range m.tickets {
+		if tk.Status == m.ticketFilter {
+			out = append(out, tk)
+		}
+	}
+	return out
+}
+
+// selectedTicket is the ticket under the list cursor (within the filtered view).
+func (m Model) selectedTicket() (api.Ticket, bool) {
+	vis := m.visibleTickets()
+	if m.ticketCursor < 0 || m.ticketCursor >= len(vis) {
+		return api.Ticket{}, false
+	}
+	return vis[m.ticketCursor], true
 }
 
 // handleTicketKey is the tickets-view sub-state machine (active while
@@ -102,11 +150,30 @@ func (m Model) handleTicketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleTicketConfirmDelKey(msg)
 	case ticketNewPrompt:
 		return m.handleTicketNewKey(msg)
+	case ticketFilterPick:
+		return m.handleTicketFilterKey(msg)
 	case ticketDetail:
 		return m.handleTicketDetailKey(msg)
 	default: // ticketList
 		return m.handleTicketListKey(msg)
 	}
+}
+
+// handleTicketFilterKey drives the Tab status-filter picker: ↑/↓ move, enter
+// applies the chosen status (or "all"), esc/tab/q cancel without changing it.
+func (m Model) handleTicketFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc", "tab":
+		m.ticketMode = ticketList
+	case "up", "k":
+		m.ticketFilterCursor = (m.ticketFilterCursor - 1 + len(ticketFilters)) % len(ticketFilters)
+	case "down", "j":
+		m.ticketFilterCursor = (m.ticketFilterCursor + 1) % len(ticketFilters)
+	case "enter":
+		m.ticketFilter = ticketFilters[m.ticketFilterCursor]
+		m.ticketMode, m.ticketCursor = ticketList, 0 // new filtered view starts at the top
+	}
+	return m, nil
 }
 
 // handleTicketNewKey drives the new-ticket name prompt: printables build the name,
@@ -142,20 +209,24 @@ func (m Model) handleTicketNewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTicketListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	n := len(m.visibleTickets())
 	switch msg.String() {
 	case "q", "esc":
 		m.ticketMode = ticketNone
 		return m, m.fetch() // refresh the grid (ticket columns may have changed)
 	case "up", "k":
-		if len(m.tickets) > 0 {
-			m.ticketCursor = (m.ticketCursor - 1 + len(m.tickets)) % len(m.tickets)
+		if n > 0 {
+			m.ticketCursor = (m.ticketCursor - 1 + n) % n
 		}
 	case "down", "j":
-		if len(m.tickets) > 0 {
-			m.ticketCursor = (m.ticketCursor + 1) % len(m.tickets)
+		if n > 0 {
+			m.ticketCursor = (m.ticketCursor + 1) % n
 		}
+	case "tab":
+		// Open the status-filter picker (default view is active; Tab to change).
+		m.ticketMode, m.ticketFilterCursor = ticketFilterPick, filterIndex(m.ticketFilter)
 	case "enter", "l", "right":
-		if m.ticketCursor < len(m.tickets) {
+		if _, ok := m.selectedTicket(); ok {
 			m.ticketMode, m.ticketDetail = ticketDetail, tdName
 		}
 	case "n":
@@ -168,11 +239,11 @@ func (m Model) handleTicketListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTicketDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.ticketCursor >= len(m.tickets) {
+	tk, ok := m.selectedTicket()
+	if !ok {
 		m.ticketMode = ticketList
 		return m, nil
 	}
-	tk := m.tickets[m.ticketCursor]
 	switch msg.String() {
 	case "q", "esc", "h", "left":
 		m.ticketMode = ticketList
@@ -200,7 +271,11 @@ func (m Model) handleTicketDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTicketStatusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	tk := m.tickets[m.ticketCursor]
+	tk, ok := m.selectedTicket()
+	if !ok {
+		m.ticketMode = ticketList
+		return m, nil
+	}
 	switch msg.String() {
 	case "q", "esc", "h", "left":
 		m.ticketMode = ticketDetail
@@ -223,7 +298,11 @@ func (m Model) handleTicketStatusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTicketThreadPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	tk := m.tickets[m.ticketCursor]
+	tk, ok := m.selectedTicket()
+	if !ok {
+		m.ticketMode = ticketList
+		return m, nil
+	}
 	cands := m.ticketThreadCandidates()
 	switch msg.String() {
 	case "esc":
@@ -267,8 +346,11 @@ func (m Model) handleTicketThreadPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTicketConfirmDelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	tk := m.tickets[m.ticketCursor]
+	tk, ok := m.selectedTicket()
 	m.ticketMode = ticketList // back to the list either way (the detail's ticket may be gone)
+	if !ok {
+		return m, nil
+	}
 	if s := msg.String(); s == "y" || s == "Y" {
 		if m.ticketCursor > 0 {
 			m.ticketCursor-- // keep the cursor in range after the row vanishes
@@ -471,15 +553,24 @@ func (m Model) ticketView() string {
 		b.WriteString("\n" + styleHeader.Render(fmt.Sprintf("new ticket name> %s█", string(m.ticketNewInput))) + "\n")
 		b.WriteString(styleDim.Render("  enter create (bound to this thread) · esc cancel") + "\n")
 	}
+	if m.ticketMode == ticketFilterPick {
+		b.WriteString("\n" + m.ticketFilterView())
+	}
 	return b.String()
 }
 
 func (m Model) ticketListView() string {
 	var b strings.Builder
-	if len(m.tickets) == 0 {
-		b.WriteString(styleDim.Render("  (no tickets for this thread)") + "\n")
+	filter := m.ticketFilter
+	if filter == "" {
+		filter = ticketFilterAll
 	}
-	for i, tk := range m.tickets {
+	b.WriteString(styleDim.Render(fmt.Sprintf("showing: %s  (tab to change)", filter)) + "\n")
+	vis := m.visibleTickets()
+	if len(vis) == 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  (no %s tickets)", filter)) + "\n")
+	}
+	for i, tk := range vis {
 		line := fmt.Sprintf("%-8s  %-7s  %s", tid8(tk.ID), tk.Status, tk.Name)
 		if i == m.ticketCursor {
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
@@ -487,13 +578,30 @@ func (m Model) ticketListView() string {
 			b.WriteString("  " + line + "\n")
 		}
 	}
-	b.WriteString("\n" + styleDim.Render("↑/↓ move · enter open · n new · R reload · q/esc back to grid") + "\n")
+	b.WriteString("\n" + styleDim.Render("↑/↓ move · enter open · n new · tab filter · R reload · q/esc back to grid") + "\n")
+	return b.String()
+}
+
+func (m Model) ticketFilterView() string {
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("┃ show which tickets? ┃") + "\n")
+	for i, f := range ticketFilters {
+		if i == m.ticketFilterCursor {
+			b.WriteString(styleSelected.Render("  > "+f) + "\n")
+		} else {
+			b.WriteString("    " + f + "\n")
+		}
+	}
+	b.WriteString(styleDim.Render("  ↑/↓ move · enter apply · esc/tab cancel") + "\n")
 	return b.String()
 }
 
 func (m Model) ticketDetailView() string {
 	var b strings.Builder
-	tk := m.tickets[m.ticketCursor]
+	tk, ok := m.selectedTicket()
+	if !ok {
+		return styleDim.Render("  (ticket no longer in view)") + "\n"
+	}
 	thread := "(unbound)"
 	if tk.ThreadID != "" {
 		thread = tid8(tk.ThreadID)
@@ -579,8 +687,14 @@ func (m Model) ticketThreadPickView() string {
 // TicketViewOpen reports whether the tickets view is active (for tests).
 func (m Model) TicketViewOpen() bool { return m.ticketMode != ticketNone }
 
-// Tickets exposes the loaded ticket list (for tests).
+// Tickets exposes the full loaded ticket list (unfiltered, for tests).
 func (m Model) Tickets() []api.Ticket { return m.tickets }
+
+// TicketFilter exposes the current status filter (for tests; "" before open).
+func (m Model) TicketFilter() string { return m.ticketFilter }
+
+// VisibleTickets exposes the filtered list the cursor moves over (for tests).
+func (m Model) VisibleTickets() []api.Ticket { return m.visibleTickets() }
 
 // TicketErr exposes the last tickets-view error (for tests).
 func (m Model) TicketErr() error { return m.ticketErr }

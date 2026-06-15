@@ -66,6 +66,7 @@ var declaredTUIClaims = []string{
 	"master-cursor",             // preselecting a NESTED CHILD (the master prefix+s jump path) auto-expands its ancestors so the collapsed child becomes the visible cursor target
 	"tickets-view",              // K opens the tickets view, lists the thread's REAL bound tickets, and the status-change + delete + create actions land on the daemon
 	"tickets-view-remote",       // tickets view on a thread owned by ANOTHER machine: every op routes to the thread's machine (the cross-machine "bound thread not found" bug)
+	"tickets-view-filter",       // the K view defaults to showing ACTIVE tickets; Tab opens a status picker (incl. all) that narrows the list
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 }
 
@@ -114,6 +115,7 @@ func init() {
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
 	registerTUIClaim("tickets-view", claimTicketsView)
 	registerTUIClaim("tickets-view-remote", claimTicketsViewRemote)
+	registerTUIClaim("tickets-view-filter", claimTicketsViewFilter)
 	registerTUIClaim("tickets-columns", claimTicketsColumns)
 }
 
@@ -243,6 +245,66 @@ func claimTicketsViewRemote(t *testing.T) {
 	// ...and the LOCAL daemon holds no copy (it was never the writer).
 	if lt := local.allTickets(t); len(lt) != 0 {
 		t.Fatalf("local daemon holds %d tickets, want 0 (the write must go to the peer)", len(lt))
+	}
+}
+
+// claimTicketsViewFilter: K defaults to showing ACTIVE tickets; Tab opens a status
+// picker (incl. "all") that narrows the list. Two real bound tickets, one active +
+// one done, prove the default hides the done one and the picker reveals it.
+func claimTicketsViewFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "filt")
+
+	act := sb.ticketCreate(t, "still-going", "")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", act, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+	dn := sb.ticketCreate(t, "all-finished", "")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", dn, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind done ticket: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", dn, "--status", "done"); err != nil {
+		t.Fatalf("mark done: %v\n%s", err, stderr)
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "filt")
+
+	// K opens the view; both tickets load but the DEFAULT filter is `active`.
+	m = runKey(t, m, "K")
+	if m.TicketFilter() != "active" {
+		t.Fatalf("default ticket filter = %q, want active", m.TicketFilter())
+	}
+	if got := len(m.Tickets()); got != 2 {
+		t.Fatalf("loaded %d tickets, want 2 (both bound)", got)
+	}
+	if vis := m.VisibleTickets(); len(vis) != 1 || vis[0].ID != act {
+		t.Fatalf("default view shows %v, want only the active ticket %s", ticketIDs(m.VisibleTickets()), act)
+	}
+
+	// Tab → status picker → pick "all" (active idx 2 → all idx 5): down x3, enter.
+	m = runKey(t, m, "tab")
+	for i := 0; i < 3; i++ {
+		m = runKey(t, m, "down")
+	}
+	m = runKey(t, m, "enter")
+	if m.TicketFilter() != "all" || len(m.VisibleTickets()) != 2 {
+		t.Fatalf("after picking all: filter=%q visible=%d, want all/2", m.TicketFilter(), len(m.VisibleTickets()))
+	}
+
+	// Tab again → pick "done" (all idx 5 → done idx 3): up x2, enter.
+	m = runKey(t, m, "tab")
+	m = runKey(t, m, "up")
+	m = runKey(t, m, "up")
+	m = runKey(t, m, "enter")
+	if vis := m.VisibleTickets(); m.TicketFilter() != "done" || len(vis) != 1 || vis[0].ID != dn {
+		t.Fatalf("after picking done: filter=%q visible=%v, want done + [%s]", m.TicketFilter(), ticketIDs(m.VisibleTickets()), dn)
 	}
 }
 

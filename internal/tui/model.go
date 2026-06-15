@@ -269,6 +269,8 @@ type Model struct {
 	ticketPickQuery    []rune // change-thread picker query (search by name/uuid)
 	ticketPickCursor   int
 	ticketNewInput     []rune // name buffer while creating a new ticket (n in the list)
+	ticketFilter       string // status filter for the list (default "active"; "all" = no filter)
+	ticketFilterCursor int    // selection in the Tab status-filter picker
 	editor             string // editor for in-TUI field edits (--editor / [tui] editor / $EDITOR)
 }
 
@@ -589,8 +591,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ticketErr = nil
 		m.tickets = msg.tickets
-		if m.ticketCursor >= len(m.tickets) {
-			m.ticketCursor = max(0, len(m.tickets)-1)
+		if vis := len(m.visibleTickets()); m.ticketCursor >= vis {
+			m.ticketCursor = max(0, vis-1)
 		}
 		return m, nil
 	case ticketEditDoneMsg:

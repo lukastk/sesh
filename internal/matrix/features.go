@@ -360,6 +360,16 @@ func init() {
 		Description: "ticket list --current auto-detects the calling pane's thread ($SESH_THREAD_ID / @sesh-thread-id marker) and lists its tickets — for agents checking their assignment; resolved client-side before owner-routing (Local: a local-pane concept; routing covered by route.parity)",
 		Localities:  []Locality{Local},
 	})
+	Register(Feature{
+		ID:          "ticket.unbind",
+		Description: "ticket unbind --id detaches a ticket from its thread (clears thread_id; an active ticket downgrades to ready, unattached); 'remove from thread'. Unknown id is loud",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "ticket.move",
+		Description: "cross-machine ticket relocation: `ticket get --json | ticket import --machine DST` lands the record on another daemon PRESERVING its id (binding cleared, active→ready), then it deletes from the source — so a ticket can bind to a thread on any machine (the co-located ticket↔thread live join is preserved). Real ssh hop; id-collision on the target is loud",
+		Localities:  []Locality{Remote},
+	})
 
 	// ---- daemon / API ----
 	Register(Feature{

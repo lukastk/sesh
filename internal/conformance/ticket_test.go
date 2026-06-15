@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ func init() {
 			func(t *testing.T) { testTicketGet(t, loc) })
 		matrix.RegisterTest("ticket.set", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testTicketSet(t, loc) })
+		matrix.RegisterTest("ticket.unbind", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testTicketUnbind(t, loc) })
 		// ticket.send-prompt touches the agent send path; all three agents now
 		// spawn deterministically (codex cwd pre-trusted at spawn).
 		for _, a := range matrix.AllAgents {
@@ -34,6 +37,9 @@ func init() {
 		}
 	}
 	matrix.RegisterTest("ticket.ownership", matrix.AgentAgnostic, matrix.Remote, testTicketOwnership)
+	// ticket.move is the cross-machine relocate (get|import|delete over a real ssh
+	// hop) — the capability behind "bind a ticket to a thread on any machine".
+	matrix.RegisterTest("ticket.move", matrix.AgentAgnostic, matrix.Remote, testTicketMove)
 	// list --current auto-detects the calling pane's thread; the inference is a
 	// local-pane concept (Local only — routing is covered by route.parity).
 	matrix.RegisterTest("ticket.list-current", matrix.AgentAgnostic, matrix.Local, testTicketListCurrent)
@@ -147,6 +153,128 @@ func testTicketListCurrent(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != bound {
 		t.Fatalf("list --current = %v, want only the bound ticket %s", ticketIDs(got), bound)
+	}
+}
+
+// testTicketUnbind asserts `ticket unbind` detaches a ticket from its thread:
+// thread_id is cleared and an `active` ticket downgrades to `ready` (unattached).
+func testTicketUnbind(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	sb.startDaemon(t)
+
+	th := sb.newThread(t, "pi", "ub", "/tmp")
+	id := sb.ticketCreate(t, "detach me", "the work")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, id); tk.Status != api.StatusActive || tk.ThreadID != th.ID {
+		t.Fatalf("pre-unbind state wrong: %+v", tk)
+	}
+
+	// Unbind: thread cleared, active -> ready, the text fields untouched.
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "unbind", "--id", id); err != nil {
+		t.Fatalf("unbind: %v\n%s", err, stderr)
+	}
+	tk := sb.ticketByID(t, id)
+	if tk.ThreadID != "" {
+		t.Errorf("after unbind thread_id = %q, want empty", tk.ThreadID)
+	}
+	if tk.Status != api.StatusReady {
+		t.Errorf("after unbind status = %q, want ready", tk.Status)
+	}
+	if tk.Name != "detach me" || tk.Prompt != "the work" {
+		t.Errorf("unbind altered text fields: %+v", tk)
+	}
+	// Unknown id is loud (no silent success).
+	if _, _, err := sb.Runner.Run(t, "ticket", "unbind", "--id", "00000000-dead-beef-0000-000000000000"); err == nil {
+		t.Errorf("unbind of an unknown id was accepted")
+	}
+}
+
+// testTicketMove is the cross-machine relocation behind "bind a ticket to a thread
+// on ANY machine". A ticket↔thread live join only works co-located, so binding a
+// ticket on machine A to a thread on machine B RELOCATES the ticket to B:
+// `ticket get --json | ticket import --machine B` (preserving the id, dropping the
+// binding, active→ready), then delete on A, then bind on B. Real ssh hops both ways.
+func testTicketMove(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	src := newSandbox(t, matrix.Local) // machine A (the ticket's origin)
+	src.startDaemon(t)
+	dst := newSandbox(t, matrix.Local) // machine B (where the target thread lives)
+	dst.startDaemon(t)
+
+	// A client that peers with BOTH daemons — the cockpit machine doing the move.
+	bin := seshBin(t)
+	client := &localRunner{bin: bin, env: map[string]string{
+		"SESH_HOME":    t.TempDir(),
+		"SESH_MACHINE": "mover-client",
+	}}
+	for _, p := range []*Sandbox{src, dst} {
+		if _, stderr, err := client.Run(t, "peer", "add", "--machine", p.Machine, "--ssh", "localhost", "--home", p.Home, "--binary", bin); err != nil {
+			t.Fatalf("peer add %s: %v\n%s", p.Machine, err, stderr)
+		}
+	}
+
+	// A thread on each daemon; the ticket starts ACTIVE bound to A's thread (the
+	// realistic case: it was being worked on A, now we want it on B).
+	thA := src.newThread(t, "pi", "mvA", "/tmp")
+	thB := dst.newThread(t, "pi", "mvB", "/tmp")
+	id := src.ticketCreate(t, "relocate me", "the cross-machine work")
+	if _, stderr, err := src.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active", "--thread", thA.ID); err != nil {
+		t.Fatalf("bind active on A: %v\n%s", err, stderr)
+	}
+
+	// 1) Read the full record from A and import it onto B (preserving the id). The
+	//    import arrives UNATTACHED: binding dropped, active→ready.
+	rec, stderr, err := client.Run(t, "ticket", "get", "--machine", src.Machine, "--id", id, "--json")
+	if err != nil {
+		t.Fatalf("ticket get --machine A: %v\n%s", err, stderr)
+	}
+	importCmd := exec.Command(bin, "ticket", "import", "--machine", dst.Machine)
+	importCmd.Env = sandboxEnv(client.env)
+	importCmd.Stdin = strings.NewReader(rec)
+	if out, ierr := importCmd.CombinedOutput(); ierr != nil {
+		t.Fatalf("ticket import --machine B: %v\n%s", ierr, out)
+	}
+	if tk := dst.ticketByID(t, id); tk.ID != id || tk.ThreadID != "" || tk.Status != api.StatusReady {
+		t.Fatalf("imported record wrong (want same id, unbound, ready): %+v", tk)
+	}
+	if tk := dst.ticketByID(t, id); tk.Name != "relocate me" || tk.Prompt != "the cross-machine work" {
+		t.Errorf("import dropped text fields: %+v", tk)
+	}
+
+	// 2) Delete from A, then bind to B's thread — the ticket now lives WITH its thread.
+	if _, stderr, err := client.Run(t, "ticket", "delete", "--machine", src.Machine, "--id", id); err != nil {
+		t.Fatalf("delete on A: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := client.Run(t, "ticket", "set-status", "--machine", dst.Machine, "--id", id, "--status", "active", "--thread", thB.ID); err != nil {
+		t.Fatalf("bind active on B: %v\n%s", err, stderr)
+	}
+
+	// Final: present + active + bound to B's thread on B, and GONE from A.
+	if tk := dst.ticketByID(t, id); tk.Status != api.StatusActive || tk.ThreadID != thB.ID {
+		t.Fatalf("ticket not active-bound on B: %+v", tk)
+	}
+	for _, tk := range src.allTickets(t) {
+		if tk.ID == id {
+			t.Fatalf("ticket %s still on A after the move (should be gone)", id)
+		}
+	}
+
+	// Loud collision: importing an id that already exists on the target is refused
+	// (so a half-done move never silently overwrites).
+	dup := exec.Command(bin, "ticket", "import", "--machine", dst.Machine)
+	dup.Env = sandboxEnv(client.env)
+	dup.Stdin = strings.NewReader(rec)
+	if out, derr := dup.CombinedOutput(); derr == nil {
+		t.Errorf("importing a colliding id was accepted (want loud conflict); out=%s", out)
 	}
 }
 

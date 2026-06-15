@@ -46,6 +46,19 @@ func (c *Client) TicketSetStatus(ctx context.Context, req api.SetStatusRequest) 
 	return out, c.postJSON(ctx, "http://unix/v1/tickets/status", req, &out)
 }
 
+// TicketImport posts POST /v1/tickets/import — lands a full ticket record on this
+// daemon, preserving its id (the receiving half of a cross-machine ticket move).
+func (c *Client) TicketImport(ctx context.Context, req api.ImportTicketRequest) (api.TicketResponse, error) {
+	var out api.TicketResponse
+	return out, c.postJSON(ctx, "http://unix/v1/tickets/import", req, &out)
+}
+
+// TicketUnbind posts POST /v1/tickets/unbind — detaches a ticket from its thread.
+func (c *Client) TicketUnbind(ctx context.Context, id string) (api.TicketResponse, error) {
+	var out api.TicketResponse
+	return out, c.postJSON(ctx, "http://unix/v1/tickets/unbind", api.UnbindTicketRequest{ID: id}, &out)
+}
+
 // TicketNeedsInput fetches GET /v1/tickets/needs-input?id=.
 func (c *Client) TicketNeedsInput(ctx context.Context, id string) (api.TicketNeedsInput, error) {
 	var out api.TicketNeedsInput

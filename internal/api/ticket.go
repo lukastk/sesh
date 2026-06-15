@@ -71,6 +71,25 @@ type SetStatusRequest struct {
 	ThreadID string `json:"thread_id,omitempty"`
 }
 
+// ImportTicketRequest is the body of POST /v1/tickets/import — it inserts a full
+// ticket record (PRESERVING its id) onto THIS daemon. It is the landing half of a
+// cross-machine ticket move: a ticket↔thread binding only produces live derived
+// state (needs-input, the TKT columns) when both live on the same daemon, so a
+// ticket bound to a thread on another machine is relocated to that machine. On
+// arrival the binding is dropped (the old thread is on the old daemon) and an
+// `active` status downgrades to `ready` (unattached) — the caller re-binds locally.
+type ImportTicketRequest struct {
+	Ticket Ticket `json:"ticket"`
+}
+
+// UnbindTicketRequest is the body of POST /v1/tickets/unbind — it detaches a
+// ticket from its thread (clears thread_id) and, if it was `active` (a status that
+// requires a binding), downgrades it to `ready` (unattached, prompt presumed
+// final). Other statuses are left as-is. This is "remove from thread".
+type UnbindTicketRequest struct {
+	ID string `json:"id"`
+}
+
 // TicketNeedsInput is the derived needs-input view of a ticket (SPEC §4):
 // status == active AND the bound thread's activity == waiting, REGARDLESS of
 // attachment. A dead bound thread is "needs-restart", not needs-input.

@@ -27,7 +27,12 @@ package api
 // 11: per-thread ticket summary on the row/snapshot — `ticket_name` (newest open
 // ticket) + `ticket_needs_input` (any active ticket on a headful·idle thread) for
 // the new TUI columns; tickets lost the `description` field (mechanism-only).
-const SchemaVersion = 11
+// 12: cross-machine ticket binding — `POST /v1/tickets/import` (land a ticket
+// record on this daemon, preserving id, binding cleared, active→ready) + `POST
+// /v1/tickets/unbind` (detach from thread, active→ready). A ticket is now relocated
+// to its bound thread's machine so the live join stays co-located. Additive
+// endpoints (no existing wire shape changed) → mixed-mesh safe during rollout.
+const SchemaVersion = 12
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

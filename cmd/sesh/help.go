@@ -220,8 +220,8 @@ var helpRegistry = map[string]cmdHelp{
 	},
 
 	"ticket": {
-		summary:  "ticket layer (create | list | get | set | delete | set-status | needs-input | send-prompt); auto-routes to the configured ticket owner",
-		usage:    "sesh ticket <create|list|get|set|delete|set-status|needs-input|send-prompt>",
+		summary:  "ticket layer (create | list | get | set | delete | set-status | import | unbind | needs-input | send-prompt); auto-routes to the configured ticket owner",
+		usage:    "sesh ticket <create|list|get|set|delete|set-status|import|unbind|needs-input|send-prompt>",
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
 	"ticket create": {
@@ -253,6 +253,16 @@ var helpRegistry = map[string]cmdHelp{
 		summary:  "set a ticket's status (triage|ready|active|done|dropped); --thread binds the thread (required for active)",
 		usage:    "sesh ticket set-status --id <id> --status <triage|ready|active|done|dropped> [--thread <id>] [--machine <m>] [--json]",
 		examples: []string{"sesh ticket set-status --id t1 --status active --thread 1a2b3c4d"},
+	},
+	"ticket import": {
+		summary:  "land a ticket record (JSON on stdin, from `ticket get --json`) on a daemon, preserving its id; binding cleared, active→ready. Landing half of a cross-machine ticket move",
+		usage:    "sesh ticket get --machine <src> --id <id> --json | sesh ticket import --machine <dst> [--json]",
+		examples: []string{"sesh ticket get --machine macbook --id t1 --json | sesh ticket import --machine mymain"},
+	},
+	"ticket unbind": {
+		summary:  "detach a ticket from its thread (clears the binding; an active ticket becomes ready) — 'remove from thread'",
+		usage:    "sesh ticket unbind --id <id> [--machine <m>] [--json]",
+		examples: []string{"sesh ticket unbind --id t1"},
 	},
 	"ticket needs-input": {
 		summary:  "report whether a ticket needs input or a restart, with its status and the bound thread's head/busy axes",

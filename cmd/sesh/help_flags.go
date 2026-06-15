@@ -317,6 +317,16 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
+	"ticket import": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--id", "(in the piped `ticket get` half) the ticket to read; import itself reads the record from stdin"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+	},
+	"ticket unbind": {
+		{"--id", "ticket id to detach from its thread (required)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+	},
 	"ticket needs-input": {
 		{"--id", "ticket id to flag as needing input (required)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},

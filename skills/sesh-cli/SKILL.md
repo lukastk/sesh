@@ -82,6 +82,7 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   sesh ticket get --id <id> [--field prompt] [--json]     # --field prints one field raw (clipboard/agents)
   sesh ticket set --id <id> [--name <t>] [--prompt <t>]   # partial text-field update
   sesh ticket set-status --id <id> --status <s> [--thread <id>]   # active requires --thread
+  sesh ticket unbind --id <id>                            # detach from the thread (active→ready); "remove from thread"
   sesh ticket send-prompt --id <id>                       # deliver the prompt to the bound thread's pane
   sesh ticket needs-input --id <id>                       # derived: active && thread headful·idle
   sesh ticket delete --id <id>
@@ -90,6 +91,21 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   `ticket list --current` is the agent self-check ("what am I assigned?") — it resolves the
   current thread from `$SESH_THREAD_ID`/the pane marker. **Subscriptions** deliver one
   thread's completed turns into another.
+
+  **Status model**: `triage` (unattached, prompt not final) · `ready` (unattached, prompt
+  final) · `active` (**attached to a thread** — the only attached state) · `done`/`dropped`
+  (terminal). Only `active` requires a binding; `unbind` (or any non-active status) detaches.
+
+  **A ticket lives on the same daemon as its bound thread** (the live `needs-input`/`TKT`
+  join is computed per-daemon). To bind a ticket to a thread on **another machine**, the
+  ticket is *relocated* to that thread's machine first — `ticket get --json` piped into
+  `ticket import` on the target (preserving the id, binding cleared, `active`→`ready`), then
+  `ticket delete` on the source, then `set-status active --thread` on the target. The
+  `mt-`/`mmt-` ticket cockpit does this automatically; `ticket import` is the mechanism:
+
+  ```bash
+  sesh ticket get --machine <src> --id <id> --json | sesh ticket import --machine <dst>
+  ```
 
 ## The TUI (`sesh tui`)
 

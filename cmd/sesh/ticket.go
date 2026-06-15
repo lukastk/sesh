@@ -58,6 +58,10 @@ func runTicket(args []string) error {
 		return ticketDelete(cfg, rest)
 	case "set-status":
 		return ticketSetStatus(cfg, rest)
+	case "import":
+		return ticketImport(cfg, rest)
+	case "unbind":
+		return ticketUnbind(cfg, rest)
 	case "needs-input":
 		return ticketNeedsInput(cfg, rest)
 	case "send-prompt":
@@ -268,6 +272,58 @@ func ticketSetStatus(cfg config.Config, args []string) error {
 		return emitJSON(resp.Ticket)
 	}
 	fmt.Printf("%s -> %s\n", resp.Ticket.ID, resp.Ticket.Status)
+	return nil
+}
+
+// ticketImport reads a full ticket record (JSON, as emitted by `ticket get
+// --json`) from stdin and lands it on the targeted daemon, PRESERVING its id. It
+// is the landing half of a cross-machine move: bind a ticket to a thread on another
+// machine by `ticket get --machine SRC --json | ticket import --machine DST`, then
+// `ticket delete --machine SRC`, then bind on DST. The binding is dropped and an
+// `active` status becomes `ready` on arrival (the daemon enforces this).
+func ticketImport(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var tk api.Ticket
+	if err := json.NewDecoder(os.Stdin).Decode(&tk); err != nil {
+		return fmt.Errorf("ticket import: reading record from stdin: %w", err)
+	}
+	c := daemonClient(cfg)
+	resp, err := c.TicketImport(context.Background(), api.ImportTicketRequest{Ticket: tk})
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Ticket)
+	}
+	fmt.Printf("imported %s (%s)\n", resp.Ticket.ID, resp.Ticket.Status)
+	return nil
+}
+
+// ticketUnbind detaches a ticket from its thread (clears the binding; an `active`
+// ticket becomes `ready`). This is "remove from thread".
+func ticketUnbind(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("unbind", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket unbind: --id is required")
+	}
+	c := daemonClient(cfg)
+	resp, err := c.TicketUnbind(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Ticket)
+	}
+	fmt.Printf("%s -> %s (unbound)\n", resp.Ticket.ID, resp.Ticket.Status)
 	return nil
 }
 

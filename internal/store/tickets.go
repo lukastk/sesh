@@ -213,6 +213,25 @@ func (s *Store) OpenTicketDigests() (map[string]TicketDigest, error) {
 	return out, rows.Err()
 }
 
+// UnbindTicket detaches a ticket from its thread: it clears thread_id and, if the
+// ticket was `active` (a status that REQUIRES a binding), downgrades it to `ready`
+// (unattached). Any other status is preserved. Returns ErrTicketNotFound if absent.
+func (s *Store) UnbindTicket(id string) error {
+	res, err := s.db.Exec(
+		`UPDATE tickets SET thread_id = NULL,
+		   status = CASE WHEN status = ? THEN ? ELSE status END
+		 WHERE id = ?`,
+		api.StatusActive, api.StatusReady, id)
+	if err != nil {
+		return fmt.Errorf("store: unbind ticket: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrTicketNotFound
+	}
+	return nil
+}
+
 // SetHookMuted persists a hook's mute state.
 func (s *Store) SetHookMuted(name string, muted bool) error {
 	var err error

@@ -70,7 +70,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 - **Agents**: `claude`, `codex`, `pi`. Spawn policy (yolo/default/sandbox) comes from
   `[spawn]` config or `--yolo`/`--sandbox`.
 - **Parent/child** threads form a tree (a supervisor thread and its sub-agents); the TUI
-  renders it collapsibly.
+  renders it collapsibly. **`thread new` defaults to childing the new thread to the current
+  one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
 - **Tickets** are work items optionally bound to a thread (`needs-input` derives from the
   thread's axes). **Subscriptions** deliver one thread's completed turns into another.
 
@@ -143,6 +144,21 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 
 ## Creating, lifecycle, navigating
 
+> ⚠️ **PARENT INFERENCE — read this before you create a thread.** `sesh thread new`
+> defaults to making the new thread a **CHILD** of the thread you are running inside. With
+> no `--parent` and no `--no-parent`, it infers a parent from your environment
+> (`$SESH_THREAD_ID`, set in every sesh-managed pane, then the calling pane's
+> `@sesh-thread-id` marker). **So an agent that spawns a thread will, by default, create a
+> child of itself — silently.** This is correct only when you genuinely mean to delegate a
+> sub-task.
+>
+> **If the thread is meant to stand alone (a top-level/independent thread), you MUST pass
+> `--no-parent`.** Otherwise it will be a child. Be explicit:
+> - `--parent <id>` — child of a specific thread.
+> - *(neither flag)* — child of the **current** thread (inferred). Standalone only when run
+>   from outside any thread.
+> - `--no-parent` — force a **root** thread regardless of context.
+
 `--cwd` accepts a **relative path or `~`** (expanded against the directory where you run
 the command — the daemon stores an absolute path); pass an absolute path for a
 cross-`--machine` spawn, where the target dir lives on the remote.
@@ -151,7 +167,8 @@ cross-`--machine` spawn, where the target dir lives on the remote.
 sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)
 sesh thread new --agent pi --cwd ~/proj                              # --name is OPTIONAL (a nameless thread)
 sesh thread new --agent pi --name notes --cwd . --headless           # headless; cwd = $PWD
-sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child thread
+sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child of a specific thread
+sesh thread new --agent claude --name solo --cwd ~/p --no-parent     # a ROOT thread (standalone; suppress inference)
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation
 
 # Placement — a tmux session may host MANY threads (identity is the pane marker,

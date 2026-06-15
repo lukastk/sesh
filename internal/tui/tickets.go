@@ -271,10 +271,23 @@ func (m Model) handleTicketConfirmDelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // ---- commands (all EXEC the binary so ticket-owner routing applies) ----
 
+// ticketArgs builds `ticket <args…>` and routes to the thread's OWNING machine
+// (--machine) when it differs from this client's. A ticket binds to / is validated
+// against the thread, and with no SESH_TICKET_OWNER set tickets are local to a
+// daemon — so a thread on another machine needs its ticket ops carried there, or
+// the bind/list/columns all miss (the "bound thread not found" cross-machine bug).
+func (m Model) ticketArgs(args ...string) []string {
+	out := append([]string{"ticket"}, args...)
+	if mc := m.ticketThread.Machine; mc != "" && mc != m.machine {
+		out = append(out, "--machine", mc)
+	}
+	return out
+}
+
 func (m Model) loadTickets(thread api.ThreadRow) tea.Cmd {
 	bin, env := m.binaryPath, m.navEnv
 	return func() tea.Msg {
-		cmd := exec.Command(bin, "ticket", "list", "--thread", thread.ID, "--json")
+		cmd := exec.Command(bin, m.ticketArgs("list", "--thread", thread.ID, "--json")...)
 		cmd.Env = append(os.Environ(), env...)
 		out, err := cmd.Output()
 		if err != nil {
@@ -298,9 +311,9 @@ func (m Model) loadTickets(thread api.ThreadRow) tea.Cmd {
 // ticketAction execs `sesh ticket <args...>` (routes to the owner) and, on
 // success, re-lists so the view refreshes. note is the success status line.
 func (m Model) ticketAction(note string, args ...string) tea.Cmd {
-	bin, env, threadID := m.binaryPath, m.navEnv, m.ticketThread.ID
+	bin, env, threadID, fullArgs := m.binaryPath, m.navEnv, m.ticketThread.ID, m.ticketArgs(args...)
 	return func() tea.Msg {
-		cmd := exec.Command(bin, append([]string{"ticket"}, args...)...)
+		cmd := exec.Command(bin, fullArgs...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return ticketActionMsg{err: fmt.Errorf("ticket %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))}
@@ -314,8 +327,12 @@ func (m Model) ticketAction(note string, args ...string) tea.Cmd {
 // owner-routed CLI; a created-but-unbound ticket would just not show here.
 func (m Model) createTicket(name string) tea.Cmd {
 	bin, env, threadID := m.binaryPath, m.navEnv, m.ticketThread.ID
+	createArgs := m.ticketArgs("create", "--name", name, "--json")
+	bindArgs := func(id string) []string {
+		return m.ticketArgs("set-status", "--id", id, "--status", api.StatusActive, "--thread", threadID)
+	}
 	return func() tea.Msg {
-		out, err := runSesh(bin, env, "ticket", "create", "--name", name, "--json")
+		out, err := runSesh(bin, env, createArgs...)
 		if err != nil {
 			return ticketActionMsg{err: fmt.Errorf("ticket create: %v: %s", err, out)}
 		}
@@ -323,7 +340,7 @@ func (m Model) createTicket(name string) tea.Cmd {
 		if e := json.Unmarshal([]byte(strings.TrimSpace(out)), &tk); e != nil {
 			return ticketActionMsg{err: fmt.Errorf("decode created ticket: %w", e)}
 		}
-		if bout, berr := runSesh(bin, env, "ticket", "set-status", "--id", tk.ID, "--status", api.StatusActive, "--thread", threadID); berr != nil {
+		if bout, berr := runSesh(bin, env, bindArgs(tk.ID)...); berr != nil {
 			return ticketActionMsg{err: fmt.Errorf("bind new ticket: %v: %s", berr, bout)}
 		}
 		return ticketActionMsg{reload: threadID, note: "created " + tid8(tk.ID)}
@@ -370,6 +387,7 @@ func (m Model) editTicketField(tk api.Ticket, field string) tea.Cmd {
 // applyTicketEdit reads the edited temp file and persists it via `sesh ticket set`.
 func (m Model) applyTicketEdit(msg ticketEditDoneMsg) tea.Cmd {
 	bin, env, threadID := m.binaryPath, m.navEnv, m.ticketThread.ID
+	setArgs := func(val string) []string { return m.ticketArgs("set", "--id", msg.id, "--"+msg.field, val) }
 	return func() tea.Msg {
 		defer os.Remove(msg.file)
 		if msg.err != nil {
@@ -380,7 +398,7 @@ func (m Model) applyTicketEdit(msg ticketEditDoneMsg) tea.Cmd {
 			return ticketActionMsg{err: fmt.Errorf("read edited %s: %w", msg.field, err)}
 		}
 		val := strings.TrimRight(string(raw), "\n") // editors add a trailing newline
-		cmd := exec.Command(bin, "ticket", "set", "--id", msg.id, "--"+msg.field, val)
+		cmd := exec.Command(bin, setArgs(val)...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return ticketActionMsg{err: fmt.Errorf("save %s: %v: %s", msg.field, err, strings.TrimSpace(string(out)))}

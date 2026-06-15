@@ -64,7 +64,8 @@ var declaredTUIClaims = []string{
 	"notify-toggle",             // n flips the real notify gate; the NTF column renders the muted state
 	"action-mutate-remote",      // notify/stop/archive on a thread owned by ANOTHER machine ROUTE to the owner (the local daemon doesn't own it) — the cross-machine gap that direct-client calls silently missed
 	"master-cursor",             // preselecting a NESTED CHILD (the master prefix+s jump path) auto-expands its ancestors so the collapsed child becomes the visible cursor target
-	"tickets-view",              // K opens the tickets view, lists the thread's REAL bound tickets, and the status-change + delete actions land on the daemon
+	"tickets-view",              // K opens the tickets view, lists the thread's REAL bound tickets, and the status-change + delete + create actions land on the daemon
+	"tickets-view-remote",       // tickets view on a thread owned by ANOTHER machine: every op routes to the thread's machine (the cross-machine "bound thread not found" bug)
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 }
 
@@ -112,6 +113,7 @@ func init() {
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
 	registerTUIClaim("tickets-view", claimTicketsView)
+	registerTUIClaim("tickets-view-remote", claimTicketsViewRemote)
 	registerTUIClaim("tickets-columns", claimTicketsColumns)
 }
 
@@ -188,6 +190,59 @@ func claimTicketsView(t *testing.T) {
 	created := sb.ticketsByThread(t, th.ID)
 	if len(created) != 1 || created[0].Name != "viaTUI" || created[0].Status != api.StatusActive {
 		t.Fatalf("create via `n` did not land a bound active ticket named viaTUI: %+v", created)
+	}
+}
+
+// claimTicketsViewRemote: the tickets view acts on a thread that lives on ANOTHER
+// machine — every ticket op (list, create+bind, status) must route to the THREAD's
+// machine (--machine), not the local daemon. With no SESH_TICKET_OWNER, tickets are
+// local to a daemon, so a bind on the wrong daemon 400s "bound thread not found"
+// (the exact cross-machine bug). The local daemon must hold NO copy.
+func claimTicketsViewRemote(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	// The peer owns the thread (a real daemon over ssh-localhost).
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+	th := peer.newHeadlessThread(t, "pi", "remote-tkt")
+
+	// The local client knows the peer; the TUI runs here with --all-machines.
+	bin := seshBin(t)
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	if _, stderr, err := local.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
+	m := tui.New(local.Home+"/daemon.sock", true).
+		WithExec(bin, []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine}).
+		WithLocal(local.Machine, local.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "remote-tkt") // wait for the mesh to replicate the peer's thread
+
+	// Open the view + create a ticket via `n` — the create AND the active bind must
+	// route to the peer (the thread's machine), or the bind 400s.
+	m = runKey(t, m, "K")
+	if !m.TicketViewOpen() {
+		t.Fatalf("K did not open the tickets view for the remote thread")
+	}
+	m = runKey(t, m, "n")
+	for _, ch := range []string{"r", "e", "m", "o", "t", "e"} {
+		m = runKey(t, m, ch)
+	}
+	m = runKey(t, m, "enter")
+	if m.TicketErr() != nil {
+		t.Fatalf("remote create+bind errored (routing not carried to the thread's machine?): %v", m.TicketErr())
+	}
+	// It landed on the PEER, bound active...
+	onPeer := peer.ticketsByThread(t, th.ID)
+	if len(onPeer) != 1 || onPeer[0].Name != "remote" || onPeer[0].Status != api.StatusActive {
+		t.Fatalf("remote ticket did not land bound-active on the peer: %+v", onPeer)
+	}
+	// ...and the LOCAL daemon holds no copy (it was never the writer).
+	if lt := local.allTickets(t); len(lt) != 0 {
+		t.Fatalf("local daemon holds %d tickets, want 0 (the write must go to the peer)", len(lt))
 	}
 }
 

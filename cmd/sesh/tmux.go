@@ -27,7 +27,7 @@ import (
 // `current` is client-side (it needs the caller's $TMUX).
 func runTmux(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh tmux <current|info|create-session|create-pane|send-text|stage-file>")
+		return printGroupHelp("tmux")
 	}
 	cfg := config.Load()
 	sub, rest := args[0], args[1:]

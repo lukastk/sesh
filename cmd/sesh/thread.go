@@ -39,7 +39,7 @@ func absCwd(cwd string) (string, error) {
 // the local daemon (this machine is the thread's owner).
 func runThread(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh thread <new|list|stop|delete|pane>")
+		return printGroupHelp("thread")
 	}
 	cfg := config.Load()
 	sub, rest := args[0], args[1:]

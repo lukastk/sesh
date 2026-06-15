@@ -444,6 +444,12 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh peer remove --machine macbook"},
 	},
 
+	"help-tree": {
+		summary:  "print the whole command surface as an indented tree (every command + subcommand with a one-line summary). NOT --machine routable",
+		usage:    "sesh help-tree",
+		examples: []string{"sesh help-tree"},
+	},
+
 	"matrix": {
 		summary:  "report the feature-matrix state from the last conformance run's artifact (grid | skips); does NOT run tests. NOT --machine routable",
 		usage:    "sesh matrix <grid|skips> [--artifact <path>] [--json]",
@@ -467,7 +473,7 @@ var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
-	"doctor", "cwd-label", "mesh", "master", "peer",
+	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }
 
 // resolveHelpRequest reports whether args (os.Args[1:]) is a help request and, if so,
@@ -505,6 +511,15 @@ func leadingWords(args []string) []string {
 
 // printCommandHelp writes the help for a command path to stdout.
 func printCommandHelp(path []string) { fmt.Print(renderHelp(path)) }
+
+// printGroupHelp prints the full help for a command group (e.g. "thread") to stdout
+// and returns nil. It is what a bare group command (`sesh thread`, no subcommand)
+// runs instead of a confusing partial usage line — the user/agent sees the COMPLETE
+// subcommand list, usage, and examples, exactly as `sesh thread --help` would.
+func printGroupHelp(path ...string) error {
+	printCommandHelp(path)
+	return nil
+}
 
 // renderHelp returns the help text for a command path ([] = the root overview).
 func renderHelp(path []string) string {
@@ -559,6 +574,46 @@ func renderRootHelp() string {
 	return b.String()
 }
 
+// renderHelpTree renders the whole command surface as an indented tree — every
+// top-level command with its subcommands nested beneath it, each with a one-line
+// summary. It is the `sesh help-tree` output (a `my --help-tree` analogue): a single
+// glance at everything the CLI can do.
+func renderHelpTree() string {
+	var b strings.Builder
+	b.WriteString("sesh — multi-machine coding-agent session management\n\n")
+	b.WriteString("sesh\n")
+	names := append([]string(nil), topLevelCommands...)
+	sort.Strings(names)
+	for i, n := range names {
+		lastTop := i == len(names)-1
+		h, ok := helpRegistry[n]
+		if !ok {
+			continue
+		}
+		topConn := "├──"
+		if lastTop {
+			topConn = "└──"
+		}
+		fmt.Fprintf(&b, "%s %-15s %s\n", topConn, n, firstClause(h.summary))
+		children := helpChildren(n)
+		for j, c := range children {
+			lastChild := j == len(children)-1
+			// The vertical guide under this top-level command continues only while
+			// it is not the last top-level entry.
+			guide := "│  "
+			if lastTop {
+				guide = "   "
+			}
+			childConn := "├──"
+			if lastChild {
+				childConn = "└──"
+			}
+			fmt.Fprintf(&b, "%s%s %-12s %s\n", guide, childConn, lastWord(c), firstClause(helpRegistry[c].summary))
+		}
+	}
+	return b.String()
+}
+
 // helpChildren returns the immediate sub-paths of key, sorted.
 func helpChildren(key string) []string {
 	prefix := key + " "
@@ -591,7 +646,7 @@ func firstClause(s string) string {
 // isRoutable mirrors route.go's routableSubcommand for the help footer.
 func isRoutable(cmd string) bool {
 	switch cmd {
-	case "peer", "matrix", "master", "help", "-h", "--help":
+	case "peer", "matrix", "master", "help", "help-tree", "-h", "--help":
 		return false
 	}
 	return true

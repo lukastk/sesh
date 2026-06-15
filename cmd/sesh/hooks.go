@@ -15,7 +15,7 @@ import (
 
 func runHooks(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh hooks <list|enable|disable|test>")
+		return printGroupHelp("hooks")
 	}
 	cfg := config.Load()
 	c := daemonClient(cfg)

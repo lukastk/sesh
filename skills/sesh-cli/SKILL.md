@@ -20,7 +20,10 @@ to machine `m`. **`sesh` is mechanism, not UX** — it is explicit and machine-r
 
 Run `sesh help` for the command list and `sesh <command> --help` (or `sesh help <command>
 <sub>`) for any command — every command and flag is documented there. Prefer reading
-`--help` over guessing.
+`--help` over guessing. `sesh help-tree` prints the entire command surface (every command
+and subcommand, each with a one-line summary) as one indented tree — the fastest way to see
+everything at a glance. Invoking a command group with no subcommand (e.g. `sesh thread`)
+prints that group's full `--help` (not a partial usage line).
 
 ## Thread ids and id-prefixes
 

@@ -26,7 +26,7 @@ import (
 //	status  print the running daemon's status (--json for machine-readable)
 func runDaemon(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh daemon <run|start|stop|status>")
+		return printGroupHelp("daemon")
 	}
 	cfg := config.Load()
 	sub, rest := args[0], args[1:]

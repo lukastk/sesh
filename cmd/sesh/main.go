@@ -55,6 +55,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "help-tree":
+		fmt.Print(renderHelpTree())
 	case "matrix":
 		if err := runMatrix(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh matrix:", err)

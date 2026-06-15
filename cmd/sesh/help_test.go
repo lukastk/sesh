@@ -71,6 +71,24 @@ func TestRenderHelpNamesTheCommand(t *testing.T) {
 	}
 }
 
+func TestHelpTreeCoversEverything(t *testing.T) {
+	tree := renderHelpTree()
+	// Every top-level command appears...
+	for _, cmd := range topLevelCommands {
+		if !strings.Contains(tree, cmd) {
+			t.Errorf("help-tree omits top-level command %q", cmd)
+		}
+	}
+	// ...and every declared subcommand's leaf name appears under it.
+	for parent, subs := range subcommandSets {
+		for _, sub := range subs {
+			if !strings.Contains(tree, sub) {
+				t.Errorf("help-tree omits subcommand %q of %q", sub, parent)
+			}
+		}
+	}
+}
+
 func TestResolveHelpRequest(t *testing.T) {
 	cases := []struct {
 		args     []string

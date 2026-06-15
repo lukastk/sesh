@@ -15,7 +15,7 @@ import (
 // runTicket implements `sesh ticket <create|list|set-status|needs-input>`.
 func runTicket(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh ticket <create|list|set-status|needs-input|send-prompt>")
+		return printGroupHelp("ticket")
 	}
 	cfg := config.Load()
 

@@ -12,7 +12,7 @@ import (
 // runPeer implements `sesh peer <add|list>` — the local mesh registry.
 func runPeer(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh peer <add|list|remove>")
+		return printGroupHelp("peer")
 	}
 	cfg := config.Load()
 	switch args[0] {

@@ -16,7 +16,7 @@ import (
 
 func runMeta(cfg config.Config, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh meta <set|get|unset|list>")
+		return printGroupHelp("meta")
 	}
 	sub, rest := args[0], args[1:]
 	fs := flag.NewFlagSet("meta "+sub, flag.ContinueOnError)

@@ -28,7 +28,7 @@ const masterSession = "master"
 
 func runMaster(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sesh master <up|window|attach|down|ensure|watchers>")
+		return printGroupHelp("master")
 	}
 	cfg := config.Load()
 	switch args[0] {

@@ -747,3 +747,59 @@ SMOKE on the real supervised mymain daemon: host + sib --into-session share one 
 sib → host pane survives + session intact, stop host → session torn down. PROVEN. myrig
 staged SPECIFICALLY (shell.sh.jinja + tmux.work.conf only — Lukas's voice-agent-bridge/
 config.json + .claude/settings.json stayed uncommitted local edits, per the H12 lesson).
+
+## H14 — TUI latency fix + empty thread names + the command-menu/enter/mysetup batch (2026-06-14/15)
+Two SESH commits + one help commit + a big MYRIG cockpit batch. All deployed ALL FOUR.
+### sesh
+- **TUI optimistic hide** (edef5aa): archiving/deleting a row in the TUI lagged ~1s (the row
+  stayed until the next mesh poll refetched). Fix: `a`/`d` now optimistically drop the row
+  locally on success (rowPatch hide), so it disappears instantly; the next fetch reconciles.
+  Audited the other actions — nav/stop/tag/reparent/notify already patch or quit, so archive
+  + delete were the only laggy ones.
+- **empty thread names** (79a6467; binary-only, no schema bump): `thread new --name` is now
+  OPTIONAL. Dropped the `req.Name == ""` reject in daemon `handleThreadNew` + the
+  `*name == ""` guard in cmd `threadNew` (the name is DISPLAY-ONLY — the session name comes
+  from a `[[session_name]]` rule / cwd, and `sanitizeName` already falls back to "thread").
+  New `TestEmptyThreadName` (internal/conformance/emptyname_test.go, OUTSIDE the matrix — a
+  focused regression). help.go usage + sesh-cli SKILL updated (`--name` marked optional).
+- **CLI help** (f5e8a7e): a bare group command (`sesh thread`, `sesh ticket`, …) now prints
+  the group's full `--help` instead of erroring; added `sesh help-tree` (the whole command
+  tree). Pure help-layer, no behavior change.
+### myrig (commits a3dffd6→73c271d; render-only deploy + source-file the live confs)
+- **command palettes** (a3dffd6, 5965889, 31bd5b4): `mmt-menu`/`mmt-quick-menu`/`mt-menu`/
+  `mt-quick-menu` bound `prefix+M` (group palette = `my -g <groups>`) / `prefix+m` (curated
+  = `my --only <list>`) on BOTH the master + work servers. The lists/groups live in a NEW
+  editable, symlinked `home/.sesh/myrig/menus.sh` (`MMT_MY_GROUPS`/`MT_MY_GROUPS` +
+  `*_QUICK_CMDS`). KEY FIX (Lukas hit it twice): a `send-keys` menu typed the command into
+  his prompt — the work `prefix+m` must run the pick IN a `display-popup -E` (carrying
+  `SESH_NAV_CLIENT`, exactly like the master menu), NOT send-keys it. So a popup-interactive
+  pick (fzf/TUI/agent) works; a print-and-exit can't change your pane from a popup. `my`
+  gained multi-group `-g a,b` (comma-split) + curated `--only` in my_alias.sh; fixed a zsh
+  stdout leak (a bare re-run `local NAME` on an already-valued var prints it — declare
+  `_my_fzf` locals once up front).
+- **enter split + reclassification** (3ebf98d): the cross-machine pickers are `mmt-*`, with
+  a THIS-MACHINE `mt-*` twin each (`*-enter-session`/`*-enter-tmux-session`/`*-enter-box`).
+  WHY the split matters: a work-server (mt) nav can't move you to another HOST — only the
+  master path moves the marker client — so cross-machine enters MUST be mmt. Also renamed
+  `mt-reload-conf-all`→`mmt-reload-conf-all`; **master status bar → blue** (`tmux.master.conf`
+  `status-style fg=black,bg=blue`).
+- **mt-enter-box was showing 2 boxes** (d577cdd): it filtered to the `ctx/<machine>` boxyard
+  group (only 2 tagged) — but "checked out HERE" = the `~/dev/<index>` dir EXISTS, not the
+  ctx tag. Switched the this-machine box filter to dir-existence (33 real on mymain); peers
+  still use `ctx/<peer>`.
+- **mysetup commands** (f767b58): `*-enter-mysetup` (pick a `~/mysetup` folder → tmux
+  session) + `*-enter-new-mysetup-thread` (folder + agent + name → sesh thread; blank name →
+  `mysetup - <folder>`), each mmt-(machine-first)/mt-(this-machine).
+- **new-thread commands** (73c271d): `mt-enter-new-thread-here` (new thread in the CURRENT
+  tmux session via `--into-session`; reads the live session + `$PWD` so it's pane-only — run
+  it IN your pane, NOT in the popup quick menu) + `mt-`/`mmt-enter-new-thread-in-box` (pick a
+  box this/any machine, agent + name → `thread new --cwd <boxdir>`). Empty names ride the
+  sesh empty-name change above.
+DEPLOY: sesh = binary build + daemon restart (edef5aa/79a6467 touch the daemon); help-only
+f5e8a7e is binary. myrig = render shell.sh (rendered jinja; macs/termux need `uv run --with
+jinja2`) + `source-file` the live confs (symlinked) for the new bindings. LIVE on all four
+(mymain/macstudio/macbook/termux). Live-smoked: empty-name thread (all 4), enter-new-thread-
+here (nameless thread into current session), enter-new-thread-in-box (session templated from
+the box, not the empty name), box count (mymain 33 / termux 0 — 0 is correct, no checkouts).
+PROCESS LESSON (re-confirmed): stage myrig files SPECIFICALLY — never `git add -A` (live
+uncommitted local edits: voice-agent-bridge/config.json, .claude/settings.json).

@@ -116,6 +116,7 @@ func (m Model) handleTicketNewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.ticketMode, m.ticketNewInput = ticketList, nil
+		return m, nil
 	case "enter":
 		name := strings.TrimSpace(string(m.ticketNewInput))
 		if name == "" {
@@ -128,10 +129,14 @@ func (m Model) handleTicketNewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := len(m.ticketNewInput); n > 0 {
 			m.ticketNewInput = m.ticketNewInput[:n-1]
 		}
-	default:
-		if r := []rune(msg.String()); len(r) == 1 {
-			m.ticketNewInput = append(m.ticketNewInput, r[0])
-		}
+		return m, nil
+	}
+	// Text input: append whole runes (so a paste / multi-rune key isn't dropped).
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.ticketNewInput = append(m.ticketNewInput, msg.Runes...)
+	case tea.KeySpace:
+		m.ticketNewInput = append(m.ticketNewInput, ' ')
 	}
 	return m, nil
 }
@@ -247,12 +252,16 @@ func (m Model) handleTicketThreadPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.ticketAction("rebound to "+tid8(target.ID), "set-status", "--id", tk.ID, "--status", status, "--thread", target.ID)
 		}
-	default:
-		// Type to filter (by name or uuid). Single printable runes only.
-		if r := []rune(msg.String()); len(r) == 1 {
-			m.ticketPickQuery = append(m.ticketPickQuery, r[0])
-			m.ticketPickCursor = 0
-		}
+		return m, nil
+	}
+	// Type to filter (by name or uuid) — whole runes, so a paste isn't dropped.
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.ticketPickQuery = append(m.ticketPickQuery, msg.Runes...)
+		m.ticketPickCursor = 0
+	case tea.KeySpace:
+		m.ticketPickQuery = append(m.ticketPickQuery, ' ')
+		m.ticketPickCursor = 0
 	}
 	return m, nil
 }

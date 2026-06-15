@@ -870,3 +870,39 @@ supervisor), migration 13 clean, live-smoked create/get --field/no-description/d
 termux `/tmp` is UNWRITABLE — use `$TMPDIR`/`$HOME` in remote smokes. macbook's local
 uncommitted menus.sh edit (his mt-enter-new-thread-here) did NOT block this pull (the create
 commit only touched shell.sh.jinja, not menus.sh). ALL FOUR now on the ticket-editor feature.
+
+### Follow-up 2: live drive of EVERY ticket feature → 3 real bugs fixed (sesh 3547922, myrig 3b1b952)
+Lukas hit `bind new ticket: … bound thread not found: 7e108848 (HTTP 400)` creating a ticket
+and asked me to actually exercise everything. Set up an ISOLATED real daemon (own SESH_HOME/
+sockets, real pi thread, fake $EDITOR script) and drove the real `sesh tui` K view in tmux +
+the myrig helpers. Found + fixed THREE real bugs the conformance claims missed:
+1. **Cross-machine ticket routing (sesh 337a56d, the reported bug).** SESH_TICKET_OWNER is
+   EMPTY → tickets are LOCAL to a daemon; a ticket binds to / is validated against its
+   thread's daemon. The TUI ticket ops (loadTickets/ticketAction/createTicket/applyTicketEdit)
+   hit the LOCAL daemon, so acting on a thread that lives on ANOTHER machine (viewing it via
+   the mesh) → the bind validates in the wrong store → 400. Fix: `m.ticketArgs()` appends
+   `--machine <ticketThread.Machine>` when remote (mirrors routedVerb). New `tickets-view-remote`
+   claim (TUI creates+binds on an ssh-localhost peer's thread; asserts it lands on the PEER,
+   local holds 0). The myrig twin: resolvers echo "tid<TAB>machine", `_mt_route` builds the
+   --machine arg threaded through every helper; mmt-ticket-browse fans out across machines.
+2. **Space/paste dropped in the new-ticket name prompt + thread-pick query (sesh 3547922).**
+   handleTicketNewKey/handleTicketThreadPickKey matched on `msg.String()` and appended only
+   when `len(runes)==1` — so a SPACE (String()=="space") and any paste (multi-rune) were
+   silently ignored. The claim passed because it typed single chars. Fix: the established
+   `switch msg.Type { case KeyRunes: append msg.Runes…; case KeySpace: ' ' }` pattern. Live-
+   verified "fix the OAuth flow" registers verbatim.
+3. **myrig `_mt_ticket_create` prompt polluted the returned id (myrig 3b1b952).** It printed
+   "New ticket name: " to STDOUT, which the callers capture via `$()` for the new id → the id
+   became "New ticket name: <uuid>" → 404. Fix: prompt to STDERR (`print -nu2`); only the id
+   on stdout.
+LIVE-VERIFIED in the K view: create (n, with spaces), edit name/prompt via the $EDITOR
+SUSPEND (tea.ExecProcess — the untested path; fake editor wrote a marker, TUI suspended→
+saved), status picker, thread-rebind picker + search, delete (daemon confirmed 0). myrig
+(non-interactive w/ fake fzf): _mt_route (remote→`--machine x`, local→empty), _mt_pick_ticket
+±＋new sentinel, _mt_ticket_create bound-active, browse fan-out formatting. KNOWN NON-ISSUE:
+send-prompt on the isolated thread hit `tmux: list-panes line has N fields, want 13` — a
+PRE-EXISTING internal/tmux pane-parse error (thread status/pane fail identically; untouched by
+me) triggered by a DEGRADED pi pane (pi not functional in the isolated env → π-glyph/control
+bytes in pane_title); healthy threads work (ticket.send-prompt cell passes). The ticket layer
+surfaced it loudly (correct). DEPLOY: binary + myrig only (TUI/CLI changes, no daemon API
+change → NO daemon restart) — mymain/macstudio/macbook/termux all on 3547922 + 3b1b952.

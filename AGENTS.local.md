@@ -1011,3 +1011,61 @@ routed mymain→macstudio + loud 409), ticket-new full flow, rename cursor in a 
 parse with no unknown-command warnings. PROCESS: staged myrig SPECIFICALLY (his settings.json +
 voice-agent-bridge/config.json stayed local), amended the myrig commit for the status→st fix
 before pushing.
+
+## H18 — the BLOB store: files/images in prompts + daemon-coordinated `ticket move` (2026-06-15, sesh 16a6bd9, myrig 6320b83; api schema 13→14)
+Lukas wanted images (and any file) in prompts. Design Q&A converged on: a content-addressed
+blob store + inline reference TOKENS in prompts that expand to full paths on send/copy, the
+move carrying referenced blobs. "What does it mean to include an image in a prompt" → an image
+can't ride a text channel; it becomes a FILE the agent reads via a path, and the model gets the
+pixels (every agent reads images from a path: codex -i, pi @path, claude Read-tool).
+### Token & store (internal/blobs — pure filesystem, NO db/schema)
+`<SESH_HOME>/blobs/<sha256>/<name>` — hash dir = content address (dedup), file keeps its name
+(real extension for the agent). Token `@blob(<hex-prefix>)` (12-hex prefix of the content hash
+— STABLE across machines: same bytes→same hash→same prefix; resolved by prefix). Format chosen
+to dodge Lukas's tools: NOT `[[ ]]` (Obsidian) or `{{ }}` (jinja). Escape: `@@blob(…)` → literal,
+unexpanded. Expand() = loud error on a token resolving to no blob / ambiguous prefix (never a
+silent passthrough). References() lists a prompt's tokens (for the move). Unit-tested.
+### sesh
+- daemon `/v1/blobs` add|list|get|delete|path|expand (GET get streams raw bytes + X-Blob-Name
+  header). d.blobs = blobs.New(home). CLI `sesh blob add <path>|--stdin --name | ls | get | rm |
+  path | expand` (routes per --machine like tickets; add prints the @blob token on stdout,
+  summary on stderr). schema 13→14.
+- EXPANSION wired into send: ticket send-prompt, thread send, send-headless all call
+  d.expandPrompt(text) before delivery (co-located ⇒ local blobs); a missing blob = loud 400
+  (never a dangling token typed at the agent). Copy = myrig pipes `sesh blob expand`.
+- `sesh ticket move --id --to [--from]` (first-class, DAEMON-COORDINATED — the principled
+  choice Lukas asked for: cross-daemon movement is the daemon's job, NOT a CLI script). The
+  INVOKED daemon is the HUB: it pulls the record + every @blob() the prompt references from
+  --from and pushes them to --to over its OWN peer transport (http client or ssh hop — same
+  machinery as fanout/meshsync), then deletes the source. Only the hub must reach both ends;
+  SRC and DST need not peer. NEVER deletes the source unless the push fully succeeded (a
+  duplicate is content-addressed + recoverable; data loss is not). move.go has per-machine
+  helpers (self=local store / http=client / ssh=shell-out) for getTicket/importTicket/
+  deleteTicket/getBlob/addBlob. importTicketLocal factored out of the import handler. Replaces
+  the H16 `_mt_ticket_move` get|import|delete glue.
+- conformance (real ssh): blob.store + blob.expand (agnostic × both loc); ticket.move REWRITTEN
+  to a 3-DAEMON HUB model (coordinator that is neither SRC nor DST, only it peers with both)
+  moving a ticket whose prompt references a blob — asserts record landed (id preserved, active→
+  ready), blob CARRIED (resolves + token expands on DST), gone from SRC, re-move loud.
+  TestSendExpandsBlobReferences (regression, outside matrix): send-headless w/ unknown token =
+  loud. Runner gained RunStdin. matrix now 202 cells. help registry/flags/meta-test + sesh-cli
+  SKILL (new "Blobs & files in prompts" section) updated.
+### myrig
+- `_mt_ticket_move` now delegates to `sesh ticket move`. `_mt_ticket_copy_prompt` pipes through
+  `sesh blob expand` (routed to the ticket's machine) so copied prompts have real paths. New
+  `_mt_ticket_attach <id> <machine>` + "attach file/image" item in the ticket editor: clipboard
+  image (reuse _mmt_clip_get_image) or a file path → `blob add --stdin` ON THE TICKET'S MACHINE
+  (piped bytes — `blob add <path> --machine` would read the path on the WRONG host) → append the
+  @blob token to the prompt.
+DEPLOY (schema 14 = daemon RESTART): mymain/macstudio/termux done; **macbook ASLEEP (still
+schema 13) — PENDING: git pull both, build+restart sesh-daemon, render myrig.** Schema 14 is
+additive/mixed-mesh-safe: a move TO a schema-13 macbook fails LOUDLY (404 on blob add, source
+intact) — PROVEN live (the move aborted before delete when macstudio was briefly still on 13).
+SELF-TEST (every feature, live): blob CLI full round-trip (add/dedup/ls/get/path/expand/escape/
+missing-loud/rm); a REAL claude headless turn READ an image via a @blob-referenced prompt —
+expanded the token to the blobs path and its VISION reported the image's text "BLOBVISION-7391"
+(generated via uv+pillow); send-headless missing-blob loud; cross-network move mymain→macstudio
+carried the blob (bytes + token-expands-on-DST) and removed it from mymain; myrig attach(file)+
+copy-prompt-expansion composed end-to-end. Full blob+ticket conformance suite green (95s, real
+ssh+agents). GOTCHAS: termux /tmp UNWRITABLE (build + logs → $HOME); termux daemon needed a hard
+pkill -9 + socket rm to drop a stale schema-13 instance before the schema-14 one served blobs.

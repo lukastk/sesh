@@ -803,3 +803,51 @@ here (nameless thread into current session), enter-new-thread-in-box (session te
 the box, not the empty name), box count (mymain 33 / termux 0 — 0 is correct, no checkouts).
 PROCESS LESSON (re-confirmed): stage myrig files SPECIFICALLY — never `git add -A` (live
 uncommitted local edits: voice-agent-bridge/config.json, .claude/settings.json).
+
+## H15 — the ticket EDITOR feature (TUI K view + columns + mt/mmt cockpit) (2026-06-15, sesh 08189ed, myrig d0c87f4; api schema 10→11)
+Lukas's checklist: a TUI tickets view + an editor, ticket name/needs-input columns, drop
+`description`, mmt commands to copy-prompt/send/edit the current thread's tickets + a global
+browser, `ticket list` of a given/current thread, retrieve a ticket's prompt. Design Q&A
+(AskUserQuestion): per-thread ticket cmds = BOTH mt+mmt twins; editor = mechanism-in-sesh +
+glue-in-myrig (NOT a sesh interactive command — mechanism/UX rule). The TUI K view is the Go
+twin of the myrig shell editor, both over the same `sesh ticket` mechanism.
+- **sesh mechanism** (3c8fbf8): `ticket get --id [--field id|name|prompt|status|thread|created]`
+  (raw field = clipboard/agent path), `ticket set --id [--name][--prompt]` (flag.Visit ⇒ only
+  passed flags apply; `--name ""` clears), `ticket delete`, `ticket list --current` (resolves
+  the caller's thread via resolveThreadID and is expanded to `--thread <id>` BEFORE
+  owner-routing, so it binds the CALLER's pane not the owner's). `description` DROPPED
+  (migration 13 = `ALTER TABLE tickets DROP COLUMN`; api/store/cli scrubbed). Per-thread
+  `ticket_name` (newest open) + `ticket_needs_input` (any active ticket on a headful·idle
+  thread) on ThreadRow/ThreadSnapshot, computed by the OWNING daemon: maintainer derives
+  needs-input in `publish()` (single choke point: st.hasActiveTicket && headful·idle), grid/
+  maintainer use a new `OpenTicketDigests()` (count + newest-name + has-active). Schema 10→11
+  (additive/omitempty ⇒ mixed-mesh safe during rollout).
+- **TUI** (a7df56f): `internal/tui/tickets.go` — full-screen takeover on `K`: list → drill into
+  a ticket → name/prompt edit in $EDITOR (tea.ExecProcess suspend→save), status picker, thread
+  (re)bind picker (fzf-style, search name/uuid), send-prompt, delete (y/n). ALL ops EXEC
+  `sesh ticket …` (owner-routed; m.client would hit the maybe-non-owner local daemon). Two
+  opt-in columns `ticket_name` + `ticket_input` (TKT!). `--editor` flag + `[tui] editor` config
+  (precedence flag → config → $EDITOR → loud). KEY BUG caught by the claim: the mesh
+  snapshot→row conversion in fetch() dropped the new fields → columns empty cross-machine; fixed.
+- **conformance** (08189ed): ticket.get/ticket.set/ticket.list-current cells + tickets-view/
+  tickets-columns TUI claims (the K view's status-change + delete land on the daemon; the
+  ExecProcess editor isn't driven headlessly — its save path is `ticket set`, a green cell).
+- **myrig** (d0c87f4): `_mt_current_thread` (pressing pane via $SESH_MT_PANE / `sesh tmux
+  current`) + `_mmt_current_thread` (active master window's machine via $SESH_MT_MASTER_MACHINE /
+  `sesh tmux master-current`); shared `_mt_ticket_editor` (fzf attribute → vim/picker →
+  `sesh ticket set`/`set-status`); commands mt-/mmt-ticket-copy-prompt/-send/-edit +
+  mmt-ticket-browse (global status-filtered). Work prefix+M/m now bake SESH_MT_PANE; master
+  prefix+M/m became run-shell+display-popup to bake SESH_NAV_CLIENT + SESH_MT_MASTER_MACHINE
+  (the carriers). menus.sh quick lists + config.toml.jinja `[tui] editor = "vim"`.
+- CONCURRENT-WORK NOTE: while building, another agent pushed dbdd189 (SKILL parent-inference
+  loudness) + 9f61f55 (TUI delayed post-action reconcile). REBASED my 3 commits on top; the
+  only real conflict was the SKILL Tickets/Parent bullet (kept both); model.go auto-merged
+  (their reconcileMsg + my ticket cases coexist). Full build/vet/tests green post-rebase.
+DEPLOY (schema 11 = daemon RESTART): LIVE on mymain (live-smoked create/get/set/delete — no
+`description` in output, migration 13 clean), macstudio, macbook. **macbook had a local
+uncommitted menus.sh edit (he'd added mt-enter-new-thread-here to MT_QUICK_CMDS) — stashed →
+pulled → re-applied his -here precisely → re-rendered, so his customization survived.**
+**termux PENDING** (not in mymain's peers — peers via macbook, often offline; same runbook
+when up). Native build per machine (.new+mv; mac auto-signs); supervisorctl restart
+sesh-daemon; install-home render (macs need `uv run --with jinja2`); source-file work+master
+confs on the running servers.

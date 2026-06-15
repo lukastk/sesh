@@ -1,9 +1,49 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// TestHelpFlagsCoverUsageExactly is the no-silent-gap guard for per-flag help: every
+// flag in a command's usage line must have a flagDoc, and every flagDoc must be a real
+// usage flag (no orphans, no dups, no empty descriptions). So a new/renamed flag can't
+// land in the usage line without an explanation.
+func TestHelpFlagsCoverUsageExactly(t *testing.T) {
+	// Flags are dash-prefixed tokens (single- or double-dash) at a token boundary
+	// (start, space, '[', '(', or '|') in the usage line.
+	flagRe := regexp.MustCompile(`(?:^|[\s\[(|])(-{1,2}[a-z][a-z0-9-]*)`)
+	for key := range flagDocs {
+		if _, ok := helpRegistry[key]; !ok {
+			t.Errorf("flagDocs has key %q with no help registry entry", key)
+		}
+	}
+	for key, h := range helpRegistry {
+		usage := map[string]bool{}
+		for _, m := range flagRe.FindAllStringSubmatch(h.usage, -1) {
+			usage[m[1]] = true
+		}
+		doc := map[string]bool{}
+		for _, fd := range flagDocs[key] {
+			if doc[fd.name] {
+				t.Errorf("%q: flag %q documented twice", key, fd.name)
+			}
+			doc[fd.name] = true
+			if strings.TrimSpace(fd.desc) == "" {
+				t.Errorf("%q: flag %q has an empty description", key, fd.name)
+			}
+			if !usage[fd.name] {
+				t.Errorf("%q: documented flag %q is not in the usage line %q", key, fd.name, h.usage)
+			}
+		}
+		for f := range usage {
+			if !doc[f] {
+				t.Errorf("%q: usage flag %q has no flag doc (cmd/sesh/help_flags.go)", key, f)
+			}
+		}
+	}
+}
 
 // subcommandSets mirrors each parent command's dispatch switch. The meta-test asserts
 // every declared subcommand has a help entry — the "no silent gap" guard for help.

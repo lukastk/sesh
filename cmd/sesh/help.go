@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/lukastk/sesh/internal/tui"
 )
 
 type cmdHelp struct {
@@ -549,6 +551,18 @@ func renderHelp(path []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "sesh %s — %s\n\n", key, h.summary)
 	fmt.Fprintf(&b, "usage: %s\n", h.usage)
+	if fd := flagDocs[key]; len(fd) > 0 {
+		b.WriteString("\nflags:\n")
+		for _, f := range fd {
+			desc := f.desc
+			// The available column names are programmatic — keep --help in sync with
+			// the actual column set rather than a hand-copied list.
+			if key == "tui" && f.name == "--columns" {
+				desc += " (available: " + strings.Join(tui.ValidColumnNames(), ", ") + ")"
+			}
+			fmt.Fprintf(&b, "  %-18s %s\n", f.name, desc)
+		}
+	}
 	if h.long != "" {
 		fmt.Fprintf(&b, "\n%s\n", h.long)
 	}
@@ -564,10 +578,22 @@ func renderHelp(path []string) string {
 			fmt.Fprintf(&b, "  %s\n", e)
 		}
 	}
-	if !strings.Contains(key, " ") && isRoutable(key) {
+	if !strings.Contains(key, " ") && isRoutable(key) && !hasFlagDoc(key, "--machine") {
+		// Only when the flags section didn't already explain --machine for this command.
 		b.WriteString("\nglobal: --machine <m> routes the command to remote machine <m>.\n")
 	}
 	return b.String()
+}
+
+// hasFlagDoc reports whether key documents the named flag (so renderHelp can avoid
+// repeating the --machine routing note when it's already a listed flag).
+func hasFlagDoc(key, name string) bool {
+	for _, f := range flagDocs[key] {
+		if f.name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // renderRootHelp is the top-level overview: every top-level command + summary.

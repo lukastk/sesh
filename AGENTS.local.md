@@ -963,3 +963,51 @@ round-trip (mymain); REAL cross-network move mymain→macstudio (create→import
 macstudio's thread; gone from mymain) + cross-machine unbind (active→ready); PARENT column shows
 the bound thread's name for a real ticket. macbook grid was momentarily empty during smoke (used
 macstudio as the move target).
+
+## H17 — TUI rename cursor, `--cwd` default, `tmux kill-session`, cockpit menu/kill-empty/ticket-new (2026-06-15, sesh cc0baa6 schema 12→13, myrig e5a112b; ALL FOUR)
+Six-item batch from Lukas.
+### sesh (schema 12→13: one additive endpoint)
+- **TUI rename in-place editing**: Model.promptCursor (insertion point 0..len). handlePromptKey
+  gained ←/→ (^b/^f), Home/End (^a/^e), Delete, and INSERT-at-cursor (was append-only);
+  Backspace deletes before the cursor. `r` prefills the name with cursor at end. New
+  renderPromptInput draws a block cursor at its position (model.go:1534). Unit
+  TestPromptInPlaceEditing + LIVE-driven in a real tmux TUI (insert mid-name, Home jumps).
+  Covers tag/parent prompts too (shared handlePromptKey).
+- **`thread new --cwd` defaults to '.'**: was a hard "required" error. Default applied only when
+  cwd is empty AND not --into-pane (inherits pane cwd) — fork still defaults to the source's
+  cwd (set earlier). flag/help/help_flags/SKILL. Live: a no-`--cwd` headless thread took the
+  invocation dir.
+- **`sesh tmux kill-session --target <name>`** (NEW routed verb): daemon → tmux.KillSession on
+  the work server; non-existent session = loud 409. api.KillSessionRequest, client, handler +
+  route, cmd dispatch, help/help_flags/help_test, SKILL. Conformance tmux.kill-session (agent-
+  agnostic × both loc, real ssh remote) — create→kill→assert gone + non-existent loud. The
+  mechanism behind myrig kill-empty-sessions. SchemaVersion 12→13 (additive; mixed-mesh safe).
+### myrig (e5a112b)
+- **Quick menus one-per-line**: my_alias.sh `my --only` now splits on newline AND comma
+  (`${only//$'\n'/,}` then comma-split) and skips blank/`#`-comment lines. menus.sh
+  MMT_/MT_QUICK_CMDS rewritten multi-line (+ the new commands). Backward compatible (comma
+  lists still parse).
+- **master prefix+A → `sesh tui` WITHOUT --filter** (prefix+a keeps --filter). Same popup/env as
+  `a`. WAS `mmt-enter-session --archived` (archived-thread picker) — archived browsing still via
+  the TUI's Tab. Sourced live on the macbook + mymain masters.
+- **mt-/mmt-kill-empty-sessions**: kill work-server tmux sessions with NO non-archived thread
+  (keep every session `thread grid` reports; kill the rest via `sesh tmux kill-session`). mt=this
+  machine, mmt=every machine; prints each kill + per-machine count. GOTCHA: `sesh tmux info`
+  emits JSONL and has NO `--json` flag (don't pass it). Dry-run on mymain correctly flagged 4
+  real empties; did NOT bulk-kill the user's live sessions (left for the user to run).
+- **mt-/mmt-ticket-new**: create a ticket for the current thread — prompt TITLE, then PROMPT,
+  then STATUS picker with `active` FIRST (preselected); active attaches to the current thread
+  (routed to its machine), else unattached. GOTCHA (bit me, caught in live smoke): `status` is a
+  READ-ONLY special var in zsh — renamed the local to `st`. Live-driven end-to-end with a fake
+  fzf + piped input: title+prompt+active → ticket created & attached.
+DEPLOY (schema 13 = daemon RESTART): ALL FOUR. mymain/macstudio/macbook native build + restart
++ render; termux build to ~/.local/bin (/tmp unwritable) + pkill+setsid-nohup relaunch. macbook
+had a LOCAL uncommitted menus.sh edit (his mt-enter-new-thread-here in MT_QUICK_CMDS) — my commit
+REWROTE menus.sh, so: stash all 3 local edits → pull → `git checkout stash@{0} -- settings.json
+.env` (restore the non-conflicting two) → drop stash → python-insert his `mt-enter-new-thread-here`
+after `mt-enter-new-thread-in-box` in the NEW multi-line format. (macOS `sed -i '' 'a\'` mangles
+through ssh+zsh quoting — use a python insert.) Live-smoked: --cwd default, kill-session (local +
+routed mymain→macstudio + loud 409), ticket-new full flow, rename cursor in a live TUI, menus
+parse with no unknown-command warnings. PROCESS: staged myrig SPECIFICALLY (his settings.json +
+voice-agent-bridge/config.json stayed local), amended the myrig commit for the status→st fix
+before pushing.

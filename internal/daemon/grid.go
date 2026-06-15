@@ -11,6 +11,7 @@ import (
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
+	"github.com/lukastk/sesh/internal/store"
 )
 
 func (d *Daemon) routesGrid(mux *http.ServeMux) {
@@ -33,7 +34,7 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tickets, err := d.store.OpenTicketCounts()
+	tickets, err := d.store.OpenTicketDigests()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -68,16 +69,25 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 // background maintainer's O(1) maintained state (so the whole grid is a memory
 // read, not N concurrent ~3s probes). Fallback: an on-demand resolve for a thread
 // the maintainer has not ticked yet (just created) — correctness without a tick.
-func (d *Daemon) resolveRow(th api.Thread, tickets map[string]int) api.ThreadRow {
+func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest) api.ThreadRow {
+	dg := tickets[th.ID]
+	// Use the FRESH digest (not snap.TicketsOpen) so a ticket created/closed since the
+	// last maintainer tick shows immediately; needs-input combines it with the
+	// maintained head/busy.
 	if snap, ok := d.maint.stateOf(th.ID); ok {
-		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment, TicketsOpen: tickets[th.ID], CwdRel: snap.CwdRel}
+		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment,
+			TicketsOpen: dg.Count, TicketName: dg.NewestName,
+			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
+			CwdRel:           snap.CwdRel}
 	}
-	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID], CwdRel: config.TildeRelative(th.Cwd, d.maint.home)}
+	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
+		CwdRel: config.TildeRelative(th.Cwd, d.maint.home)}
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		head, busy = api.Headless, api.BusyIdle
 	}
 	row.Head, row.Busy = head, busy
+	row.TicketNeedsInput = dg.HasActive && head == api.Headful && busy == api.BusyIdle
 	if loc, found, _ := d.tmux.FindPaneByThreadID(th.ID); found {
 		if clients, _ := d.tmux.ClientCount(loc.Session); clients > 0 {
 			row.Attachment = api.Attached

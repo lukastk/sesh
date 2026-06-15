@@ -24,7 +24,10 @@ package api
 // 10: thread placement — `into_session`/`into_window`/`into_pane` on the new-thread
 // request (a session may host many threads); `launch_command`/`launch_env` on the
 // thread response carry the register-then-exec command for `--into-pane`.
-const SchemaVersion = 10
+// 11: per-thread ticket summary on the row/snapshot — `ticket_name` (newest open
+// ticket) + `ticket_needs_input` (any active ticket on a headful·idle thread) for
+// the new TUI columns; tickets lost the `description` field (mechanism-only).
+const SchemaVersion = 11
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

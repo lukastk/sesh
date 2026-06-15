@@ -28,7 +28,6 @@ func ValidTicketStatus(s string) bool {
 type Ticket struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
-	Description   string `json:"description"`
 	Prompt        string `json:"prompt"`
 	Status        string `json:"status"`
 	ThreadID      string `json:"thread_id,omitempty"`
@@ -37,9 +36,18 @@ type Ticket struct {
 
 // CreateTicketRequest is the body of POST /v1/tickets.
 type CreateTicketRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
+	Name   string `json:"name"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// SetTicketRequest is the body of POST /v1/tickets/set — a partial update of a
+// ticket's text fields. A nil pointer leaves that field unchanged (status and
+// thread binding go through SetStatusRequest, which has the active-needs-thread
+// invariant).
+type SetTicketRequest struct {
+	ID     string  `json:"id"`
+	Name   *string `json:"name,omitempty"`
+	Prompt *string `json:"prompt,omitempty"`
 }
 
 // TicketResponse wraps a single ticket.

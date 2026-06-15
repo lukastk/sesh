@@ -14,6 +14,9 @@ import (
 func (d *Daemon) routesTickets(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tickets", d.handleTicketCreate)
 	mux.HandleFunc("GET /v1/tickets", d.handleTicketList)
+	mux.HandleFunc("GET /v1/tickets/get", d.handleTicketGet)
+	mux.HandleFunc("POST /v1/tickets/set", d.handleTicketSet)
+	mux.HandleFunc("POST /v1/tickets/delete", d.handleTicketDelete)
 	mux.HandleFunc("POST /v1/tickets/status", d.handleTicketSetStatus)
 	mux.HandleFunc("GET /v1/tickets/needs-input", d.handleTicketNeedsInput)
 	mux.HandleFunc("POST /v1/tickets/send-prompt", d.handleTicketSendPrompt)
@@ -81,7 +84,6 @@ func (d *Daemon) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	ticket := api.Ticket{
 		ID:            uuid.NewString(),
 		Name:          req.Name,
-		Description:   req.Description,
 		Prompt:        req.Prompt,
 		Status:        api.StatusTriage, // a new ticket starts in triage
 		CreatedAtUnix: time.Now().Unix(),
@@ -91,6 +93,80 @@ func (d *Daemon) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.TicketResponse{Schema: api.SchemaVersion, Ticket: ticket})
+}
+
+// handleTicketGet returns a single ticket by id (?id=ID) — the mechanism behind
+// `sesh ticket get`, used by the TUI/myrig ticket editors and by agents.
+func (d *Daemon) handleTicketGet(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "ticket get: id is required")
+		return
+	}
+	ticket, err := d.store.GetTicket(id)
+	if err != nil {
+		if errors.Is(err, store.ErrTicketNotFound) {
+			writeError(w, http.StatusNotFound, "ticket not found: "+id)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.TicketResponse{Schema: api.SchemaVersion, Ticket: ticket})
+}
+
+// handleTicketSet applies a partial update of a ticket's text fields (name,
+// prompt). Status and thread binding go through /v1/tickets/status (which owns
+// the active-needs-thread invariant), never here.
+func (d *Daemon) handleTicketSet(w http.ResponseWriter, r *http.Request) {
+	var req api.SetTicketRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "ticket set: id is required")
+		return
+	}
+	if err := d.store.UpdateTicketFields(req.ID, req.Name, req.Prompt); err != nil {
+		if errors.Is(err, store.ErrTicketNotFound) {
+			writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ticket, err := d.store.GetTicket(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.TicketResponse{Schema: api.SchemaVersion, Ticket: ticket})
+}
+
+// handleTicketDelete removes a ticket record (the ticket-delete action in the
+// TUI / myrig). It is purely a record op — no thread or pane is touched.
+func (d *Daemon) handleTicketDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "ticket delete: id is required")
+		return
+	}
+	if err := d.store.DeleteTicket(req.ID); err != nil {
+		if errors.Is(err, store.ErrTicketNotFound) {
+			writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "deleted": req.ID})
 }
 
 // handleTicketList lists tickets, optionally filtered to a thread (?thread=ID),

@@ -19,6 +19,15 @@ func runTicket(args []string) error {
 	}
 	cfg := config.Load()
 
+	// `ticket list --current` binds to the CALLER's current thread. Resolve it
+	// BEFORE owner-routing: once the command is routed to the owner machine we'd be
+	// in the OWNER's pane/env, not the caller's. The resolved value is a global
+	// uuid, so it routes cleanly as a plain --thread <id>.
+	args, err := expandTicketCurrent(cfg, args)
+	if err != nil {
+		return err
+	}
+
 	// Single-writer ownership: tickets live on one canonical owner machine. If an
 	// owner is configured and it is not us, route the whole ticket command there over
 	// the owner peer's explicit transport — writes go to the owner, never silently
@@ -41,6 +50,12 @@ func runTicket(args []string) error {
 		return ticketCreate(cfg, rest)
 	case "list":
 		return ticketList(cfg, rest)
+	case "get":
+		return ticketGet(cfg, rest)
+	case "set":
+		return ticketSet(cfg, rest)
+	case "delete":
+		return ticketDelete(cfg, rest)
 	case "set-status":
 		return ticketSetStatus(cfg, rest)
 	case "needs-input":
@@ -55,7 +70,6 @@ func runTicket(args []string) error {
 func ticketCreate(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("create", flag.ContinueOnError)
 	name := fs.String("name", "", "ticket name (required)")
-	desc := fs.String("description", "", "description")
 	prompt := fs.String("prompt", "", "prompt")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
@@ -65,7 +79,7 @@ func ticketCreate(cfg config.Config, args []string) error {
 		return errors.New("ticket create: --name is required")
 	}
 	c := daemonClient(cfg)
-	resp, err := c.TicketCreate(context.Background(), api.CreateTicketRequest{Name: *name, Description: *desc, Prompt: *prompt})
+	resp, err := c.TicketCreate(context.Background(), api.CreateTicketRequest{Name: *name, Prompt: *prompt})
 	if err != nil {
 		return err
 	}
@@ -79,6 +93,9 @@ func ticketCreate(cfg config.Config, args []string) error {
 func ticketList(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	thread := fs.String("thread", "", "filter to tickets bound to this thread")
+	// --current is expanded to --thread <id> in runTicket (before owner-routing);
+	// declared here only so the flag parses if it survives. See expandTicketCurrent.
+	fs.Bool("current", false, "auto-detect the current thread and list its tickets")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -100,6 +117,133 @@ func ticketList(cfg config.Config, args []string) error {
 	for _, tk := range resp.Tickets {
 		fmt.Printf("%s\t%s\t%s\t%s\n", tk.ID, tk.Status, tk.Name, tk.ThreadID)
 	}
+	return nil
+}
+
+// expandTicketCurrent rewrites `ticket list --current` into `ticket list
+// --thread <current-thread-id>` against the LOCAL daemon, so the resolution
+// happens in the caller's pane/env (not the owner's, after routing). Other
+// subcommands are returned unchanged. A bare --current with no resolvable thread
+// is a loud error (resolveThreadID).
+func expandTicketCurrent(cfg config.Config, args []string) ([]string, error) {
+	if len(args) == 0 || args[0] != "list" {
+		return args, nil
+	}
+	out := make([]string, 0, len(args)+1)
+	found := false
+	for _, a := range args {
+		if a == "--current" || a == "-current" {
+			found = true
+			continue // drop it; we append --thread <id> below
+		}
+		out = append(out, a)
+	}
+	if !found {
+		return args, nil
+	}
+	id, err := resolveThreadID(cfg, "")
+	if err != nil {
+		return nil, fmt.Errorf("ticket list --current: %w", err)
+	}
+	return append(out, "--thread", id), nil
+}
+
+func ticketGet(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	field := fs.String("field", "", "print one field raw: id|name|prompt|status|thread|created")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket get: --id is required")
+	}
+	c := daemonClient(cfg)
+	resp, err := c.TicketGet(context.Background(), *id)
+	if err != nil {
+		return err
+	}
+	tk := resp.Ticket
+	if *field != "" {
+		// Raw value, no trailing newline added — exact for clipboard/agent capture.
+		switch *field {
+		case "id":
+			fmt.Print(tk.ID)
+		case "name":
+			fmt.Print(tk.Name)
+		case "prompt":
+			fmt.Print(tk.Prompt)
+		case "status":
+			fmt.Print(tk.Status)
+		case "thread":
+			fmt.Print(tk.ThreadID)
+		case "created":
+			fmt.Print(tk.CreatedAtUnix)
+		default:
+			return fmt.Errorf("ticket get: unknown --field %q (id|name|prompt|status|thread|created)", *field)
+		}
+		return nil
+	}
+	if *asJSON {
+		return emitJSON(tk)
+	}
+	fmt.Printf("id:      %s\nname:    %s\nstatus:  %s\nthread:  %s\nprompt:  %s\n", tk.ID, tk.Name, tk.Status, tk.ThreadID, tk.Prompt)
+	return nil
+}
+
+func ticketSet(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("set", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	name := fs.String("name", "", "set the ticket name")
+	prompt := fs.String("prompt", "", "set the ticket prompt")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket set: --id is required")
+	}
+	// Only the flags the caller actually passed are applied (a nil pointer leaves
+	// the field unchanged) — so `--name ""` can legitimately clear a name.
+	req := api.SetTicketRequest{ID: *id}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "name":
+			req.Name = name
+		case "prompt":
+			req.Prompt = prompt
+		}
+	})
+	if req.Name == nil && req.Prompt == nil {
+		return errors.New("ticket set: nothing to change (pass --name and/or --prompt)")
+	}
+	c := daemonClient(cfg)
+	resp, err := c.TicketSet(context.Background(), req)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Ticket)
+	}
+	fmt.Printf("%s updated\n", resp.Ticket.ID)
+	return nil
+}
+
+func ticketDelete(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket delete: --id is required")
+	}
+	c := daemonClient(cfg)
+	if err := c.TicketDelete(context.Background(), *id); err != nil {
+		return err
+	}
+	fmt.Println("deleted", *id)
 	return nil
 }
 

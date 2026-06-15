@@ -108,6 +108,11 @@ var migrations = []string{
 	FROM threads;
 	DROP TABLE threads;
 	ALTER TABLE threads_new RENAME TO threads;`,
+	// 13: drop tickets.description — it was superfluous (name + prompt suffice).
+	// SQLite 3.35+ (modernc.org/sqlite is well past it) supports DROP COLUMN, so a
+	// plain ALTER is enough here (no constraint to rebuild around, unlike #12). Any
+	// existing description text is discarded.
+	`ALTER TABLE tickets DROP COLUMN description;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

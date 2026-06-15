@@ -218,19 +218,34 @@ var helpRegistry = map[string]cmdHelp{
 	},
 
 	"ticket": {
-		summary:  "ticket layer (create | list | set-status | needs-input | send-prompt); auto-routes to the configured ticket owner",
-		usage:    "sesh ticket <create|list|set-status|needs-input|send-prompt>",
+		summary:  "ticket layer (create | list | get | set | delete | set-status | needs-input | send-prompt); auto-routes to the configured ticket owner",
+		usage:    "sesh ticket <create|list|get|set|delete|set-status|needs-input|send-prompt>",
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
 	"ticket create": {
-		summary:  "create a ticket with a name and optional description/prompt",
-		usage:    "sesh ticket create --name <name> [--description <text>] [--prompt <text>] [--machine <m>] [--json]",
+		summary:  "create a ticket with a name and optional prompt",
+		usage:    "sesh ticket create --name <name> [--prompt <text>] [--machine <m>] [--json]",
 		examples: []string{"sesh ticket create --name fix-login --prompt 'fix the OAuth redirect'"},
 	},
 	"ticket list": {
-		summary:  "list tickets (id, status, name, thread); optionally filter to one thread",
-		usage:    "sesh ticket list [--thread <id>] [--machine <m>] [--json]",
-		examples: []string{"sesh ticket list", "sesh ticket list --thread 1a2b3c4d --json"},
+		summary:  "list tickets (id, status, name, thread); --thread filters to one thread, --current auto-detects the calling pane's thread",
+		usage:    "sesh ticket list [--thread <id>] [--current] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --thread 1a2b3c4d --json"},
+	},
+	"ticket get": {
+		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created) for clipboard/agent capture",
+		usage:    "sesh ticket get --id <id> [--field <name>] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket get --id t1 --json", "sesh ticket get --id t1 --field prompt"},
+	},
+	"ticket set": {
+		summary:  "partial update of a ticket's text fields (name, prompt); status/thread go through set-status",
+		usage:    "sesh ticket set --id <id> [--name <text>] [--prompt <text>] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket set --id t1 --prompt 'updated work'", "sesh ticket set --id t1 --name renamed"},
+	},
+	"ticket delete": {
+		summary:  "delete a ticket record (no thread or pane is touched)",
+		usage:    "sesh ticket delete --id <id> [--machine <m>]",
+		examples: []string{"sesh ticket delete --id t1"},
 	},
 	"ticket set-status": {
 		summary:  "set a ticket's status (triage|ready|active|done|dropped); --thread binds the thread (required for active)",

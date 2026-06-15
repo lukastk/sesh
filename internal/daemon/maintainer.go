@@ -8,6 +8,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
+	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
@@ -25,11 +26,12 @@ const (
 // are touched ONLY by the single maintainer goroutine; snap is published under the
 // maintainer's lock for readers.
 type liveState struct {
-	snap        api.ThreadSnapshot
-	seeded      bool        // have we captured a baseline for this pane yet?
-	lastContent string      // last captured pane content (for the diff)
-	changes     []time.Time // timestamps of recent content changes (pruned to busyWindow)
-	lastActive  int64       // unix time of the most recent change/turn
+	snap            api.ThreadSnapshot
+	seeded          bool        // have we captured a baseline for this pane yet?
+	lastContent     string      // last captured pane content (for the diff)
+	changes         []time.Time // timestamps of recent content changes (pruned to busyWindow)
+	lastActive      int64       // unix time of the most recent change/turn
+	hasActiveTicket bool        // any bound ticket is `active` (set per tick from the digest)
 }
 
 type maintainer struct {
@@ -94,9 +96,9 @@ func (m *maintainer) tick() {
 	if err != nil {
 		attached = map[string]bool{} // tmux unreachable => nothing attached
 	}
-	tickets, err := m.d.store.OpenTicketCounts()
+	tickets, err := m.d.store.OpenTicketDigests()
 	if err != nil {
-		tickets = map[string]int{} // transient store error: counts refresh next tick
+		tickets = map[string]store.TicketDigest{} // transient store error: refresh next tick
 	}
 	now := time.Now()
 
@@ -117,7 +119,7 @@ func (m *maintainer) tick() {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]int, now time.Time) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, now time.Time) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -126,7 +128,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 	}
 	m.mu.Unlock()
 
-	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: tickets[th.ID],
+	dg := tickets[th.ID]
+	st.hasActiveTicket = dg.HasActive // publish() turns this into TicketNeedsInput once head/busy are known
+	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
 		// Stamp the owner-relative cwd so cross-machine viewers (with a different home)
 		// can apply their cwd_label rules — they cannot know this machine's home.
 		CwdRel: config.TildeRelative(th.Cwd, m.home)}
@@ -199,8 +203,11 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 	m.publish(st, snap)
 }
 
-// publish stores the computed snapshot for readers.
+// publish stores the computed snapshot for readers. It derives TicketNeedsInput
+// here — the single choke point — so every early-return path gets it consistently:
+// an active ticket on a headful·idle thread is the human-blocked state.
 func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
+	snap.TicketNeedsInput = st.hasActiveTicket && snap.Head == api.Headful && snap.Busy == api.BusyIdle
 	m.mu.Lock()
 	st.snap = snap
 	m.mu.Unlock()

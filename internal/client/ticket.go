@@ -23,6 +23,23 @@ func (c *Client) TicketList(ctx context.Context, threadID string) (api.TicketLis
 	return out, c.getJSON(ctx, u, &out)
 }
 
+// TicketGet fetches GET /v1/tickets/get?id=.
+func (c *Client) TicketGet(ctx context.Context, id string) (api.TicketResponse, error) {
+	var out api.TicketResponse
+	return out, c.getJSON(ctx, "http://unix/v1/tickets/get?id="+url.QueryEscape(id), &out)
+}
+
+// TicketSet posts POST /v1/tickets/set (partial text-field update).
+func (c *Client) TicketSet(ctx context.Context, req api.SetTicketRequest) (api.TicketResponse, error) {
+	var out api.TicketResponse
+	return out, c.postJSON(ctx, "http://unix/v1/tickets/set", req, &out)
+}
+
+// TicketDelete posts POST /v1/tickets/delete.
+func (c *Client) TicketDelete(ctx context.Context, id string) error {
+	return c.postJSON(ctx, "http://unix/v1/tickets/delete", map[string]string{"id": id}, nil)
+}
+
 // TicketSetStatus posts POST /v1/tickets/status.
 func (c *Client) TicketSetStatus(ctx context.Context, req api.SetStatusRequest) (api.TicketResponse, error) {
 	var out api.TicketResponse

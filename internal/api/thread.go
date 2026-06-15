@@ -251,6 +251,11 @@ type ThreadRow struct {
 	// TicketsOpen is the number of bound, still-open tickets (not done/dropped)
 	// — the TUI's `ticketed` predicate and TICKETS column read it.
 	TicketsOpen int `json:"tickets_open"`
+	// TicketName is the newest open ticket's name (the TKT-NAME column); '' if none.
+	TicketName string `json:"ticket_name,omitempty"`
+	// TicketNeedsInput is true when ANY bound open ticket of this thread needs input
+	// (an active ticket on a headful·idle thread) — the TKT-! column.
+	TicketNeedsInput bool `json:"ticket_needs_input,omitempty"`
 	// CwdRel mirrors ThreadSnapshot.CwdRel: Cwd ~-relative to the OWNING machine's
 	// home, so the CWD column / cwd_label rules render correctly cross-machine.
 	CwdRel string `json:"cwd_rel,omitempty"`
@@ -276,9 +281,11 @@ type ThreadSnapshot struct {
 	Head           Head       `json:"head"`
 	Busy           Busy       `json:"busy"`
 	Attachment     Attachment `json:"attachment"`
-	TicketsOpen    int        `json:"tickets_open"`
-	AgentRunning   bool       `json:"agent_running"`
-	LastActiveUnix int64      `json:"last_active_unix"` // last pane change / turn completion
+	TicketsOpen      int        `json:"tickets_open"`
+	TicketName       string     `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
+	TicketNeedsInput bool       `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
+	AgentRunning     bool       `json:"agent_running"`
+	LastActiveUnix   int64      `json:"last_active_unix"` // last pane change / turn completion
 	// CwdRel is Cwd rendered ~-relative to the OWNING machine's home, stamped by
 	// that machine's maintainer (the home is owner data the viewer cannot know). A
 	// viewer applies its own [[cwd_label]] rules to this, so the CWD column labels

@@ -266,7 +266,7 @@ var helpRegistry = map[string]cmdHelp{
 	"tui": {
 		summary:  "launch the live cross-machine thread-grid TUI (a thin client over the daemon; Enter navigates/attaches)",
 		usage:    "sesh tui [--all-machines] [--cursor] [--filter] [--expand] [--columns <c1,c2,…>] [--editor <cmd>] [--machine <m>]",
-		long:     "Keys: ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l pan columns · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · K tickets · n notify · x stop · d delete · a archive · q quit. Tickets view (K): list a thread's tickets, drill in, edit name/prompt in $EDITOR, change status/thread, send/delete. --editor sets the field editor (else [tui] editor, else $EDITOR).",
+		long:     "Keys: ↑/↓ move · ^j/^k scroll · ←/→ fold · h/l pan columns · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · K tickets · n notify · x stop · d delete · a archive · q quit. Tickets view (K): list a thread's tickets, drill in, edit name/prompt in $EDITOR, change status/thread, send/delete; n creates a new ticket bound to the thread. --editor sets the field editor (else [tui] editor, else $EDITOR).",
 		examples: []string{"sesh tui --all-machines", "sesh tui --cursor --filter", "sesh tui --editor vim"},
 	},
 	"info": {

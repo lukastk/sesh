@@ -125,7 +125,8 @@ Enter drills into one ticket: its fields (name, prompt) + a small action menu. E
 **name**/**prompt** edits it in your editor (suspend → save); **status** opens a picker
 (triage/ready/active/done/dropped); **thread** opens an fzf-style picker to (re)bind the
 ticket to another thread (type to filter by name or uuid); **send prompt to thread**
-delivers the prompt to the thread's live pane; **delete ticket** asks y/n. `↑/↓` move,
+delivers the prompt to the thread's live pane; **delete ticket** asks y/n. In the list,
+**`n`** creates a new ticket (type a name) bound to the thread. `↑/↓` move,
 `enter`/`l` drill in, `h`/`esc` back, `q` back to the grid. The field editor is
 `sesh tui --editor <cmd>`, else `[tui] editor`, else `$EDITOR` (a loud error if none).
 Two opt-in columns surface ticket state per thread: **`ticket_name`** (the newest open

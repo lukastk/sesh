@@ -30,6 +30,7 @@ const (
 	ticketStatusPick      // choosing a new status
 	ticketThreadPick      // choosing a thread to (re)bind (fzf-style, search by uuid)
 	ticketConfirmDel      // y/n delete confirmation
+	ticketNewPrompt       // typing a name to create a new ticket (bound to this thread)
 )
 
 // detail item indices (the navigable rows of the detail view, in render order).
@@ -99,11 +100,40 @@ func (m Model) handleTicketKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleTicketThreadPickKey(msg)
 	case ticketConfirmDel:
 		return m.handleTicketConfirmDelKey(msg)
+	case ticketNewPrompt:
+		return m.handleTicketNewKey(msg)
 	case ticketDetail:
 		return m.handleTicketDetailKey(msg)
 	default: // ticketList
 		return m.handleTicketListKey(msg)
 	}
+}
+
+// handleTicketNewKey drives the new-ticket name prompt: printables build the name,
+// Enter creates the ticket (bound active to this thread, so it joins the list),
+// Esc cancels. A name is required (ticket create rejects empty).
+func (m Model) handleTicketNewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.ticketMode, m.ticketNewInput = ticketList, nil
+	case "enter":
+		name := strings.TrimSpace(string(m.ticketNewInput))
+		if name == "" {
+			m.ticketErr = fmt.Errorf("a ticket needs a name")
+			return m, nil
+		}
+		m.ticketMode, m.ticketNewInput = ticketList, nil
+		return m, m.createTicket(name)
+	case "backspace":
+		if n := len(m.ticketNewInput); n > 0 {
+			m.ticketNewInput = m.ticketNewInput[:n-1]
+		}
+	default:
+		if r := []rune(msg.String()); len(r) == 1 {
+			m.ticketNewInput = append(m.ticketNewInput, r[0])
+		}
+	}
+	return m, nil
 }
 
 func (m Model) handleTicketListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -123,6 +153,9 @@ func (m Model) handleTicketListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.ticketCursor < len(m.tickets) {
 			m.ticketMode, m.ticketDetail = ticketDetail, tdName
 		}
+	case "n":
+		// Create a new ticket bound to this thread.
+		m.ticketMode, m.ticketNewInput, m.ticketErr = ticketNewPrompt, nil, nil
 	case "R":
 		return m, m.loadTickets(m.ticketThread)
 	}
@@ -276,6 +309,35 @@ func (m Model) ticketAction(note string, args ...string) tea.Cmd {
 	}
 }
 
+// createTicket creates a ticket and binds it ACTIVE to this thread (so it joins
+// the thread's list), then re-lists. The bind is best-effort over the same
+// owner-routed CLI; a created-but-unbound ticket would just not show here.
+func (m Model) createTicket(name string) tea.Cmd {
+	bin, env, threadID := m.binaryPath, m.navEnv, m.ticketThread.ID
+	return func() tea.Msg {
+		out, err := runSesh(bin, env, "ticket", "create", "--name", name, "--json")
+		if err != nil {
+			return ticketActionMsg{err: fmt.Errorf("ticket create: %v: %s", err, out)}
+		}
+		var tk api.Ticket
+		if e := json.Unmarshal([]byte(strings.TrimSpace(out)), &tk); e != nil {
+			return ticketActionMsg{err: fmt.Errorf("decode created ticket: %w", e)}
+		}
+		if bout, berr := runSesh(bin, env, "ticket", "set-status", "--id", tk.ID, "--status", api.StatusActive, "--thread", threadID); berr != nil {
+			return ticketActionMsg{err: fmt.Errorf("bind new ticket: %v: %s", berr, bout)}
+		}
+		return ticketActionMsg{reload: threadID, note: "created " + tid8(tk.ID)}
+	}
+}
+
+// runSesh execs `sesh <args...>` with the model's exec env, returning combined output.
+func runSesh(bin string, env []string, args ...string) (string, error) {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 // editTicketField writes the current value to a temp file, suspends to the editor,
 // and (on exit) posts ticketEditDoneMsg so the edited value is saved.
 func (m Model) editTicketField(tk api.Ticket, field string) tea.Cmd {
@@ -378,6 +440,10 @@ func (m Model) ticketView() string {
 	default:
 		b.WriteString(m.ticketListView())
 	}
+	if m.ticketMode == ticketNewPrompt {
+		b.WriteString("\n" + styleHeader.Render(fmt.Sprintf("new ticket name> %s█", string(m.ticketNewInput))) + "\n")
+		b.WriteString(styleDim.Render("  enter create (bound to this thread) · esc cancel") + "\n")
+	}
 	return b.String()
 }
 
@@ -394,7 +460,7 @@ func (m Model) ticketListView() string {
 			b.WriteString("  " + line + "\n")
 		}
 	}
-	b.WriteString("\n" + styleDim.Render("↑/↓ move · enter open · R reload · q/esc back to grid") + "\n")
+	b.WriteString("\n" + styleDim.Render("↑/↓ move · enter open · n new · R reload · q/esc back to grid") + "\n")
 	return b.String()
 }
 

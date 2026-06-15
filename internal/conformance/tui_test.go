@@ -174,6 +174,21 @@ func claimTicketsView(t *testing.T) {
 			t.Fatalf("ticket still present after delete via the tickets view")
 		}
 	}
+
+	// Create a new ticket via `n` (name prompt) — it's created AND bound active to
+	// this thread, so it really lands on the daemon under this thread.
+	m = runKey(t, m, "n")
+	for _, ch := range []string{"v", "i", "a", "T", "U", "I"} {
+		m = runKey(t, m, ch)
+	}
+	m = runKey(t, m, "enter") // create + bind
+	if m.TicketErr() != nil {
+		t.Fatalf("create via the tickets view errored: %v", m.TicketErr())
+	}
+	created := sb.ticketsByThread(t, th.ID)
+	if len(created) != 1 || created[0].Name != "viaTUI" || created[0].Status != api.StatusActive {
+		t.Fatalf("create via `n` did not land a bound active ticket named viaTUI: %+v", created)
+	}
 }
 
 // claimTicketsColumns: the ticket_name + ticket_input columns render a thread's

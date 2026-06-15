@@ -268,6 +268,7 @@ type Model struct {
 	ticketStatusCursor int    // selection in the status picker
 	ticketPickQuery    []rune // change-thread picker query (search by name/uuid)
 	ticketPickCursor   int
+	ticketNewInput     []rune // name buffer while creating a new ticket (n in the list)
 	editor             string // editor for in-TUI field edits (--editor / [tui] editor / $EDITOR)
 }
 

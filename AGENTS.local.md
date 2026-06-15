@@ -906,3 +906,60 @@ me) triggered by a DEGRADED pi pane (pi not functional in the isolated env → �
 bytes in pane_title); healthy threads work (ticket.send-prompt cell passes). The ticket layer
 surfaced it loudly (correct). DEPLOY: binary + myrig only (TUI/CLI changes, no daemon API
 change → NO daemon restart) — mymain/macstudio/macbook/termux all on 3547922 + 3b1b952.
+
+## H16 — cross-machine ticket binding via RELOCATE + ticket-cockpit UX (2026-06-15, sesh d62a64e [pre-rebase 2a77f31], myrig 3602606; api schema 11→12; deployed ALL FOUR)
+Lukas hit "no threads to bind to" pressing the `thread` item on a triage ticket in
+mmt-ticket-browse, + asked for: a parent-thread column in the ticket fzfs, list ALL active
+threads to bind to, a `thread (by uuid)` item, and a `remove from thread (current: …)` item.
+ROOT CAUSE (architectural, surfaced to Lukas not hacked): tickets are machine-LOCAL — the
+ticket↔thread live join (needs-input, TKT-NAME/TKT-! cols) is computed per-daemon
+(OpenTicketDigests + maintainer join LOCAL threads), and `set-status active --thread`
+validates the thread in the ticket's OWN store. So a ticket can ONLY bind to a thread on its
+own daemon; the empty picker happened because the ticket lived on a thread-less machine (the
+master box) while the threads were elsewhere. Decided WITH Lukas (AskUserQuestion): keep
+co-location, make cross-machine binds RELOCATE the ticket to the thread's machine. Detach/
+move-invalidated status → `ready` (Lukas's call; both triage+ready are unattached by design,
+ready = prompt-final, and a detached active ticket's prompt is presumably final).
+### sesh (schema 11→12, additive endpoints ⇒ mixed-mesh safe during rollout)
+- api: ImportTicketRequest + UnbindTicketRequest. store.UnbindTicket(id) = thread_id NULL +
+  active→ready (CASE; other statuses preserved). InsertTicket already preserves a supplied id.
+- daemon: POST /v1/tickets/import (land a full record PRESERVING id; binding dropped, active→
+  ready on arrival; colliding id = loud 409, never silent overwrite) + POST /v1/tickets/unbind.
+- client TicketImport/TicketUnbind; cmd `ticket import` (reads the record as JSON on STDIN, e.g.
+  from `ticket get --json`) + `ticket unbind --id`. A cross-machine MOVE is the composition
+  `ticket get --machine SRC --json | ticket import --machine DST` → `ticket delete --machine SRC`
+  → `set-status active --thread` on DST. help.go/help_flags.go/help_test.go + sesh-cli SKILL
+  (status model + co-location rule + relocate recipe). do-tickets SKILL unchanged (status model
+  there still accurate; import/unbind aren't part of the agent find→read→report loop).
+- conformance (honest, real ssh hops): ticket.unbind (agent-agnostic × both loc — bind active→
+  unbind→thread cleared + active→ready, text untouched, unknown id loud) + ticket.move (Remote —
+  two real daemons + a client peering with both: active-bound ticket on A read→imported onto B
+  [same id, unbound, ready, text preserved]→deleted from A→re-bound active to B's thread; gone
+  from A; colliding re-import refused). Both green. matrix now 196 cells.
+### myrig (the 4 asks, all on the new mechanisms)
+- mmt-ticket-browse PARENT column: thread-id→name map from `thread grid --all-machines`; each
+  row shows the bound thread's name (— unbound / <id8> bound-but-not-in-grid). KEY zsh BUG fixed:
+  the ticket-list jq must emit thread_id with a "-" SENTINEL for unbound — an empty field
+  COLLAPSES under zsh's IFS-whitespace tab-merging in `IFS=$'\t' read` and shifts every column.
+  Also dropped a `local tcol` inside the subshell while-loop (the "bare local prints the var"
+  gotcha). 
+- `thread` bind item now lists ALL active threads across EVERY machine (_mt_pick_thread over
+  `thread grid --all-machines`), fixing the bogus "no threads to bind to"; binding a thread on
+  another machine relocates the ticket first (_mt_bind_ticket → _mt_ticket_move).
+- new `thread (by uuid)` item: prompt a uuid/prefix, _mt_thread_find resolves across the mesh,
+  LOUD on zero or >1 match, then bind (relocating if cross-machine).
+- new `remove from thread (current: <name> <id8>)` item (shown only when bound; label via
+  _mt_thread_label) → `sesh ticket unbind`.
+- helpers: _mt_ticket_move/_mt_bind_ticket/_mt_pick_thread/_mt_thread_find/_mt_thread_label;
+  editor menu built dynamically. _mt_pick_ticket (per-thread) left alone (parent col redundant —
+  same thread). 
+DEPLOY (schema 12 = daemon RESTART): ALL FOUR. mymain/macstudio/macbook native build (.new+mv;
+macs auto-sign) + supervisorctl restart sesh-daemon; termux build to ~/.local/bin/sesh.new (/tmp
+UNWRITABLE) + pkill 'sesh daemon run' + setsid nohup relaunch with explicit SESH_HOME/MACHINE
+(termux)/TMUX_SOCKET=sesh/MASTER_SOCKET=sesh-master (read from /proc/<pid>/environ). myrig render
+via install-home (macs/termux `uv run --with jinja2`); macbook had local uncommitted edits
+(settings.json/.env/menus.sh) → git stash → pull → stash pop (preserved). LIVE-SMOKED: bind→unbind
+round-trip (mymain); REAL cross-network move mymain→macstudio (create→import→delete→bind active to
+macstudio's thread; gone from mymain) + cross-machine unbind (active→ready); PARENT column shows
+the bound thread's name for a real ticket. macbook grid was momentarily empty during smoke (used
+macstudio as the move target).

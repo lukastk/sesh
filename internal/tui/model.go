@@ -28,6 +28,15 @@ import (
 // refreshInterval is the poll cadence (poll-first, no SSE).
 const refreshInterval = 3 * time.Second
 
+// postActionReconcileDelay schedules ONE fast follow-up reconcile after a
+// successful action. The immediate post-action fetch races the maintainer's
+// snapshot republish (it ticks every ~300ms and the mesh/self view is read from
+// THAT published snapshot, not live from the DB), so a structural change with no
+// optimistic patch — notably `reparent` (incl. reparent-to-root on an empty
+// prompt) — would otherwise not show until the next 3s poll. 500ms reliably
+// outlasts one maintainer tick, so the change appears promptly.
+const postActionReconcileDelay = 500 * time.Millisecond
+
 // Model is the TUI state. Its rows come only from the daemon grid.
 // View indexes into the model's view list: the three built-ins followed by
 // the config-defined custom views ([[tui.views]]). Tab cycles; the current
@@ -496,6 +505,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(m.fetch(), tick())
+	case reconcileMsg:
+		// A fast follow-up reconcile after a successful action (does NOT re-arm the
+		// poll timer — it's a one-shot, scheduled by the actionMsg handler).
+		return m, m.fetch()
 	case actionMsg:
 		m.note = ""
 		if msg.err != nil {
@@ -533,6 +546,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.expanded[msg.expand] = true // keep the new parent open so the moved child is visible
 		}
+		if msg.err == nil {
+			// Reconcile now AND once more shortly: the immediate fetch can outrun the
+			// maintainer's snapshot republish, so a no-optimistic-patch structural
+			// change (reparent, incl. reparent-to-root) would otherwise not show until
+			// the next 3s poll. The delayed reconcile makes it appear promptly.
+			return m, tea.Batch(m.fetch(), reconcileAfter(postActionReconcileDelay))
+		}
 		return m, m.fetch() // reconcile against the daemon
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us) —
@@ -557,6 +577,16 @@ type actionMsg struct {
 	patch     *rowPatch // the optimistic change to show until the daemon's read path catches up
 	preselect string    // on success, move the cursor here on the next fetch (structural changes like reparent: no patch, the tree refetches and the moved node is re-selected)
 	expand    string    // on success, expand this node so a freshly-nested child stays visible even before the snapshot reflects the new parent (avoids the preselect/propagation race)
+}
+
+// reconcileMsg fires after postActionReconcileDelay to trigger one extra fetch (see
+// reconcileAfter) so a server-side change that lagged the immediate post-action fetch
+// shows promptly instead of waiting for the next 3s poll.
+type reconcileMsg struct{}
+
+// reconcileAfter schedules a single delayed reconcile fetch (via reconcileMsg).
+func reconcileAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return reconcileMsg{} })
 }
 
 // preselectMsg carries the result of the async master-cursor resolve (the thread the

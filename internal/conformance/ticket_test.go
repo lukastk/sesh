@@ -383,9 +383,14 @@ func testTicketListAll(t *testing.T) {
 		t.Fatalf("hub peer add: %v\n%s", err, stderr)
 	}
 
-	// A ticket on the HUB and a thread-bound ticket on the PEER.
+	// A ticket on the HUB and a thread-bound ticket on the PEER, whose thread has a
+	// PARENT (so list-all's thread_parent — parity with the find snapshot — is exercised).
 	hubID := hub.ticketCreate(t, "hub ticket", "")
+	parentTh := peer.newThread(t, "pi", "parentthread", "/tmp")
 	th := peer.newThread(t, "pi", "peerthread", "/tmp")
+	if _, stderr, err := peer.Runner.Run(t, "thread", "reparent", "--id", th.ID, "--parent", parentTh.ID); err != nil {
+		t.Fatalf("reparent peer thread: %v\n%s", err, stderr)
+	}
 	peerID := peer.ticketCreate(t, "peer ticket", "the peer work")
 	if _, stderr, err := peer.Runner.Run(t, "ticket", "set-status", "--id", peerID, "--status", "active", "--thread", th.ID); err != nil {
 		t.Fatalf("bind active on peer: %v\n%s", err, stderr)
@@ -412,6 +417,9 @@ func testTicketListAll(t *testing.T) {
 	}
 	if e.ThreadName != "peerthread" || e.Ticket.ThreadID != th.ID {
 		t.Errorf("peer ticket missing bound-thread context: name=%q thread_id=%q", e.ThreadName, e.Ticket.ThreadID)
+	}
+	if e.ThreadParent != parentTh.ID {
+		t.Errorf("peer ticket thread_parent = %q, want the parent thread %q", e.ThreadParent, parentTh.ID)
 	}
 }
 

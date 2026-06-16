@@ -182,15 +182,18 @@ func (d *Daemon) listTicketsLocalEntries() ([]api.TicketListEntry, error) {
 		return nil, err
 	}
 	nameByID := make(map[string]string, len(threads))
+	parentByID := make(map[string]string, len(threads))
 	for _, th := range threads {
 		nameByID[th.ID] = th.Name
+		parentByID[th.ID] = th.Parent
 	}
 	out := make([]api.TicketListEntry, 0, len(tickets))
 	for _, t := range tickets {
 		out = append(out, api.TicketListEntry{
-			Ticket:     t,
-			Machine:    d.cfg.Machine,
-			ThreadName: nameByID[t.ThreadID], // "" if unbound or thread gone
+			Ticket:       t,
+			Machine:      d.cfg.Machine,
+			ThreadName:   nameByID[t.ThreadID],   // "" if unbound or thread gone
+			ThreadParent: parentByID[t.ThreadID], // "" if unbound / root / thread gone
 		})
 	}
 	return out, nil

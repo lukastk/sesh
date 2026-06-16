@@ -82,6 +82,10 @@ type TicketListEntry struct {
 	Ticket     Ticket `json:"ticket"`
 	Machine    string `json:"machine"`
 	ThreadName string `json:"thread_name,omitempty"`
+	// ThreadParent is the bound thread's parent thread id (if any) — parity with the
+	// per-ticket find snapshot (SeshTicketData.thread.parent), so a bulk reconcile
+	// produces the same cached snapshot a find would.
+	ThreadParent string `json:"thread_parent,omitempty"`
 }
 
 // TicketListAllResponse is returned by GET /v1/tickets/list-all: every ticket on

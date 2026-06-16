@@ -18,6 +18,7 @@ func (d *Daemon) routesTickets(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/tickets", d.handleTicketList)
 	mux.HandleFunc("GET /v1/tickets/get", d.handleTicketGet)
 	mux.HandleFunc("GET /v1/tickets/find", d.handleTicketFind)
+	mux.HandleFunc("GET /v1/tickets/list-all", d.handleTicketListAll)
 	mux.HandleFunc("POST /v1/tickets/set", d.handleTicketSet)
 	mux.HandleFunc("POST /v1/tickets/delete", d.handleTicketDelete)
 	mux.HandleFunc("POST /v1/tickets/status", d.handleTicketSetStatus)
@@ -232,8 +233,9 @@ func (d *Daemon) handleTicketGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTicketSet applies a partial update of a ticket's text fields (name,
-// prompt). Status and thread binding go through /v1/tickets/status (which owns
-// the active-needs-thread invariant), never here.
+// prompt, notes). Status and thread binding go through /v1/tickets/status (which
+// owns the active-needs-thread invariant), never here. Notes REPLACES the notes
+// field; AppendNote instead appends to it — the two are mutually exclusive.
 func (d *Daemon) handleTicketSet(w http.ResponseWriter, r *http.Request) {
 	var req api.SetTicketRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -244,13 +246,27 @@ func (d *Daemon) handleTicketSet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "ticket set: id is required")
 		return
 	}
-	if err := d.store.UpdateTicketFields(req.ID, req.Name, req.Prompt); err != nil {
+	if req.Notes != nil && req.AppendNote != nil {
+		writeError(w, http.StatusBadRequest, "ticket set: --notes (replace) and --append-note are mutually exclusive")
+		return
+	}
+	if err := d.store.UpdateTicketFields(req.ID, req.Name, req.Prompt, req.Notes); err != nil {
 		if errors.Is(err, store.ErrTicketNotFound) {
 			writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if req.AppendNote != nil {
+		if err := d.store.AppendTicketNote(req.ID, *req.AppendNote); err != nil {
+			if errors.Is(err, store.ErrTicketNotFound) {
+				writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	ticket, err := d.store.GetTicket(req.ID)
 	if err != nil {
@@ -337,6 +353,14 @@ func (d *Daemon) handleTicketSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// --note appends to the ticket's notes in the same call — the "close AND record
+	// what was done" ergonomic path (e.g. set-status done --note "fixed in <commit>").
+	if req.Note != "" {
+		if err := d.store.AppendTicketNote(req.ID, req.Note); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	ticket, err := d.store.GetTicket(req.ID)
 	if err != nil {

@@ -145,6 +145,150 @@ func (d *Daemon) fanOutFindTicket(id string) (*api.TicketFindResponse, []string)
 	return nil, unreachable
 }
 
+// handleTicketListAll serves GET /v1/tickets/list-all — a MESH-WIDE ticket listing
+// for the ticket browser. This daemon's own tickets (each stamped with this machine
+// and its bound-thread name) plus, unless `&local=1`, every reachable peer's tickets
+// (each peer answering local-only — no recursion). Unreachable peers are reported,
+// not dropped, so an incomplete listing is visible (offline browsing).
+func (d *Daemon) handleTicketListAll(w http.ResponseWriter, r *http.Request) {
+	localOnly := r.URL.Query().Get("local") == "1"
+	local, err := d.listTicketsLocalEntries()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := api.TicketListAllResponse{Schema: api.SchemaVersion, Tickets: local}
+	if !localOnly {
+		peerEntries, unreachable := d.fanOutListTickets()
+		out.Tickets = append(out.Tickets, peerEntries...)
+		out.Unreachable = unreachable
+	}
+	if out.Tickets == nil {
+		out.Tickets = []api.TicketListEntry{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// listTicketsLocalEntries lists THIS daemon's tickets as browser entries: each
+// stamped with this machine and, if bound, its thread's display name (resolved from
+// a single threads snapshot, so it is O(threads) not O(tickets·queries)).
+func (d *Daemon) listTicketsLocalEntries() ([]api.TicketListEntry, error) {
+	tickets, err := d.store.ListTickets()
+	if err != nil {
+		return nil, err
+	}
+	threads, err := d.store.ListThreads(true)
+	if err != nil {
+		return nil, err
+	}
+	nameByID := make(map[string]string, len(threads))
+	for _, th := range threads {
+		nameByID[th.ID] = th.Name
+	}
+	out := make([]api.TicketListEntry, 0, len(tickets))
+	for _, t := range tickets {
+		out = append(out, api.TicketListEntry{
+			Ticket:     t,
+			Machine:    d.cfg.Machine,
+			ThreadName: nameByID[t.ThreadID], // "" if unbound or thread gone
+		})
+	}
+	return out, nil
+}
+
+// fanOutListTickets queries every peer's list-all endpoint (local-only) CONCURRENTLY
+// and merges the entries (already stamped with each peer's machine). A peer error is
+// non-fatal — reported in unreachable so the caller knows the listing is incomplete.
+func (d *Daemon) fanOutListTickets() ([]api.TicketListEntry, []string) {
+	reg, err := peers.Load(d.cfg.PeersPath())
+	if err != nil {
+		return nil, nil
+	}
+	list := reg.List()
+	if len(list) == 0 {
+		return nil, nil
+	}
+	type result struct {
+		entries []api.TicketListEntry
+		ok      bool
+	}
+	results := make([]result, len(list))
+	var wg sync.WaitGroup
+	for i, p := range list {
+		i, p := i, p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			entries, err := fetchPeerTicketList(p)
+			if err != nil {
+				results[i] = result{ok: false}
+				return
+			}
+			results[i] = result{entries: entries, ok: true}
+		}()
+	}
+	wg.Wait()
+
+	var merged []api.TicketListEntry
+	var unreachable []string
+	for i, p := range list {
+		if !results[i].ok {
+			unreachable = append(unreachable, p.Machine)
+			continue
+		}
+		merged = append(merged, results[i].entries...)
+	}
+	return merged, unreachable
+}
+
+// fetchPeerTicketList asks ONE peer's daemon for its tickets (local-only, no further
+// fan-out) over the peer's EXPLICIT transport — http via its TCP API, else a real ssh
+// hop. A failure is returned to the caller (reported Unreachable); never a silent
+// transport downgrade.
+func fetchPeerTicketList(p peers.Peer) ([]api.TicketListEntry, error) {
+	if p.Transport() == "http" {
+		c, err := peerRemoteClient(p)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
+		defer cancel()
+		resp, err := c.TicketListAll(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Tickets, nil
+	}
+	args := []string{
+		"env",
+		"SESH_HOME=" + shQuote(p.Home),
+		"SESH_MACHINE=" + shQuote(p.Machine),
+		shQuote(p.Binary),
+		"ticket", "list", "--all-machines", "--local", "--json",
+	}
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
+	cmd := exec.Command("ssh", sshArgs...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	var out []api.TicketListEntry
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var e api.TicketListEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
 // fetchPeerTicketFind asks ONE peer's daemon to resolve a ticket id from its own store
 // (local-only, no further fan-out) over the peer's EXPLICIT transport — http via its
 // TCP API, else a real ssh hop. A failure is returned to the caller (reported

@@ -42,6 +42,10 @@ func init() {
 	// ticket.find is the mesh-wide lookup: a hub daemon resolves a ticket living on a
 	// PEER via a real ssh fan-out (the one thing a same-store test can't prove).
 	matrix.RegisterTest("ticket.find", matrix.AgentAgnostic, matrix.Remote, testTicketFind)
+	// ticket.list-all is the mesh-wide ticket LISTING behind the ticket browser: a hub
+	// daemon merges its own tickets with a peer's over a real ssh fan-out, each stamped
+	// with its owning machine + bound-thread name.
+	matrix.RegisterTest("ticket.list-all", matrix.AgentAgnostic, matrix.Remote, testTicketListAll)
 	// list --current auto-detects the calling pane's thread; the inference is a
 	// local-pane concept (Local only — routing is covered by route.parity).
 	matrix.RegisterTest("ticket.list-current", matrix.AgentAgnostic, matrix.Local, testTicketListCurrent)
@@ -82,6 +86,16 @@ func testTicketGet(t *testing.T, loc matrix.Locality) {
 	if _, _, err := sb.Runner.Run(t, "ticket", "get", "--id", id, "--field", "description"); err == nil {
 		t.Errorf("get --field description was accepted (description is gone)")
 	}
+	// notes default empty; --field notes prints them raw after a set.
+	if out, _, _ := sb.Runner.Run(t, "ticket", "get", "--id", id, "--field", "notes"); out != "" {
+		t.Errorf("new ticket --field notes = %q, want empty", out)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--notes", "looked into it"); err != nil {
+		t.Fatalf("set --notes: %v\n%s", err, stderr)
+	}
+	if out, _, _ := sb.Runner.Run(t, "ticket", "get", "--id", id, "--field", "notes"); out != "looked into it" {
+		t.Errorf("--field notes = %q, want the raw notes", out)
+	}
 }
 
 // testTicketSet asserts a partial text-field update: only the flags passed are
@@ -111,6 +125,20 @@ func testTicketSet(t *testing.T, loc matrix.Locality) {
 	// An empty update is loud (nothing to change).
 	if _, _, err := sb.Runner.Run(t, "ticket", "set", "--id", id); err == nil {
 		t.Errorf("ticket set with no fields was accepted")
+	}
+	// --notes REPLACES; --append-note appends (blank-line separated); name/prompt untouched.
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--notes", "line one"); err != nil {
+		t.Fatalf("set --notes: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--append-note", "line two"); err != nil {
+		t.Fatalf("set --append-note: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, id); tk.Notes != "line one\n\nline two" || tk.Name != "new name" || tk.Prompt != "new prompt" {
+		t.Errorf("after notes append: %+v", tk)
+	}
+	// --notes and --append-note together are loud (mutually exclusive).
+	if _, _, err := sb.Runner.Run(t, "ticket", "set", "--id", id, "--notes", "x", "--append-note", "y"); err == nil {
+		t.Errorf("ticket set --notes + --append-note together was accepted")
 	}
 }
 
@@ -334,6 +362,59 @@ func testTicketFind(t *testing.T) {
 	}
 }
 
+// testTicketListAll drives the mesh-wide `sesh ticket list --all-machines`: a HUB
+// daemon merges its own tickets with a PEER's over a REAL ssh fan-out, each entry
+// stamped with its owning machine and (when bound) its thread's display name — the
+// data behind the ticket browser. A same-store list can't prove the cross-machine
+// attribution.
+func testTicketListAll(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	bin := seshBin(t)
+	hub := newSandbox(t, matrix.Local)
+	hub.startDaemon(t)
+	peer := newSandbox(t, matrix.Local)
+	peer.startDaemon(t)
+
+	if _, stderr, err := hub.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
+		t.Fatalf("hub peer add: %v\n%s", err, stderr)
+	}
+
+	// A ticket on the HUB and a thread-bound ticket on the PEER.
+	hubID := hub.ticketCreate(t, "hub ticket", "")
+	th := peer.newThread(t, "pi", "peerthread", "/tmp")
+	peerID := peer.ticketCreate(t, "peer ticket", "the peer work")
+	if _, stderr, err := peer.Runner.Run(t, "ticket", "set-status", "--id", peerID, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active on peer: %v\n%s", err, stderr)
+	}
+
+	entries := hub.ticketListAll(t)
+	byID := map[string]api.TicketListEntry{}
+	for _, e := range entries {
+		byID[e.Ticket.ID] = e
+	}
+
+	// The hub ticket is attributed to the hub, unbound.
+	if e, ok := byID[hubID]; !ok || e.Machine != hub.Machine {
+		t.Errorf("hub ticket missing/mis-attributed: ok=%t %+v", ok, e)
+	}
+	// The peer ticket is attributed to the PEER (proving the ssh fan-out) and carries
+	// its bound thread's name + id.
+	e, ok := byID[peerID]
+	if !ok {
+		t.Fatalf("peer ticket %s absent from list-all (entries: %+v)", peerID, entries)
+	}
+	if e.Machine != peer.Machine {
+		t.Errorf("peer ticket machine = %q, want the peer %q", e.Machine, peer.Machine)
+	}
+	if e.ThreadName != "peerthread" || e.Ticket.ThreadID != th.ID {
+		t.Errorf("peer ticket missing bound-thread context: name=%q thread_id=%q", e.ThreadName, e.Ticket.ThreadID)
+	}
+}
+
 // testTicketOwnership asserts the single-writer ownership model: a NON-owner
 // machine's ticket write routes (over a real ssh hop) to the canonical owner, so
 // the record lands on the OWNER's store — not silently locally. This is the
@@ -476,6 +557,15 @@ func testTicketSetStatus(t *testing.T, loc matrix.Locality) {
 	if _, _, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "active"); err == nil {
 		t.Errorf("active without a thread was accepted")
 	}
+	// The ergonomic close-AND-record path: set-status --note appends a note in the
+	// same call (each --note appends, blank-line separated).
+	noteID := sb.ticketCreate(t, "close me", "")
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", noteID, "--status", "done", "--note", "fixed in abc123"); err != nil {
+		t.Fatalf("set-status done --note: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, noteID); tk.Status != api.StatusDone || tk.Notes != "fixed in abc123" || tk.ClosedAtUnix == 0 {
+		t.Errorf("after close+note: %+v", tk)
+	}
 }
 
 // testTicketListByThread asserts list --thread returns exactly the tickets bound
@@ -614,6 +704,26 @@ func (sb *Sandbox) ticketFind(t *testing.T, id string) api.TicketFindResponse {
 	var out api.TicketFindResponse
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("decode find: %v\nraw: %s", err, stdout)
+	}
+	return out
+}
+
+func (sb *Sandbox) ticketListAll(t *testing.T) []api.TicketListEntry {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "ticket", "list", "--all-machines", "--json")
+	if err != nil {
+		t.Fatalf("ticket list --all-machines: %v\n%s", err, stderr)
+	}
+	var out []api.TicketListEntry
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var e api.TicketListEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("decode list-all line %q: %v", line, err)
+		}
+		out = append(out, e)
 	}
 	return out
 }

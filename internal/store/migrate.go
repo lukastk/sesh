@@ -118,6 +118,11 @@ var migrations = []string{
 	// projection reads. Set by the daemon on a terminal transition (preserved across
 	// an idempotent re-set, cleared to 0 if reopened).
 	`ALTER TABLE tickets ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0;`,
+	// 15: tickets.notes — free-text scratch field, primarily where an agent records
+	// what it did on close (and which commit closed the ticket). Empty by default;
+	// set via `ticket set --notes`/`--append-note` or appended on `ticket set-status
+	// --note`. Surfaced in the Obsidian ticket-note top panel.
+	`ALTER TABLE tickets ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

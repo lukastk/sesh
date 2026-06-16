@@ -51,7 +51,7 @@ package api
 // config, overridable per call). Also multi-line prompts now deliver via bracketed paste
 // (newlines preserved). Additive request field → mixed-mesh safe (a pre-16 daemon ignores
 // `prepend` and never prepends).
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

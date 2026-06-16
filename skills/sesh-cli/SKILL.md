@@ -83,11 +83,11 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   ```bash
   sesh ticket create --name <name> [--prompt <text>]      # starts in triage
   sesh ticket list [--thread <id>] [--current]            # --current = the calling pane's thread
-  sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed (raw)
+  sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed|notes (raw)
   sesh ticket find --id <id> [--json]                     # MESH-WIDE lookup: fans out across peers; returns the
                                                           #   ticket + its owning machine + bound-thread context
-  sesh ticket set --id <id> [--name <t>] [--prompt <t>]   # partial text-field update
-  sesh ticket set-status --id <id> --status <s> [--thread <id>]   # active requires --thread
+  sesh ticket set --id <id> [--name <t>] [--prompt <t>] [--notes <t>|--append-note <t>]   # partial text-field update
+  sesh ticket set-status --id <id> --status <s> [--thread <id>] [--note <t>]   # active requires --thread; --note appends
   sesh ticket unbind --id <id>                            # detach from the thread (active→ready); "remove from thread"
   sesh ticket send-prompt --id <id> [--no-prepend]        # deliver the prompt to the bound thread's pane
   sesh ticket needs-input --id <id>                       # derived: active && thread headful·idle
@@ -100,6 +100,12 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   in one call — the mechanism behind an API client (e.g. the Obsidian ticket note) that tracks
   a ticket from anywhere. A ticket found nowhere is `found=false` (exit 0), a legitimate state.
   A terminal ticket carries `closed_at_unix` (the done/dropped timestamp; `--field closed`).
+
+  A ticket has a free-text **`notes`** field (the done/scrapped scratchpad — primarily where an
+  agent records what it did and which commit closed it). `set --notes` REPLACES it, `set
+  --append-note` appends (blank-line separated), and `set-status --note` appends as part of a
+  status change — the ergonomic "close AND record what was done" path. Read with `get --field
+  notes`. Surfaced in the Obsidian ticket-note top panel.
 
   **`send-prompt`** delivers multi-line prompts intact (bracketed paste — newlines are preserved,
   not submitted line-by-line) and by default **prepends the ticket's name + id** so the agent

@@ -18,12 +18,24 @@ sesh ticket list --current                 # id  status  name  thread
 sesh ticket list --current --json          # one JSON object per line
 
 # READ — the instructions (raw, no trailing newline)
-sesh ticket get --id <id> --field prompt   # --field: id|name|prompt|status|thread|created|closed
+sesh ticket get --id <id> --field prompt   # --field: id|name|prompt|status|thread|created|closed|notes
 sesh ticket get --id <id> --json           # whole record
 
-# REPORT — set status (moving to `active` needs --thread)
-sesh ticket set-status --id <id> --status done
+# REPORT — close AND record what you did, in one call (ALWAYS leave a note on close)
+sesh ticket set-status --id <id> --status done --note "what you did; closed by <commit-sha>"
 sesh ticket set-status --id <id> --status active --thread <thread-id>
+```
+
+**Always leave a note when you close a ticket.** A ticket has a free-text **`notes`**
+field; when you mark a ticket `done` (or `dropped`), append a short note explaining what
+you did and — if there was a commit — which commit closed it. `--note` on `set-status`
+appends as part of the same call (each `--note` appends, blank-line separated). You can
+also append/replace notes independently:
+
+```bash
+sesh ticket set --id <id> --append-note "investigated; root cause is X"   # append
+sesh ticket set --id <id> --notes "<full text>"                          # REPLACE
+sesh ticket get --id <id> --field notes                                  # read them back
 ```
 
 `--id` takes the full ticket UUID (from `ticket list`). Commands auto-route to wherever
@@ -38,6 +50,7 @@ expanded — pipe through `sesh blob expand` to resolve them to paths:
 sesh ticket get --id <id> --field prompt | sesh blob expand   # @blob(..) → real file paths
 ```
 
-Other ops: `ticket create --name <n> [--prompt <t>]`, `ticket set --id <id> [--name|--prompt]`,
+Other ops: `ticket create --name <n> [--prompt <t>]`,
+`ticket set --id <id> [--name|--prompt|--notes|--append-note]`,
 `ticket send-prompt --id <id>` (type the prompt into the bound thread's pane),
 `ticket delete --id <id>`. (`sesh ticket --help` for the rest.)

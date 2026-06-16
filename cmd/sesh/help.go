@@ -270,9 +270,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket create --name fix-login --prompt 'fix the OAuth redirect'"},
 	},
 	"ticket list": {
-		summary:  "list tickets (id, status, name, thread); --thread filters to one thread, --current auto-detects the calling pane's thread",
-		usage:    "sesh ticket list [--thread <id>] [--current] [--machine <m>] [--json]",
-		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --thread 1a2b3c4d --json"},
+		summary:  "list tickets (id, status, name, thread); --thread filters to one thread, --current auto-detects the calling pane's thread, --all-machines fans out across the mesh (machine + thread name per ticket)",
+		usage:    "sesh ticket list [--thread <id>] [--current] [--all-machines] [--local] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --all-machines --json"},
 	},
 	"ticket get": {
 		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created|closed) for clipboard/agent capture",
@@ -285,9 +285,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket find --id 7e108848 --json", "sesh ticket find --id t1 --local"},
 	},
 	"ticket set": {
-		summary:  "partial update of a ticket's text fields (name, prompt); status/thread go through set-status",
-		usage:    "sesh ticket set --id <id> [--name <text>] [--prompt <text>] [--machine <m>] [--json]",
-		examples: []string{"sesh ticket set --id t1 --prompt 'updated work'", "sesh ticket set --id t1 --name renamed"},
+		summary:  "partial update of a ticket's text fields (name, prompt, notes); status/thread go through set-status",
+		usage:    "sesh ticket set --id <id> [--name <text>] [--prompt <text>] [--notes <text>] [--append-note <text>] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket set --id t1 --prompt 'updated work'", "sesh ticket set --id t1 --append-note 'investigated; see commit abc123'"},
 	},
 	"ticket delete": {
 		summary:  "delete a ticket record (no thread or pane is touched)",
@@ -295,9 +295,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket delete --id t1"},
 	},
 	"ticket set-status": {
-		summary:  "set a ticket's status (triage|ready|active|done|dropped); --thread binds the thread (required for active)",
-		usage:    "sesh ticket set-status --id <id> --status <triage|ready|active|done|dropped> [--thread <id>] [--machine <m>] [--json]",
-		examples: []string{"sesh ticket set-status --id t1 --status active --thread 1a2b3c4d"},
+		summary:  "set a ticket's status (triage|ready|active|done|dropped); --thread binds the thread (required for active); --note appends a note (e.g. on close)",
+		usage:    "sesh ticket set-status --id <id> --status <triage|ready|active|done|dropped> [--thread <id>] [--note <text>] [--machine <m>] [--json]",
+		examples: []string{"sesh ticket set-status --id t1 --status active --thread 1a2b3c4d", "sesh ticket set-status --id t1 --status done --note 'fixed in abc123'"},
 	},
 	"ticket import": {
 		summary:  "land a ticket record (JSON on stdin, from `ticket get --json`) on a daemon, preserving its id; binding cleared, active→ready. Landing half of a cross-machine ticket move",

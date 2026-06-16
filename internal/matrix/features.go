@@ -376,6 +376,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "ticket.list-all",
+		Description: "mesh-wide ticket LISTING (`sesh ticket list --all-machines`): the invoked daemon merges its own tickets with every reachable peer's (each answering local-only, over real ssh), each entry stamped with its owning machine + bound-thread name — the data behind the Obsidian ticket browser. Unreachable peers are reported, not dropped",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "ticket.move",
 		Description: "daemon-coordinated cross-machine ticket relocation (`sesh ticket move --from --to`): the INVOKED daemon pulls the record + every @blob() the prompt references from SRC and pushes them to DST, then deletes the source — so a ticket binds to a thread on any machine with its blobs carried along (co-located live join preserved). Real ssh hops; id-collision on the target is loud",
 		Localities:  []Locality{Remote},

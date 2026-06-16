@@ -36,6 +36,9 @@ type Ticket struct {
 	// the "closed/scrapped" timestamp. 0 while open; preserved across an idempotent
 	// re-set of the same terminal status; cleared back to 0 if the ticket reopens.
 	ClosedAtUnix int64 `json:"closed_at_unix,omitempty"`
+	// Notes is a free-text scratch field for a ticket — primarily where an agent
+	// records what it did when closing (and which commit closed it). Empty by default.
+	Notes string `json:"notes,omitempty"`
 }
 
 // CreateTicketRequest is the body of POST /v1/tickets.
@@ -52,6 +55,11 @@ type SetTicketRequest struct {
 	ID     string  `json:"id"`
 	Name   *string `json:"name,omitempty"`
 	Prompt *string `json:"prompt,omitempty"`
+	// Notes REPLACES the notes field (a nil pointer leaves it unchanged). AppendNote
+	// instead APPENDS its text to the existing notes (blank-line separated) — the two
+	// are mutually exclusive in one call.
+	Notes      *string `json:"notes,omitempty"`
+	AppendNote *string `json:"append_note,omitempty"`
 }
 
 // TicketResponse wraps a single ticket.
@@ -66,6 +74,26 @@ type TicketListResponse struct {
 	Tickets []Ticket `json:"tickets"`
 }
 
+// TicketListEntry is one row of a MESH-WIDE ticket listing: the ticket plus its
+// owning machine and (if bound) its thread's display name — enough for a ticket
+// browser to filter by machine / thread name / thread uuid (Ticket.ThreadID)
+// without a per-ticket find round-trip.
+type TicketListEntry struct {
+	Ticket     Ticket `json:"ticket"`
+	Machine    string `json:"machine"`
+	ThreadName string `json:"thread_name,omitempty"`
+}
+
+// TicketListAllResponse is returned by GET /v1/tickets/list-all: every ticket on
+// THIS daemon plus (unless local-only) every reachable peer's tickets, each stamped
+// with its owning machine. Unreachable lists peers the fan-out could not reach (the
+// listing is incomplete by those machines if non-empty) — never silently dropped.
+type TicketListAllResponse struct {
+	Schema      int               `json:"schema"`
+	Tickets     []TicketListEntry `json:"tickets"`
+	Unreachable []string          `json:"unreachable,omitempty"`
+}
+
 // SetStatusRequest is the body of POST /v1/tickets/status. ThreadID is required
 // when transitioning to active (a ticket is active BECAUSE it is attached to a
 // thread); it is ignored otherwise.
@@ -73,6 +101,10 @@ type SetStatusRequest struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	ThreadID string `json:"thread_id,omitempty"`
+	// Note, when non-empty, is APPENDED to the ticket's notes as part of the same
+	// call — the ergonomic "close a ticket AND record what was done" path: e.g.
+	// `ticket set-status --status done --note "fixed in <commit>"`.
+	Note string `json:"note,omitempty"`
 }
 
 // ImportTicketRequest is the body of POST /v1/tickets/import — it inserts a full

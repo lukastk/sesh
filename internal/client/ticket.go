@@ -44,6 +44,19 @@ func (c *Client) TicketFind(ctx context.Context, id string, localOnly bool) (api
 	return out, c.getJSON(ctx, u, &out)
 }
 
+// TicketListAll fetches GET /v1/tickets/list-all — the MESH-WIDE ticket listing for
+// the ticket browser. The daemon it hits returns its own tickets plus (unless
+// localOnly) every reachable peer's, each stamped with its owning machine. localOnly
+// restricts it to THIS daemon's store (the leaf form the fan-out calls on each peer).
+func (c *Client) TicketListAll(ctx context.Context, localOnly bool) (api.TicketListAllResponse, error) {
+	var out api.TicketListAllResponse
+	u := "http://unix/v1/tickets/list-all"
+	if localOnly {
+		u += "?local=1"
+	}
+	return out, c.getJSON(ctx, u, &out)
+}
+
 // TicketSet posts POST /v1/tickets/set (partial text-field update).
 func (c *Client) TicketSet(ctx context.Context, req api.SetTicketRequest) (api.TicketResponse, error) {
 	var out api.TicketResponse

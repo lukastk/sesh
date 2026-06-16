@@ -104,11 +104,36 @@ func ticketList(cfg config.Config, args []string) error {
 	// --current is expanded to --thread <id> in runTicket (before owner-routing);
 	// declared here only so the flag parses if it survives. See expandTicketCurrent.
 	fs.Bool("current", false, "auto-detect the current thread and list its tickets")
+	allMachines := fs.Bool("all-machines", false, "fan out across the mesh (this machine + peers); emits machine + thread name per ticket")
+	localOnly := fs.Bool("local", false, "with --all-machines: only this daemon's tickets (the leaf form the fan-out calls)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	c := daemonClient(cfg)
+	// Mesh-wide listing (the ticket browser): a different, machine-stamped shape.
+	if *allMachines {
+		resp, err := c.TicketListAll(context.Background(), *localOnly)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			for _, e := range resp.Tickets {
+				if err := enc.Encode(e); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		for _, e := range resp.Tickets {
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", e.Machine, e.Ticket.ID, e.Ticket.Status, e.Ticket.Name, e.ThreadName)
+		}
+		if len(resp.Unreachable) > 0 {
+			fmt.Printf("(unreachable: %v)\n", resp.Unreachable)
+		}
+		return nil
+	}
 	resp, err := c.TicketList(context.Background(), *thread)
 	if err != nil {
 		return err
@@ -159,7 +184,7 @@ func expandTicketCurrent(cfg config.Config, args []string) ([]string, error) {
 func ticketGet(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 	id := fs.String("id", "", "ticket id (required)")
-	field := fs.String("field", "", "print one field raw: id|name|prompt|status|thread|created")
+	field := fs.String("field", "", "print one field raw: id|name|prompt|status|thread|created|closed|notes")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -190,8 +215,10 @@ func ticketGet(cfg config.Config, args []string) error {
 			fmt.Print(tk.CreatedAtUnix)
 		case "closed":
 			fmt.Print(tk.ClosedAtUnix)
+		case "notes":
+			fmt.Print(tk.Notes)
 		default:
-			return fmt.Errorf("ticket get: unknown --field %q (id|name|prompt|status|thread|created|closed)", *field)
+			return fmt.Errorf("ticket get: unknown --field %q (id|name|prompt|status|thread|created|closed|notes)", *field)
 		}
 		return nil
 	}
@@ -199,6 +226,9 @@ func ticketGet(cfg config.Config, args []string) error {
 		return emitJSON(tk)
 	}
 	fmt.Printf("id:      %s\nname:    %s\nstatus:  %s\nthread:  %s\nprompt:  %s\n", tk.ID, tk.Name, tk.Status, tk.ThreadID, tk.Prompt)
+	if tk.Notes != "" {
+		fmt.Printf("notes:   %s\n", tk.Notes)
+	}
 	return nil
 }
 
@@ -249,6 +279,8 @@ func ticketSet(cfg config.Config, args []string) error {
 	id := fs.String("id", "", "ticket id (required)")
 	name := fs.String("name", "", "set the ticket name")
 	prompt := fs.String("prompt", "", "set the ticket prompt")
+	notes := fs.String("notes", "", "REPLACE the ticket notes")
+	appendNote := fs.String("append-note", "", "append text to the ticket notes (blank-line separated)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -265,10 +297,17 @@ func ticketSet(cfg config.Config, args []string) error {
 			req.Name = name
 		case "prompt":
 			req.Prompt = prompt
+		case "notes":
+			req.Notes = notes
+		case "append-note":
+			req.AppendNote = appendNote
 		}
 	})
-	if req.Name == nil && req.Prompt == nil {
-		return errors.New("ticket set: nothing to change (pass --name and/or --prompt)")
+	if req.Notes != nil && req.AppendNote != nil {
+		return errors.New("ticket set: --notes (replace) and --append-note are mutually exclusive")
+	}
+	if req.Name == nil && req.Prompt == nil && req.Notes == nil && req.AppendNote == nil {
+		return errors.New("ticket set: nothing to change (pass --name, --prompt, --notes, or --append-note)")
 	}
 	c := daemonClient(cfg)
 	resp, err := c.TicketSet(context.Background(), req)
@@ -304,6 +343,7 @@ func ticketSetStatus(cfg config.Config, args []string) error {
 	id := fs.String("id", "", "ticket id (required)")
 	status := fs.String("status", "", "triage|ready|active|done|dropped (required)")
 	thread := fs.String("thread", "", "thread to bind (required for active)")
+	note := fs.String("note", "", "append a note to the ticket as part of this status change (e.g. on close)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -312,7 +352,7 @@ func ticketSetStatus(cfg config.Config, args []string) error {
 		return errors.New("ticket set-status: --id and --status are required")
 	}
 	c := daemonClient(cfg)
-	resp, err := c.TicketSetStatus(context.Background(), api.SetStatusRequest{ID: *id, Status: *status, ThreadID: *thread})
+	resp, err := c.TicketSetStatus(context.Background(), api.SetStatusRequest{ID: *id, Status: *status, ThreadID: *thread, Note: *note})
 	if err != nil {
 		return err
 	}

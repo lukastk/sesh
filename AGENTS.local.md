@@ -1070,25 +1070,51 @@ copy-prompt-expansion composed end-to-end. Full blob+ticket conformance suite gr
 ssh+agents). GOTCHAS: termux /tmp UNWRITABLE (build + logs → $HOME); termux daemon needed a hard
 pkill -9 + socket rm to drop a stale schema-13 instance before the schema-14 one served blobs.
 
-## NEXT (planned, not started) — ticket-note rewrite drives 2 sesh API additions (2026-06-16)
-Design + ALL decisions locked in `~/mysetup/mysystem/_dev/TICKET_NOTE_REWRITE.md` (committed,
-mysystem e5a9564). The Obsidian "ticket note" is being rewritten as a sesh-v2 API client
-(sesh knows nothing about notes; the note is a draft→submit→live projection that polls its
-sesh ticket via the API → mobile-capable). The bulk is mysystem/mysystem-obsidian plugin
-work; the SESH-side work is just TWO additive API features (do these FIRST — they're the
-only blockers):
-1. **Mesh-wide ticket lookup** `GET /v1/tickets/find?id=<id>` — fan out across the mesh
-   (tickets are per-daemon, spread across machines; today `ticket get/list` are
-   local/owner-routed only, NO fan-out). Returns the ticket + its bound thread's
-   {machine,name,parent} in ONE call (powers the note's decorator-sync + top panel). EFFICIENCY:
-   the note polls on an interval, so `find` should read the hub's existing mesh-sync CACHE,
-   not live-fan-out per call — likely means extending the mesh snapshot to carry ticket
-   records keyed by id (today it carries threads + per-thread ticket *summaries* only). Decide
-   replicate-vs-fanout at impl.
-2. **`closed_at_unix`** on the ticket record — set when status → done/dropped (today only
-   `created_at_unix`). The note shows the done/scrapped timestamp + done/dropped → HP-consolidate.
-Both additive (schema bump, mixed-mesh safe) → deploy all 4 + the usual live smoke. Everything
-else (link→blob flattening, recursive nothing — DROPPED, blob layer unchanged) is plugin-side.
-The proposal also flags prereqs for the API-only/mobile goal: local daemons must expose the TCP
-API on 127.0.0.1, ONE shared SESH_API_TOKEN across the mesh, and an always-on box running a sesh
-daemon as the mobile fallback hub.
+## H19 — sesh API for the ticket-note rewrite: mesh-wide `ticket find` + `closed_at_unix` (2026-06-16, sesh 32d8263; api schema 14→15; deployed ALL FOUR)
+The 2 sesh-side blockers for the Obsidian ticket-note rewrite (design + ALL decisions locked
+in `~/mysetup/mysystem/_dev/TICKET_NOTE_REWRITE.md`, mysystem e5a9564; the note becomes a
+sesh API client, sesh knows nothing about notes). Everything else is plugin-side (NOT started).
+1. **Mesh-wide ticket lookup** `GET /v1/tickets/find?id=<id>` (`internal/daemon/ticketfind.go`).
+   Tickets are per-daemon; the note must resolve a ticket-id without knowing its machine. The
+   invoked daemon resolves its OWN store first, else fans out to every peer in PARALLEL — each
+   answering local-only (`&local=1`, no recursion) over the peer's explicit http/ssh transport —
+   first hit wins. Returns the ticket record + its owning machine + bound-thread
+   {id,name,parent,machine} in ONE call. **found=false is a 200, NOT a 404** (a draft note has
+   no ticket, a deleted ticket resolves to nothing — a legit state the note uses for validation);
+   Unreachable[] surfaces peers the fan-out couldn't reach so a not-found is never silently
+   incomplete. **DECISION (proposal left it open): LIVE fan-out, NOT cache-backed snapshot
+   replication** — always-correct (reads the authoritative store), far less code, avoids
+   threading ticket records through the ssh-JSONL snapshot transport + a cache-format/rollout
+   hazard; fine at 4 machines (if poll-load ever bites, cache-backed is a clean follow-up).
+   Wired: daemon handler+fanout, client.TicketFind, CLI `sesh ticket find --id [--local] [--json]`.
+   On the SHARED router → automatically exposed over the TCP API behind the bearer token (the
+   plugin's transport — verified `d.routes()` wraps routesTickets, apiSrv wraps d.routes()).
+2. **`closed_at_unix`** on the ticket record (migration 14: `tickets.closed_at`). SetTicketStatus
+   now takes the daemon's clock and stamps closed_at on the FIRST done/dropped transition,
+   PRESERVES it across an idempotent re-set, CLEARS it to 0 on reopen (one SQL CASE; store never
+   calls time.Now — daemon owns the clock, mirroring created_at). New `ticket get --field closed`.
+TESTS: store unit (stamp/preserve/clear); conformance **ticket.find** (Remote, real ssh fan-out
+hub→peer — carried thread context + closed_at + found=false; ✓ live) + closed_at folded into
+ticket.set-status. Blast-radius gate (ticket|blob|mesh|route|api|daemon.mesh-read, 1200s) GREEN
+108s — incl. the http-transport mesh cells that exercise the same fan-out path. (The FULL 203-cell
+suite times out at the default 10m under the box's load — known, not a regression; ran the
+blast-radius subset instead.) help registry/flags + sesh-cli/do-tickets SKILLs updated.
+DEPLOY (schema 15 = daemon RESTART): ALL FOUR on 32d8263. mymain (native build .new+mv +
+supervisorctl restart sesh-daemon; live-smoked find local-hit + closed_at + found=false),
+macstudio=cij@macstudio + macbook=lukas@macbook (pull+build+restart), termux=lukas@android-main:8022
+(build to ~/.local/bin/sesh.new — /tmp unwritable — + pkill 'sesh daemon run' + setsid nohup
+relaunch with the env read from /proc/<pid>/environ: SESH_HOME/MACHINE=termux/TMUX_SOCKET=sesh/
+MASTER_SOCKET=sesh-master/TMUX_CONF/API_TOKEN_FILE). mymain's PEERS are macbook+macstudio over
+**http** (`:7878`) — so its find fan-out uses the http path. KILLER PROOF (real network): a ticket
+created on macstudio resolved by `sesh ticket find` invoked on mymain → found=True machine=macstudio
+unreachable=None (BEFORE the peers were upgraded the same find showed `unreachable:[macbook
+macstudio]` — their schema-14 daemons 404'd the find route; the additive/mixed-mesh-safe rollout in
+action). Nothing in myrig changed (no cockpit surface touched).
+NEXT (plugin work, NOT started): per the proposal §10 — Obsidian sesh API client
+(`src/sesh/client.ts`, fetch-based, mobile-capable) → TicketNote rewrite (frontmatter w/ managed
+`sesh-ticket-data`, datestamp validation, prompt-from-body w/ `# Prompt` override, link→blob
+client-side flattening + cycle detection, decorator from cached status, consolidation repoint) →
+shared `src/ticket/actions.ts` (submit/attach/move/send/status/delete + create-thread modal) →
+`TicketPanel.svelte` + command overrides → Create-ticket/Create-inline/Task-to-ticket/Create-thread.
+Connectivity: local-first + fallback (mobile→fallback). Prereqs flagged in §7: local daemons expose
+TCP API on 127.0.0.1, ONE shared SESH_API_TOKEN across the mesh, an always-on fallback hub.

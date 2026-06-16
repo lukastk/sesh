@@ -1126,7 +1126,19 @@ flowed daemon→find→note (closedAt stamped); needsConsolidation flipped true 
 (proposal §7) MET: macbook+macstudio expose the TCP API on `:7878` (the tailscale hostname, NOT
 127.0.0.1 — the plugin's local endpoint is `macbook:7878`), shared SESH_API_TOKEN (identical sha
 on both macs). Plugin data.json on macbook configured: sesh_api_token + sesh_local_endpoint=
-macbook:7878 + sesh_fallback_endpoint=macstudio:7878 (backup at data.json.bak). DEFERRED (flagged):
-the deploy-to-new-thread modal takes cwd as a path; box/mysetup-folder cwd pickers are a later
-convenience. NOT done: the plugin is installed only on macbook (where Obsidian runs); macstudio
-(fallback) + mobile would need the plugin + settings too if used there.
+macbook:7878 + sesh_fallback_endpoint=macstudio:7878 (backup at data.json.bak).
+FOLLOW-UP DONE (mysystem 1ca6342): the deferred cwd pickers — the deploy-to-new-thread modal now
+picks cwd from a boxyard BOX (cached BoxyardService, reads boxyard_meta.json + config off disk; no
+CLI; resolves `<user_boxes_path>/<index>`) or a `~/mysetup` folder (Node fs readdirSync); a picked
+path is local so it sets machine=local (no silent cross-machine wrong path; mobile no-ops the
+pickers). FULL LIVE SMOKE on macbook's Obsidian (driving modals via the obsidian-CLI eval +
+DOM-injection technique from AGENTS.md): box picker = 133 boxes resolving to /Users/lukas/dev/<i>,
+mysetup = 9 folders; submit (name modal editable default=note-name-sans-datestamp, draft→live,
+ticket-id + sesh-ticket-data written); materialize (inline [[md]] + ![[image]]→@blob upload, token
+expands to a real blob path, no raw [[ left); set-status picker→ready; unsubmit (sesh ticket
+deleted, note→draft); sync decorator triage 📥→done ✅ + closed_at + needsConsolidation. All smoke
+artifacts cleaned up. macbook source pulled to 1ca6342 (matches the deployed main.js).
+STILL NOT done: the plugin is installed only on macbook (where Obsidian runs); macstudio (fallback)
++ mobile would need the plugin + settings too if used there. Heavyweight paths not live-driven
+(would spawn real agents): actually spawning a thread via attach-to-new + the cross-machine ticket
+move — but threadNew is a documented sesh endpoint and `ticket move` was proven in the sesh phase.

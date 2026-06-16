@@ -421,6 +421,27 @@ func testTicketListAll(t *testing.T) {
 	if e.ThreadParent != parentTh.ID {
 		t.Errorf("peer ticket thread_parent = %q, want the parent thread %q", e.ThreadParent, parentTh.ID)
 	}
+	// Live thread → not archived yet.
+	if e.ThreadArchived {
+		t.Errorf("peer ticket thread_archived = true, want false for a live thread")
+	}
+
+	// Archive the bound thread on the peer; the bound ticket's entry must now report
+	// thread_archived (the "open ticket stranded in an archived thread" signal).
+	if _, stderr, err := peer.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+		t.Fatalf("archive peer thread: %v\n%s", err, stderr)
+	}
+	entries = hub.ticketListAll(t)
+	byID = map[string]api.TicketListEntry{}
+	for _, e := range entries {
+		byID[e.Ticket.ID] = e
+	}
+	if e := byID[peerID]; !e.ThreadArchived {
+		t.Errorf("after archiving the bound thread, peer ticket thread_archived = false, want true (%+v)", e)
+	}
+	if e := byID[hubID]; e.ThreadArchived {
+		t.Errorf("unbound hub ticket thread_archived = true, want false")
+	}
 }
 
 // testTicketOwnership asserts the single-writer ownership model: a NON-owner

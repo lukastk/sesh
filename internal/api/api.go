@@ -51,7 +51,15 @@ package api
 // config, overridable per call). Also multi-line prompts now deliver via bracketed paste
 // (newlines preserved). Additive request field → mixed-mesh safe (a pre-16 daemon ignores
 // `prepend` and never prepends).
-const SchemaVersion = 18
+// 17: free-text `notes` on the ticket record + mesh-wide `GET /v1/tickets/list-all`
+// (every ticket across the mesh, each stamped with its owning machine + bound-thread
+// name) powering the Obsidian ticket browser / bulk reconcile. Additive → mixed-mesh safe.
+// 18: `thread_parent` added to the list-all entry (the bound thread's parent id) for
+// snapshot parity with the per-ticket find. Additive omitempty → mixed-mesh safe.
+// 19: `thread_archived` added to the list-all entry (the bound thread is archived) so a
+// ticket browser can surface open tickets stranded in archived threads without a
+// per-thread round-trip. Additive omitempty → mixed-mesh safe.
+const SchemaVersion = 19
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

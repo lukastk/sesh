@@ -86,6 +86,10 @@ type TicketListEntry struct {
 	// per-ticket find snapshot (SeshTicketData.thread.parent), so a bulk reconcile
 	// produces the same cached snapshot a find would.
 	ThreadParent string `json:"thread_parent,omitempty"`
+	// ThreadArchived is true when the bound thread is archived (omitempty, so it is
+	// absent for unbound tickets and for live threads). Lets a ticket browser surface
+	// "open tickets stranded in archived threads" without a per-thread round-trip.
+	ThreadArchived bool `json:"thread_archived,omitempty"`
 }
 
 // TicketListAllResponse is returned by GET /v1/tickets/list-all: every ticket on

@@ -281,3 +281,39 @@ func TestMasterCursorAsyncAndNestedJump(t *testing.T) {
 		t.Errorf("empty preselect should not move the cursor")
 	}
 }
+
+// TestFilterExcludesChildThreadsByDefault: a filter query searches only top-level
+// threads by default; child threads (Parent != "") are excluded until ^k toggles
+// filterChildren on.
+func TestFilterExcludesChildThreadsByDefault(t *testing.T) {
+	mm := Model{
+		rows: []api.ThreadRow{
+			{Thread: api.Thread{ID: "p", Name: "alpha-parent"}},
+			{Thread: api.Thread{ID: "c", Name: "alpha-child", Parent: "p"}},
+			{Thread: api.Thread{ID: "r", Name: "alpha-root"}},
+		},
+		filter:   "alpha",
+		expanded: map[string]bool{},
+	}
+	ids := func() map[string]bool {
+		out := map[string]bool{}
+		for _, tr := range mm.visibleMatches() {
+			out[tr.row.ID] = true
+		}
+		return out
+	}
+	// Default: child "c" excluded; top-level "p" and "r" kept.
+	got := ids()
+	if got["c"] {
+		t.Errorf("default filter must EXCLUDE child thread c; visible=%v", got)
+	}
+	if !got["p"] || !got["r"] {
+		t.Errorf("default filter must keep top-level threads p,r; visible=%v", got)
+	}
+	// Toggle on: the child is now included.
+	mm.filterChildren = true
+	got = ids()
+	if !got["c"] || !got["p"] || !got["r"] {
+		t.Errorf("filterChildren=on must include the child; visible=%v", got)
+	}
+}

@@ -186,6 +186,11 @@ type Model struct {
 	filter      string
 	filterCaret int
 	target      filterTarget
+	// filterChildren: when filtering, whether to include CHILD threads (those with a
+	// parent) in the results. Default false — a query searches only top-level threads;
+	// ^k in the filter prompt toggles it (children of a tree you're navigating are
+	// usually noise when you're searching by name).
+	filterChildren bool
 
 	// columns is the visible column set (validated names; see columns.go).
 	// userHome powers the CWD column's ~-relative display; cwdLabeler, when set,

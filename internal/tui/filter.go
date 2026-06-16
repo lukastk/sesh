@@ -115,6 +115,19 @@ func (m *Model) visibleMatches() []treeRow {
 		}
 	}
 	if m.filter != "" {
+		// By default a query searches only top-level threads; child threads (those with
+		// a parent) are excluded unless filterChildren is toggled on (^k) — children of a
+		// tree are usually noise when searching by name.
+		if !m.filterChildren {
+			kept := matched[:0]
+			for _, rm := range matched {
+				if rm.row.Parent != "" {
+					continue
+				}
+				kept = append(kept, rm)
+			}
+			matched = kept
+		}
 		sort.SliceStable(matched, func(i, j int) bool {
 			if matched[i].score != matched[j].score {
 				return matched[i].score > matched[j].score // best first (v2 is top-down)
@@ -231,7 +244,12 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m, m.navSelected()
-	case "up", "ctrl+k":
+	case "ctrl+k":
+		// Toggle whether child threads are included in the filter results.
+		m.filterChildren = !m.filterChildren
+		m.clampCursor()
+		return m, nil
+	case "up":
 		m.moveCursor(-1)
 		return m, nil
 	case "down", "ctrl+j":
@@ -308,6 +326,20 @@ func (m *Model) moveCursor(delta int) {
 	m.cursor = (m.cursor + delta + n) % n
 }
 
+// clampCursor keeps the cursor within the current visible range after the row set
+// changes size (e.g. toggling filterChildren).
+func (m *Model) clampCursor() {
+	n := len(m.visibleMatches())
+	switch {
+	case n == 0:
+		m.cursor = 0
+	case m.cursor >= n:
+		m.cursor = n - 1
+	case m.cursor < 0:
+		m.cursor = 0
+	}
+}
+
 // renderFilterPrompt renders the filter line: `> query` with a caret block,
 // and right-aligned the target label, its ^t hint, and the match count.
 func (m *Model) renderFilterPrompt(matched, total int) string {
@@ -317,7 +349,11 @@ func (m *Model) renderFilterPrompt(matched, total int) string {
 	}
 	q := string(r[:m.filterCaret]) + "█" + string(r[m.filterCaret:])
 	left := "> " + q
-	right := fmt.Sprintf("%s ^t→%s  %d/%d", m.target.label(), m.target.other(), matched, total)
+	kids := "off"
+	if m.filterChildren {
+		kids = "on"
+	}
+	right := fmt.Sprintf("%s ^t→%s  ^k children:%s  %d/%d", m.target.label(), m.target.other(), kids, matched, total)
 	gap := m.width - len([]rune(left)) - len([]rune(right))
 	if gap < 1 {
 		gap = 1

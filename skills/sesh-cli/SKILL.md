@@ -161,7 +161,8 @@ Keymap (normal mode):
 mouse wheel  move selection up/down; Shift+wheel (or wheel left/right) pans columns
 enter        nav: switch your tmux client to the thread (or attach from a plain shell;
              a headless thread is promoted, a dead one resumed first)
-/            filter mode (fuzzy; ^t cycles the search target; esc applies)
+/            filter mode (fuzzy; ^t cycles the search target; ^k toggles searching
+             child threads — off by default; esc applies)
 tab          cycle views (active / archived / all / custom [[tui.views]])
 r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
 t            add tag                T          remove tag (picker)

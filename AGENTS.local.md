@@ -1110,11 +1110,23 @@ created on macstudio resolved by `sesh ticket find` invoked on mymain → found=
 unreachable=None (BEFORE the peers were upgraded the same find showed `unreachable:[macbook
 macstudio]` — their schema-14 daemons 404'd the find route; the additive/mixed-mesh-safe rollout in
 action). Nothing in myrig changed (no cockpit surface touched).
-NEXT (plugin work, NOT started): per the proposal §10 — Obsidian sesh API client
-(`src/sesh/client.ts`, fetch-based, mobile-capable) → TicketNote rewrite (frontmatter w/ managed
-`sesh-ticket-data`, datestamp validation, prompt-from-body w/ `# Prompt` override, link→blob
-client-side flattening + cycle detection, decorator from cached status, consolidation repoint) →
-shared `src/ticket/actions.ts` (submit/attach/move/send/status/delete + create-thread modal) →
-`TicketPanel.svelte` + command overrides → Create-ticket/Create-inline/Task-to-ticket/Create-thread.
-Connectivity: local-first + fallback (mobile→fallback). Prereqs flagged in §7: local daemons expose
-TCP API on 127.0.0.1, ONE shared SESH_API_TOKEN across the mesh, an always-on fallback hub.
+PLUGIN WORK — DONE (mysystem 73dcadf, rebased→706d43b; deployed + live-smoked on macbook
+2026-06-16). The whole Obsidian ticket-note rewrite landed in the mysystem repo (NOT sesh):
+sesh API client (`src/sesh/client.ts`, Obsidian requestUrl, no-CORS/mobile, local-first+fallback)
+→ TicketNote rewrite (managed nested `sesh-ticket-data`, datestamp validation, prompt-from-body
+w/ `# Prompt`, link→blob flattening + cycle detection, decorator/consolidation from cached status)
+→ shared `src/ticket/actions.ts` (submit/attach/move/send/status/update-prompt/unsubmit/sync) +
+materialize + create-thread modal → `TicketPanel.svelte` + sync-service (open + interval) →
+commands (ticket-actions/create-ticket/create-inline-ticket; task-to-ticket retargeted; v1
+deploy/revive/auto-deploy/_ticket-cli removed). 15 ticket unit tests + full mysystem suite (99)
+green. LIVE SMOKE on macbook's running Obsidian: plugin loaded + all 11 ticket commands
+registered; `ticket-sync` hit the sesh API over requestUrl and wrote the nested sesh-ticket-data
+into the note's YAML (live round-trip); decorator tracked status triage 📥 → done ✅; `closed_at`
+flowed daemon→find→note (closedAt stamped); needsConsolidation flipped true on done. Connectivity
+(proposal §7) MET: macbook+macstudio expose the TCP API on `:7878` (the tailscale hostname, NOT
+127.0.0.1 — the plugin's local endpoint is `macbook:7878`), shared SESH_API_TOKEN (identical sha
+on both macs). Plugin data.json on macbook configured: sesh_api_token + sesh_local_endpoint=
+macbook:7878 + sesh_fallback_endpoint=macstudio:7878 (backup at data.json.bak). DEFERRED (flagged):
+the deploy-to-new-thread modal takes cwd as a path; box/mysetup-folder cwd pickers are a later
+convenience. NOT done: the plugin is installed only on macbook (where Obsidian runs); macstudio
+(fallback) + mobile would need the plugin + settings too if used there.

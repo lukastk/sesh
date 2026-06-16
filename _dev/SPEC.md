@@ -149,6 +149,15 @@ As v1, mutations route to the owning machine's daemon (single writer), which exe
 - sesh provides: create/read/update tickets; `sesh ticket send-prompt --to-thread` (deliver the ticket's prompt to its bound thread); `sesh ticket list --thread <id>` (what an agent is assigned); the agent may call `sesh ticket set-status done`.
 - sesh does **not** track "was the prompt sent?" — there is no such state. Attaching a ticket to a thread and sending the prompt is **myrig's** job (an easy shell+keybinding flow). sesh just makes the underlying actions clean and explicit.
 
+### Blobs — files & images in prompts (added 2026-06-15)
+
+A prompt is text, so a **file** (image, log, anything) is referenced by a token and expanded to a real path on delivery; the agent reads the path (claude's Read tool / codex `-i` / pi `@path` all ingest a file/image from a path).
+
+- **Store:** content-addressed, pure filesystem — `<SESH_HOME>/blobs/<sha256>/<name>`. The hash dir is the content address (identical bytes dedup); the file keeps its original name so the path has a real extension. No DB/schema. Exposed via daemon endpoints (routes per `--machine` like everything).
+- **Token:** `@blob(<hex-prefix>)` — a prefix of the content hash (stable across machines: same bytes → same hash → same prefix), resolved by prefix. Escape a literal with `@@blob(…)`.
+- **Expansion** (`blob expand`, and automatic on `ticket send-prompt` / `thread send` / `send-headless`, and on the cockpit's copy-prompt): each token → the blob's absolute path on the target daemon. A token resolving to **no blob is a loud error**, never sent verbatim.
+- **`sesh ticket move --id --to [--from]`** is **daemon-coordinated**: the invoked daemon (the hub — only it must reach both ends) pulls the record *and every `@blob()` its prompt references* from the source and pushes them to the destination, then deletes the source (never before the push succeeds). This is what keeps a ticket co-located with its bound thread when a cross-machine bind relocates it — with its files carried along. (Cross-daemon data movement is the daemon's job, not a CLI script.)
+
 This is the v1 `tickets` thesis pushed all the way: *project a lifecycle onto threads; don't build a parallel world.* Folding tickets into sesh specifically **deletes `vaulthost.py`** — the SSH-re-exec vault-sync bridge existed only because "the note IS the database" collided with an eventually-consistent vault. With tickets as first-class single-writer sesh records, that whole class of bug (which lost a real ticket's binding mid-run) disappears. Obsidian integration becomes an **API client** (§5), not markdown-as-database.
 
 ---

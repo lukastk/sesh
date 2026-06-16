@@ -29,6 +29,15 @@ sesh ticket set-status --id <id> --status active --thread <thread-id>
 `--id` takes the full ticket UUID (from `ticket list`). Commands auto-route to wherever
 the ticket lives, so acting on your own thread's tickets just works.
 
+A prompt may reference files/images as **`@blob(<hex>)`** tokens. When the prompt is
+*delivered* to you (`send-prompt`) these are already expanded to real paths you can read.
+If you read the prompt **raw** with `ticket get --field prompt`, the tokens are NOT
+expanded — pipe through `sesh blob expand` to resolve them to paths:
+
+```bash
+sesh ticket get --id <id> --field prompt | sesh blob expand   # @blob(..) → real file paths
+```
+
 Other ops: `ticket create --name <n> [--prompt <t>]`, `ticket set --id <id> [--name|--prompt]`,
 `ticket send-prompt --id <id>` (type the prompt into the bound thread's pane),
 `ticket delete --id <id>`. (`sesh ticket --help` for the rest.)

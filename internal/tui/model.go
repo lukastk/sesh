@@ -321,6 +321,15 @@ func (m Model) WithExec(binaryPath string, env []string) Model {
 	return m
 }
 
+// WithNavEnv sets extra env appended (last-wins) to every nav subprocess's
+// environment — used to inject the daemon's SESH_* identity (home, machine,
+// tmux/master sockets) so `sesh tmux nav` / `thread resume` resolve the right
+// servers even when the TUI was launched without that env (a `zsh -fc` popup).
+func (m Model) WithNavEnv(env []string) Model {
+	m.navEnv = env
+	return m
+}
+
 // PendingAttach reports whether the TUI quit to attach the terminal to a thread, and
 // if so returns the argv to exec (`sesh tmux nav --to <target> --attach`). The caller
 // (runTUI) execs it AFTER the TUI has exited and restored the terminal.

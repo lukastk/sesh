@@ -54,6 +54,13 @@ type TUIConfig struct {
 	//	mouse_scroll_h = 2
 	MouseScrollV int `toml:"mouse_scroll_v"`
 	MouseScrollH int `toml:"mouse_scroll_h"`
+	// AllMachines makes `sesh tui` default to the cross-machine view (every mesh
+	// machine, not just self) — the same as passing --all-machines. Lets the popup
+	// bindings launch the TUI WITHOUT the shell wrapper that used to add the flag.
+	//
+	//	[tui]
+	//	all_machines = true
+	AllMachines bool `toml:"all_machines"`
 }
 
 // ScrollV / ScrollH resolve the effective wheel divisor (unset/0 → 1).

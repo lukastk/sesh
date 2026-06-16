@@ -52,3 +52,27 @@ color = "green"
 		t.Errorf("a negative mouse_scroll_v should be a loud error")
 	}
 }
+
+// TestLoadTUIAllMachines covers the [tui] all_machines default (makes the TUI a
+// cross-machine view without --all-machines / the shell wrapper).
+func TestLoadTUIAllMachines(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, "[tui]\nall_machines = true\n")
+	c, err := LoadTUI(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || !c.AllMachines {
+		t.Fatalf("all_machines = true not parsed: %+v", c)
+	}
+	// Unset → false (self-only default).
+	home2 := t.TempDir()
+	writeConfig(t, home2, "[tui]\ncolumns = [\"name\"]\n")
+	c2, err := LoadTUI(home2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.AllMachines {
+		t.Errorf("all_machines should default to false when unset")
+	}
+}

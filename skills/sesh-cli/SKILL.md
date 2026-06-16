@@ -342,6 +342,7 @@ label = 'mysetup/{rel}'
 
 [tui]
 columns = ["machine","agent","name","cwd","tags","notify"]
+all_machines = true              # default `sesh tui` to the cross-machine view (= --all-machines)
 [[tui.column_color]]             # NAME blue / CWD green by default; override here
 name = "cwd"
 color = "green"

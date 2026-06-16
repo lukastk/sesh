@@ -59,7 +59,12 @@ package api
 // 19: `thread_archived` added to the list-all entry (the bound thread is archived) so a
 // ticket browser can surface open tickets stranded in archived threads without a
 // per-thread round-trip. Additive omitempty → mixed-mesh safe.
-const SchemaVersion = 19
+// 20: daemon identity on GET /v1/status — `tmux_socket`/`master_socket`/`home`, so the
+// TUI learns its machine + work/master sockets from the daemon rather than its own
+// SESH_* env (lets a fast `zsh -fc` popup launch `sesh tui` with no shell wrapper).
+// Additive omitempty → mixed-mesh safe (a pre-20 daemon just omits them; the client
+// falls back to its env-derived config).
+const SchemaVersion = 20
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {
@@ -72,6 +77,13 @@ type StatusResponse struct {
 	DBPath        string `json:"db_path"`
 	SocketPath    string `json:"socket_path"`
 	SchemaVersion int    `json:"schema_version"`
+	// Daemon IDENTITY (schema 20): the machine + tmux sockets + home this daemon
+	// owns, so a client (the TUI) can learn them from the daemon instead of from
+	// its own SESH_* env — making `sesh tui` work correctly even when launched
+	// without the shell wrapper that exports those (e.g. a fast `zsh -fc` popup).
+	TmuxSocket   string `json:"tmux_socket,omitempty"`
+	MasterSocket string `json:"master_socket,omitempty"`
+	Home         string `json:"home,omitempty"`
 }
 
 // ErrorResponse is the uniform error body.

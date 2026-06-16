@@ -62,6 +62,9 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 		DBPath:        d.cfg.DBPath(),
 		SocketPath:    d.cfg.SocketPath(),
 		SchemaVersion: schemaVer,
+		TmuxSocket:    d.cfg.TmuxSocket,
+		MasterSocket:  d.cfg.MasterSocket,
+		Home:          d.cfg.Home,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

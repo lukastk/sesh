@@ -442,7 +442,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"tui": {
-		{"--all-machines", "show threads from every machine in the mesh"},
+		{"--all-machines", "show threads from every machine in the mesh (also defaults on via [tui] all_machines in config.toml)"},
 		{"--cursor", "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)"},
 		{"--filter", "start in filter mode (type-to-narrow immediately)"},
 		{"--expand", "start with tree nodes expanded (default from [tui] expand_children in config.toml)"},

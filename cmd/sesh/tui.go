@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -87,7 +89,40 @@ func runTUI(args []string) error {
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
 	}
-	m := tui.New(cfg.SocketPath(), *allMachines).WithLocal(cfg.Machine, cfg.TmuxSocket).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
+	// Learn IDENTITY from the daemon (its machine + work/master sockets + home) so the
+	// TUI resolves the right machine/socket for nav even when launched WITHOUT the SESH_*
+	// env — i.e. a fast `zsh -fc` popup with no shell wrapper. The env-derived cfg
+	// (SESH_MACHINE/SESH_TMUX_SOCKET, hostname/"mytmux" when unset) is the fallback for a
+	// pre-schema-20 daemon or an unreachable one. The daemon's identity is also injected
+	// into nav subprocesses (navEnv) so `sesh tmux nav` / `thread resume` target the right
+	// servers regardless of the TUI's own env.
+	localMachine, localSocket := cfg.Machine, cfg.TmuxSocket
+	var navEnv []string
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		st, serr := daemonClient(cfg).Status(ctx)
+		cancel()
+		if serr == nil {
+			if st.Machine != "" {
+				localMachine = st.Machine
+			}
+			if st.TmuxSocket != "" {
+				localSocket = st.TmuxSocket
+			}
+			for _, kv := range [][2]string{
+				{"SESH_HOME", st.Home}, {"SESH_MACHINE", st.Machine},
+				{"SESH_TMUX_SOCKET", st.TmuxSocket}, {"SESH_MASTER_SOCKET", st.MasterSocket},
+			} {
+				if kv[1] != "" {
+					navEnv = append(navEnv, kv[0]+"="+kv[1])
+				}
+			}
+		}
+	}
+	// --all-machines from the flag OR the [tui] all_machines config default (the latter
+	// lets the popup bindings drop the wrapper that used to add the flag).
+	useAllMachines := *allMachines || (tcfg != nil && tcfg.AllMachines)
+	m := tui.New(cfg.SocketPath(), useAllMachines).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

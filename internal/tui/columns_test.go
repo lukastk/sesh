@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -283,7 +284,7 @@ func TestMasterCursorAsyncAndNestedJump(t *testing.T) {
 }
 
 // TestFilterExcludesChildThreadsByDefault: a filter query searches only top-level
-// threads by default; child threads (Parent != "") are excluded until ^k toggles
+// threads by default; child threads (Parent != "") are excluded until ^y toggles
 // filterChildren on.
 func TestFilterExcludesChildThreadsByDefault(t *testing.T) {
 	mm := Model{
@@ -315,5 +316,45 @@ func TestFilterExcludesChildThreadsByDefault(t *testing.T) {
 	got = ids()
 	if !got["c"] || !got["p"] || !got["r"] {
 		t.Errorf("filterChildren=on must include the child; visible=%v", got)
+	}
+}
+
+// TestFilterChildToggleKeyIsCtrlY proves the ^k/^y rebinding: in filter mode ^k
+// moves the selection UP (the symmetric partner of ^j = down) and ^y toggles the
+// include-children search. The old binding had ^k toggle children, shadowing the
+// move-up key.
+func TestFilterChildToggleKeyIsCtrlY(t *testing.T) {
+	mm := Model{
+		filtering: true,
+		rows: []api.ThreadRow{
+			{Thread: api.Thread{ID: "p", Name: "alpha-one"}},
+			{Thread: api.Thread{ID: "r", Name: "alpha-two"}},
+		},
+		filter:   "alpha",
+		expanded: map[string]bool{},
+		cursor:   1, // on the 2nd visible match
+	}
+	step := func(kt tea.KeyType) { m2, _ := mm.handleFilterKey(tea.KeyMsg{Type: kt}); mm = m2.(Model) }
+
+	// ^k moves the selection up (1 -> 0) and does NOT toggle children.
+	step(tea.KeyCtrlK)
+	if mm.cursor != 0 {
+		t.Errorf("^k should move the selection up to 0, got cursor=%d", mm.cursor)
+	}
+	if mm.filterChildren {
+		t.Errorf("^k must NOT toggle filterChildren")
+	}
+
+	// ^y toggles children and does NOT move the selection.
+	step(tea.KeyCtrlY)
+	if !mm.filterChildren {
+		t.Errorf("^y should toggle filterChildren on")
+	}
+	if mm.cursor != 0 {
+		t.Errorf("^y must not move the selection, got cursor=%d", mm.cursor)
+	}
+	step(tea.KeyCtrlY)
+	if mm.filterChildren {
+		t.Errorf("^y should toggle filterChildren back off")
 	}
 }

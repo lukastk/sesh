@@ -116,7 +116,7 @@ func (m *Model) visibleMatches() []treeRow {
 	}
 	if m.filter != "" {
 		// By default a query searches only top-level threads; child threads (those with
-		// a parent) are excluded unless filterChildren is toggled on (^k) — children of a
+		// a parent) are excluded unless filterChildren is toggled on (^y) — children of a
 		// tree are usually noise when searching by name.
 		if !m.filterChildren {
 			kept := matched[:0]
@@ -244,12 +244,13 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m, m.navSelected()
-	case "ctrl+k":
+	case "ctrl+y":
 		// Toggle whether child threads are included in the filter results.
+		// (^y, not ^k — ^k stays the symmetric "move selection up" of ^j.)
 		m.filterChildren = !m.filterChildren
 		m.clampCursor()
 		return m, nil
-	case "up":
+	case "up", "ctrl+k":
 		m.moveCursor(-1)
 		return m, nil
 	case "down", "ctrl+j":
@@ -353,7 +354,7 @@ func (m *Model) renderFilterPrompt(matched, total int) string {
 	if m.filterChildren {
 		kids = "on"
 	}
-	right := fmt.Sprintf("%s ^t→%s  ^k children:%s  %d/%d", m.target.label(), m.target.other(), kids, matched, total)
+	right := fmt.Sprintf("%s ^t→%s  ^y children:%s  %d/%d", m.target.label(), m.target.other(), kids, matched, total)
 	gap := m.width - len([]rune(left)) - len([]rune(right))
 	if gap < 1 {
 		gap = 1

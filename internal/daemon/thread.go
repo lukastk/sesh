@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// A leading ~ is resolved against THIS (the owner) daemon's home, so a
+	// portable ~-relative cwd from a remote client (e.g. the Obsidian plugin
+	// deploying onto this machine) lands at the right absolute path on the
+	// machine that actually runs the agent. Done once, up front, so every
+	// spawn path (headed/headless/fork) sees the expanded cwd.
+	req.Cwd = expandHomeCwd(req.Cwd)
 	kind, err := agents.ParseKind(req.Agent)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -592,6 +599,24 @@ func (d *Daemon) paneChanging(pane string) (bool, error) {
 		prev = cur
 	}
 	return false, nil
+}
+
+// expandHomeCwd expands a leading ~ (or ~/…) in a thread cwd against THIS
+// daemon's home directory. A portable ~-relative path (the form the Obsidian
+// plugin sends when deploying onto another machine) thus resolves against the
+// OWNER's home — the home of the machine that runs the agent — not the
+// caller's. A cwd with no leading ~ is returned unchanged; if the home can't be
+// resolved the ~-path is left as-is so the caller's absolute-path check rejects
+// it loudly rather than guessing.
+func expandHomeCwd(cwd string) string {
+	if cwd != "~" && !strings.HasPrefix(cwd, "~/") {
+		return cwd
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return cwd
+	}
+	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(cwd, "~"), "/"))
 }
 
 // sanitizeName maps a thread name to a tmux-safe session suffix. tmux session

@@ -17,20 +17,21 @@ import (
 
 // absCwd expands a --cwd value to an absolute path relative to the process's
 // working directory — i.e. WHERE the command was invoked — so a relative path
-// (or a leading ~) just works (the daemon requires absolute). Empty stays empty
-// (the caller's own required-check handles that). Note: for a cross-machine
-// (--machine) spawn the expansion is still against the LOCAL cwd, so pass an
-// absolute path when the target dir only exists on the remote.
+// just works (the daemon requires absolute). Empty stays empty (the caller's own
+// required-check handles that).
+//
+// A leading ~ is left UNTOUCHED: ~ means "the OWNER machine's home", which only
+// the owning daemon can resolve correctly (it expands ~ against its own home).
+// Resolving it here would bake in the LOCAL home, which is wrong for a
+// cross-machine (--machine) spawn — the exact bug a ~-relative cwd is meant to
+// avoid. So a ~-relative cwd is portable across machines; a bare relative path
+// (./x) still expands locally because it only has meaning where you typed it.
 func absCwd(cwd string) (string, error) {
 	if cwd == "" {
 		return "", nil
 	}
 	if cwd == "~" || strings.HasPrefix(cwd, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		cwd = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(cwd, "~"), "/"))
+		return cwd, nil
 	}
 	return filepath.Abs(cwd)
 }

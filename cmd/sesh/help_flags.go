@@ -216,7 +216,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread new": {
 		{"--agent", "agent to spawn: claude | codex | pi (required)"},
-		{"--cwd", "start directory; relative or ~ ok, expanded against the invocation dir (default: the current dir '.')"},
+		{"--cwd", "start directory; a relative path expands against the invocation dir, a ~/… path resolves against the OWNER machine's home (portable cross-machine) (default: the current dir '.')"},
 		{"--name", "thread name (optional; empty = a nameless thread)"},
 		{"--headless", "spawn headless (a durable conversation with no tmux window)"},
 		{"--parent", "parent thread id/prefix (default: the CURRENT thread when run inside one)"},

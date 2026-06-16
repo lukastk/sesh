@@ -255,10 +255,13 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 >   from outside any thread.
 > - `--no-parent` — force a **root** thread regardless of context.
 
-`--cwd` accepts a **relative path or `~`** (expanded against the directory where you run
-the command — the daemon stores an absolute path) and **defaults to the current dir
-(`.`)** when omitted; pass an absolute path for a cross-`--machine` spawn, where the
-target dir lives on the remote.
+`--cwd` accepts a **relative path** (expanded against the directory where you run the
+command) or **`~` / `~/…`** and **defaults to the current dir (`.`)** when omitted. A
+leading `~` is **resolved by the OWNING daemon against THAT machine's home**, not the
+caller's — so a `~`-relative cwd is **portable across a `--machine` spawn** (e.g.
+`--cwd ~/proj --machine macbook` lands in macbook's `~/proj`). A bare relative path is
+only meaningful locally, so for a cross-machine spawn into a dir outside `~` pass an
+absolute path.
 
 ```bash
 sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)

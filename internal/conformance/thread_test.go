@@ -211,6 +211,13 @@ func testThreadStop(t *testing.T, agent string, loc matrix.Locality) {
 		t.Fatalf("agent never came up alive for stop test")
 	}
 
+	// An empty/omitted --id must be a LOUD "id required" error, never an inferred
+	// current-thread stop (ending the agent + session is destructive; an ambient guess
+	// is a footgun — same rule as `thread delete`).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", ""); err == nil || !strings.Contains(stderr, "required") {
+		t.Errorf("thread stop with empty --id must be a loud 'id required' error; err=%v stderr=%q", err, stderr)
+	}
+
 	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", th.ID); err != nil {
 		t.Fatalf("thread stop: %v\n%s", err, stderr)
 	}

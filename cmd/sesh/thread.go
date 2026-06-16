@@ -629,12 +629,19 @@ func threadStop(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	if *id == "" {
+		return errors.New("thread stop: --id is required")
+	}
+	// resolveIDPrefix, NOT resolveThreadID: stop ends the agent + tmux session
+	// (destructive), so it must never INFER the current thread from an empty id — an
+	// ambient guess is a footgun (same rule as `thread delete`). An explicit prefix
+	// resolves; an unknown one is loud.
+	c := daemonClient(cfg)
+	rid, err := resolveIDPrefix(c, *id)
 	if err != nil {
 		return err
 	}
 	*id = rid
-	c := daemonClient(cfg)
 	if err := c.ThreadStop(context.Background(), *id); err != nil {
 		return err
 	}

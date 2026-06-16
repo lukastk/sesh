@@ -1173,3 +1173,52 @@ Surfaced by the Obsidian ticket note sending a multi-paragraph prompt via the pa
 DEPLOY: sesh cbccc24 (schema 16 = daemon RESTART) on mymain/macstudio/macbook/termux (stop guard +
 schema 16 verified on each). Plugin 16a2242 on macbook (pull+build+install+reload; panel shows
 Send + Send raw; corruption fix verified). The user's note re-synced clean (status active).
+
+## H21 — portable ~ cwd, tui ^k/^y, thread_archived + the ticket-dashboard feature (2026-06-16; sesh 7e6a888/0109197/0ccda7a schema 18→19, mysystem 84b99df/32db53e/fb82e5a/f519f32; deployed ALL FOUR daemons + plugin on macbook)
+Three sesh changes + a mysystem ticket-dashboard feature (ticket f31fc492) + ticket ff48b03e.
+- **Portable ~ cwd (sesh 7e6a888, binary; no schema bump)**: the Obsidian new-thread modal's
+  box/mysetup pickers baked the LOCAL home into an absolute cwd → deploying that thread on a
+  remote machine pointed nowhere. Fix: the OWNER daemon resolves a leading ~ against ITS OWN
+  home (`expandHomeCwd` at top of handleThreadNew, before the absolute check + every spawn
+  branch). CLI `absCwd` now PASSES ~ THROUGH unchanged (was expanding locally) so ~ is portable
+  cross-machine; a bare relative path still expands against the invocation dir. Plugin
+  (create-thread-modal) renders picked paths ~-relative (`toHomeRelative`) + no longer pins the
+  machine for a ~-path. Tests: daemon TestExpandHomeCwd, cmd TestAbsCwd (now asserts ~
+  passthrough). Daemon-side change ⇒ RESTART to apply, but it's NOT a schema bump.
+- **tui ^k/^y (sesh 0109197, binary, ticket ff48b03e)**: in `/` filter mode ^k toggled
+  include-children, shadowing move-up. Restored ^k = move selection up (symmetric w/ ^j=down);
+  moved the child toggle to ^y. filter.go footer hint + SKILL + TestFilterChildToggleKeyIsCtrlY.
+- **thread_archived (sesh 0ccda7a, schema 18→19 = daemon RESTART)**: added to the list-all entry
+  (`api.TicketListEntry.ThreadArchived`, populated by the owning daemon from `archivedByID`), so
+  a ticket browser can find OPEN tickets stranded in ARCHIVED threads without a per-thread call.
+  Additive omitempty ⇒ mixed-mesh safe. conformance ticket.list-all archives the bound peer
+  thread + asserts the flip. Back-filled the 17/18 schema-history comments.
+- **mysystem ticket dashboard (ticket f31fc492)**: ticket-browser gained note-less +
+  archived-thread PRESET filters (toolbar toggles + BrowserOpts.noteless/archivedThread); new
+  `ms.sesh.*` obako-js helpers (getNotelessTickets/getArchivedThreadTickets/
+  addNotesForNotelessTickets/openTicketBrowser) in src/ticket/dashboard.ts, exposed in plugin.ts.
+  The vault note `bs/High-priority consolidations.md` got two obako-js blocks (buttons +
+  dynamic lists) under "# Note-less tickets" + "# Non-completed tickets in archived threads".
+  Live-verified end-to-end on macbook with synthetic data (both lists, both presets, the
+  add-notes button), then cleaned up.
+- **TWO plugin onReady FRAGILITIES uncovered + fixed (the deep lesson)**: the plugin's obako-js
+  global surface (ms.consolidation/ms.sesh/ms.openBoxyardBrowser/…) was set in onReady AFTER
+  BoxyardService.start(). BoxyardService reads its config via a dependency that does
+  `import("node:fs")` — a DYNAMIC import (variable specifier, so esbuild can't externalize it)
+  that REJECTS in Obsidian's renderer. Depending on esbuild's bundle ORDERING (which DIFFERS BY
+  BUILD HOST — a mymain-built bundle was healthy, the same source built on macbook aborted!),
+  that failure threw during init and aborted onReady before the globals were set → every
+  dashboard silently lost its `ms.*` helpers. Fixes: (1) lazy-import the dashboard module inside
+  the ms.sesh closures (fb82e5a) so onReady doesn't eager-load the browser chain; (2) move
+  startTicketSync + BoxyardService to the END of onReady, after all global exposures (f519f32) —
+  a boxyard failure can no longer strand the API surface. PROVEN by building on macbook (the
+  broken-bundle env) and confirming healthy. LESSON: a plugin built on machine A can work while
+  the SAME source built on machine B is broken if onload depends on bundle ordering — always
+  test the bundle built where it's deployed; expose stable globals BEFORE fragile I/O subsystems.
+DEPLOY (2026-06-16): all four daemons rebuilt+restarted to schema 19 (mymain/macstudio/macbook
+supervisorctl; termux pkill+setsid-nohup with explicit SESH_* env from shell.sh). Plugin
+(macbook only) pull+build+install+reload. KILLER PROOF for ~: a headless thread with --cwd
+~/mysetup stored /home/lukastk/mysetup; on termux ~/storage → /data/data/com.termux/files/home/storage.
+GOTCHA (re-confirmed): a stray `sesh daemon stop` with no isolated env hits the DEFAULT daemon —
+the supervised mymain daemon auto-restarted, but be careful. /proc/<pid>/environ is unreadable on
+termux — read the daemon env from shell.sh (~/.sesh, SESH_MACHINE=termux, sockets sesh/sesh-master).

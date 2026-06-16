@@ -1142,3 +1142,34 @@ STILL NOT done: the plugin is installed only on macbook (where Obsidian runs); m
 + mobile would need the plugin + settings too if used there. Heavyweight paths not live-driven
 (would spawn real agents): actually spawning a thread via attach-to-new + the cross-machine ticket
 move — but threadNew is a documented sesh endpoint and `ticket move` was proven in the sesh phase.
+
+## H20 — ticket-send fixes (newlines + prepend), frontmatter-corruption fix, stop-guard (2026-06-16; sesh cbccc24 schema 16, mysystem 16a2242; deployed ALL FOUR + plugin on macbook)
+Surfaced by the Obsidian ticket note sending a multi-paragraph prompt via the panel Send button.
+- **NEWLINES (sesh tmux.SendText)**: `send-keys -l` sent embedded `\n` as submitting Enters →
+  multi-paragraph prompts fired line-by-line, structure lost. Multi-line now delivers via
+  BRACKETED PASTE (set-buffer + paste-buffer -p): the agent buffers it as ONE input, trailing
+  Enter submits intact. Single-line keeps send-keys (no change). Real-tmux unit test (bracketed
+  paste preserves lines + nothing executed); all ticket.send-prompt cells (claude/codex/pi × loc)
+  pass; LIVE-verified on a pi thread (3 paragraphs intact).
+- **PREPEND (sesh)**: send-prompt prepends `Ticket "<name>" (<id>)\n\n` so the agent knows its
+  ticket. Default = `[ticket] send_prepend` in <SESH_HOME>/config.toml (built-in ON);
+  `--prepend`/`--no-prepend` override per call (SendPromptRequest.Prepend tri-state; config.LoadTicket).
+  api schema 15→16 (additive request field, mixed-mesh safe — pre-16 daemon ignores it). LIVE: pi
+  pane showed the header. Plugin: panel "Send raw" button + `ticket-send-prompt-raw` command (no header).
+- **FRONTMATTER CORRUPTION (plugin)**: on note open the panel mount-sync + the sync-service
+  file-open sync both fired; their async find()s returned together and both wrote sesh-ticket-data
+  via processFrontMatter CONCURRENTLY → corrupt YAML (a DUPLICATED `sesh-ticket-data:` block in the
+  user's note; processFrontMatter ERRORS on the dup → the note wouldn't parse in Obsidian). Fix: a
+  per-note write QUEUE (serializeWrite) — all ticket frontmatter writes to one path serialize
+  (sync/submit/unsubmit); + made sameSnapshot order-insensitive (it compared JSON.stringify, key
+  order differs YAML-read vs freshly-built → churned every poll). Healed the user's note (python
+  dedupe of the top-level key). VERIFIED: 6 rapid concurrent syncs → still 1 block, parses OK.
+- **STOP-GUARD (sesh)**: `thread stop --id ""` (or omitted) resolved via resolveThreadID → INFERRED
+  the current thread ($SESH_THREAD_ID/pane marker) → a stray empty id silently stopped the wrong
+  session (bit a test script that stopped my own session — survived, it was interrupted). Stop is
+  destructive (ends agent+session); now requires an explicit --id (loud "id required") + resolves
+  via resolveIDPrefix, NOT resolveThreadID — same guard `thread delete` already has. thread.stop
+  cell gained the empty-id loud assertion (pi cells green).
+DEPLOY: sesh cbccc24 (schema 16 = daemon RESTART) on mymain/macstudio/macbook/termux (stop guard +
+schema 16 verified on each). Plugin 16a2242 on macbook (pull+build+install+reload; panel shows
+Send + Send raw; corruption fix verified). The user's note re-synced clean (status active).

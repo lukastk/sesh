@@ -46,7 +46,12 @@ package api
 // `closed_at_unix` on the ticket record (set on done/dropped). Additive (new endpoint,
 // new omitempty field) → mixed-mesh safe; a find fanning out to a pre-15 peer simply
 // misses a ticket living there until that peer is upgraded.
-const SchemaVersion = 15
+// 16: `ticket send-prompt` gained `prepend` (SendPromptRequest, optional) — prepend the
+// ticket's name + id to the delivered prompt (default from the [ticket] send_prepend
+// config, overridable per call). Also multi-line prompts now deliver via bracketed paste
+// (newlines preserved). Additive request field → mixed-mesh safe (a pre-16 daemon ignores
+// `prepend` and never prepends).
+const SchemaVersion = 16
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

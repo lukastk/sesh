@@ -97,6 +97,15 @@ type MoveTicketRequest struct {
 	To   string `json:"to"`
 }
 
+// SendPromptRequest is the body of POST /v1/tickets/send-prompt. Prepend overrides the
+// daemon's [ticket] send_prepend default for this one call (nil = use the configured
+// default): when on, the ticket's identity (name + id) is prepended to the delivered
+// prompt so the agent knows which ticket it is working on.
+type SendPromptRequest struct {
+	ID      string `json:"id"`
+	Prepend *bool  `json:"prepend,omitempty"`
+}
+
 // UnbindTicketRequest is the body of POST /v1/tickets/unbind — it detaches a
 // ticket from its thread (clears thread_id) and, if it was `active` (a status that
 // requires a binding), downgrades it to `ready` (unattached, prompt presumed

@@ -92,3 +92,62 @@ func TestInnerSwitchScriptLandsOnThreadWindow(t *testing.T) {
 		t.Errorf("script did not land the client on the thread's window 0 (got %q)", got)
 	}
 }
+
+// TestSendTextMultilinePreservesNewlines proves the bracketed-paste path: a multi-line
+// send arrives as ONE multi-line input (newlines intact, NOT submitted line-by-line). It
+// runs an interactive bash with bracketed paste enabled (the same readline mechanism a
+// modern agent TUI uses) and asserts (a) every line survives in the pane and (b) nothing
+// was executed (no "command not found") — i.e. the embedded newlines did not submit.
+func TestSendTextMultilinePreservesNewlines(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	sock := "seshsend-test-" + strings.ReplaceAll(t.Name(), "/", "_")
+	raw := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sock}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := raw("-f", "/dev/null", "new-session", "-d", "-s", "s", "-x", "120", "-y", "40", "bash --norc --noprofile -i"); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	defer exec.Command("tmux", "-L", sock, "kill-server").Run() //nolint:errcheck
+	pane, err := raw("list-panes", "-t", "s", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("pane id: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	// Enable bracketed paste in the proxy shell (deterministic regardless of bash default).
+	raw("send-keys", "-t", pane, "-l", "bind 'set enable-bracketed-paste on'") //nolint:errcheck
+	raw("send-keys", "-t", pane, "Enter")                                       //nolint:errcheck
+	time.Sleep(300 * time.Millisecond)
+	raw("send-keys", "-t", pane, "-l", "clear")  //nolint:errcheck
+	raw("send-keys", "-t", pane, "Enter")        //nolint:errcheck
+	time.Sleep(300 * time.Millisecond)
+
+	srv := NewServer(sock)
+	text := "SENTINELA first line\nSENTINELB second line\nSENTINELC third line"
+	if err := srv.SendText(pane, text, false); err != nil {
+		t.Fatalf("SendText: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	capt, err := raw("capture-pane", "-p", "-t", pane)
+	if err != nil {
+		t.Fatalf("capture-pane: %v", err)
+	}
+	for _, s := range []string{"SENTINELA", "SENTINELB", "SENTINELC"} {
+		if !strings.Contains(capt, s) {
+			t.Errorf("multi-line paste lost %q; pane:\n%s", s, capt)
+		}
+	}
+	// enter=false, so nothing should have executed — a submitted "SENTINELA first line"
+	// would run as a command and bash would print "not found".
+	if strings.Contains(capt, "not found") {
+		t.Errorf("multi-line text was EXECUTED (newlines submitted as Enter); pane:\n%s", capt)
+	}
+}

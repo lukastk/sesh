@@ -60,11 +60,27 @@ const sendEnterDelay = 250 * time.Millisecond
 
 // SendText sends literal text to target's pane. If enter is true, a trailing
 // Enter key is sent after (so it submits).
+//
+// Multi-line text is sent as a BRACKETED PASTE (set-buffer + paste-buffer -p) rather
+// than literal send-keys: with `send-keys -l`, each embedded newline reaches the agent's
+// TUI as a submitting Enter, so a multi-paragraph prompt is fired off line-by-line and
+// its structure is lost. The `-p` flag wraps the text in the bracketed-paste escapes
+// (\e[200~…\e[201~), which a modern agent TUI (claude/codex/pi) honors by buffering the
+// whole thing — newlines and all — as one input; the trailing Enter then submits it
+// intact. Single-line text keeps the original send-keys path (no behavior change).
 func (s *Server) SendText(target, text string, enter bool) error {
 	if target == "" {
 		return fmt.Errorf("tmux: send-text: empty target")
 	}
-	if _, err := s.run("send-keys", "-t", target, "-l", text); err != nil {
+	if strings.Contains(text, "\n") {
+		const buf = "sesh-send"
+		if _, err := s.run("set-buffer", "-b", buf, text); err != nil {
+			return err
+		}
+		if _, err := s.run("paste-buffer", "-p", "-d", "-b", buf, "-t", target); err != nil {
+			return err
+		}
+	} else if _, err := s.run("send-keys", "-t", target, "-l", text); err != nil {
 		return err
 	}
 	if enter {

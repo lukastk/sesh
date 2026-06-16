@@ -400,14 +400,29 @@ func ticketMove(cfg config.Config, args []string) error {
 func ticketSendPrompt(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("send-prompt", flag.ContinueOnError)
 	id := fs.String("id", "", "ticket id (required)")
+	fs.Bool("prepend", false, "prepend the ticket's name + id to the delivered prompt")
+	fs.Bool("no-prepend", false, "do NOT prepend the ticket's name + id (overrides the [ticket] config default)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *id == "" {
 		return errors.New("ticket send-prompt: --id is required")
 	}
+	// Tri-state: only a flag the caller actually passed overrides the daemon's config
+	// default (neither passed → nil → use the [ticket] send_prepend default).
+	var prepend *bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "prepend":
+			v := true
+			prepend = &v
+		case "no-prepend":
+			v := false
+			prepend = &v
+		}
+	})
 	c := daemonClient(cfg)
-	if err := c.TicketSendPrompt(context.Background(), *id); err != nil {
+	if err := c.TicketSendPrompt(context.Background(), *id, prepend); err != nil {
 		return err
 	}
 	fmt.Println("sent prompt for", *id)

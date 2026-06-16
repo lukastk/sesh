@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
 )
 
@@ -122,9 +123,7 @@ func (d *Daemon) handleTicketUnbind(w http.ResponseWriter, r *http.Request) {
 // thread must have a live pane. sesh does NOT track "was the prompt sent" — that
 // state does not exist (SPEC §4); this just performs the delivery cleanly.
 func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID string `json:"id"`
-	}
+	var req api.SendPromptRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -165,6 +164,21 @@ func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Optionally prepend the ticket's identity (name + id) so the agent knows which
+	// ticket it is working on. Per-call --prepend/--no-prepend (req.Prepend) overrides the
+	// [ticket] send_prepend config default.
+	tcfg, err := config.LoadTicket(d.cfg.Home)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	prepend := tcfg.SendPrependDefault()
+	if req.Prepend != nil {
+		prepend = *req.Prepend
+	}
+	if prepend {
+		prompt = fmt.Sprintf("Ticket %q (%s)\n\n%s", ticket.Name, ticket.ID, prompt)
 	}
 	if err := d.tmux.SendText(loc.Pane, prompt, true); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

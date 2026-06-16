@@ -366,6 +366,8 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"ticket send-prompt": {
 		{"--id", "ticket id whose prompt to send to its bound thread (required)"},
+		{"--prepend", "prepend the ticket's name + id to the delivered prompt (overrides the config default)"},
+		{"--no-prepend", "do NOT prepend the ticket's name + id (overrides the [ticket] send_prepend config default)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"ticket set": {

@@ -86,7 +86,8 @@ func (c *Client) TicketNeedsInput(ctx context.Context, id string) (api.TicketNee
 	return out, c.getJSON(ctx, "http://unix/v1/tickets/needs-input?id="+url.QueryEscape(id), &out)
 }
 
-// TicketSendPrompt posts POST /v1/tickets/send-prompt.
-func (c *Client) TicketSendPrompt(ctx context.Context, id string) error {
-	return c.postJSON(ctx, "http://unix/v1/tickets/send-prompt", map[string]string{"id": id}, nil)
+// TicketSendPrompt posts POST /v1/tickets/send-prompt. prepend overrides the daemon's
+// [ticket] send_prepend default for this call (nil = use the configured default).
+func (c *Client) TicketSendPrompt(ctx context.Context, id string, prepend *bool) error {
+	return c.postJSON(ctx, "http://unix/v1/tickets/send-prompt", api.SendPromptRequest{ID: id, Prepend: prepend}, nil)
 }

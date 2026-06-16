@@ -89,7 +89,7 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   sesh ticket set --id <id> [--name <t>] [--prompt <t>]   # partial text-field update
   sesh ticket set-status --id <id> --status <s> [--thread <id>]   # active requires --thread
   sesh ticket unbind --id <id>                            # detach from the thread (active→ready); "remove from thread"
-  sesh ticket send-prompt --id <id>                       # deliver the prompt to the bound thread's pane
+  sesh ticket send-prompt --id <id> [--no-prepend]        # deliver the prompt to the bound thread's pane
   sesh ticket needs-input --id <id>                       # derived: active && thread headful·idle
   sesh ticket delete --id <id>
   ```
@@ -100,6 +100,11 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   in one call — the mechanism behind an API client (e.g. the Obsidian ticket note) that tracks
   a ticket from anywhere. A ticket found nowhere is `found=false` (exit 0), a legitimate state.
   A terminal ticket carries `closed_at_unix` (the done/dropped timestamp; `--field closed`).
+
+  **`send-prompt`** delivers multi-line prompts intact (bracketed paste — newlines are preserved,
+  not submitted line-by-line) and by default **prepends the ticket's name + id** so the agent
+  knows which ticket it is on. Toggle the default in `<SESH_HOME>/config.toml`
+  (`[ticket]\nsend_prepend = false`); override per call with `--prepend` / `--no-prepend`.
 
   `ticket list --current` is the agent self-check ("what am I assigned?") — it resolves the
   current thread from `$SESH_THREAD_ID`/the pane marker. **Subscriptions** deliver one

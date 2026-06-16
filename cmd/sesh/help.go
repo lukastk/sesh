@@ -320,9 +320,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket needs-input --id t1 --json"},
 	},
 	"ticket send-prompt": {
-		summary:  "send a ticket's prompt into its bound thread",
-		usage:    "sesh ticket send-prompt --id <id> [--machine <m>]",
-		examples: []string{"sesh ticket send-prompt --id t1"},
+		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call)",
+		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--machine <m>]",
+		examples: []string{"sesh ticket send-prompt --id t1", "sesh ticket send-prompt --id t1 --no-prepend"},
 	},
 
 	"tui": {

@@ -1069,3 +1069,26 @@ carried the blob (bytes + token-expands-on-DST) and removed it from mymain; myri
 copy-prompt-expansion composed end-to-end. Full blob+ticket conformance suite green (95s, real
 ssh+agents). GOTCHAS: termux /tmp UNWRITABLE (build + logs → $HOME); termux daemon needed a hard
 pkill -9 + socket rm to drop a stale schema-13 instance before the schema-14 one served blobs.
+
+## NEXT (planned, not started) — ticket-note rewrite drives 2 sesh API additions (2026-06-16)
+Design + ALL decisions locked in `~/mysetup/mysystem/_dev/TICKET_NOTE_REWRITE.md` (committed,
+mysystem e5a9564). The Obsidian "ticket note" is being rewritten as a sesh-v2 API client
+(sesh knows nothing about notes; the note is a draft→submit→live projection that polls its
+sesh ticket via the API → mobile-capable). The bulk is mysystem/mysystem-obsidian plugin
+work; the SESH-side work is just TWO additive API features (do these FIRST — they're the
+only blockers):
+1. **Mesh-wide ticket lookup** `GET /v1/tickets/find?id=<id>` — fan out across the mesh
+   (tickets are per-daemon, spread across machines; today `ticket get/list` are
+   local/owner-routed only, NO fan-out). Returns the ticket + its bound thread's
+   {machine,name,parent} in ONE call (powers the note's decorator-sync + top panel). EFFICIENCY:
+   the note polls on an interval, so `find` should read the hub's existing mesh-sync CACHE,
+   not live-fan-out per call — likely means extending the mesh snapshot to carry ticket
+   records keyed by id (today it carries threads + per-thread ticket *summaries* only). Decide
+   replicate-vs-fanout at impl.
+2. **`closed_at_unix`** on the ticket record — set when status → done/dropped (today only
+   `created_at_unix`). The note shows the done/scrapped timestamp + done/dropped → HP-consolidate.
+Both additive (schema bump, mixed-mesh safe) → deploy all 4 + the usual live smoke. Everything
+else (link→blob flattening, recursive nothing — DROPPED, blob layer unchanged) is plugin-side.
+The proposal also flags prereqs for the API-only/mobile goal: local daemons must expose the TCP
+API on 127.0.0.1, ONE shared SESH_API_TOKEN across the mesh, and an always-on box running a sesh
+daemon as the mobile fallback hub.

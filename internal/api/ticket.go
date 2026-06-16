@@ -32,6 +32,10 @@ type Ticket struct {
 	Status        string `json:"status"`
 	ThreadID      string `json:"thread_id,omitempty"`
 	CreatedAtUnix int64  `json:"created_at_unix"`
+	// ClosedAtUnix is when the ticket entered a terminal status (done/dropped) —
+	// the "closed/scrapped" timestamp. 0 while open; preserved across an idempotent
+	// re-set of the same terminal status; cleared back to 0 if the ticket reopens.
+	ClosedAtUnix int64 `json:"closed_at_unix,omitempty"`
 }
 
 // CreateTicketRequest is the body of POST /v1/tickets.
@@ -99,6 +103,34 @@ type MoveTicketRequest struct {
 // final). Other statuses are left as-is. This is "remove from thread".
 type UnbindTicketRequest struct {
 	ID string `json:"id"`
+}
+
+// TicketThread is the bound-thread context returned by a ticket find — enough
+// for a remote client (the Obsidian ticket note) to render the panel without a
+// second round-trip. Machine == the ticket's owning machine (a ticket and its
+// bound thread are always co-located on the same daemon).
+type TicketThread struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Parent  string `json:"parent,omitempty"`
+	Machine string `json:"machine"`
+}
+
+// TicketFindResponse is returned by GET /v1/tickets/find?id=<id>: a MESH-WIDE
+// lookup of a ticket by id. Tickets are per-daemon (spread across the mesh), so
+// the daemon this hits resolves its own store first, then fans out to every peer
+// (each answering local-only) and returns the first hit — the ticket record PLUS
+// its owning machine and bound-thread context, in ONE call. Found=false (with a
+// 200, not a 404) is a legitimate state: a draft note has no ticket, a deleted
+// ticket resolves to nothing. Unreachable lists peers the fan-out could not reach
+// (the not-found answer may be incomplete if non-empty).
+type TicketFindResponse struct {
+	Schema      int           `json:"schema"`
+	Found       bool          `json:"found"`
+	Machine     string        `json:"machine,omitempty"`
+	Ticket      Ticket        `json:"ticket"`
+	Thread      *TicketThread `json:"thread,omitempty"`
+	Unreachable []string      `json:"unreachable,omitempty"`
 }
 
 // TicketNeedsInput is the derived needs-input view of a ticket (SPEC §4):

@@ -16,6 +16,7 @@ func (d *Daemon) routesTickets(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tickets", d.handleTicketCreate)
 	mux.HandleFunc("GET /v1/tickets", d.handleTicketList)
 	mux.HandleFunc("GET /v1/tickets/get", d.handleTicketGet)
+	mux.HandleFunc("GET /v1/tickets/find", d.handleTicketFind)
 	mux.HandleFunc("POST /v1/tickets/set", d.handleTicketSet)
 	mux.HandleFunc("POST /v1/tickets/delete", d.handleTicketDelete)
 	mux.HandleFunc("POST /v1/tickets/status", d.handleTicketSetStatus)
@@ -315,7 +316,7 @@ func (d *Daemon) handleTicketSetStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := d.store.SetTicketStatus(req.ID, req.Status, req.ThreadID); err != nil {
+	if err := d.store.SetTicketStatus(req.ID, req.Status, req.ThreadID, time.Now().Unix()); err != nil {
 		if errors.Is(err, store.ErrTicketNotFound) {
 			writeError(w, http.StatusNotFound, "ticket not found: "+req.ID)
 			return

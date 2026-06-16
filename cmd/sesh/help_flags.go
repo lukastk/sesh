@@ -307,8 +307,13 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"ticket get": {
 		{"--id", "ticket id to fetch (required)"},
-		{"--field", "print one field raw: id|name|prompt|status|thread|created"},
+		{"--field", "print one field raw: id|name|prompt|status|thread|created|closed"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+	},
+	"ticket find": {
+		{"--id", "ticket id to resolve across the mesh (required)"},
+		{"--local", "resolve only against this daemon's store (no mesh fan-out; the leaf form)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"ticket list": {

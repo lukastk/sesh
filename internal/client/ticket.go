@@ -29,6 +29,21 @@ func (c *Client) TicketGet(ctx context.Context, id string) (api.TicketResponse, 
 	return out, c.getJSON(ctx, "http://unix/v1/tickets/get?id="+url.QueryEscape(id), &out)
 }
 
+// TicketFind fetches GET /v1/tickets/find?id= — the mesh-wide ticket lookup. The
+// daemon it hits resolves the ticket across the whole mesh (its own store + every
+// peer) and returns the record plus its owning machine and bound-thread context.
+// localOnly restricts it to THIS daemon's store (the leaf form the fan-out calls on
+// each peer; clients normally pass false). A ticket not found anywhere is Found=false
+// (no error) — a legitimate state, not a failure.
+func (c *Client) TicketFind(ctx context.Context, id string, localOnly bool) (api.TicketFindResponse, error) {
+	var out api.TicketFindResponse
+	u := "http://unix/v1/tickets/find?id=" + url.QueryEscape(id)
+	if localOnly {
+		u += "&local=1"
+	}
+	return out, c.getJSON(ctx, u, &out)
+}
+
 // TicketSet posts POST /v1/tickets/set (partial text-field update).
 func (c *Client) TicketSet(ctx context.Context, req api.SetTicketRequest) (api.TicketResponse, error) {
 	var out api.TicketResponse

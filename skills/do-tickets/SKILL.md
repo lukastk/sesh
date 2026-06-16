@@ -18,7 +18,7 @@ sesh ticket list --current                 # id  status  name  thread
 sesh ticket list --current --json          # one JSON object per line
 
 # READ — the instructions (raw, no trailing newline)
-sesh ticket get --id <id> --field prompt   # --field: id|name|prompt|status|thread|created
+sesh ticket get --id <id> --field prompt   # --field: id|name|prompt|status|thread|created|closed
 sesh ticket get --id <id> --json           # whole record
 
 # REPORT — set status (moving to `active` needs --thread)

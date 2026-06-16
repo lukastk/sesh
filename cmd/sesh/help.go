@@ -225,8 +225,8 @@ var helpRegistry = map[string]cmdHelp{
 	},
 
 	"ticket": {
-		summary:  "ticket layer (create | list | get | set | delete | set-status | import | unbind | needs-input | send-prompt); auto-routes to the configured ticket owner",
-		usage:    "sesh ticket <create|list|get|set|delete|set-status|import|unbind|needs-input|send-prompt>",
+		summary:  "ticket layer (create | list | get | find | set | delete | set-status | import | unbind | move | needs-input | send-prompt); auto-routes to the configured ticket owner",
+		usage:    "sesh ticket <create|list|get|find|set|delete|set-status|import|unbind|move|needs-input|send-prompt>",
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
 	"blob": {
@@ -275,9 +275,14 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --thread 1a2b3c4d --json"},
 	},
 	"ticket get": {
-		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created) for clipboard/agent capture",
+		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created|closed) for clipboard/agent capture",
 		usage:    "sesh ticket get --id <id> [--field <name>] [--machine <m>] [--json]",
 		examples: []string{"sesh ticket get --id t1 --json", "sesh ticket get --id t1 --field prompt"},
+	},
+	"ticket find": {
+		summary:  "resolve a ticket by id ACROSS THE MESH (fans out to peers) and return the ticket + its owning machine + bound-thread context in one call; the mechanism behind the Obsidian ticket note. A ticket found nowhere prints 'not found' (exit 0)",
+		usage:    "sesh ticket find --id <id> [--local] [--json]",
+		examples: []string{"sesh ticket find --id 7e108848 --json", "sesh ticket find --id t1 --local"},
 	},
 	"ticket set": {
 		summary:  "partial update of a ticket's text fields (name, prompt); status/thread go through set-status",

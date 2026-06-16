@@ -52,6 +52,8 @@ func runTicket(args []string) error {
 		return ticketList(cfg, rest)
 	case "get":
 		return ticketGet(cfg, rest)
+	case "find":
+		return ticketFind(cfg, rest)
 	case "set":
 		return ticketSet(cfg, rest)
 	case "delete":
@@ -186,8 +188,10 @@ func ticketGet(cfg config.Config, args []string) error {
 			fmt.Print(tk.ThreadID)
 		case "created":
 			fmt.Print(tk.CreatedAtUnix)
+		case "closed":
+			fmt.Print(tk.ClosedAtUnix)
 		default:
-			return fmt.Errorf("ticket get: unknown --field %q (id|name|prompt|status|thread|created)", *field)
+			return fmt.Errorf("ticket get: unknown --field %q (id|name|prompt|status|thread|created|closed)", *field)
 		}
 		return nil
 	}
@@ -195,6 +199,48 @@ func ticketGet(cfg config.Config, args []string) error {
 		return emitJSON(tk)
 	}
 	fmt.Printf("id:      %s\nname:    %s\nstatus:  %s\nthread:  %s\nprompt:  %s\n", tk.ID, tk.Name, tk.Status, tk.ThreadID, tk.Prompt)
+	return nil
+}
+
+// ticketFind resolves a ticket by id ACROSS THE MESH: the local daemon checks its own
+// store and fans out to peers, returning the ticket plus its owning machine and
+// bound-thread context. This is the mechanism behind the Obsidian ticket note (an API
+// client that must locate a ticket without knowing which machine owns it). --local
+// restricts the lookup to this daemon's store (the leaf form the fan-out uses). A
+// ticket found nowhere prints "not found" (exit 0) — a legitimate state, not an error.
+func ticketFind(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("find", flag.ContinueOnError)
+	id := fs.String("id", "", "ticket id (required)")
+	localOnly := fs.Bool("local", false, "resolve only against this daemon's store (no mesh fan-out)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("ticket find: --id is required")
+	}
+	c := daemonClient(cfg)
+	resp, err := c.TicketFind(context.Background(), *id, *localOnly)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	if !resp.Found {
+		fmt.Printf("not found: %s", *id)
+		if len(resp.Unreachable) > 0 {
+			fmt.Printf(" (unreachable: %v)", resp.Unreachable)
+		}
+		fmt.Println()
+		return nil
+	}
+	thread := "(unattached)"
+	if resp.Thread != nil {
+		thread = fmt.Sprintf("%s (%s)", resp.Thread.Name, resp.Thread.ID)
+	}
+	fmt.Printf("id:      %s\nname:    %s\nstatus:  %s\nmachine: %s\nthread:  %s\n",
+		resp.Ticket.ID, resp.Ticket.Name, resp.Ticket.Status, resp.Machine, thread)
 	return nil
 }
 

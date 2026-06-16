@@ -113,6 +113,11 @@ var migrations = []string{
 	// plain ALTER is enough here (no constraint to rebuild around, unlike #12). Any
 	// existing description text is discarded.
 	`ALTER TABLE tickets DROP COLUMN description;`,
+	// 14: tickets.closed_at — the unix time a ticket entered a terminal status
+	// (done/dropped); 0 while open. The "done/scrapped timestamp" the ticket-note
+	// projection reads. Set by the daemon on a terminal transition (preserved across
+	// an idempotent re-set, cleared to 0 if reopened).
+	`ALTER TABLE tickets ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

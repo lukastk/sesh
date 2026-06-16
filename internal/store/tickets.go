@@ -19,9 +19,9 @@ func (s *Store) InsertTicket(t api.Ticket) error {
 		threadID = t.ThreadID
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO tickets (id, name, prompt, status, thread_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.Prompt, t.Status, threadID, t.CreatedAtUnix,
+		`INSERT INTO tickets (id, name, prompt, status, thread_id, created_at, closed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.Prompt, t.Status, threadID, t.CreatedAtUnix, t.ClosedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert ticket: %w", err)
@@ -32,7 +32,7 @@ func (s *Store) InsertTicket(t api.Ticket) error {
 // GetTicket returns a ticket by id, or ErrTicketNotFound.
 func (s *Store) GetTicket(id string) (api.Ticket, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at
+		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at, closed_at
 		 FROM tickets WHERE id = ?`, id)
 	t, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -44,7 +44,7 @@ func (s *Store) GetTicket(id string) (api.Ticket, error) {
 // ListTicketsByThread returns the tickets bound to a thread, newest first.
 func (s *Store) ListTicketsByThread(threadID string) ([]api.Ticket, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at
+		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at, closed_at
 		 FROM tickets WHERE thread_id = ? ORDER BY created_at DESC, id`, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tickets by thread: %w", err)
@@ -56,7 +56,7 @@ func (s *Store) ListTicketsByThread(threadID string) ([]api.Ticket, error) {
 // ListTickets returns all tickets, newest first.
 func (s *Store) ListTickets() ([]api.Ticket, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at
+		`SELECT id, name, prompt, status, COALESCE(thread_id, ''), created_at, closed_at
 		 FROM tickets ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tickets: %w", err)
@@ -68,13 +68,25 @@ func (s *Store) ListTickets() ([]api.Ticket, error) {
 // SetTicketStatus updates a ticket's status and (when binding to active) its
 // thread. Passing threadID = "" leaves the binding unchanged for non-active
 // transitions; for active it is required by the caller.
-func (s *Store) SetTicketStatus(id, status, threadID string) error {
+//
+// closed_at tracks when the ticket became terminal (done/dropped): the caller
+// passes the current unix time as `now`, and the CASE preserves an existing
+// non-zero closed_at across an idempotent re-set of a terminal status, stamps
+// `now` on the FIRST terminal transition, and clears it to 0 if the ticket
+// reopens to a non-terminal status. (The daemon owns the clock — the store never
+// calls time.Now itself, mirroring InsertTicket taking CreatedAtUnix.)
+func (s *Store) SetTicketStatus(id, status, threadID string, now int64) error {
+	closedExpr := `closed_at = CASE
+		WHEN ? IN ('done','dropped') THEN (CASE WHEN closed_at = 0 THEN ? ELSE closed_at END)
+		ELSE 0 END`
 	var res sql.Result
 	var err error
 	if threadID != "" {
-		res, err = s.db.Exec(`UPDATE tickets SET status = ?, thread_id = ? WHERE id = ?`, status, threadID, id)
+		res, err = s.db.Exec(`UPDATE tickets SET status = ?, thread_id = ?, `+closedExpr+` WHERE id = ?`,
+			status, threadID, status, now, id)
 	} else {
-		res, err = s.db.Exec(`UPDATE tickets SET status = ? WHERE id = ?`, status, id)
+		res, err = s.db.Exec(`UPDATE tickets SET status = ?, `+closedExpr+` WHERE id = ?`,
+			status, status, now, id)
 	}
 	if err != nil {
 		return fmt.Errorf("store: set ticket status: %w", err)
@@ -100,7 +112,7 @@ func scanTickets(rows *sql.Rows) ([]api.Ticket, error) {
 
 func scanTicket(r scanner) (api.Ticket, error) {
 	var t api.Ticket
-	err := r.Scan(&t.ID, &t.Name, &t.Prompt, &t.Status, &t.ThreadID, &t.CreatedAtUnix)
+	err := r.Scan(&t.ID, &t.Name, &t.Prompt, &t.Status, &t.ThreadID, &t.CreatedAtUnix, &t.ClosedAtUnix)
 	return t, err
 }
 

@@ -371,6 +371,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "ticket.find",
+		Description: "mesh-wide ticket lookup by id (`sesh ticket find --id`): the invoked daemon resolves its own store, else fans out to every peer (each answering local-only, over real ssh) and returns the first hit — the ticket record + its owning machine + bound-thread {id,name,parent}. The mechanism behind the Obsidian ticket note (an API client locating a ticket without knowing its machine). A ticket found nowhere is found=false (not an error); also surfaces closed_at_unix",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "ticket.move",
 		Description: "daemon-coordinated cross-machine ticket relocation (`sesh ticket move --from --to`): the INVOKED daemon pulls the record + every @blob() the prompt references from SRC and pushes them to DST, then deletes the source — so a ticket binds to a thread on any machine with its blobs carried along (co-located live join preserved). Real ssh hops; id-collision on the target is loud",
 		Localities:  []Locality{Remote},

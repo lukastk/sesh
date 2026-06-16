@@ -83,7 +83,9 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   ```bash
   sesh ticket create --name <name> [--prompt <text>]      # starts in triage
   sesh ticket list [--thread <id>] [--current]            # --current = the calling pane's thread
-  sesh ticket get --id <id> [--field prompt] [--json]     # --field prints one field raw (clipboard/agents)
+  sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed (raw)
+  sesh ticket find --id <id> [--json]                     # MESH-WIDE lookup: fans out across peers; returns the
+                                                          #   ticket + its owning machine + bound-thread context
   sesh ticket set --id <id> [--name <t>] [--prompt <t>]   # partial text-field update
   sesh ticket set-status --id <id> --status <s> [--thread <id>]   # active requires --thread
   sesh ticket unbind --id <id>                            # detach from the thread (active→ready); "remove from thread"
@@ -91,6 +93,13 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   sesh ticket needs-input --id <id>                       # derived: active && thread headful·idle
   sesh ticket delete --id <id>
   ```
+
+  `ticket get/list/set-status/...` are **local/owner-routed** (they act on one daemon). To
+  locate a ticket **without knowing which machine owns it**, `ticket find` fans out across the
+  whole mesh and returns the record plus its owning machine and bound-thread `{id,name,parent}`
+  in one call — the mechanism behind an API client (e.g. the Obsidian ticket note) that tracks
+  a ticket from anywhere. A ticket found nowhere is `found=false` (exit 0), a legitimate state.
+  A terminal ticket carries `closed_at_unix` (the done/dropped timestamp; `--field closed`).
 
   `ticket list --current` is the agent self-check ("what am I assigned?") — it resolves the
   current thread from `$SESH_THREAD_ID`/the pane marker. **Subscriptions** deliver one

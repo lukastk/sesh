@@ -39,6 +39,9 @@ func init() {
 	// ticket.move is the cross-machine relocate (get|import|delete over a real ssh
 	// hop) — the capability behind "bind a ticket to a thread on any machine".
 	matrix.RegisterTest("ticket.move", matrix.AgentAgnostic, matrix.Remote, testTicketMove)
+	// ticket.find is the mesh-wide lookup: a hub daemon resolves a ticket living on a
+	// PEER via a real ssh fan-out (the one thing a same-store test can't prove).
+	matrix.RegisterTest("ticket.find", matrix.AgentAgnostic, matrix.Remote, testTicketFind)
 	// list --current auto-detects the calling pane's thread; the inference is a
 	// local-pane concept (Local only — routing is covered by route.parity).
 	matrix.RegisterTest("ticket.list-current", matrix.AgentAgnostic, matrix.Local, testTicketListCurrent)
@@ -266,6 +269,71 @@ func testTicketMove(t *testing.T) {
 	}
 }
 
+// testTicketFind drives the mesh-wide `sesh ticket find`: a HUB daemon resolves a
+// ticket that lives on a PEER by fanning out over a REAL ssh hop — the property a
+// same-store lookup can never prove. It also asserts the local-store-hit path, the
+// bound-thread context the reply carries, closed_at, and that a ticket found nowhere
+// is found=false (a legitimate state, not an error).
+func testTicketFind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+
+	bin := seshBin(t)
+	hub := newSandbox(t, matrix.Local) // the daemon `find` is invoked on
+	hub.startDaemon(t)
+	peer := newSandbox(t, matrix.Local) // the ticket actually lives here
+	peer.startDaemon(t)
+
+	// The hub peers with the peer (one-directional — the peer never peers back).
+	if _, stderr, err := hub.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
+		t.Fatalf("hub peer add: %v\n%s", err, stderr)
+	}
+
+	// A ticket on the PEER, bound active to a peer thread (so find carries thread context).
+	th := peer.newThread(t, "pi", "findme", "/tmp")
+	remoteID := peer.ticketCreate(t, "remote ticket", "the remote work")
+	if _, stderr, err := peer.Runner.Run(t, "ticket", "set-status", "--id", remoteID, "--status", "active", "--thread", th.ID); err != nil {
+		t.Fatalf("bind active on peer: %v\n%s", err, stderr)
+	}
+
+	// find from the HUB fans out and resolves the peer's ticket over real ssh.
+	got := hub.ticketFind(t, remoteID)
+	if !got.Found {
+		t.Fatalf("find did not resolve the peer ticket %s (unreachable: %v)", remoteID, got.Unreachable)
+	}
+	if got.Machine != peer.Machine {
+		t.Errorf("find reported machine %q, want the peer %q", got.Machine, peer.Machine)
+	}
+	if got.Ticket.ID != remoteID || got.Ticket.Name != "remote ticket" {
+		t.Errorf("find returned wrong record: %+v", got.Ticket)
+	}
+	if got.Thread == nil || got.Thread.ID != th.ID || got.Thread.Name != "findme" || got.Thread.Machine != peer.Machine {
+		t.Errorf("find did not carry the bound-thread context: %+v", got.Thread)
+	}
+
+	// The local-store-hit path: a ticket on the HUB resolves WITHOUT fan-out, machine=hub.
+	localID := hub.ticketCreate(t, "local ticket", "")
+	if local := hub.ticketFind(t, localID); !local.Found || local.Machine != hub.Machine {
+		t.Errorf("local find wrong: found=%t machine=%q want hub %q", local.Found, local.Machine, hub.Machine)
+	}
+
+	// closed_at: closing the peer ticket stamps closed_at_unix, visible through find.
+	if _, stderr, err := peer.Runner.Run(t, "ticket", "set-status", "--id", remoteID, "--status", "done"); err != nil {
+		t.Fatalf("close peer ticket: %v\n%s", err, stderr)
+	}
+	if closed := hub.ticketFind(t, remoteID); closed.Ticket.ClosedAtUnix == 0 {
+		t.Errorf("find should surface closed_at_unix on a done ticket; got 0 (%+v)", closed.Ticket)
+	}
+
+	// A ticket found NOWHERE on the mesh is found=false (no error), not a 404.
+	none := hub.ticketFind(t, "00000000-0000-0000-0000-000000000000")
+	if none.Found {
+		t.Errorf("find of an unknown id reported found=true: %+v", none)
+	}
+}
+
 // testTicketOwnership asserts the single-writer ownership model: a NON-owner
 // machine's ticket write routes (over a real ssh hop) to the canonical owner, so
 // the record lands on the OWNER's store — not silently locally. This is the
@@ -389,6 +457,16 @@ func testTicketSetStatus(t *testing.T, loc matrix.Locality) {
 		if got := sb.ticketByID(t, id).Status; got != st {
 			t.Errorf("status = %q, want %q", got, st)
 		}
+	}
+	// done stamped closed_at; reopening clears it back to 0 (the daemon owns the clock).
+	if tk := sb.ticketByID(t, id); tk.ClosedAtUnix == 0 {
+		t.Errorf("done ticket should have closed_at_unix > 0, got %+v", tk)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "ready"); err != nil {
+		t.Fatalf("reopen: %v\n%s", err, stderr)
+	}
+	if tk := sb.ticketByID(t, id); tk.ClosedAtUnix != 0 {
+		t.Errorf("reopened ticket should clear closed_at_unix, got %d", tk.ClosedAtUnix)
 	}
 	// Invalid status is rejected.
 	if _, _, err := sb.Runner.Run(t, "ticket", "set-status", "--id", id, "--status", "bogus"); err == nil {
@@ -523,6 +601,19 @@ func (sb *Sandbox) ticketList(t *testing.T, threadID string) []api.Ticket {
 			t.Fatalf("decode ticket line %q: %v", line, err)
 		}
 		out = append(out, tk)
+	}
+	return out
+}
+
+func (sb *Sandbox) ticketFind(t *testing.T, id string) api.TicketFindResponse {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "ticket", "find", "--id", id, "--json")
+	if err != nil {
+		t.Fatalf("ticket find: %v\n%s", err, stderr)
+	}
+	var out api.TicketFindResponse
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("decode find: %v\nraw: %s", err, stdout)
 	}
 	return out
 }

@@ -40,7 +40,13 @@ package api
 // send/copy); plus `POST /v1/tickets/move` (daemon-coordinated cross-machine ticket
 // relocation that carries the prompt's referenced blobs). Additive endpoints →
 // mixed-mesh safe.
-const SchemaVersion = 14
+// 15: mesh-wide ticket lookup — `GET /v1/tickets/find?id=` fans out across the mesh
+// (tickets are per-daemon) and returns the ticket + its owning machine + bound-thread
+// context in one call (powers the Obsidian ticket note as an API client). Plus
+// `closed_at_unix` on the ticket record (set on done/dropped). Additive (new endpoint,
+// new omitempty field) → mixed-mesh safe; a find fanning out to a pre-15 peer simply
+// misses a ticket living there until that peer is upgraded.
+const SchemaVersion = 15
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

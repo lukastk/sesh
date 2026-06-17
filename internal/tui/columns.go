@@ -298,13 +298,15 @@ func (m *Model) colWidths(cols []colSpec, vis []treeRow) []int {
 func (m *Model) renderHeader(cols []colSpec, widths []int) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
-		parts[i] = pad(c.header, widths[i])
+		parts[i] = pad(trunc(c.header, widths[i]), widths[i])
 	}
 	return strings.Join(parts, " ")
 }
 
 // renderCells renders one row's column cells (after the state gutter).
-// Full-width cells are padded (they never truncate); fixed cells truncate.
+// Every cell is truncated to its render width then padded; full-width columns are
+// normally sized to their longest cell so truncation is a no-op, EXCEPT for a
+// clipped trailing column (horizontalView's partial NAME) whose width is reduced.
 // hl, when non-nil, maps column names to matched rune positions (the filter's
 // highlight); positions are styled AFTER padding so widths stay rune-true.
 // colorize applies the per-column [[tui.column_color]] tint; the caller passes
@@ -320,9 +322,10 @@ func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[str
 			cell = tr.prefix + cell // tree rails (highlight positions shift past them)
 			shift = len([]rune(tr.prefix))
 		}
-		if !c.fullWidth {
-			cell = trunc(cell, widths[i])
-		}
+		// Truncate to the render width. Full-width columns are normally sized to
+		// their longest cell (so this is a no-op), but a CLIPPED trailing column
+		// (horizontalView's partial NAME) carries a reduced width and must truncate.
+		cell = trunc(cell, widths[i])
 		cell = pad(cell, widths[i])
 		if pos := hl[c.name]; len(pos) > 0 {
 			if shift > 0 {

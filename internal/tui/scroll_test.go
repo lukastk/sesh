@@ -38,6 +38,49 @@ func TestWheelTick(t *testing.T) {
 	}
 }
 
+// TestHorizontalViewPartialColumn: when a wide trailing column (NAME) can't fully
+// fit, horizontalView still includes it at a CLIPPED width (the reported bug was it
+// vanishing entirely), but only when the leftover space is worth rendering into.
+func TestHorizontalViewPartialColumn(t *testing.T) {
+	cols := make([]colSpec, 4) // only len(cols) matters to the windowing
+	widths := []int{4, 9, 6, 30}
+
+	// avail=30: TKT!/MACHINE/AGENT fully fit (used=21), leaving 8 for a partial NAME.
+	s, e, w := horizontalView(cols, widths, 0, 30)
+	if s != 0 || e != 4 {
+		t.Fatalf("expected the 4th column partially included, got [%d:%d]", s, e)
+	}
+	if w[3] != 8 { // 30 - 21 - 1(separator)
+		t.Errorf("partial trailing width = %d, want 8", w[3])
+	}
+	if total := sumWidths(w); total > 30 {
+		t.Errorf("rendered total %d exceeds avail 30", total)
+	}
+
+	// avail=23: only 1 column-worth of leftover (< minPartialColW) — NOT worth a
+	// sliver, so the column is dropped (the › indicator carries it instead).
+	if _, e2, _ := horizontalView(cols, widths, 0, 23); e2 != 3 {
+		t.Errorf("tiny leftover should drop the trailing column, end=%d want 3", e2)
+	}
+
+	// A single forced column wider than the whole screen is clipped to avail so it
+	// never bleeds past the edge.
+	if _, _, w3 := horizontalView(make([]colSpec, 2), []int{40, 5}, 0, 10); w3[0] != 10 {
+		t.Errorf("forced overflow column should clip to avail, got %d want 10", w3[0])
+	}
+}
+
+func sumWidths(w []int) int {
+	total := 0
+	for i, x := range w {
+		if i > 0 {
+			total++ // separator
+		}
+		total += x
+	}
+	return total
+}
+
 func mouse(button tea.MouseButton, shift bool) tea.MouseMsg {
 	return tea.MouseMsg{Action: tea.MouseActionPress, Button: button, Shift: shift}
 }

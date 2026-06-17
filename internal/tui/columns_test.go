@@ -46,6 +46,26 @@ func TestFullWidthColumnsSizeToLongestCell(t *testing.T) {
 	}
 }
 
+// TestClippedTrailingColumnTruncates proves the partial-column fix: a full-width
+// column rendered at a REDUCED width (horizontalView's partial NAME) truncates with
+// an ellipsis instead of overflowing — so a too-narrow pane shows what fits of NAME
+// rather than dropping it entirely (the reported bug).
+func TestClippedTrailingColumnTruncates(t *testing.T) {
+	m := Model{columns: []string{ColName}, rows: []api.ThreadRow{
+		{Thread: api.Thread{Name: "tbi-investigation"}},
+	}}
+	cols := m.activeColumns()
+	vis := m.visibleMatches()
+	// Render the NAME cell into a clipped width of 8 (as horizontalView would).
+	line := m.renderCells(cols, []int{8}, vis[0], nil, false)
+	if !strings.HasPrefix(line, "tbi-inv…") {
+		t.Errorf("clipped NAME should truncate to 8 cols with an ellipsis, got %q", line)
+	}
+	if strings.Contains(line, "investigation") {
+		t.Errorf("clipped NAME must not show the full name, got %q", line)
+	}
+}
+
 // TestCwdDisplayUsesOwnerRelative proves the cross-machine cwd-label fix: the CWD
 // column relativizes against row.CwdRel (stamped by the OWNING machine), so a
 // thread whose absolute cwd lives under a DIFFERENT home than the viewer's still

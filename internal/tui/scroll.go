@@ -200,6 +200,53 @@ func horizontalWindow(cols []colSpec, widths []int, start, avail int) (int, int)
 	return start, end
 }
 
+// minPartialColW is the smallest leftover width worth rendering a clipped trailing
+// column into (below this the column would be just an ellipsis — not useful).
+const minPartialColW = 4
+
+// horizontalView returns the visible column range [start:end) AND the render width
+// for each column in that range. It first takes every column that fully fits (via
+// horizontalWindow); then, if space remains and a wider column was dropped, it
+// appends that one overflow column at a CLIPPED width so a too-wide trailing column
+// (e.g. NAME) renders PARTIALLY instead of vanishing entirely (the reported bug).
+// The returned widths are a fresh slice — the trailing entry may differ from the
+// column's natural width — and their total never exceeds avail (the last visible
+// column is clamped so nothing bleeds past the screen edge).
+func horizontalView(cols []colSpec, widths []int, start, avail int) (int, int, []int) {
+	s, e := horizontalWindow(cols, widths, start, avail)
+	out := make([]int, e-s)
+	copy(out, widths[s:e])
+	used := 0
+	for i := s; i < e; i++ {
+		if i > s {
+			used++ // column separator
+		}
+		used += widths[i]
+	}
+	// A wider column was dropped and there's room for a useful partial slice of it.
+	if e < len(cols) {
+		if leftover := avail - used - 1; leftover >= minPartialColW { // -1 = separator
+			out = append(out, leftover)
+			e++
+		}
+	}
+	// Clamp the last visible column so the total never overflows avail (only the
+	// single forced column from horizontalWindow can be wider than the screen).
+	total := 0
+	for i, w := range out {
+		if i > 0 {
+			total++ // separator
+		}
+		total += w
+	}
+	if total > avail && len(out) > 0 {
+		if out[len(out)-1] -= total - avail; out[len(out)-1] < 1 {
+			out[len(out)-1] = 1
+		}
+	}
+	return s, e, out
+}
+
 // maxHOffset is the largest useful horizontal offset (0 when every column fits).
 func (m *Model) maxHOffset() int {
 	if m.width <= 0 {

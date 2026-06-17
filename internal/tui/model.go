@@ -1605,12 +1605,15 @@ func (m Model) View() string {
 	widths := m.colWidths(cols, vis)
 
 	// Horizontal column window: pan with h/l. Unknown width (no WindowSizeMsg) shows
-	// every column. ‹/› in the header flag columns clipped off the left/right.
+	// every column. ‹/› in the header flag columns clipped off the left/right. The
+	// trailing column may be partially rendered (clipped width) so a too-narrow pane
+	// shows what fits of NAME instead of dropping it — see horizontalView.
 	hStart, hEnd := 0, len(cols)
+	vwidths := widths
 	if m.width > 0 {
-		hStart, hEnd = horizontalWindow(cols, widths, m.hOffset, m.width-gutterWidth)
+		hStart, hEnd, vwidths = horizontalView(cols, widths, m.hOffset, m.width-gutterWidth)
 	}
-	vcols, vwidths := cols[hStart:hEnd], widths[hStart:hEnd]
+	vcols := cols[hStart:hEnd]
 	hdr := "  HB  " + m.renderHeader(vcols, vwidths)
 	if hStart > 0 {
 		hdr = "‹" + hdr[1:] // a column is clipped to the left

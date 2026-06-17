@@ -1570,6 +1570,47 @@ func BusyGlyph(row api.ThreadRow) string {
 	}
 }
 
+// DescendantGlyph renders the descendant-activity slot (the third HB glyph): a
+// downward arrow when at least one descendant thread (child, grandchild, …) is
+// running a turn, blank otherwise. It surfaces work happening BELOW a thread even
+// when that descendant is folded away or filtered out of the current view.
+//
+//	↓ a descendant is busy   (blank) none running
+func DescendantGlyph(running bool) string {
+	if running {
+		return "↓"
+	}
+	return " "
+}
+
+// descendantsRunning returns the set of thread ids that have at least one
+// descendant (child, grandchild, …) currently running a turn (Busy==BusyBusy).
+// Computed over ALL fetched rows so the indicator stays true even when the running
+// descendant is collapsed under a folded parent or hidden by the active view.
+func descendantsRunning(rows []api.ThreadRow) map[string]bool {
+	parent := make(map[string]string, len(rows))
+	exists := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		parent[r.ID] = r.Parent
+		exists[r.ID] = true
+	}
+	out := make(map[string]bool)
+	for _, r := range rows {
+		if r.Busy != api.BusyBusy {
+			continue
+		}
+		// Walk up from the running thread, marking every ancestor. A node marks its
+		// ancestors, never itself (its own busy axis already shows ▶). Guard against a
+		// cycle on the wire (the daemon forbids them, but never trust it) with a seen set.
+		seen := map[string]bool{}
+		for p := r.Parent; p != "" && exists[p] && !seen[p]; p = parent[p] {
+			seen[p] = true
+			out[p] = true
+		}
+	}
+	return out
+}
+
 // View renders the grid. Kept pure (Model -> string) so a snapshot test can assert
 // the rendered output reflects the model's REAL rows.
 func (m Model) View() string {
@@ -1641,7 +1682,9 @@ func (m Model) View() string {
 		hStart, hEnd, vwidths = horizontalView(cols, widths, m.hOffset, m.width-gutterWidth)
 	}
 	vcols := cols[hStart:hEnd]
-	hdr := "  HB  " + m.renderHeader(vcols, vwidths)
+	// descRun marks threads with a running descendant — the third HB glyph (↓).
+	descRun := descendantsRunning(m.rows)
+	hdr := "  HBD  " + m.renderHeader(vcols, vwidths)
 	if hStart > 0 {
 		hdr = "‹" + hdr[1:] // a column is clipped to the left
 	}
@@ -1675,13 +1718,14 @@ func (m Model) View() string {
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
+		desc := DescendantGlyph(descRun[row.ID])
 		if i == m.cursor {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
+			line := HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := HeadGlyph(row) + BusyGlyph(row) + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
+			line := HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

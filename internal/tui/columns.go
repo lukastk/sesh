@@ -7,7 +7,7 @@ package tui
 // longest visible cell (no truncation — name/cwd read whole); a FIXED column
 // truncates at its width. Unknown column names are a LOUD error (a typo must
 // never silently drop a column). The leading state gutter (head/busy glyphs +
-// attachment) is not a column — it is always shown.
+// descendant-activity glyph + attachment) is not a column — it is always shown.
 //
 // Deliberately arriving later (sequenced, not cut): predicate rule columns +
 // meta columns ([[tui.columns]]) with A4; per-segment styling, match

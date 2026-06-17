@@ -64,8 +64,10 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   - **head**: `●` headful (a live pane) / `◌` headless (no pane).
   - **busy**: `▶` busy (mid-turn) / `·` idle.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
-  `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A second
-  marker shows attachment (`*` = a tmux client is attached).
+  `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
+  marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
+  … — is running a turn; blank = none), and a fourth shows attachment (`*` = a tmux
+  client is attached). The TUI's gutter header for these is `HBD` (head, busy, descendant).
 - **Machine = origin + owner.** A thread lives on the machine that spawned it; mutations
   route to that owner (`--machine`, or auto for tickets). Cross-machine reads come from
   the mesh.

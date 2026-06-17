@@ -9,8 +9,9 @@ package tui
 // columns so a clipped column can be brought into view. Fold/unfold is on the
 // arrow keys.
 
-// gutterWidth is the fixed leading state gutter: "> "/"  " + head + busy + att + " ".
-const gutterWidth = 6
+// gutterWidth is the fixed leading state gutter:
+// "> "/"  " + head + busy + descendant + att + " ".
+const gutterWidth = 7
 
 // wheelTick applies one wheel notch in direction dir (-1/+1) to the accumulator acc,
 // returning the net step (-1/0/+1) once `div` notches accumulate in one direction. A

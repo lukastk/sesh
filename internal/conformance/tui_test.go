@@ -23,6 +23,7 @@ import (
 // test; an unimplemented claim is a loud Skip, never a blank.
 var declaredTUIClaims = []string{
 	"grid-render-real-state",    // a row's glyph tracks its REAL activity, both directions
+	"descendant-running-glyph",  // a parent's HB ↓ glyph tracks whether a REAL descendant is running a turn, both directions
 	"grid-fanout-cross-machine", // the grid shows a peer's thread via the mesh
 	"navigation-cursor",         // key nav moves the selection over real rows
 	"mesh-render-offline",       // a downed peer renders OFFLINE, its threads still listed
@@ -101,6 +102,7 @@ func TestTUIClaimsComplete(t *testing.T) {
 
 func init() {
 	registerTUIClaim("grid-render-real-state", claimGridRenderRealState)
+	registerTUIClaim("descendant-running-glyph", claimDescendantRunningGlyph)
 	registerTUIClaim("grid-fanout-cross-machine", claimGridFanout)
 	registerTUIClaim("navigation-cursor", claimNavigationCursor)
 	registerTUIClaim("mesh-render-offline", claimMeshRenderOffline)

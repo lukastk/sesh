@@ -553,6 +553,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != "" {
 			if !m.positionCursorOn(msg.id) {
 				m.preselectID = msg.id
+				// Refetch NOW rather than waiting up to refreshInterval (3s) for the next
+				// poll. The immediate fetch carries the preselect, so the meshMsg handler
+				// can land it — or, if the thread is hidden by the current view (e.g. it's
+				// archived while the view is `active`), escalate to ViewAll — without a
+				// visible delay. This makes the master prefix+a path match the instant
+				// `--cursor`/SESH_TUI_PANE path (whose preselect is set at construction).
+				return m, m.fetch()
 			}
 		}
 		return m, nil

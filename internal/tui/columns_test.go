@@ -430,3 +430,41 @@ func TestPreselectDoesNotEscalateOnPublishLag(t *testing.T) {
 		t.Fatalf("preselect must remain pending, got %q", mm.preselectID)
 	}
 }
+
+// TestMasterCursorPreselectRefetchesImmediately covers the master prefix+a path (the
+// async master-cursor resolve, `sesh tui --filter` + SESH_TUI_MASTER_MACHINE): when the
+// resolve lands on a thread that the current view hides (archived), the preselectMsg
+// handler must trigger an IMMEDIATE refetch — not wait up to refreshInterval (3s) for the
+// next poll — so the escalation-to-ViewAll happens without a visible delay. The unit test
+// asserts the handoff: a hidden target stays pending AND a refetch cmd is returned.
+func TestMasterCursorPreselectRefetchesImmediately(t *testing.T) {
+	// Active view holding only an active thread — the archived master-cursor target is not
+	// in the rows, so positionCursorOn fails and the preselect must persist + refetch.
+	m := Model{
+		view:      ViewActive,
+		rows:      []api.ThreadRow{{Thread: api.Thread{ID: "a", Name: "active"}}},
+		expanded:  map[string]bool{},
+		filtering: true, // the master binding runs `--filter`
+	}
+	updated, cmd := m.Update(preselectMsg{id: "arch"})
+	mm := updated.(Model)
+	if mm.preselectID != "arch" {
+		t.Fatalf("a hidden master-cursor target must persist as a pending preselect, got %q", mm.preselectID)
+	}
+	if cmd == nil {
+		t.Fatal("a hidden master-cursor target must trigger an immediate refetch, not wait for the 3s poll")
+	}
+	// And a target already visible lands immediately with no lingering preselect / refetch.
+	m2 := Model{view: ViewActive, rows: []api.ThreadRow{{Thread: api.Thread{ID: "a", Name: "active"}}}, expanded: map[string]bool{}}
+	updated2, cmd2 := m2.Update(preselectMsg{id: "a"})
+	mm2 := updated2.(Model)
+	if mm2.preselectID != "" {
+		t.Fatalf("a visible target should land immediately, preselect still %q", mm2.preselectID)
+	}
+	if cmd2 != nil {
+		t.Fatal("a visible target needs no refetch")
+	}
+	if sel, ok := mm2.Selected(); !ok || sel.ID != "a" {
+		t.Fatalf("cursor not on the visible target: %+v ok=%v", sel, ok)
+	}
+}

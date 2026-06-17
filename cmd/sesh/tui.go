@@ -157,7 +157,9 @@ func runTUI(args []string) error {
 		if pane == "" {
 			return errors.New("tui --cursor: neither $SESH_TUI_PANE nor $TMUX_PANE is set (not inside tmux?)")
 		}
-		id, err := tmux.ThreadIDOfPane(cfg.TmuxSocket, pane)
+		// Use the daemon's work socket (localSocket), not the env default — under a
+		// wrapper-less `zsh -fc` launch cfg.TmuxSocket is the bare "mytmux" default.
+		id, err := tmux.ThreadIDOfPane(localSocket, pane)
 		if err != nil {
 			return fmt.Errorf("tui --cursor: %w", err)
 		}

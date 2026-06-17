@@ -378,3 +378,55 @@ func TestFilterChildToggleKeyIsCtrlY(t *testing.T) {
 		t.Errorf("^y should toggle filterChildren back off")
 	}
 }
+
+// TestPreselectEscalatesViewForArchived covers the ticket: prefix+a (`tui --cursor`)
+// must preselect the current thread even when it is hidden by the default `active`
+// view (e.g. an archived thread). The model escalates to ViewAll and lands it.
+func TestPreselectEscalatesViewForArchived(t *testing.T) {
+	// Start on the default active view, preselecting an ARCHIVED thread that the
+	// active-view fetch filters out (so its row is absent from the message). The mesh
+	// did contain it, so preselectSeen is true.
+	m := Model{
+		view:        ViewActive,
+		preselectID: "arch",
+		expanded:    map[string]bool{},
+	}
+	activeRows := []api.ThreadRow{{Thread: api.Thread{ID: "a", Name: "active"}}}
+	updated, cmd := m.Update(meshMsg{rows: activeRows, preselectSeen: true, fetchedAt: 1})
+	mm := updated.(Model)
+	if mm.view != ViewAll {
+		t.Fatalf("preselect of a hidden thread must escalate to ViewAll, got view=%d", mm.view)
+	}
+	if mm.preselectID != "arch" {
+		t.Fatalf("preselect must stay pending until the refetch lands it, got %q", mm.preselectID)
+	}
+	if cmd == nil {
+		t.Fatal("escalation must trigger a refetch cmd")
+	}
+	// The ViewAll refetch now includes the archived row → the cursor lands and the
+	// preselect is released.
+	allRows := append(activeRows, api.ThreadRow{Thread: api.Thread{ID: "arch", Name: "archived", Archived: true}})
+	updated2, _ := mm.Update(meshMsg{rows: allRows, preselectSeen: true, fetchedAt: 2})
+	mm2 := updated2.(Model)
+	if mm2.preselectID != "" {
+		t.Fatalf("preselect should have landed and cleared, still %q", mm2.preselectID)
+	}
+	if sel, ok := mm2.Selected(); !ok || sel.ID != "arch" {
+		t.Fatalf("cursor not on the archived thread after escalation: %+v ok=%v", sel, ok)
+	}
+}
+
+// TestPreselectDoesNotEscalateOnPublishLag: a preselect target that is NOT yet in the
+// mesh (preselectSeen=false — publish lag, not a view filter) must keep waiting on the
+// current view, not flip to ViewAll.
+func TestPreselectDoesNotEscalateOnPublishLag(t *testing.T) {
+	m := Model{view: ViewActive, preselectID: "later", expanded: map[string]bool{}}
+	updated, _ := m.Update(meshMsg{rows: []api.ThreadRow{{Thread: api.Thread{ID: "a"}}}, preselectSeen: false, fetchedAt: 1})
+	mm := updated.(Model)
+	if mm.view != ViewActive {
+		t.Fatalf("an unpublished preselect must not escalate the view, got view=%d", mm.view)
+	}
+	if mm.preselectID != "later" {
+		t.Fatalf("preselect must remain pending, got %q", mm.preselectID)
+	}
+}

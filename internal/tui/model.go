@@ -373,8 +373,10 @@ func (m Model) WithColumnColors(c map[string]lipgloss.Style) Model {
 	return m
 }
 
-// WithPreselect makes the first fetch place the cursor on the given thread id
-// (no-op if the thread is not in the current view).
+// WithPreselect makes the first fetch place the cursor on the given thread id.
+// If the thread exists but the current view filters it out (e.g. it is archived
+// while the default view is `active`), the TUI escalates to the `all` view so the
+// preselect can land — see the meshMsg handler.
 func (m Model) WithPreselect(threadID string) Model {
 	m.preselectID = threadID
 	return m
@@ -395,6 +397,11 @@ type meshMsg struct {
 	machines  []api.MachineView
 	fetchedAt int64
 	err       error
+	// preselectSeen reports whether a pending preselect target was present in the
+	// UNFILTERED mesh (before the current view's filter dropped it). It distinguishes
+	// "the thread is hidden by this view" (escalate to ViewAll) from "the thread isn't
+	// published yet" (keep waiting) — see the meshMsg handler.
+	preselectSeen bool
 }
 
 type tickMsg time.Time
@@ -407,7 +414,7 @@ func (m Model) Init() tea.Cmd { return m.fetch() }
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
-	c, view, all := m.client, m.view, m.allMachines
+	c, view, all, preselect := m.client, m.view, m.allMachines, m.preselectID
 	var pred *Predicate
 	if i := int(view - viewBuiltins); i >= 0 && i < len(m.customViews) {
 		p := m.customViews[i].pred
@@ -421,12 +428,16 @@ func (m Model) fetch() tea.Cmd {
 			return meshMsg{err: err}
 		}
 		var rows []api.ThreadRow
+		var preselectSeen bool
 		for _, mv := range mesh.Machines {
 			if !all && !mv.Self {
 				continue
 			}
 			for _, t := range mv.Threads {
 				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel}
+				if preselect != "" && t.ID == preselect {
+					preselectSeen = true // present in the mesh, regardless of the view filter
+				}
 				if pred != nil {
 					// A custom view sees EVERYTHING its predicate admits
 					// (archived included — `not archived` is the user's call).
@@ -450,7 +461,7 @@ func (m Model) fetch() tea.Cmd {
 			}
 			return rows[i].ID < rows[j].ID
 		})
-		return meshMsg{rows: rows, machines: mesh.Machines, fetchedAt: time.Now().Unix()}
+		return meshMsg{rows: rows, machines: mesh.Machines, fetchedAt: time.Now().Unix(), preselectSeen: preselectSeen}
 	}
 }
 
@@ -506,6 +517,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyPending(true) // reconcile: re-apply optimistic patches, GC satisfied/expired ones
 			if m.preselectID != "" && m.positionCursorOn(m.preselectID) {
 				m.preselectID = "" // landed — release it so the user can move freely
+			}
+			// Preselect couldn't land but the thread DOES exist in the mesh — it's just
+			// hidden by the current view (e.g. an archived thread while the default view
+			// is `active`). Escalate to ViewAll (a superset of every view) and refetch so
+			// the cursor can land. Guarded on preselectSeen so a not-yet-published thread
+			// doesn't trip it, and on view!=ViewAll so we escalate at most once.
+			if m.preselectID != "" && msg.preselectSeen && m.view != ViewAll {
+				m.view = ViewAll
+				return m, m.fetch()
 			}
 			if vis := len(m.visibleMatches()); m.cursor >= vis {
 				m.cursor = max(0, vis-1)

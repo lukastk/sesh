@@ -170,6 +170,9 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
 tab          cycle views (active / archived / all / custom [[tui.views]])
+             (`tui --cursor` / the cockpit prefix+a preselect the current thread; if it
+             is hidden by the default `active` view — e.g. archived — the TUI opens on
+             `all` so the cursor still lands on it)
 r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
 t            add tag                T          remove tag (picker)
 P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown

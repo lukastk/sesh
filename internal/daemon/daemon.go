@@ -170,6 +170,7 @@ func (d *Daemon) Serve() error {
 	d.maint.start() // begin keeping local thread state fresh in the background
 	d.mesh.start()  // begin syncing peers' snapshots into the local cache
 	go d.evt.run()  // observe the merged mesh + fire [[hooks]]
+	go d.checkPeerDNS() // loudly warn if http peers' hostnames don't resolve (e.g. a CGO=0 termux build)
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the master cockpit to one window per connected machine
 	}

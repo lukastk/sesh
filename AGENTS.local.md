@@ -1222,3 +1222,37 @@ supervisorctl; termux pkill+setsid-nohup with explicit SESH_* env from shell.sh)
 GOTCHA (re-confirmed): a stray `sesh daemon stop` with no isolated env hits the DEFAULT daemon —
 the supervised mymain daemon auto-restarted, but be careful. /proc/<pid>/environ is unreadable on
 termux — read the daemon env from shell.sh (~/.sesh, SESH_MACHINE=termux, sockets sesh/sesh-master).
+
+## H22 — termux TUI broken: CGO=0 build can't resolve tailscale MagicDNS (2026-06-18, sesh 8c833f6, myrig 62c746c)
+Ticket "something is wrong with sesh tui on termux" → user clarified: entering ANY thread in the
+termux TUI failed with `✗ nav <m>:<sess>: exit status 1: sesh tmux: nav inner switch on <m> (http):
+Post "http://<m>:7878/..."`, AND every peer showed OFFLINE (last sync ~4.6h stale). ROOT CAUSE (one
+bug, two symptoms): the DEPLOYED termux `sesh` was built `CGO_ENABLED=0 GOOS=linux`. Go's pure
+resolver reads `/etc/resolv.conf` — ABSENT on termux — and falls back to `[::1]:53` (nothing there),
+so tailscale MagicDNS names (mymain/macstudio/macbook) NEVER resolve. Android's bionic resolver
+(used by ssh/getent/python) resolves them fine via tailscale's split-DNS, but Go's pure resolver
+doesn't touch bionic. So ALL http-transport peer traffic from termux (mesh sync + routing + the
+nav "inner switch on <m> (http)", which POSTs to the peer's ApiAddr) failed on hostname lookup.
+Diagnosis evidence: `go version -m ~/.local/bin/sesh` → CGO_ENABLED=0/GOOS=linux; a tiny Go probe
+on termux showed CGO=0 default-resolver fails for `mymain`, CGO=0 + custom resolver→100.100.100.100
+resolves the FQDN `mymain.tail27f06c.ts.net` but NOT bare `mymain` (no search domain), and
+**CGO=1 build (termux's DEFAULT: GOOS=android, CC=aarch64-linux-android-clang) resolves both bare +
+FQDN via bionic, even under `env -i`** (the daemon's setsid/nohup ctx). 100.100.100.100 raw-UDP is
+unreliable for MagicDNS A-records on Android (only forwards public names) — bionic is the only thing
+that does MagicDNS there.
+FIX (Lukas chose "rebuild CGO=1 + loud self-check" over an IP-config or resolver-shim): (1) rebuilt
+termux's sesh with `CGO_ENABLED=1 go build` and redeployed — peers now `synced 1s ago`, TUI Enter
+exits 0 (no error). (2) sesh 8c833f6 adds `internal/daemon/dnscheck.go`: `checkPeerDNS()` (run
+`go d.checkPeerDNS()` from Serve()) resolves every HTTP peer's ApiAddr host once at startup and
+`log.Printf`s a LOUD warning naming the likely CGO=0 cause if any fail (ssh peers + literal IPs
+skipped — `httpPeerHost()`, unit-tested TestHTTPPeerHost). No schema change. (3) myrig 62c746c adds
+a comment at scripts/post/mysetup.sh's `go build` line: NEVER force CGO=0/GOOS=linux on termux.
+The provisioning script was ALREADY correct (plain `go build` → CGO=1 on termux) — the bug came from
+a PRIOR MANUAL deploy of mine forcing CGO=0/GOOS=linux (a static-binary habit copied from other
+machines). LESSON: on termux, build sesh with plain `go build` (CGO=1/android); a CGO=0 binary runs
+but is DNS-blind to the tailnet. termux daemon restart gotcha (bit me): `pkill -f "sesh daemon run"`
+matched MY OWN ssh shell (its argv contained that string) and killed it before the mv — kill the
+daemon by explicit PID (`sesh daemon status` prints it) instead; and `mv` the new binary into place
+BEFORE killing, so the zshenv login-guard can only ever relaunch the NEW binary.
+DEPLOY: all four daemons on 8c833f6 (termux native CGO=1 + relaunch; macstudio/macbook/mymain native
+build + supervisorctl restart). Self-check silent on mymain/macs (they have /etc/resolv.conf).

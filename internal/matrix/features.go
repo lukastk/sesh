@@ -395,6 +395,11 @@ func init() {
 		Description: "prompt blob-token expansion (`blob expand`): @blob(<hex>) → the blob's absolute path on the serving daemon; @@blob() escapes to a literal; a token referencing no blob is a LOUD error (never a silent passthrough). Routes per --machine",
 		Localities:  bothLoc,
 	})
+	Register(Feature{
+		ID:          "fs.list",
+		Description: "generic filesystem listing (`fs list --path`): the immediate SUBDIRECTORIES of an allow-listed home-rooted path on the serving daemon, ~-relative, dirs only; a path outside home (incl. ../ traversal) is a LOUD 403. Routes per --machine. Powers the Obsidian new-thread cwd pickers on mobile",
+		Localities:  bothLoc,
+	})
 
 	// ---- daemon / API ----
 	Register(Feature{

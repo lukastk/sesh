@@ -234,6 +234,16 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh blob <add|ls|get|rm|path|expand>",
 		examples: []string{"sesh blob add ~/shot.png", "cat prompt.txt | sesh blob expand"},
 	},
+	"fs": {
+		summary:  "generic, policy-free filesystem primitive the daemon serves over its API. `fs list` returns the immediate SUBDIRECTORIES of an allow-listed (home-rooted) path on the daemon's host; routes per --machine. Powers the Obsidian new-thread cwd pickers on mobile (no local fs access)",
+		usage:    "sesh fs <list>",
+		examples: []string{"sesh fs list --path ~/dev", "sesh fs list --path ~/mysetup --machine macbook --json"},
+	},
+	"fs list": {
+		summary:  "list the immediate subdirectories of a home-rooted path on the daemon's host (a path outside the home dir is refused loudly)",
+		usage:    "sesh fs list --path <p> [--machine <m>] [--json]",
+		examples: []string{"sesh fs list --path ~/dev", "sesh fs list --path ~/mysetup --machine macbook --json"},
+	},
 	"blob add": {
 		summary:  "store a file (or --stdin bytes); prints the @blob(<hex>) token to paste into a prompt. Idempotent (content-addressed: identical bytes dedup)",
 		usage:    "sesh blob add <path> [--name <n>] [--machine <m>] [--json]   |   sesh blob add --stdin --name <n> [--machine <m>]",
@@ -547,7 +557,7 @@ var helpRegistry = map[string]cmdHelp{
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "tui", "info",
+	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "fs", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

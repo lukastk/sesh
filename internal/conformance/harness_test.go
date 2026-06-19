@@ -103,6 +103,7 @@ type sandboxConfig struct {
 	apiToken    string
 	tmuxConf    string
 	selfhealOff bool
+	homeDir     string
 }
 
 type sandboxOpt func(*sandboxConfig)
@@ -124,6 +125,12 @@ func withTmuxConf(path string) sandboxOpt {
 // kill-window-then-ensure sequencing the background healer would race.
 func withSelfhealOff() sandboxOpt {
 	return func(c *sandboxConfig) { c.selfhealOff = true }
+}
+
+// withHome starts the sandbox's daemon with HOME=dir, so `fs list`'s home-rooted
+// allow-list + ~ expansion resolve against a controlled tree (not the real home).
+func withHome(dir string) sandboxOpt {
+	return func(c *sandboxConfig) { c.homeDir = dir }
 }
 
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
@@ -165,6 +172,9 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	}
 	if sc.selfhealOff {
 		env["SESH_MASTER_SELFHEAL"] = "off"
+	}
+	if sc.homeDir != "" {
+		env["HOME"] = sc.homeDir
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 

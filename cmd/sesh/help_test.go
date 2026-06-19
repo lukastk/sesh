@@ -55,6 +55,7 @@ var subcommandSets = map[string][]string{
 		"tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},
 	"ticket": {"create", "list", "set-status", "import", "unbind", "move", "needs-input", "send-prompt"},
 	"blob":   {"add", "ls", "get", "rm", "path", "expand"},
+	"fs":     {"list"},
 	"master": {"up", "window", "attach", "down", "ensure", "watchers"},
 	"peer":   {"add", "list", "remove"},
 	"hooks":  {"list", "enable", "disable", "test"},

@@ -156,6 +156,22 @@ reads the file (image → vision, etc.). A token referencing **no blob is a LOUD
 sent verbatim. Escape a literal with `@@blob(…)`. Every `blob` op takes `--machine` like
 tickets; `ticket move` carries a prompt's referenced blobs to the destination automatically.
 
+## Listing directories on a daemon (`sesh fs list`)
+
+A generic, policy-free filesystem primitive the daemon serves over its API: the immediate
+**subdirectories** of an allow-listed, **home-rooted** path on the daemon's host. Routes per
+`--machine` like tickets, so you enumerate the machine you're targeting (works where the
+caller has no local filesystem access — e.g. the Obsidian app on mobile filling its
+box/mysetup cwd pickers).
+
+```bash
+sesh fs list --path ~/dev                       # box checkout dirs (name<TAB>~-relative path)
+sesh fs list --path ~/mysetup --machine macbook --json
+```
+
+Dirs only (symlinks not followed). A path **outside the home dir** — or one escaping via
+`../` — is refused **loudly** (403), never a silent empty listing.
+
 ## The TUI (`sesh tui`)
 
 `sesh tui` opens the live cross-machine thread grid (`--all-machines` to fan out). It is a

@@ -64,7 +64,12 @@ package api
 // SESH_* env (lets a fast `zsh -fc` popup launch `sesh tui` with no shell wrapper).
 // Additive omitempty → mixed-mesh safe (a pre-20 daemon just omits them; the client
 // falls back to its env-derived config).
-const SchemaVersion = 20
+// 21: GET /v1/fs/list — a generic, policy-free filesystem primitive returning the
+// immediate SUBDIRECTORIES of an allow-listed (home-rooted) path on the daemon's host.
+// Additive new endpoint → mixed-mesh safe (a pre-21 daemon 404s the route). Powers the
+// Obsidian new-thread modal's box (~/dev) and mysetup (~/mysetup) cwd pickers on
+// platforms with no local filesystem access (mobile).
+const SchemaVersion = 21
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

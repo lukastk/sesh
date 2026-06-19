@@ -334,6 +334,11 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON (one blob per line)"},
 	},
+	"fs list": {
+		{"--path", "the home-rooted path to list (e.g. ~/dev or ~/mysetup); a path outside home is refused"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON"},
+	},
 	"blob get": {
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

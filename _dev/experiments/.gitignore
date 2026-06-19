@@ -1,0 +1,9 @@
+# Track the durable deliverables AND the small prototype source + proof screenshots
+# (Lukas wants to "really see what's possible"). Ignore only heavy/derived artifacts.
+node_modules/
+**/node_modules/
+package-lock.json
+**/package-lock.json
+.playwright-mcp/
+**/.playwright-mcp/
+*.log

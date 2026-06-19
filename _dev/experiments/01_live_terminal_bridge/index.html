@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>sesh terminal bridge — prototype</title>
+  <link rel="stylesheet" href="/xterm.css" />
+  <style>
+    body { margin: 0; background: #1a1b26; color: #c0caf5; font-family: ui-monospace, monospace; }
+    #bar { padding: 6px 10px; font-size: 13px; background: #16161e; display: flex; gap: 12px; align-items: center; }
+    #status { color: #9ece6a; }
+    #term { padding: 6px; height: calc(100vh - 40px); }
+    input { background: #1a1b26; color: #c0caf5; border: 1px solid #414868; border-radius: 4px; padding: 3px 6px; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span>thread:</span>
+    <input id="thread" size="40" placeholder="thread id" />
+    <button id="connect">connect</button>
+    <span id="status">idle</span>
+  </div>
+  <div id="term"></div>
+
+  <script src="/xterm.js"></script>
+  <script src="/addon-fit.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search)
+    const threadInput = document.getElementById('thread')
+    const statusEl = document.getElementById('status')
+    threadInput.value = params.get('thread') || ''
+
+    let term, fit, ws
+    function connect() {
+      const threadId = threadInput.value.trim()
+      if (!threadId) return
+      if (ws) ws.close()
+      document.getElementById('term').innerHTML = ''
+      term = new Terminal({ cursorBlink: true, fontSize: 13,
+        theme: { background: '#1a1b26', foreground: '#c0caf5' } })
+      fit = new FitAddon.FitAddon()
+      term.loadAddon(fit)
+      term.open(document.getElementById('term'))
+      fit.fit()
+
+      ws = new WebSocket(`ws://${location.host}/term?thread=${encodeURIComponent(threadId)}`)
+      ws.binaryType = 'arraybuffer'
+      statusEl.textContent = 'connecting…'
+      ws.onopen = () => {
+        statusEl.textContent = 'connected'
+        sendResize()
+      }
+      ws.onmessage = (ev) => {
+        const data = typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data)
+        term.write(data)
+      }
+      ws.onclose = () => { statusEl.textContent = 'closed' }
+      term.onData((d) => { if (ws.readyState === 1) ws.send(d) })
+      window.addEventListener('resize', () => { fit.fit(); sendResize() })
+    }
+    function sendResize() {
+      if (!ws || ws.readyState !== 1) return
+      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+    }
+    document.getElementById('connect').onclick = connect
+    if (threadInput.value) connect()
+  </script>
+</body>
+</html>

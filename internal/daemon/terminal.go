@@ -113,9 +113,12 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	c.SetReadLimit(1 << 20)
 
 	// pty running the attach to the GROUPED viewer session. TMUX is unset so the nested
-	// attach is allowed.
+	// attach is allowed. TERM is forced to xterm-256color: the supervised daemon often runs
+	// with TERM unset/dumb, which the pty/tmux would otherwise inherit and break any agent
+	// that clears the screen ("terminal does not support clear"). The UI terminal is xterm.js
+	// (xterm-256color), so drop any inherited TERM and set the one the client actually speaks.
 	cmd := d.tmuxCmd("attach-session", "-t", viewer)
-	cmd.Env = scrubEnv(os.Environ(), "TMUX", "TMUX_PANE")
+	cmd.Env = append(scrubEnv(os.Environ(), "TMUX", "TMUX_PANE", "TERM"), "TERM=xterm-256color")
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		c.Close(websocket.StatusInternalError, "pty start failed") //nolint:errcheck

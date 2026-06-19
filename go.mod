@@ -6,6 +6,8 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/muesli/termenv v0.16.0
 	modernc.org/sqlite v1.52.0

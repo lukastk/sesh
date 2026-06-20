@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/BurntSushi/toml"
 )
@@ -26,6 +27,19 @@ type UIConfig struct {
 	// or a mysetup repo without browsing. ~-relative, so the same list works on
 	// every machine (each daemon resolves ~ to its own home). Default ~/mysetup, ~/dev.
 	CwdRoots []string `toml:"cwd_roots" json:"cwd_roots"`
+	// CwdLabels format how a cwd entry is DISPLAYED in the new-thread quick-pick —
+	// same rule language as config.toml's [[cwd_label]] (a Go RE2 `match` regex with
+	// named groups + a `{placeholder}` `label` template; first match wins, no match →
+	// the raw entry name). The default rule turns a ~/dev box index into
+	// "<boxname> <boxid>". The app applies these to picker entries (normalizing the
+	// Go `(?P<name>)` group syntax to JS `(?<name>)`).
+	CwdLabels []UICwdLabelRule `toml:"cwd_label" json:"cwd_labels"`
+}
+
+// UICwdLabelRule is one match→label rule for the new-thread picker display.
+type UICwdLabelRule struct {
+	Match string `toml:"match" json:"match"`
+	Label string `toml:"label" json:"label"`
 }
 
 // DefaultUIConfig is what a missing file (or a missing key) resolves to.
@@ -33,7 +47,38 @@ func DefaultUIConfig() UIConfig {
 	return UIConfig{
 		CollapseParents: true,
 		CwdRoots:        []string{"~/mysetup", "~/dev"},
+		CwdLabels: []UICwdLabelRule{{
+			Match: `^~/dev/[0-9]{8}_(?P<boxid>[a-z0-9]+)__(?P<boxname>[^/]+)$`,
+			Label: `{boxname} <{boxid}>`,
+		}},
 	}
+}
+
+// ValidateUIConfig checks the cwd_label rules compile and only reference known
+// placeholders — LOUD, so a typo'd rule is refused at save, not silently dropped.
+func ValidateUIConfig(cfg UIConfig) error {
+	for i, r := range cfg.CwdLabels {
+		if r.Match == "" || r.Label == "" {
+			return fmt.Errorf("cwd_label rule %d: match and label are both required", i+1)
+		}
+		re, err := regexp.Compile(r.Match)
+		if err != nil {
+			return fmt.Errorf("cwd_label rule %d: bad match regex %q: %w", i+1, r.Match, err)
+		}
+		// Valid placeholders: the regex's named groups + {name} (raw entry) + {path} (~-path).
+		valid := map[string]bool{"name": true, "path": true}
+		for _, g := range re.SubexpNames() {
+			if g != "" {
+				valid[g] = true
+			}
+		}
+		for _, m := range placeholderRe.FindAllStringSubmatch(r.Label, -1) {
+			if !valid[m[1]] {
+				return fmt.Errorf("cwd_label rule %d: label %q uses unknown placeholder {%s} (valid: the regex's named groups + {name} {path})", i+1, r.Label, m[1])
+			}
+		}
+	}
+	return nil
 }
 
 // UIConfigPath is <home>/ui_config.toml.
@@ -42,8 +87,9 @@ func UIConfigPath(home string) string { return filepath.Join(home, "ui_config.to
 // uiConfigFile mirrors UIConfig with POINTERS so an absent key falls back to the
 // default rather than the Go zero value (collapse_parents defaults true, not false).
 type uiConfigFile struct {
-	CollapseParents *bool     `toml:"collapse_parents"`
-	CwdRoots        *[]string `toml:"cwd_roots"`
+	CollapseParents *bool             `toml:"collapse_parents"`
+	CwdRoots        *[]string         `toml:"cwd_roots"`
+	CwdLabels       *[]UICwdLabelRule `toml:"cwd_label"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -68,6 +114,13 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	// nil = key absent → keep the default roots; a present (even empty) list is honoured.
 	if f.CwdRoots != nil {
 		cfg.CwdRoots = *f.CwdRoots
+	}
+	if f.CwdLabels != nil {
+		cfg.CwdLabels = *f.CwdLabels
+	}
+	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
+	if err := ValidateUIConfig(cfg); err != nil {
+		return cfg, fmt.Errorf("config: %s: %w", UIConfigPath(home), err)
 	}
 	return cfg, nil
 }

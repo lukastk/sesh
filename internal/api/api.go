@@ -87,7 +87,11 @@ package api
 // Schema 25 adds `cwd_roots` to UIConfig — the new-thread modal's "default parent
 // folders" quick cwd pick (~/mysetup, ~/dev), listed per machine via fs/list.
 // Additive — a pre-25 daemon omits the field and the app falls back to its default.
-const SchemaVersion = 25
+//
+// Schema 26 adds `cwd_labels` to UIConfig — match→label regex rules (same language as
+// config.toml's [[cwd_label]]) the app applies to format new-thread picker entries
+// (e.g. a ~/dev box index → "<boxname> <boxid>"). Additive; validated on save (loud 400).
+const SchemaVersion = 26
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -98,6 +102,14 @@ type UIConfig struct {
 	// CwdRoots are the new-thread "default parent folders" — the app lists each one's
 	// subdirs (per target machine, via fs/list) as a quick cwd pick. Default ~/mysetup, ~/dev.
 	CwdRoots []string `json:"cwd_roots"`
+	// CwdLabels are match→label regex rules the app applies to format picker entries.
+	CwdLabels []CwdLabelRule `json:"cwd_labels"`
+}
+
+// CwdLabelRule is one new-thread-picker display rule (regex match + template label).
+type CwdLabelRule struct {
+	Match string `json:"match"`
+	Label string `json:"label"`
 }
 
 // UIConfigResponse is returned by GET and POST /v1/ui-config.

@@ -57,6 +57,31 @@ func TestUIConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUIConfigDefaultCwdLabel(t *testing.T) {
+	cfg := DefaultUIConfig()
+	if len(cfg.CwdLabels) != 1 {
+		t.Fatalf("default cwd_labels = %d rules, want 1 (the box rule)", len(cfg.CwdLabels))
+	}
+	if err := ValidateUIConfig(cfg); err != nil {
+		t.Errorf("default cwd_labels must validate: %v", err)
+	}
+}
+
+func TestValidateUIConfigLoudOnBadRule(t *testing.T) {
+	// Bad regex → loud.
+	if err := ValidateUIConfig(UIConfig{CwdLabels: []UICwdLabelRule{{Match: "([unclosed", Label: "{x}"}}}); err == nil {
+		t.Error("a bad match regex must be a loud error")
+	}
+	// Unknown placeholder (not a named group / {name} / {path}) → loud.
+	if err := ValidateUIConfig(UIConfig{CwdLabels: []UICwdLabelRule{{Match: "^~/dev/(?P<a>.+)$", Label: "{nope}"}}}); err == nil {
+		t.Error("an unknown label placeholder must be a loud error")
+	}
+	// A valid rule passes.
+	if err := ValidateUIConfig(UIConfig{CwdLabels: []UICwdLabelRule{{Match: "^~/dev/(?P<boxname>.+)$", Label: "{boxname} ({name})"}}}); err != nil {
+		t.Errorf("a valid rule must pass: %v", err)
+	}
+}
+
 func TestLoadUIConfigMalformedIsLoud(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ui_config.toml"), []byte("collapse_parents = "), 0o600); err != nil {

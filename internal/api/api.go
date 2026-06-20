@@ -69,7 +69,10 @@ package api
 // Additive new endpoint → mixed-mesh safe (a pre-21 daemon 404s the route). Powers the
 // Obsidian new-thread modal's box (~/dev) and mysetup (~/mysetup) cwd pickers on
 // platforms with no local filesystem access (mobile).
-const SchemaVersion = 21
+// 22: additive /v1/peers CRUD (GET list / POST add / POST remove) over the existing
+// peers registry — lets a client (the GUI) manage the mesh without local file access.
+// Additive → mixed-mesh safe (a pre-22 daemon 404s the new routes).
+const SchemaVersion = 22
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

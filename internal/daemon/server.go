@@ -37,6 +37,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesBlobs(mux)
 	d.routesFs(mux)
 	d.routesSubscriptions(mux)
+	d.routesPeers(mux)
 	d.routesAdopt(mux)
 	d.routesDoctor(mux)
 	mux.HandleFunc("GET /v1/hooks", d.handleHooksList)

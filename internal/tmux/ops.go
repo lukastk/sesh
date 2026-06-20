@@ -112,7 +112,20 @@ func (s *Server) KillSession(name string) error {
 // thread's runtime and leaves its siblings alive.
 func (s *Server) KillPane(pane string) error {
 	_, err := s.run("kill-pane", "-t", pane)
-	return err
+	if err != nil {
+		// Killing the LAST pane on the server tears the whole server down, and tmux
+		// then reports the kill-pane command itself as failed ("server exited
+		// unexpectedly") or the server as already gone ("no server running") even
+		// though the pane is definitively gone — which is the intended outcome of a
+		// kill. Treat ONLY those server-is-gone messages as success; any other failure
+		// (e.g. a bad pane id: "can't find pane") still surfaces loudly.
+		msg := err.Error()
+		if strings.Contains(msg, "server exited") || strings.Contains(msg, "no server running") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func sortedKeys(m map[string]string) []string {

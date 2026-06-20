@@ -151,3 +151,53 @@ func TestSendTextMultilinePreservesNewlines(t *testing.T) {
 		t.Errorf("multi-line text was EXECUTED (newlines submitted as Enter); pane:\n%s", capt)
 	}
 }
+
+// TestKillPaneLastPaneTearsDownServerIsSuccess reproduces the `stop` 500 bug: killing
+// the LAST pane on a server tears the whole server down, and tmux reports the kill-pane
+// command itself as failed ("server exited unexpectedly") even though the pane is gone.
+// KillPane must treat that as success — while still surfacing a genuine kill failure.
+func TestKillPaneLastPaneTearsDownServerIsSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	// Phase 1 — the bug: exactly one session/window/pane. Killing it tears the server
+	// down; tmux returns a non-zero "server exited" error, but the pane is gone → success.
+	sockA := "seshkill-last-" + strings.ReplaceAll(t.Name(), "/", "_")
+	rawA := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sockA}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := rawA("-f", "/dev/null", "new-session", "-d", "-s", "only", "-x", "80", "-y", "24"); err != nil {
+		t.Fatalf("new-session A: %v", err)
+	}
+	defer exec.Command("tmux", "-L", sockA, "kill-server").Run() //nolint:errcheck
+	paneA, err := rawA("list-panes", "-t", "only", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("pane id A: %v", err)
+	}
+	if err := NewServer(sockA).KillPane(paneA); err != nil {
+		t.Fatalf("KillPane on the last pane must succeed (server-exit is the intended teardown), got: %v", err)
+	}
+	if out, err := rawA("list-sessions"); err == nil {
+		t.Errorf("server should be gone after killing the last pane; list-sessions returned: %q", out)
+	}
+
+	// Phase 2 — loudness preserved: on a LIVE server, killing a nonexistent pane id must
+	// still error (the fix swallows ONLY server-is-gone messages, not real failures).
+	sockB := "seshkill-bad-" + strings.ReplaceAll(t.Name(), "/", "_")
+	rawB := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sockB}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := rawB("-f", "/dev/null", "new-session", "-d", "-s", "keep", "-x", "80", "-y", "24"); err != nil {
+		t.Fatalf("new-session B: %v", err)
+	}
+	defer exec.Command("tmux", "-L", sockB, "kill-server").Run() //nolint:errcheck
+	if err := NewServer(sockB).KillPane("%99999"); err == nil {
+		t.Error("KillPane on a nonexistent pane (live server) must surface an error, not be swallowed")
+	}
+}

@@ -98,6 +98,18 @@ func TestThreadRPCWebSocket(t *testing.T) {
 	if got := dialStatus(t, wsURL+"?id=deadbeef-no-such-thread", token); got != http.StatusNotFound {
 		t.Errorf("unknown id: status %d, want 404", got)
 	}
+
+	// --- Query-token auth (the WebView/browser path; header can't be set on a WS) ---
+	// A WebSocket handshake cannot carry the Authorization header, so the rpc/terminal
+	// routes also accept ?token=. No header is set here; auth comes from the query alone.
+	// Correct query token authenticates -> falls through to the 404 (unknown id).
+	if got := dialStatus(t, wsURL+"?id=deadbeef-no-such-thread&token="+token, ""); got != http.StatusNotFound {
+		t.Errorf("query token (good): status %d, want 404 (authenticated, unknown id)", got)
+	}
+	// Wrong query token -> 401 (same as a wrong header).
+	if got := dialStatus(t, wsURL+"?id=anything&token=wrong-query-token", ""); got != http.StatusUnauthorized {
+		t.Errorf("query token (bad): status %d, want 401", got)
+	}
 	// Non-pi thread -> 400 (a headless claude RECORD; no agent is spawned).
 	claudeOut, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", "claude", "--name", "notpi", "--cwd", "/tmp", "--headless", "--json")
 	if err != nil {

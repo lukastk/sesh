@@ -60,6 +60,35 @@ func TestThreadTerminalWebSocket(t *testing.T) {
 	if got := dialStatus(wsURL + "?id=deadbeef-nope"); got != http.StatusNotFound {
 		t.Errorf("unknown id: status %d, want 404", got)
 	}
+
+	// Query-token auth (the WebView/browser path; a WS handshake can't set headers).
+	// Dial with NO Authorization header — auth must come from ?token= alone.
+	noHdrDial := func(url, tok string) int {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h := http.Header{}
+		if tok != "" {
+			h.Set("Authorization", "Bearer "+tok)
+		}
+		c, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: h})
+		if err == nil {
+			c.CloseNow() //nolint:errcheck
+			return http.StatusSwitchingProtocols
+		}
+		if resp == nil {
+			t.Fatalf("dial %s: no response: %v", url, err)
+		}
+		return resp.StatusCode
+	}
+	if got := noHdrDial(wsURL+"?id=deadbeef-nope&token="+token, ""); got != http.StatusNotFound {
+		t.Errorf("query token (good): status %d, want 404 (authenticated, unknown id)", got)
+	}
+	if got := noHdrDial(wsURL+"?id=anything&token=wrong-query-token", ""); got != http.StatusUnauthorized {
+		t.Errorf("query token (bad): status %d, want 401", got)
+	}
+	if got := noHdrDial(wsURL+"?id=anything", ""); got != http.StatusUnauthorized {
+		t.Errorf("no token at all: status %d, want 401", got)
+	}
 	hl, _, err := sb.Runner.Run(t, "thread", "new", "--agent", "pi", "--name", "hl", "--cwd", "/tmp", "--headless", "--json")
 	if err != nil {
 		t.Fatalf("headless pi: %v", err)

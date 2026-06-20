@@ -44,9 +44,9 @@ func (d *Daemon) handleUIConfigSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func toAPIUIConfig(c config.UIConfig) api.UIConfig {
-	return api.UIConfig{CollapseParents: c.CollapseParents}
+	return api.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots}
 }
 
 func fromAPIUIConfig(c api.UIConfig) config.UIConfig {
-	return config.UIConfig{CollapseParents: c.CollapseParents}
+	return config.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots}
 }

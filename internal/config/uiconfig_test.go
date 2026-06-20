@@ -16,6 +16,24 @@ func TestLoadUIConfigDefaultsWhenAbsent(t *testing.T) {
 	if !cfg.CollapseParents {
 		t.Errorf("default collapse_parents = %v, want true", cfg.CollapseParents)
 	}
+	// Absent cwd_roots → the default parent folders, not an empty slice.
+	if len(cfg.CwdRoots) != 2 || cfg.CwdRoots[0] != "~/mysetup" || cfg.CwdRoots[1] != "~/dev" {
+		t.Errorf("default cwd_roots = %v, want [~/mysetup ~/dev]", cfg.CwdRoots)
+	}
+}
+
+func TestUIConfigCwdRootsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveUIConfig(dir, UIConfig{CollapseParents: true, CwdRoots: []string{"~/work", "~/dev", "~/src"}}); err != nil {
+		t.Fatalf("SaveUIConfig: %v", err)
+	}
+	cfg, err := LoadUIConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadUIConfig: %v", err)
+	}
+	if len(cfg.CwdRoots) != 3 || cfg.CwdRoots[0] != "~/work" || cfg.CwdRoots[2] != "~/src" {
+		t.Errorf("round-tripped cwd_roots = %v, want [~/work ~/dev ~/src]", cfg.CwdRoots)
+	}
 }
 
 func TestUIConfigRoundTrip(t *testing.T) {

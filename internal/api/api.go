@@ -91,7 +91,10 @@ package api
 // Schema 26 adds `cwd_labels` to UIConfig — match→label regex rules (same language as
 // config.toml's [[cwd_label]]) the app applies to format new-thread picker entries
 // (e.g. a ~/dev box index → "<boxname> <boxid>"). Additive; validated on save (loud 400).
-const SchemaVersion = 26
+//
+// Schema 27 adds `transcript_prefetch_secs` to UIConfig — the app's background transcript
+// prefetch interval (cache all non-archived transcripts so opening is instant). Additive.
+const SchemaVersion = 27
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -104,6 +107,8 @@ type UIConfig struct {
 	CwdRoots []string `json:"cwd_roots"`
 	// CwdLabels are match→label regex rules the app applies to format picker entries.
 	CwdLabels []CwdLabelRule `json:"cwd_labels"`
+	// TranscriptPrefetchSecs is the app's background transcript-prefetch interval (0=off).
+	TranscriptPrefetchSecs int `json:"transcript_prefetch_secs"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

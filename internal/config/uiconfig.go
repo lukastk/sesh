@@ -34,6 +34,10 @@ type UIConfig struct {
 	// "<boxname> <boxid>". The app applies these to picker entries (normalizing the
 	// Go `(?P<name>)` group syntax to JS `(?<name>)`).
 	CwdLabels []UICwdLabelRule `toml:"cwd_label" json:"cwd_labels"`
+	// TranscriptPrefetchSecs is how often (seconds) the app silently prefetches all
+	// non-archived threads' transcripts in the background and caches them, so opening
+	// a thread's transcript is instant. 0 disables. Default 10.
+	TranscriptPrefetchSecs int `toml:"transcript_prefetch_secs" json:"transcript_prefetch_secs"`
 }
 
 // UICwdLabelRule is one match→label rule for the new-thread picker display.
@@ -51,6 +55,7 @@ func DefaultUIConfig() UIConfig {
 			Match: `^~/dev/[0-9]{8}_(?P<boxid>[a-z0-9]+)__(?P<boxname>[^/]+)$`,
 			Label: `{boxname} <{boxid}>`,
 		}},
+		TranscriptPrefetchSecs: 10,
 	}
 }
 
@@ -87,9 +92,10 @@ func UIConfigPath(home string) string { return filepath.Join(home, "ui_config.to
 // uiConfigFile mirrors UIConfig with POINTERS so an absent key falls back to the
 // default rather than the Go zero value (collapse_parents defaults true, not false).
 type uiConfigFile struct {
-	CollapseParents *bool             `toml:"collapse_parents"`
-	CwdRoots        *[]string         `toml:"cwd_roots"`
-	CwdLabels       *[]UICwdLabelRule `toml:"cwd_label"`
+	CollapseParents        *bool             `toml:"collapse_parents"`
+	CwdRoots               *[]string         `toml:"cwd_roots"`
+	CwdLabels              *[]UICwdLabelRule `toml:"cwd_label"`
+	TranscriptPrefetchSecs *int              `toml:"transcript_prefetch_secs"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -117,6 +123,10 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	}
 	if f.CwdLabels != nil {
 		cfg.CwdLabels = *f.CwdLabels
+	}
+	// nil = absent → default interval; an explicit 0 (off) or any value is honoured.
+	if f.TranscriptPrefetchSecs != nil {
+		cfg.TranscriptPrefetchSecs = *f.TranscriptPrefetchSecs
 	}
 	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
 	if err := ValidateUIConfig(cfg); err != nil {

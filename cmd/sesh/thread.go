@@ -323,6 +323,7 @@ func threadSendHeadless(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("send-headless", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
 	text := fs.String("text", "", "turn text (required)")
+	model := fs.String("model", "", "override the thread's pinned model for THIS turn only (opaque pass-through; empty = the thread's model / agent default)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -335,7 +336,7 @@ func threadSendHeadless(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
-	if err := c.ThreadSendHeadless(context.Background(), *id, *text); err != nil {
+	if err := c.ThreadSendHeadlessModel(context.Background(), *id, *text, *model); err != nil {
 		return err
 	}
 	fmt.Println("turn started for", *id)
@@ -427,6 +428,7 @@ func threadNew(cfg config.Config, args []string) error {
 	name := fs.String("name", "", "thread name (optional; empty = a nameless thread)")
 	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (default: the current dir '.'; expanded against the invocation dir)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
+	model := fs.String("model", "", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
 	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
 	yolo := fs.Bool("yolo", false, "launch with permissions bypassed (overrides [spawn] config)")
@@ -524,7 +526,7 @@ func threadNew(cfg config.Config, args []string) error {
 	c := daemonClient(cfg)
 	resp, err := c.ThreadNew(context.Background(), api.NewThreadRequest{
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
-		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg,
+		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg, Model: *model,
 		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
 	})
 	if err != nil {

@@ -218,6 +218,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--agent", "agent to spawn: claude | codex | pi (required)"},
 		{"--cwd", "start directory; a relative path expands against the invocation dir, a ~/… path resolves against the OWNER machine's home (portable cross-machine) (default: the current dir '.')"},
 		{"--name", "thread name (optional; empty = a nameless thread)"},
+		{"--model", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default; applied on spawn, resume, and every headless turn)"},
 		{"--headless", "spawn headless (a durable conversation with no tmux window)"},
 		{"--parent", "parent thread id/prefix (default: the CURRENT thread when run inside one)"},
 		{"--no-parent", "force a root thread, suppressing parent inference"},
@@ -268,6 +269,7 @@ var flagDocs = map[string][]flagDoc{
 	"thread send-headless": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--text", "turn text for the headless --resume turn (required)"},
+		{"--model", "override the thread's pinned model for THIS turn only (opaque pass-through; empty = the thread's model / agent default)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread snapshot": {

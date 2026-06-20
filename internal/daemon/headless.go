@@ -38,6 +38,7 @@ func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req 
 		AgentSessionID: agentSessionID,
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
+		Model:          req.Model,
 		// HeadlessStarted stays false: the conversation begins on the first turn
 		// (codex mints its session id there; claude/pi create from the pre-assigned id).
 	}
@@ -140,9 +141,16 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		d.store.SetThreadAgentSession(req.ID, sessionID) //nolint:errcheck
 	}
 
+	// The per-turn model override (send-headless --model) wins for THIS turn only;
+	// otherwise the thread's pinned model applies (both '' = the agent default).
+	turnModel := req.Model
+	if turnModel == "" {
+		turnModel = thread.Model
+	}
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, text, codexHome, turnMode)
+			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, text, codexHome, turnMode, turnModel)
 
 		d.hlMu.Lock()
 		delete(d.hlInFlight, req.ID)

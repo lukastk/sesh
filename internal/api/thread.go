@@ -29,6 +29,11 @@ type Thread struct {
 	HeadlessStarted bool `json:"headless_started,omitempty"`
 	// Archived hides the thread from the active list (record kept).
 	Archived bool `json:"archived,omitempty"`
+	// Model is the agent model pinned to this thread (opaque pass-through, e.g.
+	// "haiku", "anthropic/claude-opus-4-8", "gpt-5.5"). '' = the agent's own
+	// default. Applied on headed spawn, resume, and every headless turn; a per-turn
+	// override (send-headless --model) does NOT change it.
+	Model string `json:"model,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -101,6 +106,9 @@ type NewThreadRequest struct {
 	// Mode overrides the [spawn] launch mode for this spawn (yolo|default|
 	// sandbox; '' = the config default).
 	Mode string `json:"mode,omitempty"`
+	// Model pins the agent model for this thread (opaque pass-through; '' = the
+	// agent's default). Stored on the record and applied to every later spawn/turn.
+	Model string `json:"model,omitempty"`
 	// Msg, for headed spawns, is an initial prompt sent once the agent is
 	// READY (the daemon waits for the pane asynchronously — never the blank-
 	// pane race; a delivery failure is loud in the daemon log).
@@ -150,6 +158,9 @@ type ThreadSendRequest struct {
 	Text string `json:"text"`
 	// Mode overrides the [spawn] mode for a HEADLESS turn ('' = config).
 	Mode string `json:"mode,omitempty"`
+	// Model overrides the thread's pinned model for THIS headless turn only ('' =
+	// use the thread's stored model). The thread record is not changed.
+	Model string `json:"model,omitempty"`
 }
 
 // RenameThreadRequest is the body of POST /v1/threads/rename.

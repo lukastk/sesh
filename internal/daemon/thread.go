@@ -151,7 +151,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))
+	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, d.spawn.ArgsFor(string(kind)))
 
 	// Resolve placement -> the thread's session_name + its (marked) pane. teardown
 	// undoes ONLY what THIS spawn created (its own session, or its window/split
@@ -232,6 +232,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		AgentSessionID: agentSessionID,
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
+		Model:          req.Model,
 		// A headed spawn BEGINS the conversation (the agent launches with this
 		// session id) — so a later headless turn on the idle thread must RESUME,
 		// not create. See api.Thread.HeadlessStarted.
@@ -302,7 +303,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, mode, d.spawn.ArgsFor(string(kind)))
+	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, d.spawn.ArgsFor(string(kind)))
 
 	thread := api.Thread{
 		ID:              id,
@@ -316,6 +317,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		AgentSessionID:  agentSessionID,
 		Parent:          req.Parent,
 		Notify:          d.defaults.NotifyDefault(),
+		Model:           req.Model,
 		HeadlessStarted: true,
 	}
 	// Insert before stamping (no stamped-but-rowless pane on failure).

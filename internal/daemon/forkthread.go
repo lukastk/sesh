@@ -70,6 +70,12 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 	}
 	_ = srcPath // documented: never written
 
+	// A fork stays the same conversation, so it inherits the source's pinned model
+	// by default; an explicit --model on the fork overrides it.
+	model := req.Model
+	if model == "" {
+		model = src.Model
+	}
 	id := uuid.NewString()
 	thread := api.Thread{
 		ID:             id,
@@ -83,6 +89,7 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		AgentSessionID: newSessionID,
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
+		Model:          model,
 		// The conversation EXISTS (the branched transcript): turns must RESUME.
 		HeadlessStarted: true,
 	}

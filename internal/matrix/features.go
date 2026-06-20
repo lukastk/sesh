@@ -322,6 +322,12 @@ func init() {
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
+	Register(Feature{
+		ID: "thread.model",
+		Description: "agent model selection: `thread new --model <m>` pins an opaque model on the thread (applied on spawn/resume/every headless turn), `send-headless --model` overrides it for one turn. Asserted on the OBSERVABLE model the agent actually ran (pi/claude: the model recorded in their transcript; codex: the exact model string reaching codex, proved by its loud rejection echoing it). LOCAL-only: the model is stored on the record + injected by the agent command builder, locality-independent; `--machine` routing of `thread new`/`send-headless` is proven by route.parity",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
 
 	// ---- ticket layer ----
 	Register(Feature{

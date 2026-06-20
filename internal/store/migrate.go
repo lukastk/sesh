@@ -123,6 +123,10 @@ var migrations = []string{
 	// set via `ticket set --notes`/`--append-note` or appended on `ticket set-status
 	// --note`. Surfaced in the Obsidian ticket-note top panel.
 	`ALTER TABLE tickets ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
+	// 16: threads.model — the agent model pinned to a thread (`thread new --model`),
+	// applied on headed spawn, resume, and every headless turn. Opaque pass-through
+	// string ('' = the agent's own default); no curated list. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN model TEXT NOT NULL DEFAULT '';`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

@@ -114,9 +114,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
-		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
-		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
-		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent claude --name beside --cwd . --into-window %12", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec"},
+		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
+		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec"},
 	},
 	"thread list": {
 		summary:  "list threads (id, agent, name, session, cwd); optionally archived and/or fanned out across the mesh",
@@ -149,9 +149,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'"},
 	},
 	"thread send-headless": {
-		summary:  "start a headless turn on an idle thread (a stateless --resume turn); 409 if a pane is live or a turn is in flight",
-		usage:    "sesh thread send-headless --id <id> --text <text> [--machine <m>]",
-		examples: []string{"sesh thread send-headless --id 1a2b3c4d --text 'summarize the diff'"},
+		summary:  "start a headless turn on an idle thread (a stateless --resume turn); 409 if a pane is live or a turn is in flight. --model overrides the thread's pinned model for THIS turn only (empty = the thread's model / agent default).",
+		usage:    "sesh thread send-headless --id <id> --text <text> [--model <m>] [--machine <m>]",
+		examples: []string{"sesh thread send-headless --id 1a2b3c4d --text 'summarize the diff'", "sesh thread send-headless --id 1a2b3c4d --text 'quick check' --model anthropic/claude-haiku-4-5"},
 	},
 	"thread headless-reply": {
 		summary:  "poll for a headless turn's completion and print whether it's working and its reply",

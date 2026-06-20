@@ -291,6 +291,12 @@ sesh thread new --agent pi --name notes --cwd . --headless           # headless;
 sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child of a specific thread
 sesh thread new --agent claude --name solo --cwd ~/p --no-parent     # a ROOT thread (standalone; suppress inference)
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation
+sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5  # pin an agent model
+
+# --model pins an OPAQUE agent model on the thread (no curated list — a bad model fails
+# LOUDLY at the agent), applied on spawn, resume, AND every headless turn. Empty = the
+# agent's own default. Each agent takes its own spelling: claude `haiku|sonnet|opus|<id>`,
+# codex `gpt-5.5|<id>`, pi `provider/id[:thinking]` (e.g. anthropic/claude-opus-4-8).
 
 # Placement — a tmux session may host MANY threads (identity is the pane marker,
 # not the session). Default = own new session; otherwise:
@@ -330,6 +336,7 @@ sesh thread new --agent claude --name x --cwd ~/proj --machine macbook
 ```bash
 sesh thread send --id <id> --text 'run the tests'          # inject into a LIVE pane
 sesh thread send-headless --id <id> --text 'summarize'     # run a stateless turn on an idle thread
+sesh thread send-headless --id <id> --text 'quick check' --model anthropic/claude-haiku-4-5  # override the model for THIS turn only
 sesh thread headless-reply --id <id> --json                # poll a headless turn's result
 sesh await <id> --timeout 5m                               # block until a turn finishes (mesh-aware)
 sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → delete

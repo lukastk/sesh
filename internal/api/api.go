@@ -72,7 +72,13 @@ package api
 // 22: additive /v1/peers CRUD (GET list / POST add / POST remove) over the existing
 // peers registry — lets a client (the GUI) manage the mesh without local file access.
 // Additive → mixed-mesh safe (a pre-22 daemon 404s the new routes).
-const SchemaVersion = 22
+// 23: agent model selection — `model` on the thread record (the agent model pinned at
+// `thread new --model`, applied on headed spawn, resume, and every headless turn) plus
+// `model` on the new-thread + send request (`send-headless --model` overrides the thread
+// model for one turn). Opaque pass-through string (claude/codex/pi each take `--model`);
+// a bad model fails LOUDLY at the agent, no curated list. Additive omitempty fields →
+// mixed-mesh safe (a pre-23 daemon ignores `model` and spawns with the agent's default).
+const SchemaVersion = 23
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

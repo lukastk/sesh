@@ -154,6 +154,12 @@ func (c *Client) ThreadSendHeadlessMode(ctx context.Context, id, text, mode stri
 	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text, Mode: mode}, nil)
 }
 
+// ThreadSendHeadlessModel is ThreadSendHeadless with a per-turn model override
+// ('' = the thread's pinned model / the agent default).
+func (c *Client) ThreadSendHeadlessModel(ctx context.Context, id, text, model string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text, Model: model}, nil)
+}
+
 // ThreadHeadlessReply fetches GET /v1/threads/headless-reply?id=.
 func (c *Client) ThreadHeadlessReply(ctx context.Context, id string) (api.HeadlessReplyResponse, error) {
 	var out api.HeadlessReplyResponse

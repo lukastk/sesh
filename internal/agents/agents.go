@@ -93,6 +93,28 @@ func modeArgs(k Kind, mode string) []string {
 	return nil
 }
 
+// modelArgs is the per-agent model flag for an opaque model string. All three
+// agents spell it `--model <m>` (claude/pi take the bare alias or provider/id;
+// codex takes -m/--model on its `exec`/`resume`/top-level commands). An empty
+// model selects the agent's own default — no flag. The model string is NOT
+// validated here: a bad model fails LOUDLY at the agent, never a silent default.
+func modelArgs(model string) []string {
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
+}
+
+// modelFlag renders the model flag as a command suffix (leading space, or "" when
+// no model). The `--model` literal is unquoted (like `--session-id` in the base
+// command); only the model value is shell-escaped.
+func modelFlag(model string) string {
+	if model == "" {
+		return ""
+	}
+	return " --model " + ShellEscape(model)
+}
+
 // LaunchArgs joins mode flags + the config's extra args into a command suffix.
 func LaunchArgs(k Kind, mode string, extra []string) string {
 	parts := append(modeArgs(k, mode), extra...)
@@ -113,8 +135,9 @@ func ShellEscape(s string) string {
 // it (pi/claude). codex cannot pre-assign its id, so it launches bare and its id
 // is discovered after the first turn (see DiscoverCodexSession) — which is what
 // lets a dead thread be resumed later. Working/waiting is still detected agent-
-// agnostically from pane content-diff.
-func HeadedCommand(k Kind, sessionID, mode string, extra []string) string {
+// agnostically from pane content-diff. model ('' = the agent default) pins the
+// model: claude/pi take it after the session flag, codex on its top-level command.
+func HeadedCommand(k Kind, sessionID, model, mode string, extra []string) string {
 	base := string(k)
 	switch k {
 	case Pi:
@@ -126,12 +149,13 @@ func HeadedCommand(k Kind, sessionID, mode string, extra []string) string {
 			base = "claude --session-id " + sessionID
 		}
 	}
-	return base + LaunchArgs(k, mode, extra)
+	return base + modelFlag(model) + LaunchArgs(k, mode, extra)
 }
 
 // ResumeCommand returns the shell command that RELAUNCHES the agent on an
-// existing conversation (for `resume`), continuing where it left off.
-func ResumeCommand(k Kind, sessionID, mode string, extra []string) string {
+// existing conversation (for `resume`), continuing where it left off. model
+// ('' = the agent default) re-pins the model on the resumed conversation.
+func ResumeCommand(k Kind, sessionID, model, mode string, extra []string) string {
 	base := string(k)
 	switch k {
 	case Pi:
@@ -141,5 +165,5 @@ func ResumeCommand(k Kind, sessionID, mode string, extra []string) string {
 	case Codex:
 		base = "codex resume " + sessionID
 	}
-	return base + LaunchArgs(k, mode, extra)
+	return base + modelFlag(model) + LaunchArgs(k, mode, extra)
 }

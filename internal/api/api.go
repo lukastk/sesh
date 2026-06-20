@@ -78,7 +78,26 @@ package api
 // model for one turn). Opaque pass-through string (claude/codex/pi each take `--model`);
 // a bad model fails LOUDLY at the agent, no curated list. Additive omitempty fields →
 // mixed-mesh safe (a pre-23 daemon ignores `model` and spawns with the agent's default).
-const SchemaVersion = 23
+//
+// Schema 24 adds the UI-config endpoints (GET/POST /v1/ui-config, backed by
+// <SESH_HOME>/ui_config.toml) so the sesh-ui app can read/write its UI preferences
+// (e.g. collapse_parents) over the API. Purely additive — a pre-24 daemon simply
+// lacks the route.
+const SchemaVersion = 24
+
+// UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
+// and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
+// not otherwise interpret; missing keys resolve to their defaults on read.
+type UIConfig struct {
+	// CollapseParents makes parent threads start collapsed in the app's thread tree.
+	CollapseParents bool `json:"collapse_parents"`
+}
+
+// UIConfigResponse is returned by GET and POST /v1/ui-config.
+type UIConfigResponse struct {
+	Schema   int      `json:"schema"`
+	UIConfig UIConfig `json:"ui_config"`
+}
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

@@ -38,6 +38,11 @@ type UIConfig struct {
 	// non-archived threads' transcripts in the background and caches them, so opening
 	// a thread's transcript is instant. 0 disables. Default 10.
 	TranscriptPrefetchSecs int `toml:"transcript_prefetch_secs" json:"transcript_prefetch_secs"`
+	// MasterCommand is the shell command the app's "Master" mode runs in a pty over a
+	// WebSocket — e.g. "mmt-start" (start+attach the master tmux). Run via `$SHELL -lc`
+	// so shell functions/aliases resolve. Empty = the Master mode is unconfigured (the
+	// endpoint refuses loudly). Per-machine: the app runs the TARGET daemon's command.
+	MasterCommand string `toml:"master_command" json:"master_command"`
 }
 
 // UICwdLabelRule is one match→label rule for the new-thread picker display.
@@ -96,6 +101,7 @@ type uiConfigFile struct {
 	CwdRoots               *[]string         `toml:"cwd_roots"`
 	CwdLabels              *[]UICwdLabelRule `toml:"cwd_label"`
 	TranscriptPrefetchSecs *int              `toml:"transcript_prefetch_secs"`
+	MasterCommand          *string           `toml:"master_command"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -127,6 +133,9 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	// nil = absent → default interval; an explicit 0 (off) or any value is honoured.
 	if f.TranscriptPrefetchSecs != nil {
 		cfg.TranscriptPrefetchSecs = *f.TranscriptPrefetchSecs
+	}
+	if f.MasterCommand != nil {
+		cfg.MasterCommand = *f.MasterCommand
 	}
 	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
 	if err := ValidateUIConfig(cfg); err != nil {

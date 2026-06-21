@@ -128,7 +128,14 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	defer cmd.Process.Kill() //nolint:errcheck
 	defer cmd.Wait()         //nolint:errcheck — reap the tmux client
 
-	ctx, cancel := context.WithCancel(r.Context())
+	bridgePTY(r.Context(), c, ptmx)
+}
+
+// bridgePTY pumps a pty <-> WebSocket: pty output → binary frames; a client binary frame →
+// pty input; a {"type":"resize",cols,rows} text frame resizes the pty. Returns when either
+// side closes. Shared by the thread-terminal and master-terminal handlers.
+func bridgePTY(parent context.Context, c *websocket.Conn, ptmx *os.File) {
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	// pty -> WebSocket (binary terminal bytes).

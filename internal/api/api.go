@@ -94,7 +94,11 @@ package api
 //
 // Schema 27 adds `transcript_prefetch_secs` to UIConfig — the app's background transcript
 // prefetch interval (cache all non-archived transcripts so opening is instant). Additive.
-const SchemaVersion = 27
+//
+// Schema 28 adds `master_command` to UIConfig + the GET /v1/master/terminal WS endpoint —
+// the app's "Master" mode runs that configured command (e.g. mmt-start) in a pty over a
+// WebSocket. Additive; the endpoint refuses loudly if master_command is unset.
+const SchemaVersion = 28
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -109,6 +113,8 @@ type UIConfig struct {
 	CwdLabels []CwdLabelRule `json:"cwd_labels"`
 	// TranscriptPrefetchSecs is the app's background transcript-prefetch interval (0=off).
 	TranscriptPrefetchSecs int `json:"transcript_prefetch_secs"`
+	// MasterCommand is the command the app's "Master" mode runs in a pty (e.g. mmt-start).
+	MasterCommand string `json:"master_command"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

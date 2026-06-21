@@ -50,7 +50,7 @@ func (d *Daemon) handleUIConfigSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func toAPIUIConfig(c config.UIConfig) api.UIConfig {
-	out := api.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots, TranscriptPrefetchSecs: c.TranscriptPrefetchSecs}
+	out := api.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots, TranscriptPrefetchSecs: c.TranscriptPrefetchSecs, MasterCommand: c.MasterCommand}
 	for _, r := range c.CwdLabels {
 		out.CwdLabels = append(out.CwdLabels, api.CwdLabelRule{Match: r.Match, Label: r.Label})
 	}
@@ -58,7 +58,7 @@ func toAPIUIConfig(c config.UIConfig) api.UIConfig {
 }
 
 func fromAPIUIConfig(c api.UIConfig) config.UIConfig {
-	out := config.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots, TranscriptPrefetchSecs: c.TranscriptPrefetchSecs}
+	out := config.UIConfig{CollapseParents: c.CollapseParents, CwdRoots: c.CwdRoots, TranscriptPrefetchSecs: c.TranscriptPrefetchSecs, MasterCommand: c.MasterCommand}
 	for _, r := range c.CwdLabels {
 		out.CwdLabels = append(out.CwdLabels, config.UICwdLabelRule{Match: r.Match, Label: r.Label})
 	}

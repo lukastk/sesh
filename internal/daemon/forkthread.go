@@ -33,19 +33,29 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		return
 	}
 	homes := agents.ResolveHomes(d.cfg.CodexHome)
-	srcPath, found, err := agents.TranscriptPath(kind, src.AgentSessionID, src.Cwd, homes)
+	// Fork from the CURRENT leaf of any claude compaction chain, not the stale stored
+	// anchor: the transcript lines we read carry the LEAF's session id, so fork.Branch's
+	// id rewrite (a string replace of oldID→newID on every line) must be given that same
+	// leaf id, or it would find nothing to replace and write a transcript still bearing
+	// the source's id. (codex/pi don't drift, so this is a no-op for them.)
+	srcSession, err := agents.ResolveCurrentSession(kind, src.AgentSessionID, src.Cwd, homes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "fork: resolve source session: "+err.Error())
+		return
+	}
+	srcPath, found, err := agents.TranscriptPath(kind, srcSession, src.Cwd, homes)
 	if err != nil || !found {
 		writeError(w, http.StatusConflict, "fork: source thread has no transcript on disk (no turn yet)")
 		return
 	}
-	lines, err := agents.ReadTranscript(kind, src.AgentSessionID, src.Cwd, homes, -1)
+	lines, err := agents.ReadTranscript(kind, srcSession, src.Cwd, homes, -1)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	newSessionID := uuid.NewString()
-	branched, err := fork.Branch(string(kind), lines, src.AgentSessionID, newSessionID, req.MessageID)
+	branched, err := fork.Branch(string(kind), lines, srcSession, newSessionID, req.MessageID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

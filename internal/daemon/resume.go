@@ -131,6 +131,19 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		writeError(w, http.StatusUnprocessableEntity, "revive: thread has no captured agent session id")
 		return
 	}
+	// claude's session id drifts across compaction (a new <id>.jsonl each time); resume
+	// the LEAF of that chain, not the stale stored anchor, or we'd revive a pre-compaction
+	// session and lose the post-compaction history. Resolve-on-read: the record keeps the
+	// stable anchor; ResolveCurrentSession follows the chain forward to the live session.
+	if kind == agents.Claude {
+		homes := agents.ResolveHomes(d.cfg.CodexHome)
+		resolved, rerr := agents.ResolveCurrentSession(kind, sessionID, thread.Cwd, homes)
+		if rerr != nil {
+			writeError(w, http.StatusInternalServerError, "revive: resolve current session: "+rerr.Error())
+			return
+		}
+		sessionID = resolved
+	}
 
 	env := map[string]string{agents.EnvThreadID: id}
 	if err := d.prepCodexEnv(kind, env, thread.Cwd); err != nil {

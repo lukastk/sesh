@@ -52,15 +52,38 @@ func ResolveHomes(codexHome string) Homes {
 	return h
 }
 
+// ResolveCurrentSession maps a thread's STORED (spawn/adopt) agent session id to the
+// CURRENT one, following claude's compaction drift to the leaf session. Claude starts a
+// new session id + .jsonl on every compaction, so the stored id freezes the transcript
+// view + resume at the last compaction; this chases the lineage to the live session.
+// Returns storedID unchanged for codex/pi (codex tracks its late-minted id via
+// DiscoverCodexSession; pi's --session-id is stable across resume, so it does not drift)
+// and for claude when there is no compaction to chase.
+func ResolveCurrentSession(kind Kind, storedID, cwd string, homes Homes) (string, error) {
+	if kind != Claude || storedID == "" || cwd == "" {
+		return storedID, nil
+	}
+	return claude.ResolveLeafSession(homes.Claude, cwd, storedID)
+}
+
 // TranscriptPath resolves a thread conversation's transcript file.
 // found=false means it isn't on disk yet (no turn taken, or another machine's
 // thread) — a legitimate state, not an error.
+//
+// For claude it first resolves the stored session id forward through any compaction
+// drift (ResolveCurrentSession) so the transcript view + last-reply follow the LIVE
+// conversation instead of freezing at the last compaction.
 func TranscriptPath(kind Kind, agentSessionID, cwd string, homes Homes) (path string, found bool, err error) {
 	if agentSessionID == "" {
 		// A codex thread before its first turn has no minted session id —
 		// there IS no transcript yet.
 		return "", false, nil
 	}
+	resolved, err := ResolveCurrentSession(kind, agentSessionID, cwd, homes)
+	if err != nil {
+		return "", false, err
+	}
+	agentSessionID = resolved
 	switch kind {
 	case Claude:
 		if cwd == "" {

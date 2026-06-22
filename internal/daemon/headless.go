@@ -141,6 +141,22 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		d.store.SetThreadAgentSession(req.ID, sessionID) //nolint:errcheck
 	}
 
+	// A claude conversation that compacted between turns lives in a NEW <id>.jsonl;
+	// --resume the LEAF of the compaction chain so this turn continues the live
+	// conversation instead of the stale pre-compaction one. (codex/pi don't drift.)
+	if thread.AgentKind == string(agents.Claude) && started && sessionID != "" {
+		homes := agents.ResolveHomes(d.cfg.CodexHome)
+		resolved, rerr := agents.ResolveCurrentSession(agents.Claude, sessionID, thread.Cwd, homes)
+		if rerr != nil {
+			d.hlMu.Lock()
+			delete(d.hlInFlight, req.ID)
+			d.hlMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "send-headless: resolve current session: "+rerr.Error())
+			return
+		}
+		sessionID = resolved
+	}
+
 	// The per-turn model override (send-headless --model) wins for THIS turn only;
 	// otherwise the thread's pinned model applies (both '' = the agent default).
 	turnModel := req.Model

@@ -107,7 +107,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   agent records what it did and which commit closed it). `set --notes` REPLACES it, `set
   --append-note` appends (blank-line separated), and `set-status --note` appends as part of a
   status change — the ergonomic "close AND record what was done" path. Read with `get --field
-  notes`. Surfaced in the Obsidian ticket-note top panel.
+  notes`. Surfaced (and rendered as **markdown**) in the Obsidian ticket-note top panel — so
+  **write notes in markdown** (headings, lists, fenced code, links) for legible consolidation.
 
   **`send-prompt`** delivers multi-line prompts intact (bracketed paste — newlines are preserved,
   not submitted line-by-line) and by default **prepends the ticket's name + id** so the agent

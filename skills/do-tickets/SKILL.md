@@ -28,7 +28,9 @@ sesh ticket set-status --id <id> --status active --thread <thread-id>
 
 **Always leave a note when you close a ticket.** A ticket has a free-text **`notes`**
 field; when you mark a ticket `done` (or `dropped`), append a short note explaining what
-you did and — if there was a commit — which commit closed it. `--note` on `set-status`
+you did and — if there was a commit — which commit closed it. **Write notes in markdown**
+(headings, lists, fenced code, links) — they are rendered as markdown in the Obsidian
+ticket-note panel where Lukas reads them during consolidation. `--note` on `set-status`
 appends as part of the same call (each `--note` appends, blank-line separated). You can
 also append/replace notes independently:
 

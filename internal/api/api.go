@@ -103,7 +103,11 @@ package api
 // <SESH_HOME>/plugins/*.toml) + POST /v1/plugins/{name}/{capability} (run a list/action
 // capability's command on this machine, routed cross-machine like fs/list). Additive;
 // the first plugin is the shipped boxyard example (box groups in the picker + create-box).
-const SchemaVersion = 29
+//
+// Schema 30 adds `default_agent` + `default_machine` to UIConfig — the agent_kind and
+// machine the app's New-thread modal preselects (empty = the app's own fallback / the
+// local daemon). Additive, display-only preferences.
+const SchemaVersion = 30
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -120,6 +124,10 @@ type UIConfig struct {
 	TranscriptPrefetchSecs int `json:"transcript_prefetch_secs"`
 	// MasterCommand is the command the app's "Master" mode runs in a pty (e.g. mmt-start).
 	MasterCommand string `json:"master_command"`
+	// DefaultAgent is the agent_kind the New-thread modal preselects (empty = app fallback).
+	DefaultAgent string `json:"default_agent"`
+	// DefaultMachine is the machine the New-thread modal preselects (empty = local daemon).
+	DefaultMachine string `json:"default_machine"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

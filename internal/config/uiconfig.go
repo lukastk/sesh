@@ -43,6 +43,12 @@ type UIConfig struct {
 	// so shell functions/aliases resolve. Empty = the Master mode is unconfigured (the
 	// endpoint refuses loudly). Per-machine: the app runs the TARGET daemon's command.
 	MasterCommand string `toml:"master_command" json:"master_command"`
+	// DefaultAgent is the agent_kind the app's New-thread modal preselects (claude/codex/pi).
+	// Empty = the app falls back to its own built-in default. Display-only preference.
+	DefaultAgent string `toml:"default_agent" json:"default_agent"`
+	// DefaultMachine is the machine the app's New-thread modal preselects. Empty = the
+	// local daemon the app is connected to. Display-only preference.
+	DefaultMachine string `toml:"default_machine" json:"default_machine"`
 }
 
 // UICwdLabelRule is one match→label rule for the new-thread picker display.
@@ -102,6 +108,8 @@ type uiConfigFile struct {
 	CwdLabels              *[]UICwdLabelRule `toml:"cwd_label"`
 	TranscriptPrefetchSecs *int              `toml:"transcript_prefetch_secs"`
 	MasterCommand          *string           `toml:"master_command"`
+	DefaultAgent           *string           `toml:"default_agent"`
+	DefaultMachine         *string           `toml:"default_machine"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -136,6 +144,12 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	}
 	if f.MasterCommand != nil {
 		cfg.MasterCommand = *f.MasterCommand
+	}
+	if f.DefaultAgent != nil {
+		cfg.DefaultAgent = *f.DefaultAgent
+	}
+	if f.DefaultMachine != nil {
+		cfg.DefaultMachine = *f.DefaultMachine
 	}
 	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
 	if err := ValidateUIConfig(cfg); err != nil {

@@ -94,7 +94,13 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	// Detach-safety (b): a grouped viewer session shares the windows but has its own
 	// current window, so pointing it at the thread's window never moves the user.
+	//
+	// Register the viewer BEFORE creating it so the reaper (which kills any uiterm-*
+	// it does not know about) can never race-kill a live bridge: by the time the
+	// session is visible to tmux it is already in the tracked set.
 	viewer := fmt.Sprintf("uiterm-%s-%d", id[:8], time.Now().UnixNano())
+	d.registerViewer(viewer)
+	defer d.unregisterViewer(viewer)
 	if err := d.tmuxRun("new-session", "-d", "-t", loc.Session, "-s", viewer, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)); err != nil {
 		writeError(w, http.StatusInternalServerError, "terminal: create viewer session: "+err.Error())
 		return
@@ -174,6 +180,83 @@ func bridgePTY(parent context.Context, c *websocket.Conn, ptmx *os.File) {
 		}
 		if _, werr := ptmx.Write(data); werr != nil {
 			return
+		}
+	}
+}
+
+// viewerReapTick is how often the reaper sweeps orphaned uiterm-* sessions.
+const viewerReapTick = 60 * time.Second
+
+func (d *Daemon) registerViewer(name string) {
+	d.viewerMu.Lock()
+	d.viewers[name] = true
+	d.viewerMu.Unlock()
+}
+
+func (d *Daemon) unregisterViewer(name string) {
+	d.viewerMu.Lock()
+	delete(d.viewers, name)
+	d.viewerMu.Unlock()
+}
+
+func (d *Daemon) viewerTracked(name string) bool {
+	d.viewerMu.Lock()
+	defer d.viewerMu.Unlock()
+	return d.viewers[name]
+}
+
+// reapViewers kills every uiterm-* session on the work server that this daemon is NOT
+// actively bridging. The per-WebSocket defer in handleThreadTerminal cleans up viewers
+// on a clean disconnect, but a daemon crash/restart/-9 leaves its in-flight viewers
+// orphaned (tmux outlives the daemon), and they pile up forever. This is the sweep:
+//   - at startup, the tracked set is empty, so EVERY uiterm-* is an orphan from a prior
+//     process and gets killed (no live bridge can predate this process);
+//   - periodically, anything not in the tracked set is an orphan.
+//
+// Killing a grouped viewer never affects the real thread session (a separate member of
+// the same group) — only the unattached clone goes away.
+func (d *Daemon) reapViewers() {
+	out, err := d.tmuxCmd("list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return // no server / no sessions yet — nothing to reap
+	}
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if !strings.HasPrefix(name, "uiterm-") || d.viewerTracked(name) {
+			continue
+		}
+		d.tmuxRun("kill-session", "-t", name) //nolint:errcheck — best-effort orphan sweep
+	}
+}
+
+func (d *Daemon) startReaper() {
+	d.viewerMu.Lock()
+	d.reaperStarted = true
+	d.viewerMu.Unlock()
+	go d.viewerReaper()
+}
+
+func (d *Daemon) stopReaper() {
+	d.viewerMu.Lock()
+	started := d.reaperStarted
+	d.viewerMu.Unlock()
+	if !started {
+		return
+	}
+	close(d.reaperStop)
+	<-d.reaperDone
+}
+
+func (d *Daemon) viewerReaper() {
+	defer close(d.reaperDone)
+	d.reapViewers() // startup sweep: kill every orphan left by a prior daemon process
+	t := time.NewTicker(viewerReapTick)
+	defer t.Stop()
+	for {
+		select {
+		case <-d.reaperStop:
+			return
+		case <-t.C:
+			d.reapViewers()
 		}
 	}
 }

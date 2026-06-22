@@ -68,7 +68,7 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh tmux current", "sesh tmux current --json"},
 	},
 	"tmux info": {
-		summary:  "list the work server's tmux sessions as JSONL (one session object per line); routes cross-machine",
+		summary:  "list the work server's tmux sessions as JSONL (one per line; internal uiterm-* live-terminal viewer sessions are excluded); routes cross-machine",
 		usage:    "sesh tmux info [--session <name>] [--machine <m>]",
 		examples: []string{"sesh tmux info", "sesh tmux info --machine macbook"},
 	},

@@ -97,6 +97,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh fs:", err)
 			os.Exit(1)
 		}
+	case "plugins":
+		if err := runPlugins(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh plugins:", err)
+			os.Exit(1)
+		}
 	case "tui":
 		if err := runTUI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh tui:", err)

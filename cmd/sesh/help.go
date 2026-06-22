@@ -244,6 +244,21 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh fs list --path <p> [--machine <m>] [--json]",
 		examples: []string{"sesh fs list --path ~/dev", "sesh fs list --path ~/mysetup --machine macbook --json"},
 	},
+	"plugins": {
+		summary:  "the daemon command-provider substrate: manifests at <SESH_HOME>/plugins/*.toml declare commands the daemon runs ON ITS OWN HOST and how the sesh-ui app surfaces them — a LIST capability (e.g. boxyard boxes → cwd picker WITH groups) and ACTION capabilities (e.g. create-box from a form). Endpoints route per --machine, so the app drives any machine's plugins. Field values pass as ARGV (no shell injection); commands come from the manifest only",
+		usage:    "sesh plugins <list|run>",
+		examples: []string{"sesh plugins list --json", "sesh plugins run boxyard boxes --machine macbook --json"},
+	},
+	"plugins list": {
+		summary:  "list the plugin manifests on the daemon's host with their capabilities (kind + name)",
+		usage:    "sesh plugins list [--machine <m>] [--json]",
+		examples: []string{"sesh plugins list", "sesh plugins list --machine macbook --json"},
+	},
+	"plugins run": {
+		summary:  "run a plugin capability on the daemon's host: a list capability returns mapped {id,label,groups,path} items; an action capability runs with --field values substituted as ARGV and returns its output",
+		usage:    "sesh plugins run <plugin> <capability> [--field <k=v>] [--machine <m>] [--json]",
+		examples: []string{"sesh plugins run boxyard boxes --json", "sesh plugins run boxyard create-box --field name=my-box --machine macbook"},
+	},
 	"blob add": {
 		summary:  "store a file (or --stdin bytes); prints the @blob(<hex>) token to paste into a prompt. Idempotent (content-addressed: identical bytes dedup)",
 		usage:    "sesh blob add <path> [--name <n>] [--machine <m>] [--json]   |   sesh blob add --stdin --name <n> [--machine <m>]",
@@ -557,7 +572,7 @@ var helpRegistry = map[string]cmdHelp{
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "fs", "tui", "info",
+	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "fs", "plugins", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

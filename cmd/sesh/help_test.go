@@ -53,14 +53,15 @@ var subcommandSets = map[string][]string{
 	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "send-headless",
 		"headless-reply", "rename", "info", "adopt", "transcript", "notify", "reparent",
 		"tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},
-	"ticket": {"create", "list", "set-status", "import", "unbind", "move", "needs-input", "send-prompt"},
-	"blob":   {"add", "ls", "get", "rm", "path", "expand"},
-	"fs":     {"list"},
-	"master": {"up", "window", "attach", "down", "ensure", "watchers"},
-	"peer":   {"add", "list", "remove"},
-	"hooks":  {"list", "enable", "disable", "test"},
-	"meta":   {"set", "get", "unset", "list"},
-	"matrix": {"grid", "skips"},
+	"ticket":  {"create", "list", "set-status", "import", "unbind", "move", "needs-input", "send-prompt"},
+	"blob":    {"add", "ls", "get", "rm", "path", "expand"},
+	"fs":      {"list"},
+	"plugins": {"list", "run"},
+	"master":  {"up", "window", "attach", "down", "ensure", "watchers"},
+	"peer":    {"add", "list", "remove"},
+	"hooks":   {"list", "enable", "disable", "test"},
+	"meta":    {"set", "get", "unset", "list"},
+	"matrix":  {"grid", "skips"},
 }
 
 func TestHelpCoversEveryTopLevelCommand(t *testing.T) {

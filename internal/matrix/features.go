@@ -406,6 +406,11 @@ func init() {
 		Description: "generic filesystem listing (`fs list --path`): the immediate SUBDIRECTORIES of an allow-listed home-rooted path on the serving daemon, ~-relative, dirs only; a path outside home (incl. ../ traversal) is a LOUD 403. Routes per --machine. Powers the Obsidian new-thread cwd pickers on mobile",
 		Localities:  bothLoc,
 	})
+	Register(Feature{
+		ID:          "plugins.run",
+		Description: "plugin command-provider substrate (`plugins list`/`plugins run`): manifests at <SESH_HOME>/plugins/*.toml declare commands the daemon runs ON ITS OWN HOST — a LIST capability (JSON output mapped to {id,label,groups,path} via templates) and ACTION capabilities (form fields substituted as ARGV, never a shell string → no injection). Commands come from the manifest only, never the client; bad requests (unknown capability, missing required field, nonzero exit) fail LOUDLY. Routes per --machine. Powers box groups in the cwd picker + create-box from the app",
+		Localities:  bothLoc,
+	})
 
 	// ---- daemon / API ----
 	Register(Feature{

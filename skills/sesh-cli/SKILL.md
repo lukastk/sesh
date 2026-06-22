@@ -172,6 +172,31 @@ sesh fs list --path ~/mysetup --machine macbook --json
 Dirs only (symlinks not followed). A path **outside the home dir** — or one escaping via
 `../` — is refused **loudly** (403), never a silent empty listing.
 
+## Plugins (`sesh plugins`) — daemon command-providers
+
+A plugin manifest at `<SESH_HOME>/plugins/*.toml` declares commands the daemon runs **on
+its own host** and how the sesh-ui app surfaces them. The app (especially mobile / a remote
+daemon) has no shell on the target, so machine ops go via the daemon. Two capability kinds:
+
+- **list** — a command whose JSON output is mapped to `{id,label,groups,path}` items
+  (templated `id`/`label`/`path` over each item's fields; `groups` names a string-array
+  field; `items` is a dotted path to the array, empty = root). E.g. boxyard boxes → the
+  new-thread cwd picker **with groups**.
+- **action** — a command with form `field`s; the values are substituted into the argv as
+  **ARGV** (never a shell string → no injection) and the command runs. E.g. create-a-box.
+
+```bash
+sesh plugins list --json                                    # manifests + capabilities
+sesh plugins run boxyard boxes --machine macbook --json     # a list capability → items
+sesh plugins run boxyard create-box --field name=my-box     # an action; values as ARGV
+```
+
+Routes per `--machine` like `fs list`, so you drive whichever machine's plugins you need.
+Commands come from the manifest **only**, never the client. Bad requests (unknown plugin or
+capability, missing required field, nonzero command exit) fail **loudly**. The shipped
+example is `examples/plugins/boxyard.toml` (drop it at `<SESH_HOME>/plugins/boxyard.toml` on
+a machine with `boxyard` on the daemon's PATH).
+
 ## The TUI (`sesh tui`)
 
 `sesh tui` opens the live cross-machine thread grid (`--all-machines` to fan out). It is a

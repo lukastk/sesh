@@ -1,0 +1,40 @@
+# boxyard plugin — the first command-provider, validating the substrate.
+#
+# Drop this at <SESH_HOME>/plugins/boxyard.toml on any machine that has `boxyard`
+# on the daemon's PATH. The daemon runs these commands ON ITS OWN HOST; the sesh-ui
+# app reaches them over the API (GET /v1/plugins, POST /v1/plugins/boxyard/<cap>),
+# routed cross-machine like fs/list — so the app drives the boxyard on whichever
+# machine you are deploying a thread to.
+#
+# Unlocks two things in the app:
+#   - the new-thread cwd picker can list boxes WITH their groups (the `boxes` list),
+#   - create-a-box from a form on a chosen machine (the `create-box` action).
+
+name = "boxyard"
+description = "Boxyard boxes on this machine"
+
+# A LIST capability: `boxyard list --output-format json` emits a top-level JSON array
+# of box objects. id/label/path are TEMPLATES over each object's fields; the box index
+# (= the ~/dev/<index> checkout dir) is composed from three fields. `groups` names the
+# string-array field carrying the box's groups — what the picker groups by.
+[[list]]
+name = "boxes"
+description = "all boxes in the yard, mapped for the cwd picker"
+command = ["boxyard", "list", "--output-format", "json"]
+id = "{creation_timestamp_utc}_{box_subid}__{name}"
+label = "{name}"
+groups = "groups"
+path = "~/dev/{creation_timestamp_utc}_{box_subid}__{name}"
+
+# An ACTION capability: the app renders a form from `field`s; the daemon substitutes
+# the values into the command argv (as ARGV — never a shell string), runs it, and
+# returns the output. `boxyard new` defaults the storage location and timestamp.
+[[action]]
+name = "create-box"
+description = "create a new box on this machine"
+command = ["boxyard", "new", "--box-name", "{name}"]
+[[action.field]]
+name = "name"
+label = "Box name"
+type = "text"
+required = true

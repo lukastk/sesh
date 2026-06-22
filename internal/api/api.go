@@ -98,7 +98,12 @@ package api
 // Schema 28 adds `master_command` to UIConfig + the GET /v1/master/terminal WS endpoint —
 // the app's "Master" mode runs that configured command (e.g. mmt-start) in a pty over a
 // WebSocket. Additive; the endpoint refuses loudly if master_command is unset.
-const SchemaVersion = 28
+//
+// Schema 29 adds the plugin command-provider substrate: GET /v1/plugins (manifests at
+// <SESH_HOME>/plugins/*.toml) + POST /v1/plugins/{name}/{capability} (run a list/action
+// capability's command on this machine, routed cross-machine like fs/list). Additive;
+// the first plugin is the shipped boxyard example (box groups in the picker + create-box).
+const SchemaVersion = 29
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

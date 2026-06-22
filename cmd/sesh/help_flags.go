@@ -341,6 +341,15 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON"},
 	},
+	"plugins list": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON"},
+	},
+	"plugins run": {
+		{"--field", "an action capability's field value as key=value, passed as ARGV (repeatable)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON"},
+	},
 	"blob get": {
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

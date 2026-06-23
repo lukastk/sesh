@@ -66,7 +66,8 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "terminal: id is required")
 		return
 	}
-	if _, err := d.store.GetThread(id); err != nil {
+	th, err := d.store.GetThread(id)
+	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
 			writeError(w, http.StatusNotFound, "thread not found: "+id)
 			return
@@ -101,7 +102,12 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	viewer := fmt.Sprintf("uiterm-%s-%d", id[:8], time.Now().UnixNano())
 	d.registerViewer(viewer)
 	defer d.unregisterViewer(viewer)
-	if err := d.tmuxRun("new-session", "-d", "-t", loc.Session, "-s", viewer, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)); err != nil {
+	// `-c <thread cwd>` sets the viewer session's working dir so a popup/new
+	// window opened inside the app's terminal (e.g. the work-conf `t` binding,
+	// `display-popup -E "zsh -l"` which inherits the SESSION dir) lands in the
+	// thread cwd — matching the real cockpit (whose work session was created
+	// with -c). Without it the viewer inherits the DAEMON's cwd (~).
+	if err := d.tmuxRun("new-session", "-d", "-t", loc.Session, "-s", viewer, "-c", th.Cwd, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)); err != nil {
 		writeError(w, http.StatusInternalServerError, "terminal: create viewer session: "+err.Error())
 		return
 	}

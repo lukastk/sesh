@@ -13,7 +13,7 @@ thread) → `done` / `dropped` (terminal). An `active` ticket on your thread = y
 mark it `done` when finished.
 
 ```bash
-# FIND — your thread's tickets (auto-detected via $SESH_THREAD_ID / pane marker)
+# FIND — your thread's tickets (auto-detected via the pane marker / $SESH_THREAD_ID)
 sesh ticket list --current                 # id  status  name  thread
 sesh ticket list --current --json          # one JSON object per line
 

@@ -29,8 +29,11 @@ prints that group's full `--help` (not a partial usage line).
 
 Threads are identified by a UUID. Every `--id` accepts an **unambiguous prefix**
 (`sesh thread stop --id 1a2b3c4d`; an unknown/ambiguous prefix is a loud error), and most
-verbs infer the **current** thread when you omit `--id` (from `$SESH_THREAD_ID`, the
-calling pane's marker, or a loud error if ambiguous). `delete` is the exception to
+verbs infer the **current** thread when you omit `--id` (from the calling pane's live
+`@sesh-thread-id` marker first, then `$SESH_THREAD_ID`, or a loud error if neither
+resolves). The pane marker wins because it is re-stamped on adopt/reparent while
+`$SESH_THREAD_ID` is frozen at launch and can drift stale; on disagreement the pane is
+used and a drift note is printed to stderr. `delete` is the exception to
 inference only — it accepts a prefix but never infers the current thread (deleting an
 ambient thread is a footgun), so it always needs an explicit `--id`. The TUI shows the
 short 8-char form (`i` toggles the ID column; `y` shows the full UUID, `c` copies it).

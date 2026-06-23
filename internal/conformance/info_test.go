@@ -120,6 +120,26 @@ func testInfoLocal(t *testing.T) {
 		t.Errorf("pane inference described the wrong thread:\n%s", out)
 	}
 
+	// 4b. DRIFT: the pane marker is thread B (describeme) while $SESH_THREAD_ID
+	// names a DIFFERENT, still-VALID thread A (otherthread) — the exact
+	// adopt/reparent drift bug. The live pane marker must WIN over the frozen
+	// env, and a loud drift note must hit stderr (never a silent wrong answer).
+	out, stderr, err = runWithEnv(t, sb,
+		map[string]string{
+			"SESH_THREAD_ID": other.ID,
+			"TMUX":           sockPath + ",1,0",
+			"TMUX_PANE":      pane,
+		}, "info")
+	if err != nil {
+		t.Fatalf("info under env/marker drift: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(out, "describeme") || strings.Contains(out, "otherthread") {
+		t.Errorf("drift: resolved the stale env thread, not the live pane marker:\n%s", out)
+	}
+	if !strings.Contains(stderr, "stale") || !strings.Contains(stderr, other.ID[:8]) {
+		t.Errorf("drift not surfaced loudly on stderr (want stale note naming %s): %q", other.ID[:8], stderr)
+	}
+
 	// 5. A retrofitted verb infers identically: `thread status` with no --id.
 	out, stderr, err = runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": th.ID}, "thread", "status")
 	if err != nil {

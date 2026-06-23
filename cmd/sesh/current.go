@@ -6,14 +6,26 @@ package main
 //
 //  1. an explicit value — a full uuid, or a UNIQUE id prefix (resolved against
 //     the daemon's list, archived included; ambiguous/unknown = loud);
-//  2. $SESH_THREAD_ID — injected into every spawned pane and headless turn
-//     process; validated against the daemon, a stale value falls through;
-//  3. the calling tmux pane's @sesh-thread-id birth-stamp ($TMUX + $TMUX_PANE
-//     — v2 needs no process walker; the stamp survives nesting because
-//     $TMUX_PANE is inherited by every process in the pane);
+//  2. the calling tmux pane's @sesh-thread-id marker ($TMUX + $TMUX_PANE — v2
+//     needs no process walker; the stamp survives nesting because $TMUX_PANE is
+//     inherited by every process in the pane). The marker is the GROUND TRUTH
+//     for "which thread owns this pane right now": it is re-stamped on
+//     adopt/reparent, so it tracks the live ownership of the pane;
+//  3. $SESH_THREAD_ID — injected into every spawned pane and headless turn
+//     process. This is FROZEN into the process env at launch and can drift
+//     stale (an adopted/reparented agent still carries its old, possibly still
+//     -valid, id), so it ranks BELOW the live pane marker. It is the source of
+//     truth only when there is no pane (headless turns inject the env and have
+//     no tmux pane);
 //
-// else a LOUD error. `delete` deliberately does NOT infer (destructive +
-// ambient context is a footgun — always explicit).
+// When the env and a valid pane marker DISAGREE, the pane wins and a one-line
+// drift note is emitted to stderr (loud, not silent). If nothing resolves it is
+// a LOUD error. `delete` deliberately does NOT infer (destructive + ambient
+// context is a footgun — always explicit).
+//
+// Inherent limitation: a detached background job (no $TMUX_PANE) cannot read a
+// pane marker, so it can only ever self-resolve via the env and cannot detect
+// drift — unavoidable; this targets in-pane agents (the common case).
 
 import (
 	"context"
@@ -37,16 +49,24 @@ func resolveThreadID(cfg config.Config, explicit string) (string, error) {
 	if explicit != "" {
 		return resolveIDPrefix(c, explicit)
 	}
-	if env := os.Getenv(agents.EnvThreadID); env != "" {
-		if _, ok := lookupThread(c, env); ok {
-			return env, nil
-		}
-		// Stale (e.g. the thread was deleted, or the env leaked across homes):
-		// fall through to the pane, per v1.
-	}
+	env := os.Getenv(agents.EnvThreadID)
+	// The live pane marker is ground truth and outranks the env: it is
+	// re-stamped on adopt/reparent, whereas the env is frozen at launch and may
+	// carry a stale-but-still-valid id (the SESH_THREAD_ID drift bug).
 	if id, err := paneThreadID(); err == nil && id != "" {
 		if _, ok := lookupThread(c, id); ok {
+			if env != "" && env != id {
+				fmt.Fprintf(os.Stderr, "sesh: $%s=%s is stale; using live pane marker %s (pane adopted/reparented since launch)\n", agents.EnvThreadID, short8(env), short8(id))
+			}
 			return id, nil
+		}
+	}
+	// No pane (e.g. a headless turn — env injected, no tmux pane), or the pane
+	// carries no valid marker: the env is the source of truth. A stale env
+	// (deleted thread, leaked across homes) falls through to the loud error.
+	if env != "" {
+		if _, ok := lookupThread(c, env); ok {
+			return env, nil
 		}
 	}
 	return "", fmt.Errorf("not inside a sesh thread: no --id, no valid $%s, and no thread-marked tmux pane — pass --id", agents.EnvThreadID)
@@ -114,6 +134,15 @@ func paneThreadID() (string, error) {
 		socketPath = tmuxEnv[:i]
 	}
 	return tmux.ThreadIDOfPaneAtPath(socketPath, pane)
+}
+
+// short8 is the leading 8 chars of an id (the conventional display prefix),
+// safe for shorter strings.
+func short8(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 func shortJoin(ids []string, n int) string {

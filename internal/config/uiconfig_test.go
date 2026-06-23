@@ -82,6 +82,44 @@ func TestValidateUIConfigLoudOnBadRule(t *testing.T) {
 	}
 }
 
+func TestUIConfigDefaultChatViewRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	// Absent → empty (the app falls back to "terminal"); NOT a Go zero surprise.
+	cfg, err := LoadUIConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadUIConfig (no file): %v", err)
+	}
+	if cfg.DefaultChatView != "" {
+		t.Errorf("absent default_chat_view = %q, want empty", cfg.DefaultChatView)
+	}
+	// A saved value must load back (the pointer-decode lesson — saves AND loads).
+	for _, v := range []string{"terminal", "transcript", "rpc"} {
+		if err := SaveUIConfig(dir, UIConfig{CollapseParents: true, DefaultChatView: v}); err != nil {
+			t.Fatalf("SaveUIConfig(%q): %v", v, err)
+		}
+		got, err := LoadUIConfig(dir)
+		if err != nil {
+			t.Fatalf("LoadUIConfig(%q): %v", v, err)
+		}
+		if got.DefaultChatView != v {
+			t.Errorf("round-tripped default_chat_view = %q, want %q", got.DefaultChatView, v)
+		}
+	}
+}
+
+func TestValidateUIConfigLoudOnBadChatView(t *testing.T) {
+	// An unknown surface is loud, never silently accepted.
+	if err := ValidateUIConfig(UIConfig{DefaultChatView: "split"}); err == nil {
+		t.Error("an invalid default_chat_view must be a loud error")
+	}
+	// Empty (unset) + each known value pass.
+	for _, v := range []string{"", "terminal", "transcript", "rpc"} {
+		if err := ValidateUIConfig(UIConfig{DefaultChatView: v}); err != nil {
+			t.Errorf("default_chat_view %q must validate: %v", v, err)
+		}
+	}
+}
+
 func TestLoadUIConfigMalformedIsLoud(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ui_config.toml"), []byte("collapse_parents = "), 0o600); err != nil {

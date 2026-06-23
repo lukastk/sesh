@@ -107,7 +107,11 @@ package api
 // Schema 30 adds `default_agent` + `default_machine` to UIConfig — the agent_kind and
 // machine the app's New-thread modal preselects (empty = the app's own fallback / the
 // local daemon). Additive, display-only preferences.
-const SchemaVersion = 30
+//
+// Schema 31 adds `default_chat_view` to UIConfig — the chat surface the app opens a
+// thread in by default (terminal|transcript|rpc; empty = the app falls back to terminal).
+// Additive/omitempty, display-only preference (mixed-mesh safe).
+const SchemaVersion = 31
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -128,6 +132,9 @@ type UIConfig struct {
 	DefaultAgent string `json:"default_agent"`
 	// DefaultMachine is the machine the New-thread modal preselects (empty = local daemon).
 	DefaultMachine string `json:"default_machine"`
+	// DefaultChatView is the chat surface the app opens a thread in by default
+	// (terminal|transcript|rpc; empty = the app falls back to terminal).
+	DefaultChatView string `json:"default_chat_view,omitempty"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

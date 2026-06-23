@@ -49,6 +49,10 @@ type UIConfig struct {
 	// DefaultMachine is the machine the app's New-thread modal preselects. Empty = the
 	// local daemon the app is connected to. Display-only preference.
 	DefaultMachine string `toml:"default_machine" json:"default_machine"`
+	// DefaultChatView is the chat surface the app opens a thread in by default —
+	// "terminal" (live tmux pane), "transcript", or "rpc". Empty = the app falls
+	// back to "terminal". Display-only preference.
+	DefaultChatView string `toml:"default_chat_view" json:"default_chat_view"`
 }
 
 // UICwdLabelRule is one match→label rule for the new-thread picker display.
@@ -94,6 +98,13 @@ func ValidateUIConfig(cfg UIConfig) error {
 			}
 		}
 	}
+	// default_chat_view: empty = unset (app falls back to terminal); otherwise it
+	// must be one of the known surfaces — loud, never a silent accept.
+	switch cfg.DefaultChatView {
+	case "", "terminal", "transcript", "rpc":
+	default:
+		return fmt.Errorf("default_chat_view %q is invalid (want one of: terminal, transcript, rpc, or empty)", cfg.DefaultChatView)
+	}
 	return nil
 }
 
@@ -110,6 +121,7 @@ type uiConfigFile struct {
 	MasterCommand          *string           `toml:"master_command"`
 	DefaultAgent           *string           `toml:"default_agent"`
 	DefaultMachine         *string           `toml:"default_machine"`
+	DefaultChatView        *string           `toml:"default_chat_view"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -150,6 +162,9 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	}
 	if f.DefaultMachine != nil {
 		cfg.DefaultMachine = *f.DefaultMachine
+	}
+	if f.DefaultChatView != nil {
+		cfg.DefaultChatView = *f.DefaultChatView
 	}
 	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
 	if err := ValidateUIConfig(cfg); err != nil {

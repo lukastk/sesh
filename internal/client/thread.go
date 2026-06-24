@@ -177,11 +177,14 @@ func (c *Client) ThreadTranscript(ctx context.Context, id string, tail int) (api
 	return out, c.getJSON(ctx, url, &out)
 }
 
-// ThreadAdopt posts POST /v1/threads/adopt. sessionID, when non-empty, supplies
-// the agent's conversation id explicitly (bypassing auto-detection).
-func (c *Client) ThreadAdopt(ctx context.Context, pane, name, sessionID string) (api.ThreadResponse, error) {
+// ThreadAdopt posts POST /v1/threads/adopt. With a pane it adopts a live agent
+// (sessionID, when non-empty, asserts its conversation id, bypassing
+// auto-detection). With an empty pane it is a HEADLESS adopt: sessionID +
+// agentKind are required and register an existing, not-running conversation as a
+// durable headless thread in cwd.
+func (c *Client) ThreadAdopt(ctx context.Context, pane, name, sessionID, agentKind, cwd string) (api.ThreadResponse, error) {
 	var out api.ThreadResponse
-	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name, SessionID: sessionID}, &out)
+	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name, SessionID: sessionID, AgentKind: agentKind, Cwd: cwd}, &out)
 }
 
 // ThreadMeta posts POST /v1/threads/meta ('' value deletes the key).

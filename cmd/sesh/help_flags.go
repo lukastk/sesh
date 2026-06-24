@@ -166,8 +166,10 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread adopt": {
 		{"--name", "thread name for the adopted agent (required)"},
-		{"--pane", "tmux pane id on the work server to adopt (default: $TMUX_PANE)"},
-		{"--session-id", "agent conversation id, supplied when it can't be auto-detected (e.g. a claude launched with a bare -r)"},
+		{"--pane", "tmux pane id on the work server to adopt (default: $TMUX_PANE; ignored for headless adopt)"},
+		{"--session-id", "agent conversation id; supplied when it can't be auto-detected (e.g. a claude launched with a bare -r); REQUIRED for headless adopt"},
+		{"--agent", "agent kind (claude|codex|pi) — selects HEADLESS adopt: register an existing, not-running conversation as a headless thread (no pane used)"},
+		{"--cwd", "headless adopt working directory, relative or ~ ok (default: the current dir '.')"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},

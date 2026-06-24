@@ -37,8 +37,18 @@ func (d *Daemon) handleThreadAdopt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Pane == "" || req.Name == "" {
-		writeError(w, http.StatusBadRequest, "adopt: pane and name are required")
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "adopt: name is required")
+		return
+	}
+	// No pane => HEADLESS adopt: register an existing, not-running conversation as a
+	// durable headless thread. There is nothing to inspect, so identity is asserted.
+	if req.Pane == "" {
+		d.adoptHeadless(w, req)
+		return
+	}
+	if req.AgentKind != "" {
+		writeError(w, http.StatusBadRequest, "adopt: --agent is only for headless adopt (no pane) — a live pane's agent is detected, never asserted")
 		return
 	}
 	info, found, err := d.tmux.FindPaneByID(req.Pane)
@@ -129,6 +139,44 @@ func (d *Daemon) handleThreadAdopt(w http.ResponseWriter, r *http.Request) {
 		// Roll the record back so store and runtime stay consistent.
 		d.store.DeleteThread(id) //nolint:errcheck
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("adopt: stamp pane: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})
+}
+
+// adoptHeadless registers an EXISTING conversation (not running anywhere) as a
+// durable headless thread bound to the caller-supplied session id. Mirrors
+// newHeadlessThread, but the conversation already exists: AgentSessionID is the
+// asserted id (never minted) and HeadlessStarted is true, so the first
+// send-headless turn RESUMES it rather than starting fresh.
+func (d *Daemon) adoptHeadless(w http.ResponseWriter, req api.AdoptThreadRequest) {
+	if req.SessionID == "" || req.AgentKind == "" {
+		writeError(w, http.StatusBadRequest, "adopt (headless): --session-id and --agent are required (no pane to detect them — assert the conversation id and agent kind)")
+		return
+	}
+	kind, err := agents.ParseKind(req.AgentKind)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "adopt (headless): "+err.Error())
+		return
+	}
+	cwd := expandHomeCwd(req.Cwd)
+	id := uuid.NewString()
+	thread := api.Thread{
+		ID:             id,
+		Machine:        d.cfg.Machine,
+		SessionName:    "headless-" + id, // logical name; no tmux session exists
+		Cwd:            cwd,
+		AgentKind:      string(kind),
+		Name:           req.Name,
+		Tags:           []string{},
+		CreatedAtUnix:  time.Now().Unix(),
+		AgentSessionID: req.SessionID,
+		Notify:         d.defaults.NotifyDefault(),
+		// The conversation already exists — a send-headless turn must RESUME it.
+		HeadlessStarted: true,
+	}
+	if err := d.store.InsertThread(thread); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})

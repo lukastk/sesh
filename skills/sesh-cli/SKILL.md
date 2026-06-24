@@ -353,6 +353,12 @@ sesh thread notify --id <id> --off                     # mute this thread's noti
 sesh thread adopt --name here                                  # current pane ($TMUX_PANE)
 sesh thread adopt --name here --session-id <conversation-uuid> # explicit id
 
+# HEADLESS adopt: register an EXISTING conversation that is NOT running anywhere
+# (e.g. a claude transcript on disk) as a durable headless thread. No pane is used,
+# so --agent and --session-id are REQUIRED (nothing to detect them from); --cwd
+# defaults to '.'. A later `send-headless` RESUMES that conversation:
+sesh thread adopt --name corkboard --agent claude --session-id <conversation-uuid> --cwd ~/dev/corkboard
+
 # Spawn on another machine (real cross-machine spawn over the mesh):
 sesh thread new --agent claude --name x --cwd ~/proj --machine macbook
 ```

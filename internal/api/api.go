@@ -111,7 +111,12 @@ package api
 // Schema 31 adds `default_chat_view` to UIConfig — the chat surface the app opens a
 // thread in by default (terminal|transcript|rpc; empty = the app falls back to terminal).
 // Additive/omitempty, display-only preference (mixed-mesh safe).
-const SchemaVersion = 31
+//
+// Schema 32 adds HEADLESS adopt: AdoptThreadRequest gains `agent_kind` + `cwd`, and an
+// empty `pane` now means "register an existing, not-running conversation (session_id) as
+// a durable headless thread" instead of erroring. Additive/omitempty request fields; a
+// pre-32 daemon rejects a pane-less adopt loudly (400), never silently mis-handling it.
+const SchemaVersion = 32
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

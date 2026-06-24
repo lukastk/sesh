@@ -798,24 +798,59 @@ func threadTranscript(cfg config.Config, args []string) error {
 	return nil
 }
 
-// threadAdopt brings a manually-launched agent under sesh management
-// (work-server panes only; the pane defaults to the caller's own).
+// threadAdopt brings an agent under sesh management. With a pane (default: the
+// caller's own) it adopts a live work-server agent. With --agent it is a HEADLESS
+// adopt: register an EXISTING, not-running conversation (--session-id) as a
+// durable headless thread — no pane is used.
 func threadAdopt(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
-	pane := fs.String("pane", "", "tmux pane id on the work server (default: $TMUX_PANE)")
+	pane := fs.String("pane", "", "tmux pane id on the work server (default: $TMUX_PANE; ignored for headless adopt)")
 	name := fs.String("name", "", "thread name (required)")
-	sessionID := fs.String("session-id", "", "agent conversation id, supplied explicitly when it can't be auto-detected (e.g. a claude launched with a bare -r)")
+	sessionID := fs.String("session-id", "", "agent conversation id; supplied explicitly when it can't be auto-detected (e.g. a claude launched with a bare -r); REQUIRED for headless adopt")
+	agent := fs.String("agent", "", "agent: claude|codex|pi — selects HEADLESS adopt (register an existing, not-running conversation; no pane used)")
+	cwd := fs.String("cwd", "", "headless adopt working directory, relative or ~ ok (default: the current dir '.'; expanded against the invocation dir)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *name == "" {
+		return errors.New("thread adopt: --name is required")
+	}
+
+	// --agent selects HEADLESS adopt: no pane is consulted (so the $TMUX_PANE
+	// default never hijacks it when run from inside a tmux pane).
+	if *agent != "" {
+		if *sessionID == "" {
+			return errors.New("thread adopt (headless): --agent requires --session-id (the existing conversation to bind to)")
+		}
+		c, err := absCwd(*cwd)
+		if err != nil {
+			return err
+		}
+		if c == "" {
+			c, err = absCwd(".")
+			if err != nil {
+				return err
+			}
+		}
+		resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), "", *name, *sessionID, *agent, c)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emitJSON(resp.Thread)
+		}
+		fmt.Printf("adopted headless %s (%s, session %s) as %s\n", resp.Thread.ID, resp.Thread.AgentKind, resp.Thread.AgentSessionID, resp.Thread.Name)
+		return nil
+	}
+
 	if *pane == "" {
 		*pane = os.Getenv("TMUX_PANE")
 	}
-	if *pane == "" || *name == "" {
-		return errors.New("thread adopt: --name and a pane (--pane or $TMUX_PANE) are required")
+	if *pane == "" {
+		return errors.New("thread adopt: a pane (--pane or $TMUX_PANE) is required for pane adopt; for headless adopt of an existing conversation pass --agent and --session-id")
 	}
-	resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), *pane, *name, *sessionID)
+	resp, err := daemonClient(cfg).ThreadAdopt(context.Background(), *pane, *name, *sessionID, "", "")
 	if err != nil {
 		return err
 	}

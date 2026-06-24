@@ -436,6 +436,12 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "thread.adopt-headless",
+		Description: "adopt (no pane): register an EXISTING, not-running conversation (--session-id + --agent) as a durable headless thread; a send-headless turn RESUMES that real conversation (continuity); missing id/agent loud",
+		Agents:      agentic,
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.fork",
 		Description: "new --fork-from [--message-id N]: branch a conversation's prefix under a fresh session id (headless-born, resumes from the branch point); the source is untouched",
 		Agents:      agentic,

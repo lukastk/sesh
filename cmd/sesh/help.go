@@ -169,9 +169,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread info --id 1a2b3c4d"},
 	},
 	"thread adopt": {
-		summary:  "bring a manually-launched agent (a work-server pane) under sesh management; --session-id supplies the conversation id when it can't be auto-detected (e.g. a claude launched with a bare -r)",
-		usage:    "sesh thread adopt --name <name> [--pane <pane>] [--session-id <uuid>] [--machine <m>] [--json]",
-		examples: []string{"sesh thread adopt --name adopted-claude --pane %42", "sesh thread adopt --name here", "sesh thread adopt --name here --session-id 9b8fccb0-e57a-484c-9c3d-353489f26d67"},
+		summary:  "bring an agent under sesh management. PANE adopt (default): a live work-server pane; --session-id supplies the conversation id when it can't be auto-detected (e.g. a claude launched with a bare -r). HEADLESS adopt (--agent): register an EXISTING, not-running conversation (--session-id) as a durable headless thread — no pane is used.",
+		usage:    "sesh thread adopt --name <name> [--pane <pane>] [--session-id <uuid>] [--agent <claude|codex|pi>] [--cwd <dir>] [--machine <m>] [--json]",
+		examples: []string{"sesh thread adopt --name adopted-claude --pane %42", "sesh thread adopt --name here", "sesh thread adopt --name here --session-id 9b8fccb0-e57a-484c-9c3d-353489f26d67", "sesh thread adopt --name corkboard --agent claude --session-id c79b8f02-2fed-4f5f-8fc9-293bd56caf6e --cwd ~/dev/corkboard"},
 	},
 	"thread transcript": {
 		summary:  "print a thread conversation's raw transcript lines (owner-side read; current thread inferred when no id)",

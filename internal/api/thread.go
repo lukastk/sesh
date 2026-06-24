@@ -350,16 +350,30 @@ type NotifyThreadRequest struct {
 	On bool   `json:"on"`
 }
 
-// AdoptThreadRequest brings an agent sesh didn't spawn under management
-// (work-server panes only; detection per agent, every ambiguity loud).
+// AdoptThreadRequest brings an agent sesh didn't spawn under management.
+//
+// Two modes:
+//   - PANE adopt (Pane set): a live agent running on the work server is brought
+//     under management; detection is per agent, every ambiguity loud.
+//   - HEADLESS adopt (Pane empty): an EXISTING conversation that is NOT running
+//     anywhere (e.g. a claude transcript on disk) is registered as a durable
+//     headless thread. There is no pane to inspect, so SessionID and AgentKind
+//     must be supplied explicitly; the caller asserts both.
 type AdoptThreadRequest struct {
 	Pane string `json:"pane"`
 	Name string `json:"name"`
 	// SessionID, when set, is the agent's conversation id supplied EXPLICITLY by the
-	// caller — used when auto-detection can't find it (e.g. claude launched with a
-	// bare `-r`, no id in argv). It bypasses the per-agent detection (the caller
-	// asserts the identity); the pane must still hold a live agent.
+	// caller. In PANE adopt it's used when auto-detection can't find it (e.g. claude
+	// launched with a bare `-r`, no id in argv) and bypasses per-agent detection (the
+	// pane must still hold a live agent). In HEADLESS adopt it is REQUIRED — it is the
+	// existing conversation the headless thread binds to.
 	SessionID string `json:"session_id,omitempty"`
+	// AgentKind (claude|codex|pi) is REQUIRED for HEADLESS adopt (no pane to detect
+	// it) and must be empty for PANE adopt (the live pane's agent is authoritative).
+	AgentKind string `json:"agent_kind,omitempty"`
+	// Cwd is the headless thread's working directory (HEADLESS adopt only). The
+	// owning daemon expands a leading ~ against its own home.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // MetaThreadRequest sets ('' value = deletes) one meta key.

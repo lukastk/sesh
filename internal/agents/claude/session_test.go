@@ -20,6 +20,9 @@ func metaJSON(t string) string { return `{"type":"` + t + `"}` }
 func msgLine(uuid, parent string) string {
 	return `{"type":"user","uuid":"` + uuid + `","parentUuid":"` + parent + `"}`
 }
+func msgLineTS(uuid, parent, ts string) string {
+	return `{"type":"user","uuid":"` + uuid + `","parentUuid":"` + parent + `","timestamp":"` + ts + `"}`
+}
 func boundaryLine(lpu, uuid string) string {
 	return `{"type":"system","subtype":"compact_boundary","logicalParentUuid":"` + lpu + `","uuid":"` + uuid + `","parentUuid":null}`
 }
@@ -146,5 +149,103 @@ func TestResolveLeafSessionInSessionCompaction(t *testing.T) {
 	// parent must NOT be claimed as a child of anything (no self/cycle link).
 	if got, _ := ResolveLeafSession(home, cwd, "child"); got != "child" {
 		t.Errorf("resolve(child) = %q, want child (leaf; no cycle back to parent)", got)
+	}
+}
+
+// A resume/rewind fork: claude copies the conversation into a NEW file (preserving each
+// message's uuid — only the per-line sessionId is rewritten) and continues there, with
+// NO compaction boundary. So the fork shares its FIRST conversation-message uuid (the
+// root) with the frozen original. This faithfully reproduces the "duplicate session"
+// bug: the stale anchor (the spawn-minted id) is frozen mid-conversation while the live
+// conversation continued in the fork. ResolveLeafSession must advance the anchor to the
+// fork (the most-recently-extended file of the shared-root lineage).
+func TestResolveLeafSessionResumeFork(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/home/u/dev/proj"
+
+	// anchor: the spawn-minted session, frozen at the fork point (ends 12:40).
+	writeSession(t, home, cwd, "0d3dc297",
+		metaJSON("mode"), metaJSON("file-history-snapshot"),
+		msgLineTS("m-root", "", "2026-06-24T08:32:03Z"),
+		msgLineTS("m-2", "m-root", "2026-06-24T12:40:21Z"))
+
+	// fork: same root uuid (copied), continues past the fork to 12:59 = the live tip.
+	writeSession(t, home, cwd, "dedd01d1",
+		metaJSON("mode"), metaJSON("file-history-snapshot"),
+		msgLineTS("m-root", "", "2026-06-24T08:32:03Z"),
+		msgLineTS("m-2", "m-root", "2026-06-24T12:40:21Z"),
+		msgLineTS("m-3", "m-2", "2026-06-24T12:59:27Z"))
+
+	for _, stored := range []string{"0d3dc297", "dedd01d1"} {
+		got, err := ResolveLeafSession(home, cwd, stored)
+		if err != nil {
+			t.Fatalf("resolve(%s): %v", stored, err)
+		}
+		if got != "dedd01d1" {
+			t.Errorf("resolve(%s) = %q, want the live fork dedd01d1", stored, got)
+		}
+	}
+}
+
+// A resume fork must not contaminate an unrelated conversation in the same cwd: the
+// lineage key is the conversation-root uuid, so distinct conversations stay separate.
+func TestResolveLeafSessionResumeForkIndependent(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/home/u/dev/proj"
+
+	writeSession(t, home, cwd, "A0",
+		metaJSON("mode"), msgLineTS("rootA", "", "2026-06-24T08:00:00Z"))
+	writeSession(t, home, cwd, "A1",
+		metaJSON("mode"),
+		msgLineTS("rootA", "", "2026-06-24T08:00:00Z"),
+		msgLineTS("a-2", "rootA", "2026-06-24T09:00:00Z"))
+
+	// A second, unrelated conversation (different root) — newer ts, but not in A's lineage.
+	writeSession(t, home, cwd, "B0",
+		metaJSON("mode"),
+		msgLineTS("rootB", "", "2026-06-24T10:00:00Z"),
+		msgLineTS("b-2", "rootB", "2026-06-24T11:00:00Z"))
+
+	if got, _ := ResolveLeafSession(home, cwd, "A0"); got != "A1" {
+		t.Errorf("resolve(A0) = %q, want A1 (its own fork tip, not the newer unrelated B0)", got)
+	}
+	if got, _ := ResolveLeafSession(home, cwd, "B0"); got != "B0" {
+		t.Errorf("resolve(B0) = %q, want B0 (sole file of its conversation)", got)
+	}
+}
+
+// Combined: a resume fork that THEN compacts. The walk hops to the resume tip, then
+// follows that tip's compaction chain to the final leaf.
+func TestResolveLeafSessionResumeThenCompaction(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/home/u/dev/proj"
+
+	// anchor: frozen original (ends 08:40).
+	writeSession(t, home, cwd, "anchor",
+		metaJSON("mode"),
+		msgLineTS("m-root", "", "2026-06-24T08:32:00Z"),
+		msgLineTS("m-a", "m-root", "2026-06-24T08:40:00Z"))
+
+	// fork: same root, continues to m-leaf (09:00) = the resume tip; then it compacts.
+	writeSession(t, home, cwd, "fork",
+		metaJSON("mode"),
+		msgLineTS("m-root", "", "2026-06-24T08:32:00Z"),
+		msgLineTS("m-a", "m-root", "2026-06-24T08:40:00Z"),
+		msgLineTS("m-leaf", "m-a", "2026-06-24T09:00:00Z"))
+
+	// compChild: born by compaction off fork (lpu = m-leaf, owned by fork).
+	writeSession(t, home, cwd, "compChild",
+		metaJSON("mode"), boundaryLine("m-leaf", "b-1"),
+		`{"type":"user","uuid":"m-leaf","isCompactSummary":true,"parentUuid":"b-1"}`,
+		msgLineTS("m-c", "m-leaf", "2026-06-24T09:10:00Z"))
+
+	for _, stored := range []string{"anchor", "fork", "compChild"} {
+		got, err := ResolveLeafSession(home, cwd, stored)
+		if err != nil {
+			t.Fatalf("resolve(%s): %v", stored, err)
+		}
+		if got != "compChild" {
+			t.Errorf("resolve(%s) = %q, want compChild (resume tip then compaction leaf)", stored, got)
+		}
 	}
 }

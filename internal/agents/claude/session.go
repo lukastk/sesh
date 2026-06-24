@@ -11,54 +11,79 @@ import (
 	"sync"
 )
 
-// session.go resolves a claude thread's CURRENT session id across COMPACTION DRIFT.
+// session.go resolves a claude thread's CURRENT session id across SESSION-ID DRIFT.
 //
-// THE PROBLEM: claude starts a NEW session id + a new <id>.jsonl on every compaction
-// (and on a resume that compacts). sesh records the session id ONCE (spawn/adopt) and
-// never updates it, so the transcript view + `resume` freeze at the LAST compaction —
-// the stored file stops growing while the live conversation continues in a new file.
+// THE PROBLEM: claude does NOT keep one stable session id for a conversation. It starts
+// a NEW session id + a new <id>.jsonl on (a) every compaction, and (b) every resume /
+// rewind — `claude --resume <id>` copies the conversation into a fresh file and
+// continues THERE. sesh records the session id ONCE (spawn/adopt) and never updates it,
+// so the transcript view + `resume` freeze at the LAST drift point: the stored file
+// stops growing while the live conversation continues in a new file. Resolve-on-read:
+// the record keeps the stable anchor; this layer follows the anchor FORWARD to the live
+// leaf. Two drift signals, two linkages, unified into one forward walk:
 //
-// THE SIGNAL (verified live against Claude Code data): a compaction-born file BEGINS
-// (only meta lines — mode/permission-mode/file-history-snapshot — before it) with a
+// (1) COMPACTION (verified live): a compaction-born file BEGINS (only meta lines —
+// mode/permission-mode/file-history-snapshot — before it) with a
 //
 //	{"type":"system","subtype":"compact_boundary","logicalParentUuid":"<msg-uuid>",…}
 //
 // whose logicalParentUuid is a MESSAGE uuid that lives in the PARENT session's file
 // (the last preserved message before the branch). So child.compact_boundary
 // .logicalParentUuid → the file OWNING that message = the parent. We map every
-// compaction-born file to its parent and follow the stored id FORWARD to the LEAF (the
-// session no born file claims as parent) = the current session.
+// compaction-born file to its parent and follow the chain to its LEAF.
 //
-// On-disk, so it works for headful AND dead threads; per-chain, so concurrent sessions
-// in one cwd don't get confused (each stored id follows its own lineage — a newest-file
-// heuristic cannot do this). A plain resume that does NOT compact produces no
-// compact_boundary and is not part of a lineage we track — by design the stored id then
-// still resumes correctly (claude --resume of a prior id works); this layer only chases
-// the compaction drift that breaks the transcript view.
+// (2) RESUME / REWIND (verified live — the "duplicate session" bug): a resume/rewind
+// fork is a normal (NOT compaction-born) file that COPIES the conversation, PRESERVING
+// each message's uuid (only the per-line sessionId is rewritten) — so it shares its
+// FIRST conversation-message uuid (the conversation ROOT) with every other fork of the
+// same conversation. Files sharing a root are one lineage; the LIVE tip is the one most
+// recently extended (latest last-message timestamp). A frozen pre-fork file (e.g. the
+// stale anchor) has an earlier last-message timestamp than the fork that continued.
+//
+// The walk follows the compaction chain to its leaf, then hops to that conversation's
+// live resume tip, repeating until stable. On-disk, so it works for headful AND dead
+// threads; lineage is keyed on the compaction-boundary link and the conversation-root
+// uuid (both precise — a newest-file heuristic cannot tell concurrent conversations in
+// one cwd apart, but a shared root uuid can).
 
-// metaLine is the subset of a transcript line this resolver needs (the boundary link +
-// the per-message uuid). json.Unmarshal ignores the many other fields.
+// metaLine is the subset of a transcript line this resolver needs (the boundary link,
+// the per-message uuid, and the message timestamp). json.Unmarshal ignores the many
+// other fields.
 type metaLine struct {
 	Type              string `json:"type"`
 	Subtype           string `json:"subtype"`
 	UUID              string `json:"uuid"`
 	LogicalParentUUID string `json:"logicalParentUuid"`
+	Timestamp         string `json:"timestamp"`
 }
 
-// headInfo reads the HEAD of a session file to classify it cheaply: born=true iff its
-// first compaction event precedes any real conversation line (a compaction-born file),
-// in which case lpu is that boundary's logicalParentUuid. A normal session (real
-// conversation before any boundary — incl. an IN-SESSION compaction deep in the file)
-// is born=false. It stops at the first compact_boundary OR the first user/assistant
-// line, so it reads only a handful of lines.
-func headInfo(path string) (born bool, lpu string, err error) {
+// fileInfo summarizes a session file for lineage resolution.
+type fileInfo struct {
+	born   bool   // first meaningful event is a compact_boundary (compaction-born)
+	lpu    string // born: the boundary's logicalParentUuid (its compaction-parent link)
+	root   string // non-born: first conversation (user/assistant) message uuid
+	lastTS string // non-born: last conversation message timestamp (ISO-8601, sorts chronologically)
+	msgs   int    // non-born: conversation message count (a tie-breaker)
+}
+
+// scanFile classifies a session file. born=true iff its first meaningful event is a
+// compact_boundary (before any real conversation line) — then lpu is that boundary's
+// logicalParentUuid and we return early (a born file's content is reached via the
+// boundary chain, not by root grouping). A normal session (real conversation before any
+// boundary — incl. an IN-SESSION compaction deep in the file) is born=false; for it we
+// scan to the end to record the conversation root uuid (shared by resume/rewind forks),
+// the last message timestamp (the live tip is the most-recently-extended fork), and the
+// message count.
+func scanFile(path string) (fileInfo, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false, "", err
+		return fileInfo{}, err
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	var fi fileInfo
+	classified := false
 	for sc.Scan() {
 		b := bytes.TrimSpace(sc.Bytes())
 		if len(b) == 0 {
@@ -68,16 +93,26 @@ func headInfo(path string) (born bool, lpu string, err error) {
 		if json.Unmarshal(b, &ml) != nil {
 			continue
 		}
-		if ml.Type == "system" && ml.Subtype == "compact_boundary" {
-			// First meaningful event is a boundary → born by compaction.
-			return true, ml.LogicalParentUUID, nil
+		isMsg := ml.Type == "user" || ml.Type == "assistant"
+		if !classified {
+			if ml.Type == "system" && ml.Subtype == "compact_boundary" {
+				// First meaningful event is a boundary → born by compaction.
+				return fileInfo{born: true, lpu: ml.LogicalParentUUID}, nil
+			}
+			if !isMsg {
+				continue // meta line before any conversation
+			}
+			classified = true
+			fi.root = ml.UUID
 		}
-		if ml.Type == "user" || ml.Type == "assistant" {
-			// Real conversation came first → a normal session, not compaction-born.
-			return false, "", nil
+		if isMsg {
+			fi.msgs++
+			if ml.Timestamp != "" {
+				fi.lastTS = ml.Timestamp
+			}
 		}
 	}
-	return false, "", sc.Err()
+	return fi, sc.Err()
 }
 
 // occurrence is where a target message uuid was found.
@@ -167,11 +202,13 @@ type sessionCacheEntry struct {
 	leaf string
 }
 
-// ResolveLeafSession follows storedID forward through the compaction chain to the
-// current leaf session id. It returns storedID unchanged when there is no compaction
-// to chase (no born files, or storedID has no born descendant) and when the project
-// dir does not exist (e.g. a thread whose claude data is on another machine). A genuine
-// read error is returned LOUDLY.
+// ResolveLeafSession follows storedID forward through the compaction chain AND the
+// resume/rewind fork lineage to the current leaf session id. It returns storedID
+// unchanged when there is no drift to chase (no born files and no sibling fork) and when
+// the project dir does not exist (e.g. a thread whose claude data is on another machine).
+// A genuine read error is returned LOUDLY. The result is cached on the SET of session
+// files in the project dir — a new compaction or resume creates a new file, changing the
+// set and forcing a re-resolve; within a stable set the leaf does not change.
 func ResolveLeafSession(claudeHome, cwd, storedID string) (string, error) {
 	if claudeHome == "" || cwd == "" || storedID == "" {
 		return storedID, nil
@@ -211,42 +248,122 @@ func ResolveLeafSession(claudeHome, cwd, storedID string) (string, error) {
 	return leaf, nil
 }
 
-// resolveLeafUncached does the actual chain walk (no cache).
+// resolveLeafUncached does the actual lineage walk (no cache).
 func resolveLeafUncached(dir string, sids []string, storedID string) string {
-	// Classify every file's head: which are compaction-born, and their parent-link lpu.
-	born := map[string]string{} // sid -> logicalParentUuid
+	// Scan every file once: born+lpu for compaction-born files, root+lastTS+msgs for
+	// normal files.
+	infos := map[string]fileInfo{}
 	for _, sid := range sids {
-		b, lpu, err := headInfo(filepath.Join(dir, sid+".jsonl"))
-		if err == nil && b && lpu != "" {
-			born[sid] = lpu
+		fi, err := scanFile(filepath.Join(dir, sid+".jsonl"))
+		if err != nil {
+			continue
 		}
-	}
-	if len(born) == 0 {
-		return storedID // no compaction anywhere → nothing to chase (cheap exit)
+		infos[sid] = fi
 	}
 
-	// Locate the owning file of each born file's logical-parent message.
-	targets := map[string][]byte{}
-	for _, lpu := range born {
-		targets[lpu] = []byte(lpu)
-	}
-	occ := map[string][]occurrence{}
-	for _, sid := range sids {
-		firstOccurrences(filepath.Join(dir, sid+".jsonl"), sid, targets, occ)
-	}
-
-	bornSet := map[string]bool{}
-	for s := range born {
-		bornSet[s] = true
+	// (1) Compaction lineage: each born file -> its parent (the file owning the message
+	// its boundary's logicalParentUuid names).
+	born := map[string]string{} // sid -> logicalParentUuid
+	for sid, fi := range infos {
+		if fi.born && fi.lpu != "" {
+			born[sid] = fi.lpu
+		}
 	}
 	children := map[string][]string{}
-	for child, lpu := range born {
-		if p := owner(occ[lpu], child, bornSet); p != "" {
-			children[p] = append(children[p], child)
+	if len(born) > 0 {
+		targets := map[string][]byte{}
+		for _, lpu := range born {
+			targets[lpu] = []byte(lpu)
+		}
+		occ := map[string][]occurrence{}
+		for _, sid := range sids {
+			firstOccurrences(filepath.Join(dir, sid+".jsonl"), sid, targets, occ)
+		}
+		bornSet := map[string]bool{}
+		for s := range born {
+			bornSet[s] = true
+		}
+		for child, lpu := range born {
+			if p := owner(occ[lpu], child, bornSet); p != "" {
+				children[p] = append(children[p], child)
+			}
 		}
 	}
 
-	return followLeaf(dir, storedID, children)
+	// (2) Resume/rewind lineage: non-born files sharing a conversation-root uuid are
+	// forks of one conversation; the live tip is the most-recently-extended.
+	byRoot := map[string][]string{}
+	for sid, fi := range infos {
+		if !fi.born && fi.root != "" {
+			byRoot[fi.root] = append(byRoot[fi.root], sid)
+		}
+	}
+
+	if len(born) == 0 && !hasMultiFork(byRoot) {
+		return storedID // no drift to chase (cheap exit)
+	}
+
+	// Follow the compaction chain to its leaf, then hop to that conversation's live
+	// resume tip; repeat until stable. Each step advances to a strictly newer file, so
+	// it converges; the file count bounds it as a backstop against an unexpected cycle.
+	cur := storedID
+	for range sids {
+		next := followLeaf(dir, cur, children)
+		next = resumeTip(next, infos, byRoot)
+		if next == cur {
+			break
+		}
+		cur = next
+	}
+	return cur
+}
+
+// hasMultiFork reports whether any conversation root is shared by more than one file
+// (i.e. there is a resume/rewind fork to chase).
+func hasMultiFork(byRoot map[string][]string) bool {
+	for _, grp := range byRoot {
+		if len(grp) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeTip returns the live tip of sid's resume/rewind conversation: among the non-born
+// files sharing sid's conversation-root uuid, the one most-recently extended. Returns
+// sid unchanged when it is compaction-born or the sole file of its root.
+func resumeTip(sid string, infos map[string]fileInfo, byRoot map[string][]string) string {
+	fi, ok := infos[sid]
+	if !ok || fi.born || fi.root == "" {
+		return sid
+	}
+	grp := byRoot[fi.root]
+	if len(grp) <= 1 {
+		return sid
+	}
+	best, bestFi := sid, fi
+	for _, cand := range grp {
+		if cand == best {
+			continue
+		}
+		if cfi := infos[cand]; moreCurrent(cfi, cand, bestFi, best) {
+			best, bestFi = cand, cfi
+		}
+	}
+	return best
+}
+
+// moreCurrent reports whether file a (id aID) is a later conversation tip than b (id
+// bID): later last-message timestamp; ties broken by more messages, then larger id (for
+// determinism).
+func moreCurrent(a fileInfo, aID string, b fileInfo, bID string) bool {
+	if a.lastTS != b.lastTS {
+		return a.lastTS > b.lastTS
+	}
+	if a.msgs != b.msgs {
+		return a.msgs > b.msgs
+	}
+	return aID > bID
 }
 
 // followLeaf walks parent→child from start to the leaf. On a FORK (a session compacted

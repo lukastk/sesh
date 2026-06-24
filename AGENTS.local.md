@@ -1,5 +1,39 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H23 — HEADLESS adopt: register an existing conversation as a headless thread (2026-06-24, sesh aa06f8c; api schema 31→32; deployed 3/4)
+Ticket "Can't adopt headlessly": `sesh thread adopt --name X --session-id <uuid>` (no
+pane) failed. ROOT CAUSE: `thread adopt` was ALWAYS pane-based — it inspects a live
+work-server pane+agent. No pane → loud "a pane is required"; with $TMUX_PANE it adopted
+the caller's shell pane → 409 "no coding agent". The H6 `--session-id` only ASSERTS the id
+for an agent already live in a pane. There was no path to register a not-running
+conversation. `thread new --headless` was closest but mints a NEW id, can't bind an
+existing one. FIX (design decided w/ Lukas via AskUserQuestion): a pane-less MODE of
+`adopt`, selected by `--agent` (meaningless in pane adopt). `--agent` + `--session-id`
+REQUIRED (nothing to detect from); `--cwd` defaults to '.'. `--agent` suppresses the
+$TMUX_PANE default so it never hijacks a headless adopt run from inside tmux.
+- api: AdoptThreadRequest gains `agent_kind`+`cwd` (omitempty); empty `pane` = headless
+  adopt instead of error. Schema 31→32 (additive; a pre-32 daemon rejects a pane-less
+  adopt LOUDLY with 400 — mixed-mesh safe).
+- daemon adopt.go: handleThreadAdopt branches empty-pane → adoptHeadless (ParseKind,
+  expandHomeCwd, headless record SessionName "headless-<id>", no pane stamp,
+  AgentSessionID=asserted id, HeadlessStarted=true so send-headless RESUMES). Pane adopt
+  now rejects a stray --agent loudly.
+- cmd/sesh: `thread adopt` grows --agent + --cwd; missing --session-id loud.
+- conformance: NEW feature thread.adopt-headless (agentic × Local). Honest CONTINUITY
+  proof: plant a codeword in a real headless source conversation, DELETE the source record
+  (transcript survives), headless-adopt the session id into a fresh thread, send-headless
+  and assert it recalls the codeword (would fail if adopt started fresh). Green claude/
+  codex/pi (32s). help registry/flags + sesh-cli SKILL updated.
+DEPLOY (schema 32 = daemon RESTART): mymain + macstudio + macbook (native build .new+mv +
+supervisorctl restart sesh-daemon). Live-smoked headless adopt on each incl. REAL-NETWORK
+routed adopt mymain→macstudio/macbook over http (record headless/idle; negatives loud).
+**TERMUX PENDING** — its Termux sshd was DOWN (ports 8022/22 refused; phone online on
+cellular but adb wireless-debug not connected, rotating connect port needs reading off the
+phone). Mixed-mesh-safe so a lagging schema-31 termux is fine. To finish: bring termux
+sshd up → git pull → plain `go build` (CGO=1, NEVER CGO=0/GOOS=linux per H22) →
+.new+mv → kill daemon by explicit PID → setsid nohup relaunch (SESH_HOME=~/.sesh
+SESH_MACHINE=termux SESH_TMUX_SOCKET=sesh SESH_MASTER_SOCKET=sesh-master).
+
 ## TUI/CLI batch H1–H6 (2026-06-11; api schema 7→8; mymain daemon redeployed)
 Six fixes from Lukas's feature list + two live requests. Each: research → impl →
 unit/claim test → live-smoke.

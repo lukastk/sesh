@@ -133,8 +133,11 @@ type UIConfig struct {
 	// DefaultMachine is the machine the New-thread modal preselects (empty = local daemon).
 	DefaultMachine string `json:"default_machine"`
 	// DefaultChatView is the chat surface the app opens a thread in by default
-	// (terminal|transcript|rpc; empty = the app falls back to terminal).
-	DefaultChatView string `json:"default_chat_view,omitempty"`
+	// (terminal|transcript|rpc; empty = the app falls back to terminal). NOT omitempty:
+	// the app gates its Settings control on the field being PRESENT (its "does this daemon
+	// support it" signal, same as default_agent/default_machine) — omitempty would drop the
+	// empty default from the GET and hide the control, so the field must always serialize.
+	DefaultChatView string `json:"default_chat_view"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

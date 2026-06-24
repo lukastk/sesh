@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -53,6 +54,14 @@ type UIConfig struct {
 	// "terminal" (live tmux pane), "transcript", or "rpc". Empty = the app falls
 	// back to "terminal". Display-only preference.
 	DefaultChatView string `toml:"default_chat_view" json:"default_chat_view"`
+	// ExtraKeys is the Android touch-keyboard extra-keys row layout (Termux-style),
+	// as an OPAQUE JSON string the app owns + renders (sesh just stores/serves it,
+	// like a richer master_command). Empty = no extra-keys row (the default). The
+	// JSON is an array of rows; each key is a string ("ESC"/"TAB"/"UP"/sticky
+	// "CTRL"/"ALT"/specials "KEYBOARD"/"PASTE"/a literal char), or
+	// {"macro":"CTRL a a","display":"C-a a"}, or {"key":"/","popup":"|"}. Validated
+	// only as well-formed JSON here — the key vocabulary is the app's concern.
+	ExtraKeys string `toml:"extra_keys" json:"extra_keys"`
 }
 
 // UICwdLabelRule is one match→label rule for the new-thread picker display.
@@ -105,6 +114,15 @@ func ValidateUIConfig(cfg UIConfig) error {
 	default:
 		return fmt.Errorf("default_chat_view %q is invalid (want one of: terminal, transcript, rpc, or empty)", cfg.DefaultChatView)
 	}
+	// extra_keys: empty = no row; otherwise it must be a well-formed JSON ARRAY (of
+	// rows). The key vocabulary itself is the app's concern — sesh only guards against
+	// a malformed blob being stored (loud, never a silent accept).
+	if cfg.ExtraKeys != "" {
+		var rows []json.RawMessage
+		if err := json.Unmarshal([]byte(cfg.ExtraKeys), &rows); err != nil {
+			return fmt.Errorf("extra_keys is not a valid JSON array of rows: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -122,6 +140,7 @@ type uiConfigFile struct {
 	DefaultAgent           *string           `toml:"default_agent"`
 	DefaultMachine         *string           `toml:"default_machine"`
 	DefaultChatView        *string           `toml:"default_chat_view"`
+	ExtraKeys              *string           `toml:"extra_keys"`
 }
 
 // LoadUIConfig reads <home>/ui_config.toml, applying defaults for any missing key.
@@ -165,6 +184,9 @@ func LoadUIConfig(home string) (UIConfig, error) {
 	}
 	if f.DefaultChatView != nil {
 		cfg.DefaultChatView = *f.DefaultChatView
+	}
+	if f.ExtraKeys != nil {
+		cfg.ExtraKeys = *f.ExtraKeys
 	}
 	// A malformed rule on disk is loud (parity with config.toml's cwd_label loader).
 	if err := ValidateUIConfig(cfg); err != nil {

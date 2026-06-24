@@ -116,7 +116,11 @@ package api
 // empty `pane` now means "register an existing, not-running conversation (session_id) as
 // a durable headless thread" instead of erroring. Additive/omitempty request fields; a
 // pre-32 daemon rejects a pane-less adopt loudly (400), never silently mis-handling it.
-const SchemaVersion = 32
+//
+// Schema 33 adds `extra_keys` to UIConfig — the Android touch-keyboard extra-keys row
+// layout (Termux-style), an opaque JSON string the app renders. Empty = no row (default).
+// NOT omitempty (the Settings control gates on presence). Additive; mixed-mesh safe.
+const SchemaVersion = 33
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -143,6 +147,10 @@ type UIConfig struct {
 	// support it" signal, same as default_agent/default_machine) — omitempty would drop the
 	// empty default from the GET and hide the control, so the field must always serialize.
 	DefaultChatView string `json:"default_chat_view"`
+	// ExtraKeys is the Android extra-keys row layout (Termux-style) as an opaque JSON string
+	// the app renders (empty = no row). NOT omitempty — same present-to-advertise-support
+	// contract as default_chat_view, so the Settings editor shows.
+	ExtraKeys string `json:"extra_keys"`
 }
 
 // CwdLabelRule is one new-thread-picker display rule (regex match + template label).

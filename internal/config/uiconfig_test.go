@@ -120,6 +120,46 @@ func TestValidateUIConfigLoudOnBadChatView(t *testing.T) {
 	}
 }
 
+func TestUIConfigExtraKeysRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	// Absent → empty (no extra-keys row).
+	cfg, err := LoadUIConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadUIConfig (no file): %v", err)
+	}
+	if cfg.ExtraKeys != "" {
+		t.Errorf("absent extra_keys = %q, want empty", cfg.ExtraKeys)
+	}
+	// A saved JSON layout must load back verbatim (pointer-decode: saves AND loads).
+	layout := `[["ESC","TAB",{"key":"/","popup":"|"}],[{"macro":"CTRL a a","display":"C-a a"},"UP"]]`
+	if err := SaveUIConfig(dir, UIConfig{CollapseParents: true, ExtraKeys: layout}); err != nil {
+		t.Fatalf("SaveUIConfig: %v", err)
+	}
+	got, err := LoadUIConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadUIConfig: %v", err)
+	}
+	if got.ExtraKeys != layout {
+		t.Errorf("round-tripped extra_keys = %q, want %q", got.ExtraKeys, layout)
+	}
+}
+
+func TestValidateUIConfigLoudOnBadExtraKeys(t *testing.T) {
+	// Empty = no row (valid). A non-array or malformed JSON is a loud error.
+	if err := ValidateUIConfig(UIConfig{ExtraKeys: ""}); err != nil {
+		t.Errorf("empty extra_keys must validate: %v", err)
+	}
+	if err := ValidateUIConfig(UIConfig{ExtraKeys: `[["ESC","TAB"]]`}); err != nil {
+		t.Errorf("a valid extra_keys array must validate: %v", err)
+	}
+	if err := ValidateUIConfig(UIConfig{ExtraKeys: `{"not":"an array"}`}); err == nil {
+		t.Error("extra_keys that is not a JSON array must be a loud error")
+	}
+	if err := ValidateUIConfig(UIConfig{ExtraKeys: `[["ESC",`}); err == nil {
+		t.Error("malformed JSON extra_keys must be a loud error")
+	}
+}
+
 func TestLoadUIConfigMalformedIsLoud(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ui_config.toml"), []byte("collapse_parents = "), 0o600); err != nil {

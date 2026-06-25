@@ -1,5 +1,49 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H24 — busy never latched at SCALE: maintainer re-ran Info+ps PER THREAD (2026-06-25, sesh 8fbaa07; NO schema change; deployed ALL FOUR)
+Ticket "In sesh tui, it doesn't show threads as running when they are (especially for
+remote)": claude threads stopped rendering busy. ROOT CAUSE = a SCALE regression in the
+state maintainer (internal/daemon/maintainer.go), not a logic bug. busy is content-diff
+derived: a thread is BusyBusy once the maintainer sees >= busyChangesNeeded (2) pane-content
+changes within busyWindow (2s), sampling every maintainerTick (300ms). The maintainer sweeps
+EVERY local thread each tick, and PER THREAD it called FindPaneByThreadID (re-enumerates ALL
+panes via one tmux Info) AND tmux.AgentUnderPane (re-runs `ps -eww` over the whole process
+table) — both are tick-GLOBAL data recomputed once per thread. At Lukas's current load (94
+threads / 46 panes / 770 procs) one full sweep measured ~3.3s (46 ps@~56ms + 94 Info@~8ms), so
+each pane was sampled only ~once/3.3s → the 2-changes-in-2s window could NEVER fill → busy
+pinned to idle forever. "Used to work" because the sweep was fast with few threads; remote
+worse because the OWNING daemon's maintainer has the same stall PLUS mesh-sync latency.
+DIAGNOSIS (cold-repro): this very thread read busy=idle while its claude pane animated every
+300ms; a from-HEAD Go probe of the IDENTICAL Info→FindPaneByThreadID→CapturePane path saw
+changed=true every tick → proved timing, not capture. Running daemon was already at HEAD on
+socket `sesh` — so not stale code, just the O(threads) sweep.
+FIX:
+- internal/tmux/threads.go: Server.PaneIndexByThreadID() — threadID→PaneLocator from a SINGLE
+  Info() enumeration (unit test TestPaneIndexByThreadIDMatchesFindPane proves it EQUALS the
+  per-thread FindPaneByThreadID it replaces, across multi-session/window marked panes).
+- internal/tmux/proctree.go: ProcSnapshot (NewProcSnapshot + AgentUnderPane method) — capture
+  the process table ONCE, resolve many panes against it. Package AgentUnderPane kept for the
+  many single-shot callers (thread.go/adopt.go/etc) — only the maintainer hot loop changed.
+- internal/daemon/maintainer.go: tick() resolves the pane index + proc snapshot ONCE per tick
+  and passes them into refreshThread (replacing the per-thread tmux calls); if either fails,
+  skip the tick. refreshThread now also runs CONCURRENTLY via a bounded pool
+  (maintainerConcurrency=8) — each thread's liveState is independent, only m.st is mu-guarded,
+  capture-pane runs without the lock. Sweep collapsed ~3.3s → well under busyWindow.
+NO api schema change (internal only; api.PaneLocator already existed) ⇒ mixed-mesh safe, no
+restart-ordering hazard. Tests: tmux + daemon packages green; -race clean.
+DEPLOY: ALL FOUR. mymain (build .new+mv + supervisorctl restart sesh-daemon), macstudio
+(cij@macstudio) + macbook (lukas@macbook) (git pull + native build + supervisorctl restart),
+termux (lukas@android-main:8022 — git pull, PLAIN `go build` CGO=1/android per H22, .new+mv,
+kill old daemon by explicit PID, setsid-nohup relaunch with SESH_HOME=~/.sesh
+SESH_MACHINE=termux SESH_TMUX_SOCKET=sesh SESH_MASTER_SOCKET=sesh-master from the zshenv
+login-guard block — termux is an inbound-less leaf, no API token/conf). LIVE-VALIDATED: a
+working claude thread now reads busy=busy while 45 idle threads stay idle (no false positives);
+mesh fan-out healthy (mymain sees macbook+macstudio rows). KNOWN TEST GAP (told Lukas): the
+existing thread.runtime-state cell tests busy with ONE thread so it could never catch this
+scale stall; the new equivalence unit test guards the refactor but there's no matrix cell that
+asserts per-tick tmux/ps calls stay constant as thread count grows. Ticket
+c8108833 marked done.
+
 ## H23 — HEADLESS adopt: register an existing conversation as a headless thread (2026-06-24, sesh aa06f8c; api schema 31→32; deployed 3/4)
 Ticket "Can't adopt headlessly": `sesh thread adopt --name X --session-id <uuid>` (no
 pane) failed. ROOT CAUSE: `thread adopt` was ALWAYS pane-based — it inspects a live

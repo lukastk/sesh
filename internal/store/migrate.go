@@ -127,6 +127,11 @@ var migrations = []string{
 	// applied on headed spawn, resume, and every headless turn. Opaque pass-through
 	// string ('' = the agent's own default); no curated list. APPENDED last.
 	`ALTER TABLE threads ADD COLUMN model TEXT NOT NULL DEFAULT '';`,
+	// 17: threads.on_hold_until — park a thread until a future instant (unix secs);
+	// 0 = not on hold. "On hold right now" is derived live (this > the daemon's
+	// clock), so a thread auto-leaves hold once the instant passes — the store only
+	// holds the absolute deadline the user set. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN on_hold_until INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

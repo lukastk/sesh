@@ -38,6 +38,12 @@ func (c *Client) ThreadNotify(ctx context.Context, id string, on bool) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/notify", api.NotifyThreadRequest{ID: id, On: on}, nil)
 }
 
+// ThreadHold posts POST /v1/threads/hold: park the thread until onHoldUntilUnix
+// (0 = clear the hold). The caller supplies the absolute instant.
+func (c *Client) ThreadHold(ctx context.Context, id string, onHoldUntilUnix int64) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/hold", api.HoldThreadRequest{ID: id, OnHoldUntilUnix: onHoldUntilUnix}, nil)
+}
+
 // ThreadReparent posts POST /v1/threads/reparent ('' parent = make root).
 func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)

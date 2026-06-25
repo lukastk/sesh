@@ -118,7 +118,15 @@ func TestLegendOverflowsNotClips(t *testing.T) {
 		}
 	}
 	// The LAST binding survives — overflow keeps it, clipping would have dropped it.
-	if !strings.Contains(strip.ReplaceAllString(out, ""), "q/esc quit") {
+	// Flatten the wrap (soft-wrap turns the separating space into a newline, and each
+	// line is space-padded to the width) so the check is robust to WHERE the wrap
+	// falls — only that the trailing binding is present.
+	var flatParts []string
+	for _, line := range strings.Split(strip.ReplaceAllString(out, ""), "\n") {
+		flatParts = append(flatParts, strings.TrimSpace(line))
+	}
+	flat := strings.Join(flatParts, " ")
+	if !strings.Contains(flat, "q/esc quit") {
 		t.Errorf("legend dropped its trailing bindings (clipped, not wrapped):\n%s", out)
 	}
 	// Unknown width (no WindowSizeMsg): single line (unwrapped) so size-less tests

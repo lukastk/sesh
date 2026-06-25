@@ -15,6 +15,7 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/rename", d.handleThreadRename)
 	mux.HandleFunc("POST /v1/threads/reparent", d.handleThreadReparent)
 	mux.HandleFunc("POST /v1/threads/notify", d.handleThreadNotify)
+	mux.HandleFunc("POST /v1/threads/hold", d.handleThreadHold)
 	mux.HandleFunc("GET /v1/threads/transcript", d.handleThreadTranscript)
 	mux.HandleFunc("POST /v1/threads/import", d.handleThreadImport)
 	mux.HandleFunc("POST /v1/threads/meta", d.handleThreadMeta)
@@ -253,6 +254,32 @@ func (d *Daemon) handleThreadNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.store.SetThreadNotify(req.ID, req.On); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	th, err := d.store.GetThread(req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+}
+
+// handleThreadHold parks/unparks a thread: stores the absolute on-hold-until
+// instant supplied by the caller (0 = clear the hold). The daemon is a pure setter
+// — "on hold right now" is derived live (this > the daemon's clock) by the
+// maintainer/grid, so a past instant stores fine and simply reads as not-on-hold.
+func (d *Daemon) handleThreadHold(w http.ResponseWriter, r *http.Request) {
+	var req api.HoldThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "hold: id is required")
+		return
+	}
+	if err := d.store.SetThreadHold(req.ID, req.OnHoldUntilUnix); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}

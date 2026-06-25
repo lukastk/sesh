@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
@@ -73,6 +74,8 @@ func runThread(args []string) error {
 		return threadTranscript(cfg, rest)
 	case "notify":
 		return threadNotify(cfg, rest)
+	case "hold":
+		return threadHold(cfg, rest)
 	case "reparent":
 		return threadReparent(cfg, rest)
 	case "tag":
@@ -766,6 +769,63 @@ func threadNotify(cfg config.Config, args []string) error {
 		state = "on"
 	}
 	fmt.Printf("notifications %s for %s\n", state, rid)
+	return nil
+}
+
+// threadHold parks/unparks a thread: sets on_hold_until to an absolute instant so
+// the thread is hidden from the default active view until then (`--until` a date or
+// `--until-unix` an exact instant), or clears the hold (`--clear`). It auto-expires
+// — once the instant passes the thread silently returns to the active view; there
+// is no separate "unhold" beyond letting the deadline lapse or `--clear`.
+func threadHold(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("hold", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	until := fs.String("until", "", "hold until the START of this date (YYYY-MM-DD, local time)")
+	untilUnix := fs.Int64("until-unix", 0, "hold until this absolute unix instant (seconds)")
+	clear := fs.Bool("clear", false, "clear the hold (return the thread to the active view now)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	// Exactly one of --until / --until-unix / --clear.
+	set := 0
+	if *until != "" {
+		set++
+	}
+	if *untilUnix != 0 {
+		set++
+	}
+	if *clear {
+		set++
+	}
+	if set != 1 {
+		return errors.New("thread hold: exactly one of --until, --until-unix, or --clear is required")
+	}
+	var when int64
+	switch {
+	case *clear:
+		when = 0
+	case *untilUnix != 0:
+		when = *untilUnix
+	default:
+		d, err := time.ParseInLocation("2006-01-02", *until, time.Local)
+		if err != nil {
+			return fmt.Errorf("thread hold: bad --until date %q (want YYYY-MM-DD): %w", *until, err)
+		}
+		when = d.Unix()
+	}
+	rid, err := resolveThreadID(cfg, *id)
+	if err != nil {
+		return err
+	}
+	c := daemonClient(cfg)
+	if err := c.ThreadHold(context.Background(), rid, when); err != nil {
+		return err
+	}
+	if when == 0 {
+		fmt.Printf("hold cleared for %s\n", rid)
+	} else {
+		fmt.Printf("%s on hold until %s\n", rid, time.Unix(when, 0).Format("2006-01-02 15:04"))
+	}
 	return nil
 }
 

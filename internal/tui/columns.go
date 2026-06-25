@@ -37,6 +37,7 @@ const (
 	ColTicketInput = "ticket_input"
 	ColNotify      = "notify"
 	ColCreated     = "created"
+	ColHold        = "hold"
 )
 
 // colSpec is a column's static metadata. fullWidth columns size to the longest
@@ -102,6 +103,15 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
 	{name: ColCreated, header: "CREATED", fixedW: 10,
 		cell: func(_ *Model, r api.ThreadRow) string { return createdLabel(r.CreatedAtUnix) }},
+	{name: ColHold, header: "HOLD", fixedW: 10,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			// The on-hold-until date while parked; blank otherwise (a lapsed hold reads
+			// as not-on-hold even if the stale timestamp lingers on the record).
+			if !r.OnHold || r.OnHoldUntilUnix == 0 {
+				return ""
+			}
+			return time.Unix(r.OnHoldUntilUnix, 0).Format("2006-01-02")
+		}},
 }
 
 // DefaultColumns is the built-in visible set (HEAD/BUSY deliberately off — the

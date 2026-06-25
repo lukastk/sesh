@@ -210,16 +210,20 @@ Keymap (normal mode):
 
 ```
 ↑/↓ or j/k   move cursor          ^j / ^k    scroll viewport a half-page
-←/→          fold / unfold tree    h / l      pan columns left/right (when clipped)
+←/→          fold / unfold tree    ^h / ^l    pan columns left/right (when clipped)
 mouse wheel  move selection up/down; Shift+wheel (or wheel left/right) pans columns
 enter        nav: switch your tmux client to the thread (or attach from a plain shell;
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
-tab          cycle views (active / archived / all / custom [[tui.views]])
+tab          cycle views (active / on hold / archived / all / custom [[tui.views]])
              (`tui --cursor` / the cockpit prefix+a preselect the current thread; if it
-             is hidden by the default `active` view — e.g. archived — the TUI opens on
-             `all` so the cursor still lands on it)
+             is hidden by the default `active` view — e.g. archived or on hold — the TUI
+             opens on `all` so the cursor still lands on it)
+h            hold: park the thread until the start of tomorrow (it drops out of the
+             default view and returns automatically tomorrow); on an already-held thread
+             `h` releases it
+H            hold until an explicit date (line prompt; YYYY-MM-DD, empty = clear)
 r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
 t            add tag                T          remove tag (picker)
 P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
@@ -230,6 +234,13 @@ K            tickets view (the selected thread's tickets — see below)
 x            stop      d  delete    a  archive/unarchive   (d and a ask y/n first)
 q / esc      quit
 ```
+
+**Hold** parks a thread you're not working on today. It sets the thread's
+`on_hold_until` to an absolute instant and the owning daemon derives a live "on hold"
+flag against its clock, so a hold **auto-expires** — `h` defaults to the start of
+*tomorrow*, so a parked thread reappears in the default view the next day with no action.
+The default `active` view hides on-hold threads; the **`on hold`** view (in the `tab`
+cycle) shows the parked ones. The CLI verb is `sesh thread hold` (see below).
 
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
@@ -251,7 +262,7 @@ headful·idle thread — i.e. it needs your input).
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
 green by default (tunable via `[[tui.column_color]]`). Wide grids clip and scroll
-horizontally (`h`/`l`, **Shift+wheel**, or a native wheel-left/right); long grids scroll
+horizontally (`^h`/`^l`, **Shift+wheel**, or a native wheel-left/right); long grids scroll
 vertically (`^j`/`^k` move the viewport a half-page; the mouse wheel moves the SELECTION,
 viewport following, with `▲/▼` markers). Wheel **sensitivity** is configurable — how many
 notches it takes to move one step (1 = every notch, higher = less sensitive):
@@ -341,6 +352,8 @@ sesh thread resume --id <id>         # revive a dead thread into a fresh pane (r
 sesh thread headful --id <id>        # promote a live HEADLESS thread into a pane
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first)
 sesh thread archive --id <id>        # park it; --unarchive to restore
+sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
+sesh thread hold --id <id> --clear                     # release the hold now
 sesh thread rename --id <id> --name <new>
 sesh thread tag --id <id> --add wip --remove stale     # repeatable --add/--remove
 sesh thread reparent --id <id> --parent <p>            # or --root to detach
@@ -411,7 +424,7 @@ name = "cwd"
 color = "green"
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
-filter = "ticketed and not archived"
+filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/ticketed
 
 [defaults]
 notifications = true

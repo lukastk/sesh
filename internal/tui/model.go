@@ -44,9 +44,10 @@ const postActionReconcileDelay = 500 * time.Millisecond
 type View int
 
 const (
-	ViewActive   View = iota // non-archived (the default)
+	ViewActive   View = iota // non-archived AND not on hold (the default)
+	ViewHold                 // non-archived AND on hold (parked threads)
 	ViewArchived             // archived only
-	ViewAll                  // everything
+	ViewAll                  // everything (archived + on-hold included)
 	viewBuiltins             // = number of built-ins; custom views follow
 )
 
@@ -60,6 +61,8 @@ func (m Model) viewName() string {
 	switch m.view {
 	case ViewActive:
 		return "active"
+	case ViewHold:
+		return "on hold"
 	case ViewArchived:
 		return "archived"
 	case ViewAll:
@@ -72,6 +75,23 @@ func (m Model) viewName() string {
 }
 
 func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
+
+// builtinViewAdmits reports whether a row belongs in one of the built-in views.
+// (Custom [[tui.views]] use their own predicate instead.) The default `active`
+// view hides BOTH archived and on-hold threads; `on hold` shows the parked ones.
+func builtinViewAdmits(view View, row api.ThreadRow) bool {
+	switch view {
+	case ViewActive:
+		return !row.Archived && !row.OnHold
+	case ViewHold:
+		return !row.Archived && row.OnHold
+	case ViewArchived:
+		return row.Archived
+	case ViewAll:
+		return true
+	}
+	return false
+}
 
 // WithViews installs the compiled custom views (see CompileViews).
 func (m Model) WithViews(views []customView) Model {
@@ -106,6 +126,7 @@ const (
 	promptRename              // rename the selected thread
 	promptTag                 // add a tag to the selected thread
 	promptReparent            // set the selected thread's parent (paste a uuid; empty = root)
+	promptHold                // hold the selected thread until a date (YYYY-MM-DD; empty = clear)
 )
 
 // confirmKind says which destructive action a y/n confirmation popup gates.
@@ -434,17 +455,17 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel}
+				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold}
 				if preselect != "" && t.ID == preselect {
 					preselectSeen = true // present in the mesh, regardless of the view filter
 				}
 				if pred != nil {
 					// A custom view sees EVERYTHING its predicate admits
-					// (archived included — `not archived` is the user's call).
+					// (archived/on-hold included — `not archived`/`not onhold` is the user's call).
 					if !pred.Eval(row) {
 						continue
 					}
-				} else if (view == ViewActive && t.Archived) || (view == ViewArchived && !t.Archived) {
+				} else if !builtinViewAdmits(view, row) {
 					continue
 				}
 				rows = append(rows, row)
@@ -749,6 +770,7 @@ const optimisticTTL = 4
 type rowPatch struct {
 	name       *string
 	notify     *bool
+	onHold     *bool
 	addTags    []string
 	removeTags []string
 	// hide drops the row from the CURRENT view instantly (archive/unarchive/delete
@@ -766,6 +788,9 @@ func (p *rowPatch) merge(o *rowPatch) {
 	if o.notify != nil {
 		p.notify = o.notify
 	}
+	if o.onHold != nil {
+		p.onHold = o.onHold
+	}
 	if o.hide {
 		p.hide = true
 	}
@@ -782,6 +807,9 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 	}
 	if p.notify != nil {
 		r.Notify = *p.notify
+	}
+	if p.onHold != nil {
+		r.OnHold = *p.onHold
 	}
 	for _, t := range p.addTags {
 		if !containsStr(r.Tags, t) {
@@ -807,6 +835,9 @@ func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 		return false
 	}
 	if p.notify != nil && r.Notify != *p.notify {
+		return false
+	}
+	if p.onHold != nil && r.OnHold != *p.onHold {
 		return false
 	}
 	for _, t := range p.addTags {
@@ -941,19 +972,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
-	// Fold/unfold the tree is on the ARROW keys; h/l pan the columns horizontally so
-	// clipped columns can be brought into view (Lukas, 2026-06-11).
+	// Fold/unfold the tree is on the ARROW keys; ^h/^l pan the columns horizontally so
+	// clipped columns can be brought into view. (h/l moved to ^h/^l in 2026-06 to free
+	// h/H for hold — Lukas; the pan pair stays symmetric.)
 	case "right":
 		m.foldSelected(true)
 	case "left":
 		m.foldSelected(false)
-	case "l":
+	case "ctrl+l":
 		if m.hOffset < m.maxHOffset() {
 			m.hOffset++
 		}
-	case "h":
+	case "ctrl+h":
 		if m.hOffset > 0 {
 			m.hOffset--
+		}
+	case "h":
+		// Toggle hold: a non-held thread is parked until the start of tomorrow (so it
+		// returns to the active view tomorrow); a held thread is released now.
+		return m, m.holdToggleSelected()
+	case "H":
+		// Hold until an explicit date: open a prompt (YYYY-MM-DD); blank clears the hold.
+		if row, ok := m.Selected(); ok {
+			pre := []rune(holdDatePrefill(row))
+			m.prompting, m.promptRow, m.promptInput = promptHold, row, pre
+			m.promptCursor = len(m.promptInput)
 		}
 	case "tab":
 		m.view = (m.view + 1) % View(m.viewCount())
@@ -1123,6 +1166,17 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case promptReparent:
 			// Empty input is meaningful here: make the thread a root.
 			return m, m.reparentRow(row, input)
+		case promptHold:
+			// Empty input clears the hold; otherwise parse a YYYY-MM-DD date.
+			if input == "" {
+				return m, m.holdRow(row, 0)
+			}
+			d, err := time.ParseInLocation("2006-01-02", input, time.Local)
+			if err != nil {
+				m.actionErr = fmt.Errorf("hold: bad date %q (want YYYY-MM-DD)", input)
+				return m, nil
+			}
+			return m, m.holdRow(row, d.Unix())
 		}
 		return m, nil
 	case "left", "ctrl+b":
@@ -1409,24 +1463,14 @@ func (m Model) deleteRow(row api.ThreadRow) tea.Cmd {
 	return m.routedVerb(row, &rowPatch{hide: true, ttl: optimisticTTL}, "delete")
 }
 
-// leavesCurrentView reports whether setting row.Archived = newArchived removes the
-// row from the CURRENTLY displayed view — i.e. whether an archive/unarchive should
-// optimistically hide it.
-func (m Model) leavesCurrentView(row api.ThreadRow, newArchived bool) bool {
-	switch m.view {
-	case ViewActive:
-		return newArchived // active hides archived rows
-	case ViewArchived:
-		return !newArchived // archived view hides un-archived rows
-	case ViewAll:
-		return false // all shows both
-	}
+// leavesViewWith reports whether a row mutated to `next` drops out of the CURRENTLY
+// displayed view — driving the optimistic hide on archive/hold so the row disappears
+// at once instead of after the next mesh read.
+func (m Model) leavesViewWith(next api.ThreadRow) bool {
 	if i := int(m.view - viewBuiltins); i >= 0 && i < len(m.customViews) {
-		r := row
-		r.Archived = newArchived
-		return !m.customViews[i].pred.Eval(r) // the predicate no longer admits it
+		return !m.customViews[i].pred.Eval(next) // the predicate no longer admits it
 	}
-	return false
+	return !builtinViewAdmits(m.view, next)
 }
 
 // notifySelected TOGGLES the selected thread's notification gate (routed to the
@@ -1460,13 +1504,63 @@ func (m Model) archiveSelected() tea.Cmd {
 func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
 	newArchived := !row.Archived
 	var patch *rowPatch
-	if m.leavesCurrentView(row, newArchived) {
+	next := row
+	next.Archived = newArchived
+	if m.leavesViewWith(next) {
 		patch = &rowPatch{hide: true, ttl: optimisticTTL}
 	}
 	if row.Archived {
 		return m.routedVerb(row, patch, "archive", "--unarchive")
 	}
 	return m.routedVerb(row, patch, "archive")
+}
+
+// holdToggleSelected parks the selected thread until the start of tomorrow (so it
+// returns to the active view tomorrow), or RELEASES it if it is already on hold.
+func (m Model) holdToggleSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	if row.OnHold {
+		return m.holdRow(row, 0) // release
+	}
+	return m.holdRow(row, startOfTomorrowUnix())
+}
+
+// holdRow sets (untilUnix > now) or clears (untilUnix == 0 / in the past) the
+// thread's hold, routed to the owner. The on-hold flag flips optimistically; when
+// the change removes the row from the current view (held while in `active`, released
+// while in `on hold`) it is hidden at once. untilUnix is an ABSOLUTE instant computed
+// here against the VIEWER's clock — i.e. the user's own "tomorrow".
+func (m Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
+	onHold := untilUnix > time.Now().Unix()
+	patch := &rowPatch{onHold: bptr(onHold), ttl: optimisticTTL}
+	next := row
+	next.OnHold = onHold
+	if m.leavesViewWith(next) {
+		patch.hide = true
+	}
+	if untilUnix == 0 {
+		return m.routedVerb(row, patch, "hold", "--clear")
+	}
+	return m.routedVerb(row, patch, "hold", "--until-unix", fmt.Sprintf("%d", untilUnix))
+}
+
+// startOfTomorrowUnix is midnight at the start of the next LOCAL day — the default
+// hold deadline, so a held thread auto-returns to the active view tomorrow.
+func startOfTomorrowUnix() int64 {
+	t := time.Now()
+	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location()).Unix()
+}
+
+// holdDatePrefill is the `H` prompt's prefilled value: the current hold date (so it
+// can be edited in place) or empty when the thread isn't on hold.
+func holdDatePrefill(row api.ThreadRow) string {
+	if row.OnHoldUntilUnix == 0 {
+		return ""
+	}
+	return time.Unix(row.OnHoldUntilUnix, 0).Format("2006-01-02")
 }
 
 // Selected returns the VISIBLE row under the cursor, if any (the filter and
@@ -1521,7 +1615,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · h/l cols · enter nav · / filter · tab view · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
@@ -1665,6 +1759,8 @@ func (m Model) View() string {
 			label = "tag"
 		case promptReparent:
 			label = "parent uuid (empty=root)"
+		case promptHold:
+			label = "hold until YYYY-MM-DD (empty=clear)"
 		}
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, m.promptRow.Name, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
 	}

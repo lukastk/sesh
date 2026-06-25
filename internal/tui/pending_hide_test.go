@@ -93,8 +93,37 @@ func TestLeavesCurrentView(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := Model{view: c.view}
-		if got := m.leavesCurrentView(row, c.newArchived); got != c.want {
-			t.Errorf("view=%d newArchived=%v: leavesCurrentView=%v, want %v", c.view, c.newArchived, got, c.want)
+		next := row
+		next.Archived = c.newArchived
+		if got := m.leavesViewWith(next); got != c.want {
+			t.Errorf("view=%d newArchived=%v: leavesViewWith=%v, want %v", c.view, c.newArchived, got, c.want)
+		}
+	}
+}
+
+// TestLeavesViewWithHold proves the on-hold axis drives the optimistic hide the
+// same way archive does: holding a thread leaves the active view; releasing it
+// leaves the on-hold view; the `all` view keeps both.
+func TestLeavesViewWithHold(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "x"}}
+	cases := []struct {
+		view   View
+		onHold bool
+		want   bool
+	}{
+		{ViewActive, true, true},    // holding in active -> leaves
+		{ViewActive, false, false},  // not held, still in active -> stays
+		{ViewHold, false, true},     // releasing in on-hold -> leaves
+		{ViewHold, true, false},     // held, stays in on-hold
+		{ViewAll, true, false},      // all shows both
+		{ViewAll, false, false},
+	}
+	for _, c := range cases {
+		m := Model{view: c.view}
+		next := row
+		next.OnHold = c.onHold
+		if got := m.leavesViewWith(next); got != c.want {
+			t.Errorf("view=%d onHold=%v: leavesViewWith=%v, want %v", c.view, c.onHold, got, c.want)
 		}
 	}
 }

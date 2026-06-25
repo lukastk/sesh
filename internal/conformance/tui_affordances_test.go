@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,8 @@ func init() {
 	registerTUIClaim("notify-toggle", claimNotifyToggle)
 	registerTUIClaim("action-mutate-remote", claimActionMutateRemote)
 	registerTUIClaim("master-cursor", claimMasterCursor)
+	registerTUIClaim("action-hold", claimActionHold)
+	registerTUIClaim("view-hold", claimViewHold)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -201,6 +204,123 @@ func claimActionRename(t *testing.T) {
 	if !renamed {
 		t.Fatalf("daemon record was not renamed to newname77 (TUI rename did not act)")
 	}
+}
+
+// claimActionHold: `h` toggles hold — it parks the thread on the daemon (record
+// gains a future on_hold_until), the row leaves the default active view at once
+// (optimistic hide), and `h` again on the parked thread releases it (record zeroed).
+// `H` opens the explicit-date prompt and submitting a date parks it to that date.
+func claimActionHold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "holdme")
+
+	bin := seshBin(t)
+	env := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "holdme")
+
+	// h: park until the start of tomorrow. The row leaves the active view at once.
+	m = runKey(t, m, "h")
+	if strings.Contains(m.View(), "holdme") {
+		t.Errorf("held thread did not leave the active view optimistically:\n%s", m.View())
+	}
+	held := holdUntilOf(t, sb, th.ID)
+	if held <= time.Now().Unix() {
+		t.Fatalf("h did not park the thread on the daemon (on_hold_until=%d)", held)
+	}
+
+	// The `on hold` view (one Tab from active) shows it.
+	m = runSpecial(t, m, tea.KeyTab) // active -> on hold
+	if !waitUntil(15*time.Second, func() bool {
+		var v string
+		m, v = render(t, m)
+		return strings.Contains(v, "[on hold]") && strings.Contains(v, "holdme")
+	}) {
+		_, v := render(t, m)
+		t.Fatalf("on-hold view never showed the parked thread:\n%s", v)
+	}
+
+	// h again (in the on-hold view) releases it — record zeroed, leaves this view.
+	m = runKey(t, m, "h")
+	if held := holdUntilOf(t, sb, th.ID); held != 0 {
+		t.Errorf("h did not release the hold (on_hold_until=%d)", held)
+	}
+
+	// H opens the explicit-date prompt; submitting a date parks it to that date.
+	m = runSpecial(t, m, tea.KeyTab) // on hold -> archived
+	m = runSpecial(t, m, tea.KeyTab) // archived -> all (holdme is visible here)
+	m, _ = renderUntilRow(t, m, "holdme")
+	m = runKey(t, m, "H")
+	if !m.Prompting() {
+		t.Fatalf("H did not open the hold-date prompt")
+	}
+	for i := 0; i < 12; i++ { // clear any prefilled date so we type a clean value
+		m = runSpecial(t, m, tea.KeyBackspace)
+	}
+	m = typeText(t, m, "2099-01-01")
+	m = runSpecial(t, m, tea.KeyEnter)
+	want := time.Date(2099, 1, 1, 0, 0, 0, 0, time.Local).Unix()
+	if held := holdUntilOf(t, sb, th.ID); held != want {
+		t.Errorf("H date prompt did not park to 2099-01-01 (got on_hold_until=%d, want %d)", held, want)
+	}
+}
+
+// claimViewHold: the DEFAULT view excludes on-hold threads while keeping un-held
+// ones, and the `on hold` view is the complement — the core of the feature.
+func claimViewHold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "working")
+	parked := sb.newHeadlessThread(t, "pi", "parked")
+	future := time.Now().Add(48 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", parked.ID, "--until-unix", strconv.FormatInt(future, 10)); err != nil {
+		t.Fatalf("hold: %v\n%s", err, stderr)
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	// Default view (active): shows `working`, hides `parked`. Settle on PRESENCE of
+	// the kept thread first (absence alone is vacuously true pre-publish).
+	var view string
+	if !waitUntil(25*time.Second, func() bool {
+		m, view = render(t, m)
+		return strings.Contains(view, "[active]") && strings.Contains(view, "working")
+	}) {
+		t.Fatalf("active view never showed the un-held thread:\n%s", view)
+	}
+	if strings.Contains(view, "parked") {
+		t.Errorf("default active view should HIDE on-hold threads:\n%s", view)
+	}
+
+	// The `on hold` view (one Tab) is the complement: parked shown, working hidden.
+	m = runSpecial(t, m, tea.KeyTab)
+	if !waitUntil(10*time.Second, func() bool {
+		m, view = render(t, m)
+		return strings.Contains(view, "[on hold]") && strings.Contains(view, "parked")
+	}) {
+		t.Fatalf("on-hold view never showed the parked thread:\n%s", view)
+	}
+	if strings.Contains(view, "working") {
+		t.Errorf("on-hold view should hide un-held threads:\n%s", view)
+	}
+}
+
+// holdUntilOf reads a thread's persisted on_hold_until from the daemon record.
+func holdUntilOf(t *testing.T, sb *Sandbox, id string) int64 {
+	t.Helper()
+	for _, th := range sb.listThreads(t) {
+		if th.ID == id {
+			return th.OnHoldUntilUnix
+		}
+	}
+	t.Fatalf("thread %s not found in listing", id)
+	return 0
 }
 
 // claimActionTag: the t line-prompt really adds a tag (daemon truth).

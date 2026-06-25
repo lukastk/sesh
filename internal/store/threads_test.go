@@ -136,3 +136,33 @@ func TestThreadOpsRenameTagArchive(t *testing.T) {
 		t.Fatalf("unarchive failed: active=%d", len(active))
 	}
 }
+
+// TestThreadHold round-trips the on_hold_until column: a thread starts not held
+// (0), a set persists the absolute instant, and a clear returns it to 0. The
+// "on hold now" derivation lives at the daemon layer (against its clock) — the
+// store only persists the deadline.
+func TestThreadHold(t *testing.T) {
+	s := openTestStore(t)
+	th := api.Thread{ID: "h1", Machine: "m", SessionName: "s1", Cwd: "/x", AgentKind: "pi", Name: "n", Tags: []string{}}
+	if err := s.InsertThread(th); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 0 {
+		t.Fatalf("new thread should not be on hold, got %d", got.OnHoldUntilUnix)
+	}
+	if err := s.SetThreadHold("h1", 1893456000); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 1893456000 {
+		t.Fatalf("hold not persisted: %d", got.OnHoldUntilUnix)
+	}
+	if err := s.SetThreadHold("h1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 0 {
+		t.Fatalf("hold not cleared: %d", got.OnHoldUntilUnix)
+	}
+	if err := s.SetThreadHold("nope", 123); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("hold on missing thread: want ErrThreadNotFound, got %v", err)
+	}
+}

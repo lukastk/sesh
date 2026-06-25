@@ -183,6 +183,11 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh thread notify (--on|--off) [--id <id>] [--machine <m>]",
 		examples: []string{"sesh thread notify --on --id 1a2b3c4d", "sesh thread notify --off"},
 	},
+	"thread hold": {
+		summary:  "park a thread until a date (hidden from the default active view), or clear the hold",
+		usage:    "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--clear) [--id <id>] [--machine <m>]",
+		examples: []string{"sesh thread hold --until 2026-07-01 --id 1a2b3c4d", "sesh thread hold --clear"},
+	},
 	"thread reparent": {
 		summary:  "re-parent a thread to a new parent, or make it a root (--root)",
 		usage:    "sesh thread reparent (--parent <id>|--root) [--id <id>] [--machine <m>]",

@@ -34,6 +34,13 @@ type Thread struct {
 	// default. Applied on headed spawn, resume, and every headless turn; a per-turn
 	// override (send-headless --model) does NOT change it.
 	Model string `json:"model,omitempty"`
+	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
+	// the thread is "on hold" and hidden from the default active view. 0 = not on
+	// hold. The caller supplies the absolute instant (the TUI computes "start of
+	// tomorrow" for a plain hold, or parses an explicit date); the OWNING daemon
+	// derives the live OnHold flag against ITS clock. Auto-expires — once the instant
+	// passes the thread silently returns to the active view (no explicit unhold).
+	OnHoldUntilUnix int64 `json:"on_hold_until_unix,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -270,6 +277,10 @@ type ThreadRow struct {
 	// CwdRel mirrors ThreadSnapshot.CwdRel: Cwd ~-relative to the OWNING machine's
 	// home, so the CWD column / cwd_label rules render correctly cross-machine.
 	CwdRel string `json:"cwd_rel,omitempty"`
+	// OnHold is the live "on hold right now" flag (OnHoldUntilUnix > the OWNING
+	// daemon's clock) — the owner derives it because only it can compare against its
+	// own now. The default view hides on-hold rows; the `on hold` view shows them.
+	OnHold bool `json:"on_hold,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -303,6 +314,10 @@ type ThreadSnapshot struct {
 	// correctly even cross-machine — without it, a viewer with a different home
 	// shows the raw absolute path. '' only if the owner's home is unknown.
 	CwdRel string `json:"cwd_rel,omitempty"`
+	// OnHold is the live "on hold right now" flag (OnHoldUntilUnix > the owning
+	// daemon's clock), stamped by that machine's maintainer so a cross-machine viewer
+	// need not (and cannot reliably) compare against the owner's clock itself.
+	OnHold bool `json:"on_hold,omitempty"`
 }
 
 // MachineSnapshot is one machine's full live thread state, returned by
@@ -348,6 +363,17 @@ type HeadlessReplyResponse struct {
 type NotifyThreadRequest struct {
 	ID string `json:"id"`
 	On bool   `json:"on"`
+}
+
+// HoldThreadRequest is the body of POST /v1/threads/hold: park the thread until
+// OnHoldUntilUnix (0 = clear the hold). The caller supplies the ABSOLUTE instant
+// (the TUI computes "start of tomorrow" for a plain hold, or parses an explicit
+// date) — the daemon is a pure setter, mechanism not UX; "on hold right now" is
+// derived live from this value vs the owning daemon's clock, so a past instant
+// stores cleanly and simply reads as not-on-hold (auto-expiry).
+type HoldThreadRequest struct {
+	ID              string `json:"id"`
+	OnHoldUntilUnix int64  `json:"on_hold_until_unix"`
 }
 
 // AdoptThreadRequest brings an agent sesh didn't spawn under management.

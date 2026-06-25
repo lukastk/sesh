@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
@@ -71,6 +72,10 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 // the maintainer has not ticked yet (just created) — correctness without a tick.
 func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest) api.ThreadRow {
 	dg := tickets[th.ID]
+	// "On hold now" derives from the record's deadline vs this machine's clock (the
+	// owner is authoritative); auto-expires once now passes. Independent of the
+	// maintained snapshot, so it is correct on the fallback path too.
+	onHold := th.OnHoldUntilUnix > time.Now().Unix()
 	// Use the FRESH digest (not snap.TicketsOpen) so a ticket created/closed since the
 	// last maintainer tick shows immediately; needs-input combines it with the
 	// maintained head/busy.
@@ -78,10 +83,10 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment,
 			TicketsOpen: dg.Count, TicketName: dg.NewestName,
 			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
-			CwdRel:           snap.CwdRel}
+			CwdRel:           snap.CwdRel, OnHold: onHold}
 	}
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
-		CwdRel: config.TildeRelative(th.Cwd, d.maint.home)}
+		CwdRel: config.TildeRelative(th.Cwd, d.maint.home), OnHold: onHold}
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		head, busy = api.Headless, api.BusyIdle

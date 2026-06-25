@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -134,6 +134,13 @@ func (s *Store) SetThreadArchived(id string, archived bool) error {
 	return s.updateThread(`UPDATE threads SET archived = ? WHERE id = ?`, v, id)
 }
 
+// SetThreadHold parks/unparks a thread: stores the absolute on-hold-until instant
+// (0 = clear the hold). The live "on hold now" flag is derived elsewhere against the
+// daemon's clock — this only persists the deadline the user set.
+func (s *Store) SetThreadHold(id string, onHoldUntilUnix int64) error {
+	return s.updateThread(`UPDATE threads SET on_hold_until = ? WHERE id = ?`, onHoldUntilUnix, id)
+}
+
 // SetThreadAgentSession records a headed thread's captured agent session id (used
 // by resume; for codex it is discovered after the first turn).
 func (s *Store) SetThreadAgentSession(id, agentSessionID string) error {
@@ -170,7 +177,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	var tags string
 	var headless, started, archived, notify int
 	var meta string
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1

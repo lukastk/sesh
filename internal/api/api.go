@@ -120,7 +120,16 @@ package api
 // Schema 33 adds `extra_keys` to UIConfig — the Android touch-keyboard extra-keys row
 // layout (Termux-style), an opaque JSON string the app renders. Empty = no row (default).
 // NOT omitempty (the Settings control gates on presence). Additive; mixed-mesh safe.
-const SchemaVersion = 33
+//
+// Schema 34 adds thread HOLD: `on_hold_until_unix` on the thread record (park a thread
+// until a future instant), `POST /v1/threads/hold` to set/clear it, and a derived
+// `on_hold` flag on the row/snapshot (OnHoldUntilUnix > the owning daemon's clock,
+// stamped by that machine's maintainer). The TUI's default view hides on-hold threads;
+// a new `on hold` view shows them; auto-expires once the instant passes. Additive
+// (new omitempty field + new derived bool + new endpoint) → mixed-mesh safe: a pre-34
+// daemon 404s the hold route loudly and its snapshots omit on_hold (read as not-held)
+// until upgraded.
+const SchemaVersion = 34
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

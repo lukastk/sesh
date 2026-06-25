@@ -21,11 +21,12 @@ package tui
 //   - busy      → "busy" | "idle"
 //   - attached  → "attached" | "detached"
 //   - archived  → "true" | "false"
+//   - onhold    → "true" | "false" (parked until a future instant)
 //   - tickets   → the open-ticket count, as digits ("0", "1", …)
 //   - agent, machine, name, cwd, id, tags (tags = comma-joined; ~ matches any)
 //
 // A bare ATOM (no operator) is a state keyword: headful, headless, busy, idle,
-// attached, detached, archived, ticketed (= at least one open ticket).
+// attached, detached, archived, onhold, ticketed (= at least one open ticket).
 // `~`/`!~` match the selector against an RE2 regex. Equality is exact and
 // case-sensitive; the canonical axis values are lowercase.
 //
@@ -286,7 +287,7 @@ func isCompareOp(k ptokKind) bool {
 
 // --- selectors + atoms (the v2 mapping) ---
 
-var selectorNames = []string{"head", "busy", "attached", "archived", "tickets", "agent", "machine", "name", "cwd", "id", "tags"}
+var selectorNames = []string{"head", "busy", "attached", "archived", "onhold", "tickets", "agent", "machine", "name", "cwd", "id", "tags"}
 
 // selectorFn resolves a selector name to a row→string function (nil = unknown).
 func selectorFn(name string) func(api.ThreadRow) string {
@@ -299,6 +300,8 @@ func selectorFn(name string) func(api.ThreadRow) string {
 		return func(r api.ThreadRow) string { return string(r.Attachment) }
 	case "archived":
 		return func(r api.ThreadRow) string { return strconv.FormatBool(r.Archived) }
+	case "onhold":
+		return func(r api.ThreadRow) string { return strconv.FormatBool(r.OnHold) }
 	case "tickets":
 		return func(r api.ThreadRow) string { return strconv.Itoa(r.TicketsOpen) }
 	case "agent":
@@ -371,6 +374,8 @@ func atomFn(t ptok) (predFn, error) {
 		return func(r api.ThreadRow) bool { return r.Attachment == api.Detached }, nil
 	case "archived":
 		return func(r api.ThreadRow) bool { return r.Archived }, nil
+	case "onhold":
+		return func(r api.ThreadRow) bool { return r.OnHold }, nil
 	case "ticketed":
 		return func(r api.ThreadRow) bool { return r.TicketsOpen > 0 }, nil
 	}
@@ -378,5 +383,5 @@ func atomFn(t ptok) (predFn, error) {
 	if key, ok := strings.CutPrefix(strings.ToLower(t.text), "meta."); ok && key != "" {
 		return func(r api.ThreadRow) bool { return r.Meta[key] != "" }, nil
 	}
-	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
+	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, onhold, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
 }

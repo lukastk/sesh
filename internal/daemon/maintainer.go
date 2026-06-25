@@ -242,6 +242,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 // an active ticket on a headful·idle thread is the human-blocked state.
 func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 	snap.TicketNeedsInput = st.hasActiveTicket && snap.Head == api.Headful && snap.Busy == api.BusyIdle
+	// "On hold right now" derives from the record's deadline vs THIS machine's clock
+	// (the owner is authoritative for its own threads); it auto-expires once now passes.
+	snap.OnHold = snap.OnHoldUntilUnix > time.Now().Unix()
 	m.mu.Lock()
 	st.snap = snap
 	m.mu.Unlock()

@@ -242,6 +242,13 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"thread hold": {
+		{"--until", "hold until the START of this date (YYYY-MM-DD, local time)"},
+		{"--until-unix", "hold until this absolute unix instant in seconds (the machine-readable form)"},
+		{"--clear", "clear the hold — return the thread to the active view now"},
+		{"--id", "thread id or unique prefix (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"thread pane": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},

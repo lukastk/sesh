@@ -482,6 +482,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.hold",
+		Description: "park a thread until a future instant (thread hold --until/--until-unix/--clear); the owning daemon derives `on_hold` against its clock so it auto-expires; the TUI's default view hides on-hold threads, the `on hold` view shows them",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.import",
 		Description: "sesh import --from-v1: bring v1 records into v2 (uuid→id+session_id so resume works; per-machine; tags/parent/archived/created mapped; idempotent; --dry-run); transcripts untouched",
 		Localities:  []Locality{Local},

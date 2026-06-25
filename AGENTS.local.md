@@ -1,5 +1,51 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H26 — hold INHERITANCE: a child inherits its parent's hold, effective = max(own, ancestors) (2026-06-25, sesh 373944b; api schema 34→35; deployed ALL FOUR)
+Follow-up to H25 (Lukas): "if a parent thread is on hold, the child threads are too —
+you inherit the hold status; an individual thread's hold = max(parent's hold date, its
+own explicitly set date)." Implemented DERIVED (not stored/propagated), so a parent's
+hold change flows to the whole subtree on the next maintainer tick with no fan-out.
+WHERE: the OWNING daemon (so CLI/TUI/predicates AND the sesh-ui app all get it free —
+sesh-ui reads `on_hold` and inherits for nothing). Computed per machine over that
+daemon's own records → a CROSS-MACHINE parent's hold is NOT inherited (the chain ends at
+a parent absent from the local set; documented limitation — parent/child are co-located
+in practice, e.g. a thread + its sub-threads on one machine).
+- api (schema 34→35): NEW derived `on_hold_effective_unix` on ThreadRow/ThreadSnapshot =
+  max(own on_hold_until, every same-machine ancestor's own). `on_hold` is now derived
+  from the EFFECTIVE deadline (was the OWN deadline). `on_hold_until_unix` stays the
+  thread's OWN editable value (what hold/H set/clear). Additive omitempty + a semantic
+  widening of the existing bool → mixed-mesh safe (a pre-35 peer reports non-inherited
+  on_hold for its threads until upgraded).
+- daemon internal/daemon/hold.go: `effectiveHolds(threads) map[string]int64` — builds
+  id→own + id→parent maps from ONE machine's thread list, walks each thread's ancestor
+  chain taking the max (visited-set + depth cap 256 against cycles, which reparent already
+  refuses). Unit TestEffectiveHolds(+MaxAndCycle): root→mid→leaf inheritance, own-later-
+  wins, cross-machine-parent-absent stops the chain, a→b cycle resolves to the cycle max.
+- maintainer: tick() computes effHolds ONCE per tick (full ListThreads(true)) and passes
+  effHolds[id] into refreshThread → the snap carries OnHoldEffectiveUnix → publish derives
+  `snap.OnHold = OnHoldEffectiveUnix > now` (single choke point; root threads unchanged
+  since eff==own when no parent).
+- grid.handleThreadGrid: computes effHolds over the FULL set (ListThreads(true) even when
+  the view hides archived, so a child's hold resolves through an archived ancestor) and
+  passes effHolds[id] into resolveRow (both the maintained fast path + the on-demand
+  fallback set OnHold + OnHoldEffectiveUnix from it).
+- tui: fetch() copies OnHoldEffectiveUnix; the HOLD column shows the EFFECTIVE date with a
+  `↑` prefix when inherited (effective > own); the `h` toggle decides on the thread's OWN
+  hold (own active → clear own; else hold-until-tomorrow) — you can't un-hold a child below
+  its parent (the max), reflected on the next fetch; holdRow optimism: SET flips on_hold +
+  hides; CLEAR does NOT (effective may still be held via a parent — let the ~300ms reconcile
+  settle). H prompt prefill still uses the OWN date.
+- conformance: thread.hold local cell EXTENDED — held parent → child with no own hold reads
+  on_hold + effective==parent's + own==0; child's OWN later hold wins (max); releasing the
+  parent leaves the child held by its own. (TUI claims unchanged — fold-fragile to assert a
+  nested inherited child in the rendered tree; the cell proves the daemon derivation that
+  drives the view filter, which is the observable effect.)
+- sesh-cli SKILL: inheritance paragraph (max, ↑ marker, per-machine scope).
+The sesh-ui hold ticket (8c2755d9, child thread 69096170) gets inheritance automatically
+(reads on_hold); ticket prompt to be updated to also surface on_hold_effective_unix + the
+own-vs-effective toggle semantics.
+DEPLOY: schema 35 = daemon RESTART, all four (additive/mixed-mesh-safe).
+
 ## H25 — thread HOLD: park a thread until a date, default view hides held threads (2026-06-25, sesh c3b1c4f; api schema 33→34; deployed ALL FOUR)
 Ticket "A way to put a thread on 'hold'" (5c670fdc): on a busy day, park the threads
 you're NOT working on so `sesh tui`'s default view only shows the active few; tomorrow

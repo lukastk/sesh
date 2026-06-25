@@ -20,6 +20,12 @@ const (
 	maintainerTick    = 300 * time.Millisecond // how often state is refreshed
 	busyWindow        = 2 * time.Second        // changes within this window => working
 	busyChangesNeeded = 2                      // >= this many changes in the window => working
+	// maintainerConcurrency bounds how many threads are probed in parallel per tick.
+	// The per-tick tmux enumeration + process table are resolved ONCE (see tick), so
+	// the only remaining per-thread cost is a capture-pane; running those concurrently
+	// keeps the whole sweep well under busyWindow even at ~100 threads, so each pane is
+	// sampled often enough for the content-diff busy signal to latch.
+	maintainerConcurrency = 8
 )
 
 // liveState is the maintainer's per-thread working state. All fields except snap
@@ -100,13 +106,41 @@ func (m *maintainer) tick() {
 	if err != nil {
 		tickets = map[string]store.TicketDigest{} // transient store error: refresh next tick
 	}
+	// Resolve EVERY thread's pane and the agent process table ONCE per tick — both
+	// are tick-global. Doing them per-thread (FindPaneByThreadID re-enumerates all
+	// panes; AgentUnderPane re-runs `ps`) made a ~100-thread sweep take seconds, so
+	// each pane was sampled far less than twice per busyWindow and `busy` never
+	// latched. If either enumeration fails, skip this tick and retry next.
+	panes, err := m.d.tmux.PaneIndexByThreadID()
+	if err != nil {
+		return
+	}
+	procs, err := tmux.NewProcSnapshot()
+	if err != nil {
+		return
+	}
 	now := time.Now()
 
 	present := make(map[string]bool, len(threads))
 	for _, th := range threads {
 		present[th.ID] = true
-		m.refreshThread(th, attached, tickets, now)
 	}
+	// Probe threads concurrently: each thread's liveState is independent and only the
+	// m.st structure (guarded by m.mu) is shared, so a bounded worker pool collapses
+	// the per-thread capture-pane cost without races.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maintainerConcurrency)
+	for _, th := range threads {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(th api.Thread) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			m.refreshThread(th, attached, tickets, panes, procs, now)
+		}(th)
+	}
+	wg.Wait()
+
 	// Drop state for threads that no longer exist.
 	m.mu.Lock()
 	for id := range m.st {
@@ -119,7 +153,7 @@ func (m *maintainer) tick() {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, now time.Time) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -138,8 +172,8 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 	// The two axes are PROBED, never read from the record: head from pane
 	// presence, busy from the pane content-diff (headful) or the turn registry
 	// (headless).
-	loc, found, err := m.d.tmux.FindPaneByThreadID(th.ID)
-	if err != nil || !found {
+	loc, found := panes[th.ID]
+	if !found {
 		snap.Head = api.Headless
 		snap.Busy = api.BusyIdle
 		if m.d.turnInFlight(th.ID) {
@@ -150,7 +184,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 		m.publish(st, snap)
 		return
 	}
-	agent, running := tmux.AgentUnderPane(loc.PanePID)
+	agent, running := procs.AgentUnderPane(loc.PanePID)
 	snap.AgentRunning = running && agent.Kind == th.AgentKind
 	if !snap.AgentRunning {
 		// A marked pane whose agent exited: no live runtime — headless·idle.

@@ -102,3 +102,26 @@ func AgentUnderPane(panePID int) (AgentProc, bool) {
 	}
 	return idx.findAgent(panePID, 4)
 }
+
+// ProcSnapshot is a one-shot capture of the process table, so a caller resolving
+// the agent under MANY panes in a single pass runs `ps` ONCE instead of once per
+// pane. The maintainer needs this: at ~100 threads, a per-pane `ps` made its sweep
+// take seconds, so each pane was sampled far less than twice per busy window and the
+// content-diff `busy` signal could never latch.
+type ProcSnapshot struct{ idx *procIndex }
+
+// NewProcSnapshot captures the process table once (one `ps`).
+func NewProcSnapshot() (*ProcSnapshot, error) {
+	idx, err := snapshotProcs()
+	if err != nil {
+		return nil, err
+	}
+	return &ProcSnapshot{idx: idx}, nil
+}
+
+// AgentUnderPane reports the coding-agent process under panePID using this
+// already-captured snapshot — identical resolution to the package-level
+// AgentUnderPane, just without re-running `ps`.
+func (p *ProcSnapshot) AgentUnderPane(panePID int) (AgentProc, bool) {
+	return p.idx.findAgent(panePID, 4)
+}

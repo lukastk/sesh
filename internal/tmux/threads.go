@@ -120,6 +120,34 @@ func (s *Server) FindPaneByThreadID(threadID string) (api.PaneLocator, bool, err
 	return api.PaneLocator{}, false, nil
 }
 
+// PaneIndexByThreadID returns threadID -> PaneLocator for every marked pane on the
+// server, built from a SINGLE enumeration. The maintainer resolves all threads'
+// panes per tick through this map rather than calling FindPaneByThreadID (one Info
+// enumeration) per thread — which, at ~100 threads, made the sweep so slow that the
+// content-diff busy window could never accumulate enough samples.
+func (s *Server) PaneIndexByThreadID() (map[string]api.PaneLocator, error) {
+	sessions, err := s.Info("")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]api.PaneLocator)
+	for _, sess := range sessions {
+		for _, win := range sess.Windows {
+			for _, pane := range win.Panes {
+				if pane.ThreadID != "" {
+					out[pane.ThreadID] = api.PaneLocator{
+						Session: sess.Name,
+						Window:  win.Index,
+						Pane:    pane.Pane,
+						PanePID: pane.PID,
+					}
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
 // SessionFirstPane returns the pane id of a session's first pane (a freshly
 // created session has exactly one).
 func (s *Server) SessionFirstPane(session string) (string, error) {

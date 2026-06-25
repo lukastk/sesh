@@ -242,6 +242,12 @@ flag against its clock, so a hold **auto-expires** — `h` defaults to the start
 The default `active` view hides on-hold threads; the **`on hold`** view (in the `tab`
 cycle) shows the parked ones. The CLI verb is `sesh thread hold` (see below).
 
+Hold is **inherited down the tree**: a thread's effective hold is `max(its own hold,
+its ancestors' holds)`, so holding a parent parks its whole subtree (the children show
+`↑<date>` in the HOLD column — an inherited hold). `h` manages a thread's OWN hold; a
+child can't be un-held below its parent's hold (that's the `max`). Inheritance is
+resolved per machine (a cross-machine parent's hold is not inherited).
+
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
 width instead of clipping, so every binding stays visible on a narrow pane.

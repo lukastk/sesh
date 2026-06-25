@@ -129,7 +129,16 @@ package api
 // (new omitempty field + new derived bool + new endpoint) → mixed-mesh safe: a pre-34
 // daemon 404s the hold route loudly and its snapshots omit on_hold (read as not-held)
 // until upgraded.
-const SchemaVersion = 34
+//
+// Schema 35 adds hold INHERITANCE: `on_hold_effective_unix` on the row/snapshot — the
+// effective hold deadline = max(a thread's own on_hold_until, every same-machine ancestor's
+// own), so a held parent parks its whole subtree. `on_hold` is now derived from the
+// EFFECTIVE deadline (was the own deadline). on_hold_until_unix stays the thread's own
+// editable value. Derived per tick by the owning daemon (cross-machine ancestry is NOT
+// inherited — the daemon resolves only its own records). Additive omitempty field + a
+// semantic widening of the existing on_hold bool → mixed-mesh safe (a pre-35 peer just
+// reports non-inherited on_hold for its threads until upgraded).
+const SchemaVersion = 35
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

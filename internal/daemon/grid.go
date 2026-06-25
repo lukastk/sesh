@@ -40,6 +40,15 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Effective hold deadlines over the FULL thread set (incl. archived) so a child's
+	// inherited hold resolves even when this view hides its archived ancestor.
+	holdThreads := threads
+	if !includeArchived {
+		if all, aerr := d.store.ListThreads(true); aerr == nil {
+			holdThreads = all
+		}
+	}
+	effHolds := effectiveHolds(holdThreads)
 	rows := make([]api.ThreadRow, len(threads))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, gridConcurrency)
@@ -49,7 +58,7 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = d.resolveRow(threads[i], tickets)
+			rows[i] = d.resolveRow(threads[i], tickets, effHolds[threads[i].ID])
 		}(i)
 	}
 	wg.Wait()
@@ -70,12 +79,12 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 // background maintainer's O(1) maintained state (so the whole grid is a memory
 // read, not N concurrent ~3s probes). Fallback: an on-demand resolve for a thread
 // the maintainer has not ticked yet (just created) — correctness without a tick.
-func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest) api.ThreadRow {
+func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest, effHoldUntil int64) api.ThreadRow {
 	dg := tickets[th.ID]
-	// "On hold now" derives from the record's deadline vs this machine's clock (the
-	// owner is authoritative); auto-expires once now passes. Independent of the
-	// maintained snapshot, so it is correct on the fallback path too.
-	onHold := th.OnHoldUntilUnix > time.Now().Unix()
+	// "On hold now" derives from the EFFECTIVE (own + inherited) deadline vs this
+	// machine's clock (the owner is authoritative); auto-expires once now passes, and a
+	// child stays held while an ancestor's hold is in the future.
+	onHold := effHoldUntil > time.Now().Unix()
 	// Use the FRESH digest (not snap.TicketsOpen) so a ticket created/closed since the
 	// last maintainer tick shows immediately; needs-input combines it with the
 	// maintained head/busy.
@@ -83,10 +92,10 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment,
 			TicketsOpen: dg.Count, TicketName: dg.NewestName,
 			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
-			CwdRel:           snap.CwdRel, OnHold: onHold}
+			CwdRel:           snap.CwdRel, OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil}
 	}
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
-		CwdRel: config.TildeRelative(th.Cwd, d.maint.home), OnHold: onHold}
+		CwdRel: config.TildeRelative(th.Cwd, d.maint.home), OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil}
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		head, busy = api.Headless, api.BusyIdle

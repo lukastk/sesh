@@ -277,10 +277,16 @@ type ThreadRow struct {
 	// CwdRel mirrors ThreadSnapshot.CwdRel: Cwd ~-relative to the OWNING machine's
 	// home, so the CWD column / cwd_label rules render correctly cross-machine.
 	CwdRel string `json:"cwd_rel,omitempty"`
-	// OnHold is the live "on hold right now" flag (OnHoldUntilUnix > the OWNING
-	// daemon's clock) — the owner derives it because only it can compare against its
-	// own now. The default view hides on-hold rows; the `on hold` view shows them.
+	// OnHold is the live "on hold right now" flag — OnHoldEffectiveUnix > the OWNING
+	// daemon's clock. The owner derives it (only it can compare against its own now).
+	// The default view hides on-hold rows; the `on hold` view shows them.
 	OnHold bool `json:"on_hold,omitempty"`
+	// OnHoldEffectiveUnix is the EFFECTIVE hold deadline: max(this thread's own
+	// OnHoldUntilUnix, every same-machine ANCESTOR's own) so a child INHERITS a parent's
+	// hold (a held parent parks its whole subtree). Derived per tick by the owner; 0 =
+	// not held. OnHoldUntilUnix stays the thread's OWN editable value (what `hold`/`H`
+	// set/clear); this is the inherited maximum the view/column read.
+	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -314,10 +320,13 @@ type ThreadSnapshot struct {
 	// correctly even cross-machine — without it, a viewer with a different home
 	// shows the raw absolute path. '' only if the owner's home is unknown.
 	CwdRel string `json:"cwd_rel,omitempty"`
-	// OnHold is the live "on hold right now" flag (OnHoldUntilUnix > the owning
+	// OnHold is the live "on hold right now" flag (OnHoldEffectiveUnix > the owning
 	// daemon's clock), stamped by that machine's maintainer so a cross-machine viewer
 	// need not (and cannot reliably) compare against the owner's clock itself.
 	OnHold bool `json:"on_hold,omitempty"`
+	// OnHoldEffectiveUnix is the effective hold deadline including inherited holds —
+	// max(own, same-machine ancestors' own). See ThreadRow.OnHoldEffectiveUnix.
+	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 }
 
 // MachineSnapshot is one machine's full live thread state, returned by

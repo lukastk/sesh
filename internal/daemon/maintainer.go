@@ -121,6 +121,10 @@ func (m *maintainer) tick() {
 	}
 	now := time.Now()
 
+	// Effective hold deadlines (own + inherited from same-machine ancestors), computed
+	// ONCE per tick over the full thread set so a held parent parks its whole subtree.
+	effHolds := effectiveHolds(threads)
+
 	present := make(map[string]bool, len(threads))
 	for _, th := range threads {
 		present[th.ID] = true
@@ -136,7 +140,7 @@ func (m *maintainer) tick() {
 		go func(th api.Thread) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			m.refreshThread(th, attached, tickets, panes, procs, now)
+			m.refreshThread(th, attached, tickets, panes, procs, now, effHolds[th.ID])
 		}(th)
 	}
 	wg.Wait()
@@ -153,7 +157,7 @@ func (m *maintainer) tick() {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -167,7 +171,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
 		// Stamp the owner-relative cwd so cross-machine viewers (with a different home)
 		// can apply their cwd_label rules — they cannot know this machine's home.
-		CwdRel: config.TildeRelative(th.Cwd, m.home)}
+		CwdRel: config.TildeRelative(th.Cwd, m.home),
+		// The effective (inherited) hold deadline; publish() turns it into OnHold.
+		OnHoldEffectiveUnix: effHoldUntil}
 
 	// The two axes are PROBED, never read from the record: head from pane
 	// presence, busy from the pane content-diff (headful) or the turn registry
@@ -242,9 +248,10 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 // an active ticket on a headful·idle thread is the human-blocked state.
 func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 	snap.TicketNeedsInput = st.hasActiveTicket && snap.Head == api.Headful && snap.Busy == api.BusyIdle
-	// "On hold right now" derives from the record's deadline vs THIS machine's clock
-	// (the owner is authoritative for its own threads); it auto-expires once now passes.
-	snap.OnHold = snap.OnHoldUntilUnix > time.Now().Unix()
+	// "On hold right now" derives from the EFFECTIVE (own + inherited) deadline vs THIS
+	// machine's clock (the owner is authoritative for its own threads); it auto-expires
+	// once now passes, and a child stays held while a parent's hold is in the future.
+	snap.OnHold = snap.OnHoldEffectiveUnix > time.Now().Unix()
 	m.mu.Lock()
 	st.snap = snap
 	m.mu.Unlock()

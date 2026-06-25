@@ -95,6 +95,49 @@ func testHoldLocal(t *testing.T) {
 	if _, _, err := sb.Runner.Run(t, "thread", "hold", "--id", th.ID); err == nil {
 		t.Errorf("hold with no deadline flag should fail loudly")
 	}
+
+	// --- INHERITANCE: a held parent parks its children (effective = max(own, ancestor)). ---
+	parent := sb.newHeadlessThread(t, "pi", "hparent")
+	child := sb.newHeadlessThreadParented(t, "pi", "hchild", parent.ID)
+	pHold := time.Now().Add(72 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", parent.ID, "--until-unix", strconv.FormatInt(pHold, 10)); err != nil {
+		t.Fatalf("hold parent: %v\n%s", err, stderr)
+	}
+	// The child has NO own hold but inherits the parent's → on_hold true, effective = parent's.
+	if !waitUntil(5*time.Second, func() bool {
+		r, ok := snapRowOnHold(t, c, child.ID)
+		return ok && r.OnHold && r.OnHoldEffectiveUnix == pHold && r.OnHoldUntilUnix == 0
+	}) {
+		r, _ := snapRowOnHold(t, c, child.ID)
+		t.Errorf("child did not inherit parent's hold: on_hold=%v eff=%d own=%d (want on_hold=true eff=%d own=0)",
+			r.OnHold, r.OnHoldEffectiveUnix, r.OnHoldUntilUnix, pHold)
+	}
+	// The child's OWN later hold wins (max): set it further out.
+	cHold := time.Now().Add(240 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", child.ID, "--until-unix", strconv.FormatInt(cHold, 10)); err != nil {
+		t.Fatalf("hold child: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool {
+		r, ok := snapRowOnHold(t, c, child.ID)
+		return ok && r.OnHoldEffectiveUnix == cHold
+	}) {
+		r, _ := snapRowOnHold(t, c, child.ID)
+		t.Errorf("child's own later hold should win: eff=%d, want %d", r.OnHoldEffectiveUnix, cHold)
+	}
+	// Releasing the PARENT leaves the child held by its OWN hold (inheritance only adds).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", parent.ID, "--clear"); err != nil {
+		t.Fatalf("clear parent: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool {
+		r, ok := snapRowOnHold(t, c, child.ID)
+		return ok && r.OnHold && r.OnHoldEffectiveUnix == cHold
+	}) {
+		t.Errorf("child should stay held by its own hold after the parent is released")
+	}
+	// And the parent itself is no longer held.
+	if !waitUntil(5*time.Second, func() bool { r, ok := snapRowOnHold(t, c, parent.ID); return ok && !r.OnHold }) {
+		t.Errorf("parent should be off-hold after --clear")
+	}
 }
 
 func testHoldRemote(t *testing.T) {

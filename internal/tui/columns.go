@@ -103,14 +103,19 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
 	{name: ColCreated, header: "CREATED", fixedW: 10,
 		cell: func(_ *Model, r api.ThreadRow) string { return createdLabel(r.CreatedAtUnix) }},
-	{name: ColHold, header: "HOLD", fixedW: 10,
+	{name: ColHold, header: "HOLD", fixedW: 11,
 		cell: func(_ *Model, r api.ThreadRow) string {
-			// The on-hold-until date while parked; blank otherwise (a lapsed hold reads
-			// as not-on-hold even if the stale timestamp lingers on the record).
-			if !r.OnHold || r.OnHoldUntilUnix == 0 {
+			// The EFFECTIVE on-hold-until date while parked; blank otherwise (a lapsed
+			// hold reads not-on-hold even if a stale timestamp lingers). A "↑" prefix
+			// marks a hold INHERITED from a parent (effective later than this thread's own).
+			if !r.OnHold || r.OnHoldEffectiveUnix == 0 {
 				return ""
 			}
-			return time.Unix(r.OnHoldUntilUnix, 0).Format("2006-01-02")
+			d := time.Unix(r.OnHoldEffectiveUnix, 0).Format("2006-01-02")
+			if r.OnHoldEffectiveUnix > r.OnHoldUntilUnix {
+				return "↑" + d // dominated by an ancestor's hold
+			}
+			return d
 		}},
 }
 

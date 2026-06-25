@@ -455,7 +455,7 @@ func (m Model) fetch() tea.Cmd {
 				continue
 			}
 			for _, t := range mv.Threads {
-				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold}
+				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix}
 				if preselect != "" && t.ID == preselect {
 					preselectSeen = true // present in the mesh, regardless of the view filter
 				}
@@ -1515,34 +1515,37 @@ func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
 	return m.routedVerb(row, patch, "archive")
 }
 
-// holdToggleSelected parks the selected thread until the start of tomorrow (so it
-// returns to the active view tomorrow), or RELEASES it if it is already on hold.
+// holdToggleSelected manages the selected thread's OWN hold: if its own hold is
+// active it RELEASES (clears own); otherwise it parks until the start of tomorrow. The
+// decision is on the OWN hold, not the effective one — a thread held only by an inherited
+// parent hold has no own hold to release, so `h` sets its own (you can't un-hold a child
+// below its parent; that follows the max() rule and is reflected on the next fetch).
 func (m Model) holdToggleSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	if row.OnHold {
-		return m.holdRow(row, 0) // release
+	if row.OnHoldUntilUnix > time.Now().Unix() { // own hold active → release it
+		return m.holdRow(row, 0)
 	}
 	return m.holdRow(row, startOfTomorrowUnix())
 }
 
-// holdRow sets (untilUnix > now) or clears (untilUnix == 0 / in the past) the
-// thread's hold, routed to the owner. The on-hold flag flips optimistically; when
-// the change removes the row from the current view (held while in `active`, released
-// while in `on hold`) it is hidden at once. untilUnix is an ABSOLUTE instant computed
-// here against the VIEWER's clock — i.e. the user's own "tomorrow".
+// holdRow sets (untilUnix > now) or clears (untilUnix == 0) the thread's OWN hold,
+// routed to the owner. untilUnix is an ABSOLUTE instant computed here against the
+// VIEWER's clock — i.e. the user's own "tomorrow". Setting a future hold makes the
+// thread on-hold for sure, so it flips + hides optimistically. CLEARING does NOT flip
+// optimistically: the effective state may still be on-hold via an inherited parent
+// hold, which only the owning daemon knows — let the next fetch (~300ms) reconcile.
 func (m Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
-	onHold := untilUnix > time.Now().Unix()
-	patch := &rowPatch{onHold: bptr(onHold), ttl: optimisticTTL}
+	if untilUnix <= time.Now().Unix() {
+		return m.routedVerb(row, nil, "hold", "--clear")
+	}
+	patch := &rowPatch{onHold: bptr(true), ttl: optimisticTTL}
 	next := row
-	next.OnHold = onHold
+	next.OnHold = true
 	if m.leavesViewWith(next) {
 		patch.hide = true
-	}
-	if untilUnix == 0 {
-		return m.routedVerb(row, patch, "hold", "--clear")
 	}
 	return m.routedVerb(row, patch, "hold", "--until-unix", fmt.Sprintf("%d", untilUnix))
 }

@@ -158,6 +158,21 @@ func (sb *Sandbox) newHeadlessThreadAt(t *testing.T, agent, name, cwd string) ap
 	return th
 }
 
+// newHeadlessThreadParented spawns a headless thread with a parent (for hold-inheritance
+// and tree tests). Headless because the record (parent edge) is all that matters here.
+func (sb *Sandbox) newHeadlessThreadParented(t *testing.T, agent, name, parentID string) api.Thread {
+	t.Helper()
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", agent, "--name", name, "--cwd", "/tmp", "--headless", "--parent", parentID, "--json")
+	if err != nil {
+		t.Fatalf("thread new --headless --parent (%s): %v\n%s", agent, err, stderr)
+	}
+	var th api.Thread
+	if err := json.Unmarshal([]byte(stdout), &th); err != nil {
+		t.Fatalf("decode parented headless thread: %v\nraw: %s", err, stdout)
+	}
+	return th
+}
+
 func (sb *Sandbox) headlessReply(t *testing.T, id string) api.HeadlessReplyResponse {
 	t.Helper()
 	stdout, stderr, err := sb.Runner.Run(t, "thread", "headless-reply", "--id", id, "--json")

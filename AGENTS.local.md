@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H25 — thread HOLD: park a thread until a date, default view hides held threads (2026-06-25, sesh c3b1c4f; api schema 33→34; deployed 3/4 — macbook offline)
+## H25 — thread HOLD: park a thread until a date, default view hides held threads (2026-06-25, sesh c3b1c4f; api schema 33→34; deployed ALL FOUR)
 Ticket "A way to put a thread on 'hold'" (5c670fdc): on a busy day, park the threads
 you're NOT working on so `sesh tui`'s default view only shows the active few; tomorrow
 they reappear. Design Q&A (AskUserQuestion) locked TWO decisions: (1) the relocation
@@ -54,9 +54,11 @@ macstudio (cij@macstudio, git pull + native build + restart) + termux (lukas@and
 PID, setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/
 sesh-master). All three verified api schema 34 / store 18; live-smoked hold set+clear on
 mymain + termux (headless record needs no working agent); mymain↔macstudio mesh synced.
-**macbook OFFLINE at deploy (ssh :22 timed out; mesh "last seen 520s ago") — PENDING:
-git pull both + native build + supervisorctl restart sesh-daemon. Schema 34 is additive/
-mixed-mesh-safe so a lagging macbook is fine (it 404s the hold route until upgraded).**
+macbook was OFFLINE during the initial deploy (ssh :22 timed out; mesh "last seen 520s
+ago") but came online shortly after and was deployed the same way (git pull + native
+build + supervisorctl restart sesh-daemon) → schema 34, mesh synced (all three peers
+"synced 0s ago" from mymain). So ALL FOUR are on schema 34. (Schema 34 is additive/
+mixed-mesh-safe, so the brief skew while macbook lagged was harmless.)
 Ticket 5c670fdc (on mymain) marked done. GOTCHA: `ticket get/find --id` match the EXACT
 id, NOT a prefix (unlike most verbs) — use the full uuid.
 

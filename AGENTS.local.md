@@ -1,5 +1,65 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H25 — thread HOLD: park a thread until a date, default view hides held threads (2026-06-25, sesh c3b1c4f; api schema 33→34; deployed 3/4 — macbook offline)
+Ticket "A way to put a thread on 'hold'" (5c670fdc): on a busy day, park the threads
+you're NOT working on so `sesh tui`'s default view only shows the active few; tomorrow
+they reappear. Design Q&A (AskUserQuestion) locked TWO decisions: (1) the relocation
+scheme — Lukas corrected his own ticket ("l not j"), so the column-pan pair `h`/`l` →
+`^h`/`^l` (frees h/H; j/k + ^j/^k scroll unchanged); (2) AUTO-EXPIRY semantics — a hold
+is a DEADLINE, not a latch.
+MODEL: `on_hold_until_unix` on the thread record (absolute instant; 0 = not held). "On
+hold RIGHT NOW" is DERIVED, never stored: `on_hold_until > the OWNING daemon's clock`,
+stamped as `on_hold` on ThreadRow/ThreadSnapshot. So a hold auto-expires once the instant
+passes (no explicit unhold) — `h` defaults the deadline to start-of-tomorrow, so a parked
+thread returns to the active view the next day on its own. The daemon is a pure SETTER
+(date math / "tomorrow" is UX → lives in the TUI/CLI, computed against the VIEWER's clock
+= the user's own tomorrow); a PAST instant stores fine and reads not-held.
+- api (schema 33→34, additive/mixed-mesh-safe): `on_hold_until_unix` (Thread), derived
+  `on_hold` (row+snapshot), `POST /v1/threads/hold` (HoldThreadRequest{id,until}),
+  client.ThreadHold. A pre-34 daemon 404s the route LOUDLY + omits on_hold (read not-held).
+- store migration 18 (the list's 18th ELEMENT — migration-"4" comment spans 2 ALTERs, so
+  store version = 18 though the comment says "17"): `ALTER TABLE threads ADD COLUMN
+  on_hold_until` (APPENDED last); SetThreadHold + all column lists. Unit TestThreadHold.
+- daemon: handleThreadHold; maintainer.publish stamps OnHold = until > now() (single choke
+  point, mirrors TicketNeedsInput); grid.resolveRow stamps it on BOTH the maintained +
+  fallback paths (independent of the snapshot so the fallback is correct too).
+- cmd: `sesh thread hold (--until YYYY-MM-DD | --until-unix <n> | --clear) [--id]
+  [--machine]` — exactly one deadline flag; --until parses start-of-day local; current-
+  thread inference like notify; routes cross-machine. help.go + help_flags.go.
+- tui: NEW built-in view ViewHold ("on hold") between active and archived. ViewActive
+  (default) now = `!archived && !onhold`; ViewHold = `!archived && onhold`. New helpers
+  builtinViewAdmits + leavesViewWith REPLACE leavesCurrentView (generalize membership +
+  optimistic-hide across both axes). Keys: `h` = toggle hold (park to start-of-tomorrow;
+  release if already held), `H` = explicit-date line prompt (promptHold; empty clears).
+  rowPatch gains an `onHold` overlay (optimistic flip + hide when the change leaves the
+  view). Opt-in `hold` column (on-hold-until date). predicate language gains `onhold`
+  selector + bare atom. Legend updated. KEY GOTCHA (bit me): the column-pan keys `h`/`l`
+  were the ones to move — Lukas's ticket said `j` but meant `l` (clarified). `^h`=BS and
+  `^j`=LF terminal codes, but bubbletea reports them distinctly so it's fine; only `^h`/
+  `^l` are used (the existing `^j`/`^k` scroll is untouched, which is why moving `l` not
+  `j` matters — moving `j`→`^j` would have collided with scroll-down).
+- conformance: feature thread.hold (AgentAgnostic × Local+Remote). HONEST proof = the
+  derived on_hold flipping BOTH directions vs the owner's clock (future→on, PAST→off =
+  the auto-expiry; the bug-class a one-directional check misses, cf the codex liveness
+  bug) + --clear zeroes it + routed hold lands & derives on the peer over a real ssh hop.
+  TUI claims action-hold (h parks on the daemon + leaves active view, h releases, H date
+  prompt) + view-hold (default hides on-hold, `on hold` view is the complement). NB the
+  TUI claim list `declaredTUIClaims` (tui_test.go) is HARDCODED — registerTUIClaim only
+  BINDS; a new claim must ALSO be added to declaredTUIClaims or it silently never runs
+  (TestTUIClaimsComplete only checks declared→bound, not the reverse). Bit me once.
+- sesh-cli SKILL: keymap (h/H, ^h/^l), the `on hold` view, the hold CLI verb, onhold kw.
+DEPLOY (schema 34 = daemon RESTART): mymain (build .new+mv + supervisorctl restart) +
+macstudio (cij@macstudio, git pull + native build + restart) + termux (lukas@android-main
+:8022 — git pull, PLAIN `go build` CGO=1/android per H22, .new+mv, kill daemon by explicit
+PID, setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/
+sesh-master). All three verified api schema 34 / store 18; live-smoked hold set+clear on
+mymain + termux (headless record needs no working agent); mymain↔macstudio mesh synced.
+**macbook OFFLINE at deploy (ssh :22 timed out; mesh "last seen 520s ago") — PENDING:
+git pull both + native build + supervisorctl restart sesh-daemon. Schema 34 is additive/
+mixed-mesh-safe so a lagging macbook is fine (it 404s the hold route until upgraded).**
+Ticket 5c670fdc (on mymain) marked done. GOTCHA: `ticket get/find --id` match the EXACT
+id, NOT a prefix (unlike most verbs) — use the full uuid.
+
 ## H24 — busy never latched at SCALE: maintainer re-ran Info+ps PER THREAD (2026-06-25, sesh 8fbaa07; NO schema change; deployed ALL FOUR)
 Ticket "In sesh tui, it doesn't show threads as running when they are (especially for
 remote)": claude threads stopped rendering busy. ROOT CAUSE = a SCALE regression in the

@@ -1,5 +1,54 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H27 — cockpit clipping: the live-terminal bridge left `window-size largest` stuck forever (2026-06-25, sesh c44b5b9; NO schema change; deployed ALL FOUR)
+Lukas: "the master tmux setup cuts off the bottom in Claude Code, esp. its multiple-choice
+modal; a previous commit tried but it's still an issue." The "previous commit" = myrig
+32fc93f, which set `window-size latest` in tmux.common.conf (right for the cockpit: size a
+window to the client you're TYPING in, so a fullscreen Ink TUI never lays out taller than
+your view + clips its bottom rows below the viewport). It never took because the conf isn't
+the only writer. ROOT CAUSE (found via `tmux -L sesh show -gw window-size` = `largest` on the
+LIVE work server while the conf + the master server both said `latest`): the sesh DAEMON's
+live-terminal bridge (sesh-ui web terminal, internal/daemon/terminal.go) does `set -g
+window-size largest` GLOBALLY on the work server for detach-safety (a smaller web viewer must
+not shrink the user's real attachment) — and NEVER restored it. So ONE web-terminal connection
+flips the long-lived work server to `largest` permanently, overriding the conf; `largest`
+sizes a window to the TALLEST attached client → a stale/secondary taller client makes Claude
+lay out bigger than the cockpit client you view through → bottom rows (the modal/input box)
+clipped. PROVEN in an isolated nested-tmux repro: largest→inner window 120x48 (tall client),
+latest→120x26 (active/cockpit client). Long-lived work servers never pick up the conf change
+(they persist across daemon restarts — they hold the agent sessions), so the stuck `largest`
+sat there for a day.
+FIX (make the override TRANSIENT, internal/daemon/terminal.go): a bridge still forces
+`largest` while live, but `normalizeWindowSize()` winds it back to `latest` (tmux's own default
++ the cockpit conf policy) once NO `uiterm-*` viewer session remains. The PRESENCE of a viewer
+session — not handler return — is the authoritative "a bridge is live" signal, because an IDLE
+pane's disconnect goes undetected (neither pty→WS nor WS→pty sees traffic, so c.Read never
+errors; this is the very reason the viewer REAPER exists). normalizeWindowSize runs (a) on each
+bridge exit and (b) in the reaper after its sweep — so the reaper's STARTUP sweep (tracked set
+empty → every uiterm-* is an orphan and is killed → no viewer remains) SELF-HEALS any work
+server a prior daemon left stuck on largest. ⇒ a routine daemon RESTART fixes it (which is the
+deploy). The old `defer unregisterViewer` + `defer kill-session` became one combined exit defer
+(unregister → kill viewer → normalize). NO api/schema change (internal-only) ⇒ mixed-mesh safe,
+no restart-ordering hazard.
+TESTS (honest/deterministic): TestUITermViewerReaper EXTENDED — seed `window-size largest` +
+leaked uiterm orphans BEFORE the daemon starts, assert the startup sweep self-heals to `latest`
+(the durable fix, no agent needed). TestThreadTerminalWebSocket — assert `largest` is in force
+while a REAL pi bridge is live. (Did NOT assert restore-on-close in the WS test: an idle pi
+pane's disconnect can go undetected so handler-return isn't a reliable trigger — the reaper test
+proves the wind-back deterministically instead.) daemon -race clean.
+DEPLOY (daemon RESTART, no schema change): ALL FOUR. mymain (build .new+mv + supervisorctl
+restart sesh-daemon) — work server flipped largest→latest on restart, LIVE-PROVEN. macstudio
+(cij@macstudio) + macbook (lukas@macbook): git pull + native build + supervisorctl restart
+(both were already `latest` — no recent bridge had clobbered them — and stay latest). termux
+(lukas@android-main:8022): git pull + PLAIN `go build` (CGO=1/android per H22 — verified
+CGO_ENABLED=1 GOOS=android on the installed binary), .new+mv, kill daemon by EXPLICIT PID (NOT
+pkill -f, which matches the ssh shell), setsid-nohup relaunch with SESH_HOME=~/.sesh
+SESH_MACHINE=termux SESH_TMUX_SOCKET=sesh SESH_MASTER_SOCKET=sesh-master (the exact env from
+~/.myrig/zshenv/termux.sh; no API token — inbound-less leaf). All four `tmux -L sesh show -gw
+window-size` = `latest`; mesh synced (mymain↔macbook/macstudio over http :7878). NOTE: only
+mymain's live server was actually stuck on `largest` (the others happened to be latest); the
+real WIN is the daemon no longer leaves it stuck, and self-heals on restart.
+
 ## H26 — hold INHERITANCE: a child inherits its parent's hold, effective = max(own, ancestors) (2026-06-25, sesh 373944b; api schema 34→35; deployed ALL FOUR)
 Follow-up to H25 (Lukas): "if a parent thread is on hold, the child threads are too —
 you inherit the hold status; an individual thread's hold = max(parent's hold date, its

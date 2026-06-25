@@ -190,4 +190,19 @@ func TestThreadTerminalWebSocket(t *testing.T) {
 	if gotPath != wantPath {
 		t.Errorf("prefix+t popup cwd = %q, want thread cwd %q (uiterm `-c <cwd>` fix missing → opens in daemon's ~)", gotPath, wantPath)
 	}
+
+	// Regression (master-cockpit clipping): while a live-terminal bridge is up, the daemon
+	// forces `window-size largest` (detach-safety — a smaller web viewer must not shrink
+	// the user's real attachment). The OLD behaviour set this PERMANENTLY and never wound
+	// it back, silently clobbering the cockpit conf's `window-size latest` forever, so a
+	// fullscreen TUI sized to a stale taller client and its bottom rows (a Claude Code
+	// modal/input box) rendered below the viewport = clipped. (The wind-back to `latest`
+	// once no viewer remains is proven deterministically by TestUITermViewerReaper's
+	// startup-sweep self-heal — not here, since an idle pane's disconnect can go
+	// undetected, so handler return is not a reliable trigger.)
+	if got, err := sb.rawTmux(t, "show-options", "-g", "-w", "-v", "window-size"); err != nil {
+		t.Fatalf("show window-size: %v", err)
+	} else if strings.TrimSpace(got) != "largest" {
+		t.Errorf("window-size DURING bridge = %q, want largest (detach-safety override)", strings.TrimSpace(got))
+	}
 }

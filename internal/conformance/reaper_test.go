@@ -13,9 +13,10 @@ import (
 // `uiterm-*` sessions BEFORE the daemon starts — exactly the orphan state a daemon
 // crash/restart/-9 leaves behind (the defer cleanup can't run when the process dies) —
 // then asserts the daemon's startup sweep kills every viewer while leaving real
-// sessions untouched, and that `sesh tmux info` hides viewer sessions from consumers
-// (session pickers, kill-empty-sessions). Outside the matrix (a hygiene loop, not a
-// (loc)×(agent) cell).
+// sessions untouched, self-heals a `window-size largest` a prior bridge left stuck back
+// to `latest`, and that `sesh tmux info` hides viewer sessions from consumers (session
+// pickers, kill-empty-sessions). Outside the matrix (a hygiene loop, not a (loc)×(agent)
+// cell).
 func TestUITermViewerReaper(t *testing.T) {
 	sb := newSandbox(t, matrix.Local)
 
@@ -24,6 +25,13 @@ func TestUITermViewerReaper(t *testing.T) {
 		if out, err := sb.rawTmux(t, "new-session", "-d", "-s", name); err != nil {
 			t.Fatalf("seed session %s: %v: %s", name, err, out)
 		}
+	}
+	// Seed the stuck state a previous bridge leaves: `window-size largest` (a live-terminal
+	// bridge forces it for detach-safety and a crash/-9 never restores it). The cockpit conf
+	// wants `latest`; a lingering `largest` clips fullscreen TUIs (a Claude Code modal renders
+	// below the viewport). The daemon's startup sweep must self-heal it back to `latest`.
+	if out, err := sb.rawTmux(t, "set-option", "-g", "window-size", "largest"); err != nil {
+		t.Fatalf("seed window-size largest: %v: %s", err, out)
 	}
 
 	sb.startDaemon(t)
@@ -39,6 +47,15 @@ func TestUITermViewerReaper(t *testing.T) {
 	// A non-viewer session must survive the sweep.
 	if out, err := sb.rawTmux(t, "list-sessions", "-F", "#{session_name}"); err != nil || !strings.Contains(out, "keepme") {
 		t.Fatalf("reaper killed a non-viewer session (or list failed: %v); sessions=%q", err, out)
+	}
+	// Self-heal: having swept the orphan viewers, no bridge remains → the startup sweep
+	// must wind `window-size` back to `latest`, undoing a prior bridge's stuck `largest`.
+	if !waitUntil(10*time.Second, func() bool {
+		out, err := sb.rawTmux(t, "show-options", "-g", "-w", "-v", "window-size")
+		return err == nil && strings.TrimSpace(out) == "latest"
+	}) {
+		out, _ := sb.rawTmux(t, "show-options", "-g", "-w", "-v", "window-size")
+		t.Fatalf("startup sweep did not self-heal window-size to latest (still %q) — a stuck largest clips fullscreen TUIs in the cockpit", strings.TrimSpace(out))
 	}
 
 	// `sesh tmux info` must HIDE viewer sessions even when one exists live (the picker /

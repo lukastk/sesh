@@ -1,5 +1,40 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H28 — TUI `f` fork: keyboard shortcut to copy the selected thread (2026-06-26, sesh 07e7298; NO schema change; deployed ALL FOUR)
+Ticket "Forking feature" (b662ec8b): fork a thread regardless of agent, via a TUI key that
+"just copies the selected thread" → the copy is headless, you enter it to continue. Asked to
+check if it already exists. IT MOSTLY DID: the CLI fork (`thread new --fork-from <id>
+[--message-id N]`) is a complete PARITY_ROADMAP D3 feature — internal/fork/fork.go branches the
+source transcript (claude/codex/pi uniformly: copies the prefix through the Nth assistant turn,
+0=whole, rewrites the embedded session id), internal/daemon/forkthread.go writes it at the
+agent's own transcript location under a FRESH session id + records a new HEADLESS thread
+(HeadlessStarted=true so turns RESUME), source untouched. Owner-side by construction (source
+transcript on that daemon's disk). thread.fork conformance cells already green for all 3 agents
+× local/remote. So the ONLY gap was the TUI shortcut.
+FIX (TUI/CLI-only, internal/tui/model.go): new `f` key → `forkSelected()` execs `thread new
+--fork-from <row.ID> --json`, adding `--machine <owner>` when the row isn't local (same routing
+as routedVerb — the transcript lives on the owner; --fork-from then resolves the source on that
+daemon). Forks the WHOLE conversation (no --message-id) into a new headless copy; nothing is
+started. On success returns actionMsg{preselect: newID} (no patch — it's a NEW row, not an edit
+of an existing one) so the cursor lands on the copy once the reconcile fetch brings it in. Did
+NOT reuse routedVerb (that builds `thread <verb> --id <row>`; fork is `thread new --fork-from`,
+a different shape + needs the new id parsed from JSON). Legend gained `f fork`; sesh-cli SKILL
+keymap updated.
+TESTS: new TUI claim action-fork (added to declaredTUIClaims in tui_test.go AND registered —
+both required, per the H25 gotcha) — drives a REAL pi source (sentinel OBSIDIAN, one headless
+turn), presses `f`, asserts a new headless pi thread appears with a DIFFERENT session id whose
+transcript carries OBSIDIAN (a real copy, not empty) while the source transcript is byte-
+untouched. Ran live → PASS (9s, real pi). TUI unit tests + help meta-tests + neighboring
+action-stop claim all still green. gofmt also realigned a pre-existing confirmKind iota comment
+block (harmless).
+NO api/schema change (the fork endpoint is unchanged; this is a pure TUI client key) ⇒ deploy =
+update the sesh BINARY only, NO daemon restart. Deployed ALL FOUR at 07e7298: mymain (native
+go build .new+mv to ~/.local/bin/sesh), macstudio (cij@macstudio) + macbook (lukas@macbook)
+(git pull + native /opt/homebrew/bin/go build + .new+mv — no supervisorctl restart needed),
+termux (lukas@android-main:8022 — git pull + PLAIN `go build` = CGO=1/GOOS=android per H22,
+verified on the installed binary, .new+mv; no daemon relaunch needed since binary-only). All
+four vcs.revision=07e7298. Ticket b662ec8b marked done.
+
 ## H27 — cockpit clipping: the live-terminal bridge left `window-size largest` stuck forever (2026-06-25, sesh c44b5b9; NO schema change; deployed ALL FOUR)
 Lukas: "the master tmux setup cuts off the bottom in Claude Code, esp. its multiple-choice
 modal; a previous commit tried but it's still an issue." The "previous commit" = myrig

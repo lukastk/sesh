@@ -789,6 +789,9 @@ func claimActionFork(t *testing.T) {
 		if th.AgentSessionID == src.AgentSessionID {
 			t.Fatalf("fork reused the source session id (no branch happened)")
 		}
+		if th.Name != "trunk (fork)" {
+			t.Errorf("fork name = %q, want %q (keep source name marked as a fork)", th.Name, "trunk (fork)")
+		}
 		forkID = th.ID
 	}
 	if forkID == "" {

@@ -1456,15 +1456,21 @@ func (m Model) stopSelected() tea.Cmd {
 // routes with --machine exactly like the other verbs; --fork-from then resolves
 // the source locally on that daemon. The new thread is a headless copy you can
 // enter to continue from where the source left off — the source is untouched.
-// On success the cursor preselects the new thread once the refetch lands.
+// It keeps the source's name marked " (fork)". On success the cursor preselects
+// the new thread once the refetch lands.
 func (m Model) forkSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
 	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	// Keep the source's name, marked as a fork (a nameless source forks to "(fork)").
+	name := "(fork)"
+	if row.Name != "" {
+		name = row.Name + " (fork)"
+	}
 	return func() tea.Msg {
-		args := []string{"thread", "new", "--fork-from", row.ID, "--json"}
+		args := []string{"thread", "new", "--fork-from", row.ID, "--name", name, "--json"}
 		if machine == "" || row.Machine != machine {
 			args = append(args, "--machine", row.Machine)
 		}

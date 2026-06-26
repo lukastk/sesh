@@ -1,5 +1,44 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H29 — maintainer idle early-out: stop fork/exec-ing tmux+ps every tick with 0 threads (2026-06-26, sesh a9529ae; NO schema change; deployed ALL FOUR)
+Lukas saw "loads of copies of the sesh daemon" in termux htop + asked for a myrig review for
+runaway/overload. DIAGNOSIS (ssh into android-main:8022): NOT multiple daemons — exactly ONE
+`sesh daemon run` (the htop "copies" = its 16 Go runtime OS threads, all comm="sesh"; htop shows
+threads as rows unless you press H). No leak/zombie/flap (12 FDs, 0 zombies, boxyard-sync a single
+hourly WiFi-gated nice-19 loop, pgrep singleton guards in the termux zshenv launch block all work).
+BUT the daemon genuinely sustained ~10.6% of a CPU core CONTINUOUSLY with ZERO local threads (1
+tmux pane = just scratch). ROOT CAUSE: maintainer.tick() (every ~300ms) unconditionally ran TWO
+per-tick global enumerations — `tmux` PaneIndexByThreadID + `ps` NewProcSnapshot — even with no
+threads. On a wake-locked phone that fork/exec churn (~4-5 tmux spawns/sec under ppid=daemon) is
+pure battery waste. (NB the "6 days" I first saw was SYSTEM uptime; the daemon PROCESS had only
+been up ~1.7h — etime, not CPU TIME — so the 10% was real, not a startup artifact. Measure
+instantaneous CPU via /proc/<pid>/stat utime+stime delta / CLK_TCK=100, getconf is absent on termux.)
+FIX (internal/daemon/maintainer.go, two early-outs): (1) len(threads)==0 → clear(m.st) + return
+BEFORE any tmux/ps call. (2) the `ps` snapshot is only consulted on refreshThread's found-MARKED-pane
+path, so compute it only when PaneIndexByThreadID returned ≥1 marked pane; else procs stays nil
+(never dereferenced) — every thread resolves headless·idle (or turn-in-flight via the registry)
+without it. So a leaf holding only headless/idle threads also skips ps. POPULATED PATH UNCHANGED: a
+thread with a live pane ⇒ panes>0 ⇒ procs computed exactly as before, busy-detection byte-identical.
+TESTS: added observable counters maintainer.probedPanes/probedProcs (incremented when each
+enumeration actually runs) + TestMaintainerIdleEarlyOut (real isolated store + real empty tmux
+server): 0 threads ⇒ 0/0; a headless thread (no marked pane) ⇒ panes enumerated once, ps skipped,
+resolves headless·idle. daemon+tmux unit suites green, -race clean; thread.runtime-state/pi/local
+conformance cell still GREEN with a real pi agent (busy still latches). NO schema change ⇒
+mixed-mesh safe, deploy = daemon restart.
+DEPLOY: ALL FOUR. termux FIRST (lukas@android-main:8022 — git pull, PLAIN `go build`=CGO=1/android
+per H22, .new+mv, kill daemon by EXPLICIT pid 1563 NOT pkill -f, setsid-nohup relaunch with
+SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/sesh-master + termux-wake-lock). VERIFIED LIVE on
+termux: CPU 10.6%→~5-6% steady, daemon tmux spawns 9-in-2s → 0, peers still synced. mymain (native
+build + supervisorctl restart sesh-daemon), macstudio (cij@macstudio) + macbook (lukas@macbook) (git
+pull + /opt/homebrew/bin/go build + supervisorctl restart). Mesh healthy post-deploy.
+RESIDUAL (flagged to Lukas, NOT a bug): the ~5-6% left on termux is the normal mesh-leaf baseline
+(1s meshsync to 3 http peers) PLUS a master-tmux COCKPIT currently running ON the phone (sesh-master
+server + 4 window supervisors + 3 persistent outbound ssh -tt to mymain/macbook/macstudio). If Lukas
+doesn't use the phone cockpit, `mmt-kill` drops that overhead (masterMaint self-heal rebuilds windows
+only if a master server EXISTS, so kill removes it until next mmt-start). A future "leaf low-power
+mode" (longer maintainer/mesh tick on battery machines) would cut the meshsync residual but Lukas
+chose just the idle early-out for now.
+
 ## H28 — TUI `f` fork: keyboard shortcut to copy the selected thread (2026-06-26, sesh 07e7298; NO schema change; deployed ALL FOUR)
 Ticket "Forking feature" (b662ec8b): fork a thread regardless of agent, via a TUI key that
 "just copies the selected thread" → the copy is headless, you enter it to continue. Asked to

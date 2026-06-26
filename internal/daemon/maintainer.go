@@ -47,6 +47,12 @@ type maintainer struct {
 	started bool
 	stop    chan struct{}
 	done    chan struct{}
+	// probedPanes / probedProcs count ticks that actually ran the (expensive)
+	// per-tick tmux pane enumeration / ps process-table snapshot. They make the
+	// idle early-out observable to tests — the per-tick fork/exec cost this guards
+	// is invisible otherwise. Touched only by the maintainer goroutine.
+	probedPanes int
+	probedProcs int
 	// home is THIS daemon's user home dir, used to stamp each thread's CwdRel
 	// (~-relative cwd) so cross-machine viewers can label it. "" if undeterminable.
 	home string
@@ -98,6 +104,17 @@ func (m *maintainer) tick() {
 	if err != nil {
 		return // transient store error: skip this tick, try again next
 	}
+	// Idle early-out: with no local threads there is nothing whose live state needs
+	// a pane/process probe, so skip the per-tick tmux + ps enumeration entirely.
+	// Otherwise the daemon fork/exec's `tmux` + `ps` every ~300ms forever even on a
+	// machine with zero threads — on a wake-locked battery leaf (e.g. termux) that is
+	// a continuous ~10% CPU drain for no work. State is already empty, so just clear.
+	if len(threads) == 0 {
+		m.mu.Lock()
+		clear(m.st)
+		m.mu.Unlock()
+		return
+	}
 	attached, err := m.d.tmux.AttachedSessions()
 	if err != nil {
 		attached = map[string]bool{} // tmux unreachable => nothing attached
@@ -115,9 +132,19 @@ func (m *maintainer) tick() {
 	if err != nil {
 		return
 	}
-	procs, err := tmux.NewProcSnapshot()
-	if err != nil {
-		return
+	m.probedPanes++
+	// The process table is only consulted to resolve the agent under a MARKED pane
+	// (refreshThread touches procs only on the found-pane path). If no local thread
+	// currently occupies a pane — every thread is headless/idle — skip the `ps`
+	// enumeration; those threads resolve to headless·idle (or turn-in-flight via the
+	// registry) without it. procs stays nil and is never dereferenced.
+	var procs *tmux.ProcSnapshot
+	if len(panes) > 0 {
+		procs, err = tmux.NewProcSnapshot()
+		if err != nil {
+			return
+		}
+		m.probedProcs++
 	}
 	now := time.Now()
 

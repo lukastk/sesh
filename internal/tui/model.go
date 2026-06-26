@@ -133,9 +133,9 @@ const (
 type confirmKind int
 
 const (
-	confirmNone   confirmKind = iota
-	confirmDelete             // `d` — drop the record
-	confirmArchive            // `a` — archive/unarchive toggle
+	confirmNone    confirmKind = iota
+	confirmDelete              // `d` — drop the record
+	confirmArchive             // `a` — archive/unarchive toggle
 )
 
 type Model struct {
@@ -1034,6 +1034,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptReparent, row, nil, 0
 		}
+	case "f":
+		// Fork: copy the selected thread into a new headless thread (same
+		// conversation, branched). It doesn't start anything — enter it to continue.
+		return m, m.forkSelected()
 	case "x":
 		return m, m.stopSelected()
 	case "d":
@@ -1446,6 +1450,41 @@ func (m Model) stopSelected() tea.Cmd {
 	return m.routedVerb(row, nil, "stop")
 }
 
+// forkSelected branches the selected thread's conversation into a NEW headless
+// copy: `thread new --fork-from <id>` (the whole transcript, no message-id). The
+// fork lands on the source's OWNING machine (its transcript lives there), so it
+// routes with --machine exactly like the other verbs; --fork-from then resolves
+// the source locally on that daemon. The new thread is a headless copy you can
+// enter to continue from where the source left off — the source is untouched.
+// On success the cursor preselects the new thread once the refetch lands.
+func (m Model) forkSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "new", "--fork-from", row.ID, "--json"}
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return actionMsg{err: fmt.Errorf("fork %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		var forked struct {
+			ID string `json:"id"`
+		}
+		if e := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &forked); e != nil || forked.ID == "" {
+			return actionMsg{err: fmt.Errorf("fork %q: parse new thread id: %v", row.Name, e)}
+		}
+		// Land the cursor on the new copy once it shows up in the refetched grid.
+		return actionMsg{preselect: forked.ID}
+	}
+}
+
 // deleteSelected drops the selected thread's record. The daemon refuses a live
 // thread (orphan guard); stop it first. Surfaced as an error in actionErr.
 func (m Model) deleteSelected() tea.Cmd {
@@ -1618,7 +1657,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · x stop · d delete · a archive · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at

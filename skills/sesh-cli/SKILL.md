@@ -231,6 +231,9 @@ P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/un
 n            toggle notify          i          toggle the ID column
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
+f            fork: copy the selected thread into a new HEADLESS thread (same
+             conversation, branched). It doesn't start anything — enter the copy to
+             continue from where the source left off; the source is untouched.
 x            stop      d  delete    a  archive/unarchive   (d and a ask y/n first)
 q / esc      quit
 ```

@@ -42,6 +42,7 @@ var declaredTUIClaims = []string{
 	"action-tag",                // the t line-prompt really adds a tag on the daemon
 	"action-untag",              // T opens a picker over the thread's tags; enter removes the highlighted one on the daemon, others survive
 	"action-reparent",           // P pastes a parent uuid → thread reparent on the daemon (nests the node); empty = root; a cycle is refused loudly, record untouched
+	"action-fork",               // f forks the selected thread into a new headless copy (`thread new --fork-from`); the copy carries the source conversation, the source is untouched
 	"cursor-wrap",               // up/down wrap around the row list
 	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
 	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it
@@ -111,6 +112,7 @@ func init() {
 	registerTUIClaim("action-stop", claimActionStop)
 	registerTUIClaim("action-delete", claimActionDelete)
 	registerTUIClaim("action-archive", claimActionArchive)
+	registerTUIClaim("action-fork", claimActionFork)
 	registerTUIClaim("action-nav", claimActionNav)
 	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
 	registerTUIClaim("action-nav-attach", claimActionNavAttach)
@@ -744,6 +746,61 @@ func claimActionStop(t *testing.T) {
 	// ...but the record is KEPT (dead, resumable) — unlike delete.
 	if !threadInList(t, sb, th.ID) {
 		t.Errorf("stop dropped the record (should keep it)")
+	}
+}
+
+// claimActionFork: `f` forks the selected thread into a NEW headless copy via
+// `thread new --fork-from`. It proves the TUI key drives the real fork mechanism:
+// a source pi conversation (sentinel OBSIDIAN) is forked through the key, and the
+// brand-new thread's transcript carries that turn (a real copy, not an empty
+// thread) while the source is untouched.
+func claimActionFork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	src := sb.newHeadlessThread(t, "pi", "trunk")
+	sb.headlessTurn(t, src.ID, "Reply with exactly the word OBSIDIAN and nothing else")
+	srcBefore := forkedTranscript(t, sb, src.ID)
+
+	before := map[string]bool{}
+	for _, th := range sb.listThreads(t) {
+		before[th.ID] = true
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "trunk") // single thread => cursor on it
+	if m = runKey(t, m, "f"); m.ActionErr() != nil {
+		t.Fatalf("fork action errored: %v", m.ActionErr())
+	}
+
+	// A NEW headless thread appeared (same agent, different id) — the copy.
+	var forkID string
+	for _, th := range sb.listThreads(t) {
+		if before[th.ID] {
+			continue
+		}
+		if th.AgentKind != "pi" {
+			t.Fatalf("fork created a %s thread, want pi", th.AgentKind)
+		}
+		if th.AgentSessionID == src.AgentSessionID {
+			t.Fatalf("fork reused the source session id (no branch happened)")
+		}
+		forkID = th.ID
+	}
+	if forkID == "" {
+		t.Fatalf("fork did not create a new thread")
+	}
+	// The copy carries the source conversation...
+	if br := forkedTranscript(t, sb, forkID); !strings.Contains(br, "OBSIDIAN") {
+		t.Errorf("forked copy lost the source turn (not a real copy)")
+	}
+	// ...and the source transcript is untouched.
+	if forkedTranscript(t, sb, src.ID) != srcBefore {
+		t.Errorf("the SOURCE transcript changed (fork must not touch it)")
 	}
 }
 

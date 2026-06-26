@@ -34,6 +34,10 @@ go build .new+mv to ~/.local/bin/sesh), macstudio (cij@macstudio) + macbook (luk
 termux (lukas@android-main:8022 — git pull + PLAIN `go build` = CGO=1/GOOS=android per H22,
 verified on the installed binary, .new+mv; no daemon relaunch needed since binary-only). All
 four vcs.revision=07e7298. Ticket b662ec8b marked done.
+FOLLOW-UP (sesh b7eadb7, Lukas): keep the source's name marked " (fork)" instead of a nameless
+copy — forkSelected passes `--name "<row.Name> (fork)"` (a nameless source → "(fork)"). claim
+asserts the copy of "trunk" is named "trunk (fork)"; SKILL keymap updated. Binary-only redeploy
+ALL FOUR at b7eadb7 (same recipe, no daemon restart).
 
 ## H27 — cockpit clipping: the live-terminal bridge left `window-size largest` stuck forever (2026-06-25, sesh c44b5b9; NO schema change; deployed ALL FOUR)
 Lukas: "the master tmux setup cuts off the bottom in Claude Code, esp. its multiple-choice

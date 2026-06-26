@@ -49,28 +49,31 @@ func atoiDefault(s string, def int) int {
 
 // handleThreadTerminal gives the client a REAL interactive terminal onto a headful
 // thread's tmux pane over a WebSocket: a pty running `tmux attach` is bridged to the
-// socket (binary frames = terminal bytes both ways; a `{"type":"resize",…}` text frame
+// socket (binary frames = terminal bytes both ways; a `{"type":"resize",...}` text frame
 // resizes the pty). This is the daemon-native version of the bridge prototyped in
-// _dev/experiments/01_live_terminal_bridge — agent-agnostic (works for claude/codex/pi).
+// _dev/experiments/01_live_terminal_bridge -- agent-agnostic (works for claude/codex/pi).
 //
-// Detach-safety (verified in _dev/experiments/02_detach_safety): a naive second attach
-// resizes the session to the smallest/latest client, shrinking the USER's real view. So
-// we (a) force `window-size largest` FOR THE LIFETIME OF THE BRIDGE (a smaller UI viewer
-// can no longer shrink the window) and wind it back to `latest` once no viewer remains —
-// the override must be transient, since a permanent `largest` clobbers the cockpit conf
-// and clips fullscreen TUIs (see normalizeWindowSize), and (b) attach a GROUPED viewer
-// session (its own independent current-window, killed on disconnect) so selecting the
-// thread's window never moves a user watching that session.
+// The pty attaches DIRECTLY to the thread's real tmux session (no grouped "viewer" clone).
+// Consequences, all intended for one user moving between his own machines one at a time:
+// the client follows the session's own current-window, so an adjacent window the user opens
+// in that session is reachable; and sizing is left entirely to the work server's conf policy
+// (`window-size latest` -- the window follows whichever client is most-recently active). The
+// daemon does NOT override window-size, so a small client attaching can resize the session
+// to fit it -- which IS the desired "adapt to whoever is typing" behaviour. (The old design
+// created a grouped uiterm-* viewer and forced `window-size largest` for detach-safety; that
+// protected simultaneous multi-machine viewing at the cost of the active client not fitting,
+// and a stale bridge could leave `largest` stuck -- both removed.)
 //
-// Loud refusals: unknown id → 404; a thread with no live pane (headless/dead) → 409.
+// Loud refusals: unknown id -> 404; a thread with no live pane (headless/dead) -> 409.
 func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "terminal: id is required")
 		return
 	}
-	th, err := d.store.GetThread(id)
-	if err != nil {
+	// GetThread first so an unknown id is a clean 404 (FindPaneByThreadID alone would
+	// report it as 409 "no live pane", conflating "unknown" with "headless/dead").
+	if _, err := d.store.GetThread(id); err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
 			writeError(w, http.StatusNotFound, "thread not found: "+id)
 			return
@@ -91,50 +94,6 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	cols := atoiDefault(r.URL.Query().Get("cols"), 120)
 	rows := atoiDefault(r.URL.Query().Get("rows"), 32)
 
-	// Detach-safety (b): a grouped viewer session shares the windows but has its own
-	// current window, so pointing it at the thread's window never moves the user.
-	//
-	// Register the viewer BEFORE creating it so the reaper (which kills any uiterm-*
-	// it does not know about) can never race-kill a live bridge: by the time the
-	// session is visible to tmux it is already in the tracked set.
-	viewer := fmt.Sprintf("uiterm-%s-%d", id[:8], time.Now().UnixNano())
-	d.registerViewer(viewer)
-	// On exit: drop from the tracked set, kill the grouped viewer, then re-normalize the
-	// work server's window-size (restores `latest` once this was the last live viewer).
-	defer func() {
-		d.unregisterViewer(viewer)
-		d.tmuxRun("kill-session", "-t", viewer) //nolint:errcheck — best-effort cleanup
-		d.normalizeWindowSize()
-	}()
-
-	// Detach-safety (a): force `window-size largest` while a bridge is live so a smaller
-	// web viewer can't shrink the user's real (cockpit) attachment. This is a TRANSIENT
-	// override, NOT a permanent one — the OLD behaviour set `largest` globally and never
-	// restored it, silently clobbering the cockpit conf's `window-size latest` forever, so
-	// a fullscreen TUI sized to a stale taller client and its bottom rows (a Claude Code
-	// modal/input box) rendered below the viewport = the cockpit clipping bug. The override
-	// is wound back by normalizeWindowSize() (above, and in the reaper) once no viewer
-	// session remains — keyed on the actual uiterm-* sessions, not handler return, because
-	// an idle bridge's disconnect can go undetected (the same reason the reaper exists).
-	if err := d.tmuxRun("set-option", "-g", "window-size", "largest"); err != nil {
-		writeError(w, http.StatusInternalServerError, "terminal: "+err.Error())
-		return
-	}
-	// `-c <thread cwd>` sets the viewer session's working dir so a popup/new
-	// window opened inside the app's terminal (e.g. the work-conf `t` binding,
-	// `display-popup -E "zsh -l"` which inherits the SESSION dir) lands in the
-	// thread cwd — matching the real cockpit (whose work session was created
-	// with -c). Without it the viewer inherits the DAEMON's cwd (~).
-	if err := d.tmuxRun("new-session", "-d", "-t", loc.Session, "-s", viewer, "-c", th.Cwd, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)); err != nil {
-		writeError(w, http.StatusInternalServerError, "terminal: create viewer session: "+err.Error())
-		return
-	}
-	// (the viewer session is killed by the combined exit defer registered above)
-	if err := d.tmuxRun("select-window", "-t", fmt.Sprintf("%s:%d", viewer, loc.Window)); err != nil {
-		writeError(w, http.StatusInternalServerError, "terminal: select window: "+err.Error())
-		return
-	}
-
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return
@@ -142,24 +101,42 @@ func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	defer c.CloseNow() //nolint:errcheck
 	c.SetReadLimit(1 << 20)
 
-	// pty running the attach to the GROUPED viewer session. TMUX is unset so the nested
+	// pty running a DIRECT attach to the thread's real session. TMUX is unset so the nested
 	// attach is allowed. TERM is forced to xterm-256color: the supervised daemon often runs
 	// with TERM unset/dumb, which the pty/tmux would otherwise inherit and break any agent
 	// that clears the screen ("terminal does not support clear"). The UI terminal is xterm.js
 	// (xterm-256color), so drop any inherited TERM and set the one the client actually speaks.
-	cmd := d.tmuxCmd("attach-session", "-t", viewer)
+	// The real session was created with `-c <thread cwd>`, so a popup/new window opened inside
+	// it (the work-conf `t` binding) lands in the thread cwd -- no per-bridge `-c` needed.
+	cmd := d.tmuxCmd("attach-session", "-t", loc.Session)
 	cmd.Env = append(scrubEnv(os.Environ(), "TMUX", "TMUX_PANE", "TERM"), "TERM=xterm-256color")
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		c.Close(websocket.StatusInternalError, "pty start failed") //nolint:errcheck
 		return
 	}
-	defer ptmx.Close()       //nolint:errcheck
-	defer cmd.Process.Kill() //nolint:errcheck
-	defer cmd.Wait()         //nolint:errcheck — reap the tmux client
+	// Teardown IN ORDER: kill the tmux attach client, reap it, then close the pty. Three
+	// separate `defer`s would run LIFO (Wait before Kill), so Wait would block forever on a
+	// still-attached client and Kill would never fire — leaking the attach as a lingering
+	// client on the real session. (The old code masked this with the uiterm reaper; with a
+	// direct attach and no reaper, the bridge MUST tear its own attach down.)
+	defer func() {
+		_ = cmd.Process.Kill() // detach the client
+		_ = cmd.Wait()         // reap the zombie
+		_ = ptmx.Close()
+	}()
 
 	bridgePTY(r.Context(), c, ptmx)
 }
+
+// Keepalive cadence for the terminal bridge: ping the client every bridgePingInterval and
+// give it bridgePingTimeout to pong. A half-open connection (a phone that slept or dropped
+// its network without a close frame) is otherwise invisible until the OS TCP keepalive fires
+// (~2h on Linux) -- which would strand the daemon's tmux attach for hours.
+const (
+	bridgePingInterval = 15 * time.Second
+	bridgePingTimeout  = 10 * time.Second
+)
 
 // bridgePTY pumps a pty <-> WebSocket: pty output → binary frames; a client binary frame →
 // pty input; a {"type":"resize",cols,rows} text frame resizes the pty. Returns when either
@@ -185,6 +162,27 @@ func bridgePTY(parent context.Context, c *websocket.Conn, ptmx *os.File) {
 		}
 	}()
 
+	// Keepalive: detect a dead/half-open client fast (see bridgePingInterval). On a failed
+	// ping, cancel -> both pumps return -> the deferred pty close kills the tmux attach.
+	go func() {
+		defer cancel()
+		t := time.NewTicker(bridgePingInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				pctx, pcancel := context.WithTimeout(ctx, bridgePingTimeout)
+				err := c.Ping(pctx)
+				pcancel()
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	// WebSocket -> pty. Binary = keystrokes; a text {"type":"resize",cols,rows} resizes.
 	for {
 		typ, data, rerr := c.Read(ctx)
@@ -204,110 +202,6 @@ func bridgePTY(parent context.Context, c *websocket.Conn, ptmx *os.File) {
 		}
 		if _, werr := ptmx.Write(data); werr != nil {
 			return
-		}
-	}
-}
-
-// viewerReapTick is how often the reaper sweeps orphaned uiterm-* sessions.
-const viewerReapTick = 60 * time.Second
-
-func (d *Daemon) registerViewer(name string) {
-	d.viewerMu.Lock()
-	d.viewers[name] = true
-	d.viewerMu.Unlock()
-}
-
-func (d *Daemon) unregisterViewer(name string) {
-	d.viewerMu.Lock()
-	delete(d.viewers, name)
-	d.viewerMu.Unlock()
-}
-
-// normalizeWindowSize winds the work server's `window-size` back to `latest` (tmux's own
-// default, and the policy the cockpit conf sets) whenever NO live-terminal viewer session
-// remains. A bridge forces `largest` for detach-safety (terminal.go) — but that override
-// must not outlive the bridge: a lingering `largest` sizes a fullscreen TUI in the master
-// cockpit to a stale taller client and clips its bottom rows (the Claude Code modal/input
-// box). The presence of a `uiterm-*` session is the authoritative "a bridge is live"
-// signal (more reliable than handler-return, since an idle bridge's disconnect can go
-// undetected). Called on every bridge exit AND by the reaper — so the startup reap, which
-// kills all orphan viewers, self-heals any server a previous daemon left stuck on largest.
-// No-op while any viewer remains (the live bridge still wants largest).
-func (d *Daemon) normalizeWindowSize() {
-	out, err := d.tmuxCmd("list-sessions", "-F", "#{session_name}").Output()
-	if err != nil {
-		return // no server / no sessions — nothing to normalize
-	}
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(name, "uiterm-") {
-			return // a live bridge still needs largest
-		}
-	}
-	d.tmuxRun("set-option", "-g", "window-size", "latest") //nolint:errcheck — best-effort restore
-}
-
-func (d *Daemon) viewerTracked(name string) bool {
-	d.viewerMu.Lock()
-	defer d.viewerMu.Unlock()
-	return d.viewers[name]
-}
-
-// reapViewers kills every uiterm-* session on the work server that this daemon is NOT
-// actively bridging. The per-WebSocket defer in handleThreadTerminal cleans up viewers
-// on a clean disconnect, but a daemon crash/restart/-9 leaves its in-flight viewers
-// orphaned (tmux outlives the daemon), and they pile up forever. This is the sweep:
-//   - at startup, the tracked set is empty, so EVERY uiterm-* is an orphan from a prior
-//     process and gets killed (no live bridge can predate this process);
-//   - periodically, anything not in the tracked set is an orphan.
-//
-// Killing a grouped viewer never affects the real thread session (a separate member of
-// the same group) — only the unattached clone goes away.
-func (d *Daemon) reapViewers() {
-	out, err := d.tmuxCmd("list-sessions", "-F", "#{session_name}").Output()
-	if err != nil {
-		return // no server / no sessions yet — nothing to reap
-	}
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if !strings.HasPrefix(name, "uiterm-") || d.viewerTracked(name) {
-			continue
-		}
-		d.tmuxRun("kill-session", "-t", name) //nolint:errcheck — best-effort orphan sweep
-	}
-	// Having swept orphan viewers, wind `window-size` back to `latest` if no bridge is
-	// left — so the startup sweep (tracked set empty → every uiterm-* is an orphan and
-	// dies) self-heals a work server a previous daemon left stuck on `largest`.
-	d.normalizeWindowSize()
-}
-
-func (d *Daemon) startReaper() {
-	d.viewerMu.Lock()
-	d.reaperStarted = true
-	d.viewerMu.Unlock()
-	go d.viewerReaper()
-}
-
-func (d *Daemon) stopReaper() {
-	d.viewerMu.Lock()
-	started := d.reaperStarted
-	d.viewerMu.Unlock()
-	if !started {
-		return
-	}
-	close(d.reaperStop)
-	<-d.reaperDone
-}
-
-func (d *Daemon) viewerReaper() {
-	defer close(d.reaperDone)
-	d.reapViewers() // startup sweep: kill every orphan left by a prior daemon process
-	t := time.NewTicker(viewerReapTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-d.reaperStop:
-			return
-		case <-t.C:
-			d.reapViewers()
 		}
 	}
 }

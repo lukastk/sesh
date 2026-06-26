@@ -66,15 +66,6 @@ type Daemon struct {
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
 
-	// viewers tracks the uiterm-* grouped sessions this daemon is actively bridging
-	// (one per live-terminal WebSocket — see terminal.go). The reaper kills any
-	// uiterm-* session NOT in this set, sweeping orphans left by a crash/restart.
-	viewerMu      sync.Mutex
-	viewers       map[string]bool
-	reaperStarted bool
-	reaperStop    chan struct{}
-	reaperDone    chan struct{}
-
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
 	// is set. apiStop stops the background bind-retry loop on shutdown.
@@ -136,9 +127,6 @@ func New(cfg config.Config) (*Daemon, error) {
 		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		hlInFlight: map[string]bool{},
 		hlReply:    map[string]string{},
-		viewers:    map[string]bool{},
-		reaperStop: make(chan struct{}),
-		reaperDone: make(chan struct{}),
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
@@ -183,7 +171,6 @@ func (d *Daemon) Serve() error {
 	d.mesh.start()      // begin syncing peers' snapshots into the local cache
 	go d.evt.run()      // observe the merged mesh + fire [[hooks]]
 	go d.checkPeerDNS() // loudly warn if http peers' hostnames don't resolve (e.g. a CGO=0 termux build)
-	d.startReaper()     // sweep orphaned uiterm-* live-terminal sessions (startup + periodic)
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the master cockpit to one window per connected machine
 	}
@@ -233,7 +220,6 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	}
 	d.mesh.stopAndWait()
 	d.maint.stopAndWait()
-	d.stopReaper()
 	srvErr := d.srv.Shutdown(ctx)
 	storeErr := d.store.Close()
 	if srvErr != nil {

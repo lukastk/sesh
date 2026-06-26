@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -65,18 +64,6 @@ func (d *Daemon) handleTmuxInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Exclude internal live-terminal viewer sessions (uiterm-*): ephemeral grouped
-	// clones the daemon creates per live-terminal WebSocket (see terminal.go), not
-	// user sessions. Surfacing them clutters session pickers and would make
-	// "kill empty sessions" tooling tear down a live viewer (it has no backing thread).
-	kept := sessions[:0]
-	for _, s := range sessions {
-		if strings.HasPrefix(s.Name, "uiterm-") {
-			continue
-		}
-		kept = append(kept, s)
-	}
-	sessions = kept
 	if filter := r.URL.Query().Get("session"); filter != "" {
 		filtered := sessions[:0]
 		for _, s := range sessions {

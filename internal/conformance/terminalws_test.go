@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -142,67 +140,5 @@ func TestThreadTerminalWebSocket(t *testing.T) {
 		return err == nil && strings.Contains(cap, marker)
 	}) {
 		t.Fatalf("typed marker %q never appeared in the live pane (write bridge broken)", marker)
-	}
-
-	// Working-dir fix (uiterm): the grouped viewer session is created with
-	// `-c <thread cwd>`, so the work-conf `t` binding (`display-popup -E "zsh
-	// -l"`, which without -d opens in the popup CLIENT's session cwd) lands in
-	// the THREAD cwd — matching the real cockpit. Without the fix the viewer's
-	// session cwd is the DAEMON's cwd (~). The WS pty already attached a real
-	// client to the viewer session; replicate the binding honestly by running
-	// `display-popup -c <that client> -E 'pwd>file'` and asserting the popup
-	// shell's cwd is the thread cwd. (A command-line popup would read the CLI
-	// client's cwd, not the session's — it must be driven through the attached
-	// client, exactly as the `t` keybind is.)
-	var viewer, vclient string
-	if !waitUntil(10*time.Second, func() bool {
-		out, err := sb.rawTmux(t, "list-clients", "-F", "#{client_name}\t#{client_session}")
-		if err != nil {
-			return false
-		}
-		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-			name, sess, ok := strings.Cut(line, "\t")
-			if ok && strings.HasPrefix(sess, "uiterm-"+th.ID[:8]) {
-				vclient, viewer = name, sess
-				return true
-			}
-		}
-		return false
-	}) {
-		t.Fatalf("no client attached to a uiterm-%s viewer session", th.ID[:8])
-	}
-	pwdFile := filepath.Join(t.TempDir(), "popup-pwd.txt")
-	if out, err := sb.rawTmux(t, "display-popup", "-c", vclient, "-t", viewer, "-E", "pwd > "+pwdFile+"; sleep 0.2"); err != nil {
-		t.Fatalf("display-popup on viewer: %v\n%s", err, out)
-	}
-	var gotPath string
-	if !waitUntil(5*time.Second, func() bool {
-		b, err := os.ReadFile(pwdFile)
-		if err != nil || len(strings.TrimSpace(string(b))) == 0 {
-			return false
-		}
-		gotPath, _ = filepath.EvalSymlinks(strings.TrimSpace(string(b)))
-		return true
-	}) {
-		t.Fatalf("popup never wrote its pwd to %s", pwdFile)
-	}
-	wantPath, _ := filepath.EvalSymlinks(cwd)
-	if gotPath != wantPath {
-		t.Errorf("prefix+t popup cwd = %q, want thread cwd %q (uiterm `-c <cwd>` fix missing → opens in daemon's ~)", gotPath, wantPath)
-	}
-
-	// Regression (master-cockpit clipping): while a live-terminal bridge is up, the daemon
-	// forces `window-size largest` (detach-safety — a smaller web viewer must not shrink
-	// the user's real attachment). The OLD behaviour set this PERMANENTLY and never wound
-	// it back, silently clobbering the cockpit conf's `window-size latest` forever, so a
-	// fullscreen TUI sized to a stale taller client and its bottom rows (a Claude Code
-	// modal/input box) rendered below the viewport = clipped. (The wind-back to `latest`
-	// once no viewer remains is proven deterministically by TestUITermViewerReaper's
-	// startup-sweep self-heal — not here, since an idle pane's disconnect can go
-	// undetected, so handler return is not a reliable trigger.)
-	if got, err := sb.rawTmux(t, "show-options", "-g", "-w", "-v", "window-size"); err != nil {
-		t.Fatalf("show window-size: %v", err)
-	} else if strings.TrimSpace(got) != "largest" {
-		t.Errorf("window-size DURING bridge = %q, want largest (detach-safety override)", strings.TrimSpace(got))
 	}
 }

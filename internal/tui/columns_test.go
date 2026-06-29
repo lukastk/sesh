@@ -267,11 +267,16 @@ func TestOptimisticPending(t *testing.T) {
 }
 
 func TestMasterCursorAsyncAndNestedJump(t *testing.T) {
-	// Async/non-blocking: a master-cursor model's Init is STILL just the fetch — the
-	// resolve fires later (from the first meshMsg), so prefix+s startup is not gated.
+	// Non-blocking + concurrent: a master-cursor model's Init returns a batch that kicks
+	// the fetch AND the master-cursor resolve together (the resolve overlaps startup so the
+	// cursor lands by first render, but still does not BLOCK it). A plain model's Init stays
+	// a lone fetch (what the conformance harness drives via Init()()).
 	m := New("/tmp/none.sock", true).WithLocal("self", "sock").WithMasterCursor("peer")
 	if m.Init() == nil {
-		t.Fatal("Init must still kick the fetch (startup must not block on the resolve)")
+		t.Fatal("Init must kick the fetch + resolve (startup must not block on the resolve)")
+	}
+	if New("/tmp/none.sock", true).WithLocal("self", "sock").Init() == nil {
+		t.Fatal("a non-master-cursor Init must still kick the fetch")
 	}
 
 	// Nested jump: a collapsed child becomes the cursor target, ancestors expanded.

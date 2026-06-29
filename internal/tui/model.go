@@ -156,13 +156,14 @@ type Model struct {
 	// thread (the `--cursor` start-on-current-thread affordance), then clears it.
 	preselectID string
 
-	// masterCursorMachine: when set (the master popup's prefix+s), the TUI resolves
-	// the thread the active master window is CURRENTLY showing — ASYNCHRONOUSLY, after
-	// the first render, so it never delays startup — then jumps the cursor to it. The
-	// resolve runs on that machine's daemon (the work server it owns), routed when
-	// remote. masterCursorDone makes it a one-shot.
+	// masterCursorMachine: when set (the master popup's prefix+s / F12), the TUI resolves
+	// the thread the active master window is CURRENTLY showing and jumps the cursor to it.
+	// The resolve is kicked CONCURRENTLY with the first fetch from Init (a one-shot, since
+	// Init runs once), so the cursor is already correct by the time rows first render
+	// instead of starting at the top and visibly jumping a beat later. It runs on that
+	// machine's daemon (the work server it owns): a direct daemon-client call when the
+	// active window is local (no `sesh` subprocess), routed via a subprocess when remote.
 	masterCursorMachine string
-	masterCursorDone    bool
 
 	// uuidPopup: `y` shows the selected thread's FULL uuid in a popup; `c` inside
 	// it copies to the system clipboard, any other key closes. note is the last
@@ -427,10 +428,18 @@ type meshMsg struct {
 
 type tickMsg time.Time
 
-// Init kicks off the first fetch. (The single poll timer is started from the first
-// meshMsg — see tickStarted — so Init stays a lone fetch cmd, which the conformance
-// harness drives directly.)
-func (m Model) Init() tea.Cmd { return m.fetch() }
+// Init kicks off the first fetch. For the master prefix+s / F12 path it ALSO kicks the
+// master-cursor resolve CONCURRENTLY (rather than waiting for the first meshMsg), so the
+// resolve overlaps startup and the cursor lands on the current thread by the time rows
+// first render — no visible jump. (The single poll timer is still started from the first
+// meshMsg — see tickStarted. A non-master-cursor Init stays a lone fetch cmd, which the
+// conformance harness drives directly via Init()().)
+func (m Model) Init() tea.Cmd {
+	if m.masterCursorMachine != "" {
+		return tea.Batch(m.fetch(), m.resolveMasterCursor())
+	}
+	return m.fetch()
+}
 
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
@@ -555,14 +564,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Bootstrap the SINGLE poll timer exactly once (on the first successful
 		// fetch). Subsequent meshMsgs — including those from action/reconcile
-		// fetches — do NOT re-arm, so the poll rate can't multiply. On the same first
-		// fetch, kick the (async) master-cursor resolve so it never blocks startup.
+		// fetches — do NOT re-arm, so the poll rate can't multiply. (The master-cursor
+		// resolve is kicked from Init concurrently with this first fetch, not here.)
 		if !m.tickStarted {
 			m.tickStarted = true
-			if m.masterCursorMachine != "" && !m.masterCursorDone {
-				m.masterCursorDone = true
-				return m, tea.Batch(tick(), m.resolveMasterCursor())
-			}
 			return m, tick()
 		}
 		return m, nil
@@ -703,17 +708,28 @@ func reconcileAfter(d time.Duration) tea.Cmd {
 // client, or its pane is a plain shell) — a legitimate no-op, never an error.
 type preselectMsg struct{ id string }
 
-// resolveMasterCursor execs `tmux master-current` against the active master window's
-// machine (routed when remote), off the main loop, returning a preselectMsg. Failures
-// resolve to an empty preselect — a missing thread must never disrupt the TUI.
+// resolveMasterCursor resolves the thread the active master window is currently showing,
+// off the main loop, returning a preselectMsg. Failures resolve to an empty preselect — a
+// missing thread must never disrupt the TUI.
+//
+// When the active window is LOCAL (same machine as the TUI's daemon) it calls the daemon
+// client directly — no `sesh` subprocess (~12ms of fork/exec saved, so the common
+// same-machine jump is effectively instant). When it's a peer it execs `tmux
+// master-current --machine X`, whose --machine routing reaches that peer's daemon (the
+// client here only speaks to the local daemon, so the subprocess is what carries the hop).
 func (m Model) resolveMasterCursor() tea.Cmd {
-	bin, env, origin, machine := m.binaryPath, m.navEnv, m.machine, m.masterCursorMachine
+	c, bin, env, origin, machine := m.client, m.binaryPath, m.navEnv, m.machine, m.masterCursorMachine
 	return func() tea.Msg {
-		args := []string{"tmux", "master-current", "--origin", origin}
-		if machine != "" && machine != origin {
-			args = append(args, "--machine", machine)
+		if machine == "" || machine == origin {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, tid, _, err := c.TmuxMasterCurrent(ctx, origin)
+			if err != nil {
+				return preselectMsg{} // resolve failed → no preselect (non-fatal)
+			}
+			return preselectMsg{id: tid}
 		}
-		cmd := exec.Command(bin, args...)
+		cmd := exec.Command(bin, "tmux", "master-current", "--origin", origin, "--machine", machine)
 		cmd.Env = append(os.Environ(), env...)
 		out, err := cmd.Output()
 		if err != nil {

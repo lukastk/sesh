@@ -1,5 +1,31 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H33 — mt-enter-new-thread-here landed the thread in $HOME (cwd from $PWD, not the pane) (2026-06-29, myrig 8a4965e; NO sesh change; deployed ALL FOUR)
+Ticket 1284a9c3: ran `mt-enter-new-thread-here` inside a workspace dir to start a Claude session,
+but the session opened in $HOME. DIAGNOSIS: the recorded thread (70b8f23f) had cwd=/home/lukastk +
+session=scratch. The sesh side was innocent — CLI absCwd passes an absolute path through, daemon
+validates absolute + CreateWindowCmd uses `-c dir` correctly. ROOT CAUSE was the MYRIG shell
+function: `mt-enter-new-thread-here` passed `--cwd "$PWD"`, but it's listed in MT_QUICK_CMDS, so it
+runs from the work prefix+m quick-menu DISPLAY-POPUP — and a display-popup starts in $HOME, so $PWD
+was $HOME (not the pressing pane's dir). The session resolved right (scratch) because the popup's
+client session matched, but $PWD didn't. FIX (shell.sh.jinja, render-only): resolve BOTH session and
+cwd from the ORIGINATING pane = `${SESH_MT_PANE:-$TMUX_PANE}` ($SESH_MT_PANE is baked in by the work
+prefix+m binding, else $TMUX_PANE when run directly in a pane) via `tmux display-message -t "$pane"
+-p '#{session_name}'` / `'#{pane_current_path}'`. pane_current_path is the real "here" whether run in
+the pane or from the popup. Mirrors the established $SESH_MT_PANE pattern in _mt_current_thread. So
+the H14 "run it IN your pane, NOT in the popup" caveat is now moot — it works from both.
+PROVEN: isolated tmux server, pane cd'd into a test dir, then SESH_MT_PANE=<pane> + cwd /home/lukastk
+(the popup's wrong $PWD) → resolution returned the test dir + scratch, not $PWD. Full rendered
+shell.sh passes `zsh -n`.
+DEPLOY (render-only — shell.sh is a rendered jinja, sourced into shells; NO daemon restart, NO conf
+re-source since it's a function not a binding): ALL FOUR via `python3 scripts/install-home.py
+"$MYRIG_TARGETS"` (or uv --with jinja2). mymain local + macbook/macstudio/termux over ssh-target.
+GOTCHA (bit me): install-home takes ONE comma-separated arg = the FULL `$MYRIG_TARGETS` string. I
+first ran `install-home.py mymain` (single target) which made shell.sh + every sesh/myrig conf
+"no longer match targets" and DELETED the symlinks (shell.sh is `all`-gated, not satisfiable by
+`mymain` alone). Re-running with the full `"$MYRIG_TARGETS"` string fully restored them. NEVER pass a
+lone machine name to install-home — always the whole comma list. Ticket marked done (closed by 8a4965e).
+
 ## H29 — maintainer idle early-out: stop fork/exec-ing tmux+ps every tick with 0 threads (2026-06-26, sesh a9529ae; NO schema change; deployed ALL FOUR)
 Lukas saw "loads of copies of the sesh daemon" in termux htop + asked for a myrig review for
 runaway/overload. DIAGNOSIS (ssh into android-main:8022): NOT multiple daemons — exactly ONE

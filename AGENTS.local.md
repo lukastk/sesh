@@ -1609,3 +1609,35 @@ already bound = the worst half-state (key bound, function missing → "command n
 python3 HAS jinja2 (3.1.6) — re-ran `python3 scripts/install-home.py` directly (no pipe-to-tail) and
 confirmed mmt-jump landed. LESSON: never gate a fallback on a `cmd | tail` pipeline; check the real
 command's status or run it bare. Ticket 1742cd23 marked done (closed by myrig 944ac3d).
+
+### H30 follow-up — F12 (Caps Lock) + `sesh tui` + a pty key-shim (2026-06-29, myrig dea086a)
+Lukas iterated the H30 jump twice. (1) KEY: C-s [flow-control] then C-g [Claude's external-editor]
+were rejected; he set Caps Lock→F12 via Karabiner on the Macs and wanted F12. tmux CANNOT see Caps
+Lock directly (an OS lock key emits no keycode) — the OS remap to a real key is what tmux binds; and
+tmux 3.5a accepts only F1-F12 as bind names (TESTED: F13+ rejected), so F12 works, F18-style tricks
+don't. (2) PICKER: switch from fzf to `sesh tui` itself — its DEFAULT view is already
+`ViewActive = non-archived AND not on hold` (model.go) and `[tui] all_machines` defaults it
+cross-machine, so the fzf + jq on-hold filter were deleted (the H30 `_mt_enter_session --jump`
+additions reverted as dead code). (3) RE-PRESS-TO-SELECT without modifying the sesh binary: new
+home/.sesh/myrig/keyshim.py — a ~15-line pty wrapper (python `pty.spawn` + a `stdin_read` filter)
+that rewrites the F12 byte sequence (ESC[24~ = terminfo kf12 = 1b,5b,32,34,7e) to CR before the
+child sees it; all else passes through. mmt-jump runs `sesh tui` through it. WHY it works: a tmux
+display-popup BYPASSES key tables, so while the jump popup is open the keypress goes to the program
+INSIDE it — the shim turns that 2nd F12 into the Enter sesh tui already treats as "enter selected
+thread". install-home symlinks keyshim.py to ~/.sesh/myrig/ on every machine (any non-.jinja file
+under home/ → symlink). PROVED in isolated tmux: shim translates trigger→Enter to a child; with a
+popup open a real F12 reaches the shim not the binding (the re-press test, GOT:[hello]); bind -n F12
+fires; keyshim+real `sesh tui` renders the [active] cross-machine grid; F12 inside the live TUI acts
+as Enter (live-filtered /fix→2 rows, then F12 selected, ZERO literal ESC[24~ leaked).
+GOTCHAS (bit me): (a) `source-file` only ADDS/overrides bindings — the stale `bind -n C-f` from H30
+PERSISTED on the running masters; must `tmux -L sesh-master unbind -n C-f` explicitly (did so on
+mymain/macbook/termux; macstudio has no master). (b) A stray `py_compile` I ran left a repo
+`home/.sesh/myrig/__pycache__/` that install-home then SYMLINKED into ~/.sesh — `rm -rf` it (running
+keyshim as a script doesn't create __pycache__; only my compile did). (c) Over `ssh-target <m> 'zsh
+-lc "…"'`, an unquoted `===` label triggers zsh's `=cmd` expansion ("== not found") and nested
+double-quotes fight the local shell — pipe a heredoc to `zsh -ls` on the remote instead (clean, login
+env sets MYRIG_TARGETS). (d) termux render: `uv run` can't fetch a Python — use its `python3`
+(has jinja2 3.1.6) directly, NOT via `… | tail` (the pipe masks the real exit status, H30 lesson).
+DEPLOY: myrig dea086a (rebased over a concurrent install-home push). All four: install-home (render
+shell.sh + symlink keyshim.py) + source master conf + unbind C-f where a master ran. macbook is the
+live Caps Lock→F12 machine.

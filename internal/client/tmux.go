@@ -49,13 +49,18 @@ func (c *Client) TmuxNav(ctx context.Context, req api.NavRequest) error {
 	return c.postJSON(ctx, "http://unix/v1/tmux/nav", req, nil)
 }
 
-// TmuxMasterCurrent fetches GET /v1/tmux/master-current?origin=X — what the origin
-// master's window is currently showing on this daemon's work server: the active
-// pane's thread id, the client's session name, and its window index (session "" / window
-// -1 = no live master client).
-func (c *Client) TmuxMasterCurrent(ctx context.Context, origin string) (session, threadID string, window int, err error) {
+// TmuxMasterCurrent fetches GET /v1/tmux/master-current?origin=X[&machine=M] — what the
+// origin master's window is currently showing: the active pane's thread id, the client's
+// session name, and its window index (session "" / window -1 = no live master client).
+// machine == "" resolves on THIS daemon's work server; machine == a peer asks that daemon
+// (which owns the work server) to resolve it — the daemon routes over its warm mesh
+// connection so the caller never forks a `sesh … --machine` subprocess.
+func (c *Client) TmuxMasterCurrent(ctx context.Context, origin, machine string) (session, threadID string, window int, err error) {
 	var out api.MasterCurrentResponse
 	u := "http://unix/v1/tmux/master-current?origin=" + url.QueryEscape(origin)
+	if machine != "" {
+		u += "&machine=" + url.QueryEscape(machine)
+	}
 	if err := c.getJSON(ctx, u, &out); err != nil {
 		return "", "", -1, err
 	}

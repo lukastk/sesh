@@ -1,11 +1,13 @@
 package conformance
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/matrix"
 	"github.com/lukastk/sesh/internal/tmux"
 )
@@ -75,5 +77,19 @@ func testMasterCurrent(t *testing.T) {
 	}) {
 		out, _, _ := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine)
 		t.Errorf("master-current did not TRACK the nav to peerw (%s); got %q", peerw.ID, strings.TrimSpace(out))
+	}
+
+	// DAEMON-SIDE routing (schema 36): the TUI's master-cursor preselect for a REMOTE
+	// active window no longer forks `sesh … --machine`; it asks its OWN daemon, passing
+	// machine=peer, and the daemon routes the resolve to the peer over its mesh transport.
+	// Drive that exact path: a direct client to self's daemon with machine=peer must return
+	// the same thread the routed CLI does (peerw) — proving self's daemon did the hop.
+	selfClient := client.New(self.Home + "/daemon.sock")
+	if !waitUntil(10*time.Second, func() bool {
+		_, tid, _, err := selfClient.TmuxMasterCurrent(context.Background(), self.Machine, peer.Machine)
+		return err == nil && tid == peerw.ID
+	}) {
+		_, tid, _, err := selfClient.TmuxMasterCurrent(context.Background(), self.Machine, peer.Machine)
+		t.Errorf("daemon-routed master-current (machine=%s) = %q (err %v), want peerw %s", peer.Machine, tid, err, peerw.ID)
 	}
 }

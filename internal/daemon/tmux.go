@@ -13,14 +13,29 @@ import (
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
-// handleTmuxMasterCurrent serves GET /v1/tmux/master-current?origin=X: the thread
-// the origin master's window is CURRENTLY showing on THIS machine's work server.
-// Resolved in-process (the daemon owns the socket + reads its own marker), so it's a
-// single fast call the TUI makes asynchronously — never blocking master prefix+s.
+// handleTmuxMasterCurrent serves GET /v1/tmux/master-current?origin=X[&machine=M]: the
+// thread the origin master's window is CURRENTLY showing on machine M's work server.
+//
+// machine == "" (or this daemon's own machine) resolves IN-PROCESS — the daemon owns the
+// socket + reads its own marker. machine == a peer is RESOLVED ON THAT PEER over the
+// daemon's own warm mesh connection (the peerRemoteClient http pool, kept alive by
+// meshsync, or an ssh hop) — so the TUI's master-cursor preselect for a remote active
+// window is a local unix call + a warm peer round trip, not a cold `sesh … --machine`
+// subprocess (~120ms → ~the RTT). The peer is queried with origin only (no machine), the
+// same in-process resolve pre-36 peers already serve.
 func (d *Daemon) handleTmuxMasterCurrent(w http.ResponseWriter, r *http.Request) {
 	origin := r.URL.Query().Get("origin")
 	if origin == "" {
 		writeError(w, http.StatusBadRequest, "master-current: origin is required")
+		return
+	}
+	if machine := r.URL.Query().Get("machine"); machine != "" && machine != d.cfg.Machine {
+		resp, err := d.fetchPeerMasterCurrent(machine, origin)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	session, tid, window, err := d.tmux.MarkerClientCurrent(tmux.MasterClientMarker(d.cfg.Home, origin))

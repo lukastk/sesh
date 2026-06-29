@@ -712,30 +712,25 @@ type preselectMsg struct{ id string }
 // off the main loop, returning a preselectMsg. Failures resolve to an empty preselect — a
 // missing thread must never disrupt the TUI.
 //
-// When the active window is LOCAL (same machine as the TUI's daemon) it calls the daemon
-// client directly — no `sesh` subprocess (~12ms of fork/exec saved, so the common
-// same-machine jump is effectively instant). When it's a peer it execs `tmux
-// master-current --machine X`, whose --machine routing reaches that peer's daemon (the
-// client here only speaks to the local daemon, so the subprocess is what carries the hop).
+// Always a single LOCAL daemon-client call — no `sesh` subprocess. For a local active
+// window machine is "" (the daemon reads its own marker). For a REMOTE active window the
+// daemon routes the resolve to that peer over its own warm mesh connection (schema 36), so
+// even the cross-machine case is a local unix call + a warm round trip rather than a cold
+// fork+connect. (machine == origin is the local case, sent as "" so a pre-36 daemon — which
+// would ignore the param — still resolves it correctly during a deploy skew.)
 func (m Model) resolveMasterCursor() tea.Cmd {
-	c, bin, env, origin, machine := m.client, m.binaryPath, m.navEnv, m.machine, m.masterCursorMachine
+	c, origin, machine := m.client, m.machine, m.masterCursorMachine
+	if machine == origin {
+		machine = ""
+	}
 	return func() tea.Msg {
-		if machine == "" || machine == origin {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_, tid, _, err := c.TmuxMasterCurrent(ctx, origin)
-			if err != nil {
-				return preselectMsg{} // resolve failed → no preselect (non-fatal)
-			}
-			return preselectMsg{id: tid}
-		}
-		cmd := exec.Command(bin, "tmux", "master-current", "--origin", origin, "--machine", machine)
-		cmd.Env = append(os.Environ(), env...)
-		out, err := cmd.Output()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, tid, _, err := c.TmuxMasterCurrent(ctx, origin, machine)
 		if err != nil {
 			return preselectMsg{} // resolve failed → no preselect (non-fatal)
 		}
-		return preselectMsg{id: strings.TrimSpace(string(out))}
+		return preselectMsg{id: tid}
 	}
 }
 

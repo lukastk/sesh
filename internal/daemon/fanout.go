@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -94,6 +95,54 @@ func fetchPeerThreads(p peers.Peer, includeArchived bool) ([]api.Thread, error) 
 		out = append(out, th)
 	}
 	return out, nil
+}
+
+// fetchPeerMasterCurrent resolves master-current for `origin` on `machine`'s work server
+// by asking that peer's daemon — over the peer's EXPLICIT transport (http via its warm TCP
+// API connection, else a real ssh hop). The peer is queried with origin only (it resolves
+// in-process), so a pre-36 peer serves it unchanged. A failure is returned to the handler
+// (which surfaces it as 502 → the TUI treats a failed resolve as an empty, no-op preselect)
+// — never a silent transport downgrade.
+func (d *Daemon) fetchPeerMasterCurrent(machine, origin string) (api.MasterCurrentResponse, error) {
+	reg, err := peers.Load(d.cfg.PeersPath())
+	if err != nil {
+		return api.MasterCurrentResponse{}, err
+	}
+	p, ok := reg.Get(machine)
+	if !ok {
+		return api.MasterCurrentResponse{}, fmt.Errorf("master-current: unknown machine %q: no peer registered", machine)
+	}
+	if p.Transport() == "http" {
+		c, err := peerRemoteClient(p)
+		if err != nil {
+			return api.MasterCurrentResponse{}, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
+		defer cancel()
+		session, tid, window, err := c.TmuxMasterCurrent(ctx, origin, "")
+		if err != nil {
+			return api.MasterCurrentResponse{}, err
+		}
+		return api.MasterCurrentResponse{Schema: api.SchemaVersion, ThreadID: tid, Session: session, Window: window}, nil
+	}
+	args := []string{
+		"env",
+		"SESH_HOME=" + shQuote(p.Home),
+		"SESH_MACHINE=" + shQuote(p.Machine),
+		shQuote(p.Binary),
+		"tmux", "master-current", "--origin", shQuote(origin), "--json",
+	}
+	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
+	out, err := exec.Command("ssh", sshArgs...).Output()
+	if err != nil {
+		return api.MasterCurrentResponse{}, err
+	}
+	var resp api.MasterCurrentResponse
+	if err := json.Unmarshal(bytes.TrimSpace(out), &resp); err != nil {
+		return api.MasterCurrentResponse{}, err
+	}
+	return resp, nil
 }
 
 func shQuote(s string) string {

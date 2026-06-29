@@ -69,7 +69,10 @@ func tmuxMasterCurrent(cfg config.Config, args []string) error {
 	if *origin == "" {
 		return errors.New("master-current: --origin is required")
 	}
-	session, tid, window, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin)
+	// --machine is handled by the pseudo-global router (route.go) before dispatch, so by
+	// the time we get here daemonClient already points at the right machine's daemon —
+	// resolve in-process there (machine "").
+	session, tid, window, err := daemonClient(cfg).TmuxMasterCurrent(context.Background(), *origin, "")
 	if err != nil {
 		return err
 	}

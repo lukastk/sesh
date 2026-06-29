@@ -138,7 +138,16 @@ package api
 // inherited — the daemon resolves only its own records). Additive omitempty field + a
 // semantic widening of the existing on_hold bool → mixed-mesh safe (a pre-35 peer just
 // reports non-inherited on_hold for its threads until upgraded).
-const SchemaVersion = 35
+//
+// 36: GET /v1/tmux/master-current gains an optional `machine` query param — when set to a
+// peer, the daemon RESOLVES IT ON THAT PEER over its own warm mesh connection (the
+// peerRemoteClient http pool / an ssh hop) instead of the caller forking a `sesh … --machine`
+// subprocess + a cold connection. This is what makes the TUI's master-cursor preselect fast
+// for a remote active window (~120ms cold subprocess → ~the warm RTT). Additive + peer-safe:
+// the routed peer is queried with NO machine (origin only), the same call pre-36 peers
+// already serve; only the daemon the TUI talks to (its own machine) needs to be on 36, so a
+// routine binary+restart on that machine suffices and the mesh need not be in lockstep.
+const SchemaVersion = 36
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

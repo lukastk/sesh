@@ -256,6 +256,10 @@ resolved per machine (a cross-machine parent's hold is not inherited).
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
 width instead of clipping, so every binding stays visible on a narrow pane.
 
+The **`archived`** view (in the `tab` cycle) orders by **most recently archived first**
+(the daemon stamps `archived_at` on each archive; un-archiving clears it, so re-archiving
+re-stamps a fresh time). An opt-in **`archived`** column shows that timestamp.
+
 **Tickets view (`K`)** is a full-screen takeover listing the selected thread's tickets. It
 defaults to showing **active** tickets; **`tab`** opens a status picker (triage/ready/active/
 done/dropped/**all**) that narrows the list. Enter drills into one ticket: its fields (name, prompt) + a small action menu. Enter on

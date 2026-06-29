@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 	"github.com/lukastk/sesh/internal/tmux"
 	"github.com/lukastk/sesh/internal/tui"
@@ -45,6 +46,7 @@ func init() {
 	registerTUIClaim("master-cursor", claimMasterCursor)
 	registerTUIClaim("action-hold", claimActionHold)
 	registerTUIClaim("view-hold", claimViewHold)
+	registerTUIClaim("view-archived-order", claimViewArchivedOrder)
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -106,8 +108,8 @@ func claimQuitEsc(t *testing.T) {
 	}
 }
 
-// claimViewCycleTab: Tab cycles active -> archived -> all (REAL archived state from
-// the daemon decides each view's rows), and the title names the current view.
+// claimViewCycleTab: Tab cycles active -> on hold -> archived -> all (REAL archived
+// state from the daemon decides each view's rows), and the title names the current view.
 func claimViewCycleTab(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -121,11 +123,13 @@ func claimViewCycleTab(t *testing.T) {
 	}
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
-	// Settle on BOTH threads being PUBLISHED (the [all] condition) before
-	// cycling — waiting on absence alone is trivially true pre-publish and
-	// races the maintainer (this claim flaked exactly that way once).
+	// The built-in cycle is active -> on hold -> archived -> all -> active. Settle on
+	// BOTH threads being PUBLISHED (the [all] condition) before asserting — waiting on
+	// absence alone is trivially true pre-publish and races the maintainer (this claim
+	// flaked exactly that way once). Three Tabs from active reaches [all].
 	var view string
-	m = runSpecial(t, m, tea.KeyTab)
+	m = runSpecial(t, m, tea.KeyTab) // -> [on hold]
+	m = runSpecial(t, m, tea.KeyTab) // -> [archived]
 	m = runSpecial(t, m, tea.KeyTab) // -> [all]
 	if !waitUntil(25*time.Second, func() bool {
 		m, view = render(t, m)
@@ -146,6 +150,15 @@ func claimViewCycleTab(t *testing.T) {
 		t.Errorf("active view rows wrong (want stayme only):\n%s", view)
 	}
 
+	m = runSpecial(t, m, tea.KeyTab) // -> [on hold] (empty — neither thread is held)
+	view = m.View()
+	if !strings.Contains(view, "[on hold]") {
+		t.Errorf("on-hold view title missing [on hold]: %q", firstLine(view))
+	}
+	if strings.Contains(view, "stayme") || strings.Contains(view, "parkme") {
+		t.Errorf("on-hold view should be empty (neither thread is held):\n%s", view)
+	}
+
 	m = runSpecial(t, m, tea.KeyTab) // -> archived
 	view = m.View()
 	if !strings.Contains(view, "[archived]") {
@@ -154,8 +167,8 @@ func claimViewCycleTab(t *testing.T) {
 	if strings.Contains(view, "stayme") || !strings.Contains(view, "parkme") {
 		t.Errorf("archived view rows wrong (want parkme only):\n%s", view)
 	}
-	m = runSpecial(t, m, tea.KeyTab) // -> all again for the cycle-back check
 
+	m = runSpecial(t, m, tea.KeyTab) // -> all
 	m = runSpecial(t, m, tea.KeyTab) // -> back to active
 	if m.CurrentView() != tui.ViewActive {
 		t.Errorf("view did not cycle back to active, got %v", m.CurrentView())
@@ -309,6 +322,65 @@ func claimViewHold(t *testing.T) {
 	if strings.Contains(view, "working") {
 		t.Errorf("on-hold view should hide un-held threads:\n%s", view)
 	}
+}
+
+// claimViewArchivedOrder: the archived view orders by most-recently-archived first
+// (archived_at DESC). Three threads are archived in sequence (oldest→newest, with
+// >1s gaps so the daemon stamps distinct second-granular archived_at values); the
+// archived view must render the newest-archived at the top — the order a user
+// reaching for "what did I just park" expects.
+func claimViewArchivedOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	a := sb.newHeadlessThread(t, "pi", "arch-alpha")
+	b := sb.newHeadlessThread(t, "pi", "arch-bravo")
+	c := sb.newHeadlessThread(t, "pi", "arch-charlie")
+
+	for i, th := range []api.Thread{a, b, c} {
+		if i > 0 {
+			time.Sleep(1100 * time.Millisecond) // distinct second-granular archive stamps
+		}
+		if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+			t.Fatalf("archive %s: %v\n%s", th.Name, err, stderr)
+		}
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	// Reach the archived view: Tab twice (active -> on hold -> archived).
+	m = runSpecial(t, m, tea.KeyTab)
+	m = runSpecial(t, m, tea.KeyTab)
+	var view string
+	if !waitUntil(25*time.Second, func() bool {
+		m, view = render(t, m)
+		return strings.Contains(view, "[archived]") &&
+			strings.Contains(view, "arch-alpha") &&
+			strings.Contains(view, "arch-bravo") &&
+			strings.Contains(view, "arch-charlie")
+	}) {
+		t.Fatalf("archived view never showed all three threads:\n%s", view)
+	}
+
+	// Most recently archived first: charlie (last archived) above bravo above alpha.
+	ia := lineIndexOf(view, "arch-alpha")
+	ib := lineIndexOf(view, "arch-bravo")
+	ic := lineIndexOf(view, "arch-charlie")
+	if !(ic < ib && ib < ia) {
+		t.Errorf("archived view not ordered most-recently-archived first:\n  charlie@%d bravo@%d alpha@%d\n%s", ic, ib, ia, view)
+	}
+}
+
+// lineIndexOf returns the index of the first rendered line containing sub (-1 if
+// absent) — used to assert relative render order between rows.
+func lineIndexOf(view, sub string) int {
+	for i, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, sub) {
+			return i
+		}
+	}
+	return -1
 }
 
 // holdUntilOf reads a thread's persisted on_hold_until from the daemon record.

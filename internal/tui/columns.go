@@ -38,6 +38,7 @@ const (
 	ColNotify      = "notify"
 	ColCreated     = "created"
 	ColHold        = "hold"
+	ColArchived    = "archived"
 )
 
 // colSpec is a column's static metadata. fullWidth columns size to the longest
@@ -116,6 +117,15 @@ var colOrder = []colSpec{
 				return "↑" + d // dominated by an ancestor's hold
 			}
 			return d
+		}},
+	{name: ColArchived, header: "ARCHIVED", fixedW: 10,
+		// When the thread was most recently archived (the `archived` view orders by it).
+		// Blank for a live thread, or a pre-37 record that carries no archived_at.
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if !r.Archived {
+				return ""
+			}
+			return createdLabel(r.ArchivedAtUnix)
 		}},
 }
 

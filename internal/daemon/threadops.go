@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"strconv"
+	"time"
 
 	"errors"
 	"github.com/lukastk/sesh/internal/agents"
@@ -132,7 +133,7 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "archive: id is required")
 		return
 	}
-	if err := d.store.SetThreadArchived(req.ID, req.Archived); err != nil {
+	if err := d.store.SetThreadArchived(req.ID, req.Archived, time.Now().Unix()); err != nil {
 		d.threadOpErr(w, err)
 		return
 	}
@@ -384,9 +385,13 @@ func (d *Daemon) handleThreadImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// InsertThread always lands un-archived; persist the imported archived flag.
+	// InsertThread persists the record's archived_at but lands the archived FLAG at 0
+	// (the flag column is written by SetThreadArchived); flip it for an imported archived
+	// thread. Passing the record's OWN archived_at as `now` preserves it verbatim (the
+	// CASE keeps an existing value); a pre-37 record carries 0, which stays 0 (no archive
+	// time ever existed — it sorts to the bottom of the archived view, by design).
 	if th.Archived {
-		if err := d.store.SetThreadArchived(th.ID, true); err != nil {
+		if err := d.store.SetThreadArchived(th.ID, true, th.ArchivedAtUnix); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

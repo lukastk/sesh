@@ -132,6 +132,12 @@ var migrations = []string{
 	// clock), so a thread auto-leaves hold once the instant passes — the store only
 	// holds the absolute deadline the user set. APPENDED last.
 	`ALTER TABLE threads ADD COLUMN on_hold_until INTEGER NOT NULL DEFAULT 0;`,
+	// 18: threads.archived_at — the unix time a thread was most recently archived
+	// (0 while un-archived). The daemon stamps it on the archive transition (the
+	// caller passes `now`; a CASE preserves an existing value across an idempotent
+	// re-archive and clears it to 0 on un-archive). The TUI's archived view orders by
+	// it (most recently archived first). APPENDED last.
+	`ALTER TABLE threads ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

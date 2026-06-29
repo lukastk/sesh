@@ -481,8 +481,15 @@ func (m Model) fetch() tea.Cmd {
 			}
 		}
 		// Stable order (machine, then name, then id) so the cursor never jumps —
-		// the maintainer's snapshot map iteration is unordered.
+		// the maintainer's snapshot map iteration is unordered. The ARCHIVED view is
+		// the exception: it orders by most-recently-archived first (archived_at DESC),
+		// the order a user reaches for when reviewing what they just parked. Ties and
+		// pre-37 records (archived_at=0) fall back to the stable order. The tree walk
+		// (visibleMatches) inherits this as its sibling/root order.
 		sort.Slice(rows, func(i, j int) bool {
+			if view == ViewArchived && rows[i].ArchivedAtUnix != rows[j].ArchivedAtUnix {
+				return rows[i].ArchivedAtUnix > rows[j].ArchivedAtUnix
+			}
 			if rows[i].Machine != rows[j].Machine {
 				return rows[i].Machine < rows[j].Machine
 			}

@@ -29,6 +29,11 @@ type Thread struct {
 	HeadlessStarted bool `json:"headless_started,omitempty"`
 	// Archived hides the thread from the active list (record kept).
 	Archived bool `json:"archived,omitempty"`
+	// ArchivedAtUnix is the unix time the thread was most recently archived; 0
+	// while un-archived. Stamped by the OWNING daemon on the archive transition,
+	// preserved across an idempotent re-archive, cleared to 0 on un-archive. The
+	// TUI's archived view orders by it (most recently archived first).
+	ArchivedAtUnix int64 `json:"archived_at_unix,omitempty"`
 	// Model is the agent model pinned to this thread (opaque pass-through, e.g.
 	// "haiku", "anthropic/claude-opus-4-8", "gpt-5.5"). '' = the agent's own
 	// default. Applied on headed spawn, resume, and every headless turn; a per-turn

@@ -147,7 +147,14 @@ package api
 // the routed peer is queried with NO machine (origin only), the same call pre-36 peers
 // already serve; only the daemon the TUI talks to (its own machine) needs to be on 36, so a
 // routine binary+restart on that machine suffices and the mesh need not be in lockstep.
-const SchemaVersion = 36
+//
+// 37: threads.archived_at — the unix time a thread was most recently archived (0 while
+// un-archived). Stamped by the OWNING daemon on the archive transition (preserved across an
+// idempotent re-archive, cleared on un-archive); the TUI's archived view orders by it (most
+// recently archived first). Additive/omitempty on the Thread record (flows through ThreadRow/
+// ThreadSnapshot automatically) ⇒ mixed-mesh safe: a pre-37 peer omits it (its archived rows
+// sort as archived_at=0, i.e. by the stable fallback) until upgraded.
+const SchemaVersion = 37
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

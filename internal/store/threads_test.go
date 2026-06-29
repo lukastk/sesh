@@ -120,8 +120,8 @@ func TestThreadOpsRenameTagArchive(t *testing.T) {
 		t.Fatalf("rename/tag wrong: %+v", got)
 	}
 
-	// archive hides from the active list but keeps the record.
-	if err := s.SetThreadArchived("o1", true); err != nil {
+	// archive hides from the active list but keeps the record, and stamps archived_at.
+	if err := s.SetThreadArchived("o1", true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	active, _ := s.ListThreads(false)
@@ -129,11 +129,32 @@ func TestThreadOpsRenameTagArchive(t *testing.T) {
 	if len(active) != 0 || len(all) != 1 {
 		t.Fatalf("archive filter wrong: active=%d all=%d", len(active), len(all))
 	}
-	if err := s.SetThreadArchived("o1", false); err != nil {
+	if got, _ := s.GetThread("o1"); got.ArchivedAtUnix != 1000 {
+		t.Fatalf("archive did not stamp archived_at: got %d, want 1000", got.ArchivedAtUnix)
+	}
+	// An idempotent re-archive PRESERVES the original stamp (does not bump it).
+	if err := s.SetThreadArchived("o1", true, 2000); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("o1"); got.ArchivedAtUnix != 1000 {
+		t.Fatalf("re-archive should preserve archived_at: got %d, want 1000", got.ArchivedAtUnix)
+	}
+	// Un-archive clears archived_at to 0.
+	if err := s.SetThreadArchived("o1", false, 3000); err != nil {
 		t.Fatal(err)
 	}
 	if active, _ := s.ListThreads(false); len(active) != 1 {
 		t.Fatalf("unarchive failed: active=%d", len(active))
+	}
+	if got, _ := s.GetThread("o1"); got.ArchivedAtUnix != 0 {
+		t.Fatalf("unarchive should clear archived_at: got %d, want 0", got.ArchivedAtUnix)
+	}
+	// A fresh archive after un-archive re-stamps (the cleared 0 lets the CASE fire).
+	if err := s.SetThreadArchived("o1", true, 4000); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("o1"); got.ArchivedAtUnix != 4000 {
+		t.Fatalf("re-archive after unarchive should re-stamp: got %d, want 4000", got.ArchivedAtUnix)
 	}
 }
 

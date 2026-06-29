@@ -1641,3 +1641,38 @@ env sets MYRIG_TARGETS). (d) termux render: `uv run` can't fetch a Python — us
 DEPLOY: myrig dea086a (rebased over a concurrent install-home push). All four: install-home (render
 shell.sh + symlink keyshim.py) + source master conf + unbind C-f where a master ran. macbook is the
 live Caps Lock→F12 machine.
+
+## H31 — master prefix+s / F12 preselect lands instantly (concurrent resolve + no fork for local) (2026-06-29, sesh 5be2e21; NO schema change; deployed ALL FOUR)
+Lukas: launching `sesh tui` from the cockpit (prefix+s or the H30 F12/Caps-Lock jump) preselects the
+thread the active master window is on, but the cursor started at the TOP and visibly JUMPED a beat
+later. MEASURED the cost (date-delta timer, no /usr/bin/time on this box): `sesh` fork/exec ~12ms;
+master-current LOCAL ~13-16ms (≈ all fork — the RPC itself ~1-3ms); master-current ROUTED to a peer
+~128ms (the cross-machine ssh/http round trip, intrinsic); mesh fetch ~17ms. ROOT CAUSE = two things:
+(1) SERIALIZED — resolveMasterCursor was kicked only from the FIRST meshMsg, so its latency stacked
+ON TOP of the first fetch; (2) FORKED — it always exec'd a whole `sesh tmux master-current`
+subprocess even when the active window is LOCAL (where the TUI's own daemon client can answer).
+FIX (internal/tui/model.go, binary-only — TUI is a daemon client, the TmuxMasterCurrent endpoint is
+unchanged ⇒ NO schema change, NO daemon restart): (a) Init now kicks the resolve CONCURRENTLY with
+the first fetch via a CONDITIONAL `tea.Batch` (only when masterCursorMachine is set; a plain Init
+stays a lone fetch — important because the conformance harness drives `m.Init()()` directly and
+expects a single meshMsg, and `render()` is only ever called on non-master-cursor models, verified).
+The resolve feeds the existing m.preselectID machinery, so whichever fetch carries rows lands the
+cursor; for local the resolve finishes before/with the fast local-cache fetch ⇒ cursor correct on the
+first render-with-rows (no jump), matching the instant --cursor path. Removed the now-redundant
+meshMsg resolve-kick + the masterCursorDone one-shot guard (Init runs once, so the kick is inherently
+one-shot — and Init's value receiver can't persist a "done" flag anyway). (b) resolveMasterCursor:
+local (machine=="" || ==origin) → m.client.TmuxMasterCurrent directly (~2ms, no fork); REMOTE → still
+execs `sesh tmux master-current --machine X` because the local client can't route the ssh/http hop
+(only the subprocess's --machine routing reaches the peer daemon). NET: local jump effectively
+instant; remote shows rows immediately + lands after the one ~120ms cross-machine read (intrinsic —
+the marker-client pane lives on the peer). TESTS: TUI unit suite green incl. -race on
+MasterCursor/Preselect; updated TestMasterCursorAsyncAndNestedJump to assert Init kicks fetch+resolve
+together AND a plain Init stays a lone fetch. Live-smoked `sesh tui` w/ SESH_TUI_MASTER_MACHINE on the
+live mymain daemon: renders cleanly, empty resolve = graceful no-op (cursor top, no crash). DEPLOY:
+binary-only — rebuilt+installed on all four (mymain native; macbook/macstudio /opt/homebrew/bin/go;
+termux PLAIN `go build` = CGO=1/android per H22), all vcs.revision=5be2e21. No daemon restart (each
+F12/prefix+s spawns a fresh `sesh tui` from the installed binary → live on next press).
+FUTURE (if the remote ~120ms still bugs him): add daemon-side routing for master-current so the TUI
+calls the LOCAL daemon (fast, no fork) and the daemon resolves the peer over its WARM keep-alive
+meshsync connection (~RTT, maybe ~30ms) instead of a cold subprocess+http. Bigger change (daemon
+endpoint), deferred — Lukas to decide if the remote case warrants it.

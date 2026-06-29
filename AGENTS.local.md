@@ -1569,3 +1569,43 @@ daemon by explicit PID (`sesh daemon status` prints it) instead; and `mv` the ne
 BEFORE killing, so the zshenv login-guard can only ever relaunch the NEW binary.
 DEPLOY: all four daemons on 8c833f6 (termux native CGO=1 + relaunch; macstudio/macbook/mymain native
 build + supervisorctl restart). Self-check silent on mymain/macs (they have /etc/resolv.conf).
+
+## H30 — cockpit FAST-JUMP: prefix-less C-f → fzf of active non-on-hold threads (2026-06-29, myrig 944ac3d; NO sesh change; deployed ALL FOUR)
+Ticket 1742cd23: a keyboard shortcut "as fast as just pressing Ctrl+S" (NOT a prefix sequence) that
+opens an fzf of ACTIVE threads across all machines and jumps into one. Lukas's original ask was
+hold-to-open / release-to-select. VIABILITY (checked first, per his request): the hold/release
+gesture is IMPOSSIBLE — terminals emit NO key-RELEASE events for normal keys (holding just
+auto-repeats the same byte sequence); the only release-reporting mechanism is the Kitty keyboard
+protocol, which tmux can't BIND to, fzf doesn't read, and termux doesn't support. Pivoted (with
+Lukas) to: re-press the SAME key to select the hovered row. KEY-CHOICE saga (each ruled out live):
+Cmd/⌘ can't be bound (terminal never receives it); M-/Alt fiddly on Mac Option; C-s = XOFF
+flow-control; C-g = Claude Code's external-editor; C-a = the MASTER PREFIX itself (binding it
+root-table would break every prefix+ binding) AND readline start-of-line. Landed on **C-f**
+(shadows readline forward-char + vim/pager page-forward globally in the cockpit — accepted).
+IMPLEMENTATION (myrig ONLY — no sesh daemon/binary/schema change): shell.sh.jinja `_mt_enter_session`
+gained a `--jump` mode = (a) drop on-hold rows via jq `select((.on_hold // false)|not)` over `thread
+grid` (default grid already excludes archived ⇒ what's left is the active set), (b) pass `--bind
+'ctrl-f:accept'` to fzf so re-pressing the opening key selects the hovered row (Enter accepts, Esc
+cancels = fzf defaults). New `mmt-jump` (= `_mt_enter_session all --jump`) + my_alias. tmux.master.conf
+`bind -n C-f` → display-popup running mmt-jump, carrying $SESH_NAV_CLIENT + active machine like s/a.
+mysetup-navigator SKILL keymap updated (+ fixed a stale a/s swap). It's an mmt-layer / master-only key
+(no mt twin) because cross-machine nav physically needs the master.
+WHY a ROOT-TABLE key on the MASTER works from inside an agent pane: the master is the OUTER tmux; it
+processes root keys FIRST and only passes unbound keys to the focused pane (the nested ssh→work
+client). PROVEN in an isolated TRIPLE-NEST (driver→master→work): a genuine C-f fired the master's
+root binding with ZERO bytes leaking to the inner work pane. Also verified: rendered template zsh -n
+clean; fzf ctrl-f:accept selects / Esc cancels / Enter accepts (real-pane send-keys); live filter
+10 active / 1 on-hold hidden. NB display-popups CAN'T be driven by `send-keys` (it injects into the
+pane stdin, bypassing BOTH the key table AND the popup overlay) — test the open path via a nested
+real-client attach, the fzf binds in a plain pane.
+DEPLOY (myrig: render shell.sh + source-file the master conf; symlinked confs update on git pull,
+rendered shell.sh needs install-home): ALL FOUR. mymain (python3 install-home + source master, C-f
+bound on running master), macstudio (cij@, pull+render, no running master — staged), macbook (lukas@,
+pull+render, master RUNNING+attached → C-f live), termux (lukas@android-main:8022). TERMUX GOTCHA
+(bit me): `uv run --with jinja2 install-home` FAILED (uv couldn't fetch a Python) but my
+`(uv … | tail) || (python3 …)` fallback NEVER fired — a pipeline's exit status is the LAST command
+(tail=0), so uv's failure was masked and shell.sh was left STALE (mmt-jump absent) while C-f was
+already bound = the worst half-state (key bound, function missing → "command not found"). FIX: termux
+python3 HAS jinja2 (3.1.6) — re-ran `python3 scripts/install-home.py` directly (no pipe-to-tail) and
+confirmed mmt-jump landed. LESSON: never gate a fallback on a `cmd | tail` pipeline; check the real
+command's status or run it bare. Ticket 1742cd23 marked done (closed by myrig 944ac3d).

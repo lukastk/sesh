@@ -1676,3 +1676,45 @@ FUTURE (if the remote ~120ms still bugs him): add daemon-side routing for master
 calls the LOCAL daemon (fast, no fork) and the daemon resolves the peer over its WARM keep-alive
 meshsync connection (~RTT, maybe ~30ms) instead of a cold subprocess+http. Bigger change (daemon
 endpoint), deferred — Lukas to decide if the remote case warrants it.
+
+## H32 — remote master-cursor preselect: daemon-side warm routing + sesh tui filter mode for F12 (2026-06-29, sesh 7f679e7 api 35→36, myrig 1b46084; deployed ALL FOUR)
+Follow-up to H31. Two asks: (1) tackle the ~120ms REMOTE master-cursor preselect; (2) F12/Caps-Lock
+should open `sesh tui` in FILTER mode like prefix+s; (3) "apply the same fix to prefix+s".
+(1) DAEMON-SIDE WARM ROUTING (sesh, api 35→36). H31 made LOCAL preselect instant but left remote at
+~120ms: resolveMasterCursor forked `sesh tmux master-current --machine X` — a cold subprocess (~12ms
+fork) that opened a COLD connection to peer X (extra handshake RTTs) and round-tripped. FIX: GET
+/v1/tmux/master-current gains an optional `machine` query param; machine==peer is resolved ON THAT
+PEER by the daemon via fetchPeerMasterCurrent (internal/daemon/fanout.go) — peerRemoteClient over http
+(the conn meshsync keeps WARM in the shared http.DefaultTransport pool, so ~RTT, no handshake) or an
+ssh hop, mirroring fetchPeerThreads. client.TmuxMasterCurrent gained a `machine` arg; the TUI's
+resolveMasterCursor now ALWAYS makes a single LOCAL daemon-client call (no subprocess ever) — local
+sent as machine "" (so a pre-36 daemon still resolves local correctly during deploy skew), remote sent
+as the machine (daemon does the warm hop). CLI unchanged (route.go still routes --machine; passes "").
+MEASURED on mymain→macbook (real network): cold CLI route ~121-141ms → daemon warm-route ~80-94ms.
+The remaining ~80ms is the FLOOR: macbook RTT ~47ms + macbook's marker read ~30ms = one round trip +
+the work. Can't beat physics without proactive per-tick caching (adds cross-machine load — not worth
+it). MIXED-MESH SAFE: only the daemon the TUI talks to (its own machine) needs 36; the routed peer is
+queried with origin only (machine ""), the in-process resolve pre-36 peers already serve — so the mesh
+need not be in lockstep, a binary+restart on the master machine suffices. handler returns 502 on a
+peer failure → the TUI treats it as an empty no-op preselect (never a wrong cursor).
+(2) FILTER MODE (myrig): mmt-jump now runs `sesh tui --filter` (was bare `sesh tui`), opening in
+filter mode like prefix+s. The keyshim still rewrites F12→Enter; in the TUI's filter mode Enter
+(=re-pressed F12) calls navSelected() = enters the highlighted row (filter.go:245), Esc applies the
+filter + drops to normal nav, q closes. So type-to-narrow then F12-to-enter is intact.
+(3) prefix+s NEEDED NOTHING: prefix+s and F12/mmt-jump both just launch `sesh tui` with
+SESH_TUI_MASTER_MACHINE set → the SAME resolveMasterCursor code path → both H31 (concurrent Init) and
+H32 (daemon warm-routing) apply to prefix+s automatically. It was only "still slow" because macbook
+hadn't been redeployed yet; fixed once the binary+schema-36 daemon landed there.
+TEST: the tmux.master-current conformance cell (real master + real ssh-localhost peer) gained a
+direct-daemon-client assertion — a client to self's daemon, called with machine=peer, returns the same
+thread the routed CLI does (peerw), proving self's daemon did the hop (the path the TUI uses). Cell
+green (10.8s). TUI unit suite green incl -race; full build+vet clean. Live-proven: a curl of mymain's
+daemon socket with machine=macbook returned a real macbook thread over the warm http conn.
+DEPLOY (api 36 = daemon RESTART): ALL FOUR. mymain (native build + supervisorctl restart sesh-daemon),
+macbook + macstudio (lukas@/cij@, git pull + /opt/homebrew/bin/go build + supervisorctl restart),
+termux (lukas@android-main:8022 — git pull + PLAIN go build CGO=1/android, mv, kill daemon by EXPLICIT
+pid + setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/sesh-master per
+~/.myrig/zshenv/termux.sh — NOT pkill -f, NOT supervisor). All four api schema 36. myrig 1b46084
+rendered on all four (shell.sh only; F12 binding unchanged so no conf re-source). NB `sesh daemon
+status` text shows `schema_version: 18` = the STORE migration version, NOT the api schema — read the
+api schema from `--json | jq .schema` (36).

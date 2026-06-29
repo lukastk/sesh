@@ -1744,3 +1744,26 @@ pid + setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets s
 rendered on all four (shell.sh only; F12 binding unchanged so no conf re-source). NB `sesh daemon
 status` text shows `schema_version: 18` = the STORE migration version, NOT the api schema — read the
 api schema from `--json | jq .schema` (36).
+
+### H32 follow-up — keyshim must SIZE the child pty (F12 sesh tui rendered garbled) (2026-06-29, myrig 4df5cce; myrig-only)
+Lukas: pressing F12 (Caps Lock) opened `sesh tui` rendered GARBLED — rows wrapped/doubled + stale
+terminal content bled through — but prefix+s was fine. (He noticed it on an archived thread but it
+recurred unarchived — archived was a red herring.) ROOT CAUSE: prefix+s runs `sesh tui` DIRECTLY in
+the popup pty (correct size); F12 runs it through keyshim.py, which used python `pty.spawn` — and
+pty.spawn/forkpty creates the inner pty WITHOUT copying the window size, so bubbletea rendered for a
+wrong/default size (rows wider than the perceived width → terminal wraps them → doubled rows; the
+unrendered popup area shows stale content). A plain PANE test happened to look fine (it inherited a
+usable size), which is exactly why my earlier smoke missed it — only a real display-popup exposed it.
+FIX (rewrote home/.sesh/myrig/keyshim.py): drop pty.spawn for an explicit bridge — pty.openpty(),
+copy our terminal's winsize (ioctl TIOCGWINSZ on stdout → TIOCSWINSZ on the pty) BEFORE the child
+starts so the TUI never sees 0x0, os.fork + os.login_tty in the child, then a select() copy loop that
+still rewrites the trigger bytes (F12=ESC[24~) → CR; a SIGWINCH handler re-copies the size (the kernel
+then SIGWINCHes the child) so resizes work. Exit with the child's status. PROVEN in isolated tmux: the
+child sees the right size in a pane (40 150) AND in a REAL display-popup (34 133 of a 40x150 client,
+not 0 0 / 24 80 — drove the popup via a nested real-client attach since send-keys can't reach a popup);
+F12 still translates to Enter; `sesh tui --filter` renders cleanly (no doubled rows). DEPLOY: keyshim.py
+is SYMLINKED by install-home (non-.jinja under home/ → symlink), so deploy = `git pull` on each machine
+(no render, no restart) — the F12 popup picks up the new file on the next press. All four pulled;
+os.login_tty present on every python3 (linux/macOS/android); compiles clean. LESSON: a pty wrapper for
+a full-screen TUI MUST set the child pty's winsize + forward SIGWINCH — pty.spawn alone doesn't, and a
+plain-pane test won't catch it; test inside the actual display-popup.

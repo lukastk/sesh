@@ -29,7 +29,9 @@ func runMeta(cfg config.Config, args []string) error {
 		return err
 	}
 	positional = append(positional, fs.Args()...)
-	rid, err := resolveThreadID(cfg, *id)
+	// --id selects the thread (rejecting an explicit-empty --id; omit it to use the
+	// current thread). The remaining positionals are the meta key/value, not an id.
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}

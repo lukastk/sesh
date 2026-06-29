@@ -21,9 +21,16 @@ func runInfo(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return err
+	}
 	ref := *id
+	refSupplied := *id != ""
 	if ref == "" && fs.NArg() == 1 {
-		ref = fs.Arg(0) // positional form: sesh info <id>
+		ref, refSupplied = fs.Arg(0), true // positional form: sesh info <id>
+	}
+	if err := guardEmptyPositionalRef(refSupplied, ref); err != nil {
+		return err
 	}
 	rid, err := resolveThreadID(cfg, ref)
 	if err != nil {

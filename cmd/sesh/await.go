@@ -29,8 +29,10 @@ func runAwait(cfg config.Config, args []string) error {
 	// Accept the v1 positional form (`sesh await <id> --timeout …`): Go's flag
 	// package stops at the first positional, so pop a leading ref first.
 	ref0 := ""
+	ref0Supplied := false
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		ref0, args = args[0], args[1:]
+		ref0Supplied = true
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -40,6 +42,12 @@ func runAwait(cfg config.Config, args []string) error {
 	}
 	if *poll <= 0 {
 		return errors.New("await: --poll must be > 0")
+	}
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return err
+	}
+	if err := guardEmptyPositionalRef(ref0Supplied, ref0); err != nil {
+		return err
 	}
 	ref := *id
 	if ref == "" {

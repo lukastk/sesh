@@ -22,14 +22,19 @@ func runTail(cfg config.Config, args []string, whole bool) error {
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	n := fs.Int("n", 20, "number of lines (tail)")
 	ref := ""
+	refSupplied := false
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		ref, args = args[0], args[1:]
+		refSupplied = true
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if ref == "" && fs.NArg() == 1 {
-		ref = fs.Arg(0)
+		ref, refSupplied = fs.Arg(0), true
+	}
+	if err := guardEmptyPositionalRef(refSupplied, ref); err != nil {
+		return err
 	}
 	rid, err := resolveThreadID(cfg, ref)
 	if err != nil {

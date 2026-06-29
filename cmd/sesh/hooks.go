@@ -73,6 +73,11 @@ func runHooks(args []string) error {
 		if *name == "" {
 			return errors.New("hooks test: --name is required")
 		}
+		// An explicit empty --thread must not silently mean "synthetic" (the OMITTED
+		// default) — reject it like the empty --id footgun.
+		if err := guardEmptyFlag(fs, "thread"); err != nil {
+			return err
+		}
 		tid := ""
 		if *thread != "" {
 			rid, err := resolveThreadID(cfg, *thread)

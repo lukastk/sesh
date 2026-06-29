@@ -107,7 +107,7 @@ func threadRename(cfg config.Config, args []string) error {
 	if *name == "" {
 		return errors.New("thread rename: --name is required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func threadTag(cfg config.Config, args []string) error {
 	if len(add) == 0 && len(remove) == 0 {
 		return errors.New("thread tag: at least one --add/--remove required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func threadArchive(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -205,11 +205,9 @@ func threadResume(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Accept a positional id too (`sesh resume <id>`).
-	if *id == "" && fs.NArg() == 1 {
-		*id = fs.Arg(0)
-	}
-	rid, err := resolveThreadID(cfg, *id)
+	// Accept a positional id too (`sesh resume <id>`); reject an explicit-empty
+	// --id / positional, infer the current thread only when both are omitted.
+	rid, err := resolveIDOrPositional(cfg, fs)
 	if err != nil {
 		return err
 	}
@@ -236,10 +234,9 @@ func threadHeadful(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *id == "" && fs.NArg() == 1 {
-		*id = fs.Arg(0)
-	}
-	rid, err := resolveThreadID(cfg, *id)
+	// Accept a positional id too (`sesh headful <id>`); reject an explicit-empty
+	// --id / positional, infer the current thread only when both are omitted.
+	rid, err := resolveIDOrPositional(cfg, fs)
 	if err != nil {
 		return err
 	}
@@ -333,7 +330,7 @@ func threadSendHeadless(cfg config.Config, args []string) error {
 	if *text == "" {
 		return errors.New("thread send-headless: --text is required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -353,7 +350,7 @@ func threadHeadlessReply(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -383,7 +380,7 @@ func threadSend(cfg config.Config, args []string) error {
 	if *text == "" {
 		return errors.New("thread send: --text is required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -403,7 +400,7 @@ func threadStatus(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -662,7 +659,7 @@ func threadPane(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -693,7 +690,7 @@ func threadCapture(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -722,7 +719,7 @@ func threadReparent(cfg config.Config, args []string) error {
 	if (*parent == "") == !*root {
 		return errors.New("thread reparent: exactly one of --parent or --root is required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -756,7 +753,7 @@ func threadNotify(cfg config.Config, args []string) error {
 	if *on == *off {
 		return errors.New("thread notify: exactly one of --on or --off is required")
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -813,7 +810,7 @@ func threadHold(cfg config.Config, args []string) error {
 		}
 		when = d.Unix()
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
@@ -840,7 +837,7 @@ func threadTranscript(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, *id)
+	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -40,6 +42,81 @@ import (
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/tmux"
 )
+
+// The empty-selector footgun: resolveThreadID treats an empty selector as "infer
+// the current thread" (the F1 convenience). An OMITTED --id is fine — that IS the
+// convenience — but an EXPLICITLY-passed empty value (`sesh thread archive --id
+// "$X"` where $X is unset, or `sesh info ""`) is indistinguishable from omission,
+// so a verb silently acts on the WRONG (current) thread. That is exactly how an
+// archive once hid the running session. The guards below make an explicit empty
+// selector a LOUD error (mirroring "loud errors over silent failures"); inference
+// on a truly-omitted selector is untouched. The DESTRUCTIVE verbs (stop, delete)
+// go further still — they never infer at all (an omitted --id is also an error).
+
+// guardEmptyIDFlag rejects an --id that was passed on the command line but is empty
+// (or whitespace). Call it right after fs.Parse in any command that resolves the
+// acted-on thread from --id. Omitting --id entirely is not flagged (inference).
+func guardEmptyIDFlag(fs *flag.FlagSet) error { return guardEmptyFlag(fs, "id") }
+
+// guardEmptyFlag is guardEmptyIDFlag for an arbitrarily-named selector flag (e.g.
+// `--thread`). It uses fs.Visit, which reports only flags actually present on the
+// command line, so an omitted flag is never rejected.
+func guardEmptyFlag(fs *flag.FlagSet, name string) error {
+	passedEmpty := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name && strings.TrimSpace(f.Value.String()) == "" {
+			passedEmpty = true
+		}
+	})
+	if passedEmpty {
+		return fmt.Errorf("--%s was passed but is empty — give a thread id, or omit --%s to use the current thread", name, name)
+	}
+	return nil
+}
+
+// guardEmptyPositionalRef rejects a single positional thread id that was supplied
+// but empty (`sesh info ""`), the positional twin of guardEmptyIDFlag. `supplied`
+// is whether a positional id argument was actually given; an omitted positional is
+// not flagged (inference).
+func guardEmptyPositionalRef(supplied bool, ref string) error {
+	if supplied && strings.TrimSpace(ref) == "" {
+		return errors.New("the thread id argument was given but is empty — give a thread id, or omit it to use the current thread")
+	}
+	return nil
+}
+
+// resolveIDFlag resolves the acted-on thread from the command's --id flag, after
+// rejecting an explicit empty value (guardEmptyIDFlag). It replaces the bare
+// `resolveThreadID(cfg, *id)` at every command that selects a single thread purely
+// by --id, folding in the footgun guard so no call site can forget it. `id` is the
+// command's bound --id flag pointer (its flagset is `fs`).
+func resolveIDFlag(cfg config.Config, fs *flag.FlagSet, id *string) (string, error) {
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return "", err
+	}
+	return resolveThreadID(cfg, *id)
+}
+
+// resolveIDOrPositional is resolveIDFlag for verbs that ALSO accept the thread id
+// as a single positional argument (`sesh resume <id>`): it rejects an explicit
+// empty --id OR an explicit empty positional, prefers --id, falls back to the
+// positional, and infers the current thread only when BOTH were omitted.
+func resolveIDOrPositional(cfg config.Config, fs *flag.FlagSet) (string, error) {
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return "", err
+	}
+	if err := guardEmptyPositionalRef(fs.NArg() == 1, fs.Arg(0)); err != nil {
+		return "", err
+	}
+	ref := ""
+	if f := fs.Lookup("id"); f != nil {
+		ref = f.Value.String()
+	}
+	if ref == "" && fs.NArg() == 1 {
+		ref = fs.Arg(0)
+	}
+	return resolveThreadID(cfg, ref)
+}
 
 // resolveThreadID resolves the thread a verb acts on (see the package comment
 // above for the precedence). The returned id is always a full, daemon-known

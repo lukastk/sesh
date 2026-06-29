@@ -32,6 +32,12 @@ func runBackup(cfg config.Config, args []string) error {
 	if *to == "" {
 		return errors.New("backup: --to <file> is required")
 	}
+	// An explicit empty --id ($X with $X unset) must NOT silently fall through to
+	// "back up every thread" — that is the empty-selector footgun. Omitting --id is
+	// the documented all-threads default.
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return err
+	}
 	c := daemonClient(cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -84,6 +90,11 @@ func runRestore(cfg config.Config, args []string) error {
 	if *from == "" {
 		return errors.New("restore: --from <file> is required")
 	}
+	// An explicit empty --id must not silently mean "restore everything" (the default
+	// for an OMITTED --id); reject it like the thread verbs.
+	if err := guardEmptyIDFlag(fs); err != nil {
+		return err
+	}
 	if (*toDir == "") == !*native {
 		return errors.New("restore: exactly one of --to-dir or --native is required")
 	}
@@ -115,14 +126,19 @@ func runCopy(cfg config.Config, args []string) error {
 	toDir := fs.String("to-dir", "", "local: copy the transcript into this dir")
 	toMachine := fs.String("to", "", "remote: ship to this peer and restore natively (claude only)")
 	ref := ""
+	refSupplied := false
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		ref, args = args[0], args[1:]
+		refSupplied = true
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if ref == "" && fs.NArg() == 1 {
-		ref = fs.Arg(0)
+		ref, refSupplied = fs.Arg(0), true
+	}
+	if err := guardEmptyPositionalRef(refSupplied, ref); err != nil {
+		return err
 	}
 	if (*toDir == "") == (*toMachine == "") {
 		return errors.New("copy: exactly one of --to-dir <dir> or --to <machine> is required")

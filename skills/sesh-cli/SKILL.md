@@ -33,10 +33,15 @@ verbs infer the **current** thread when you omit `--id` (from the calling pane's
 `@sesh-thread-id` marker first, then `$SESH_THREAD_ID`, or a loud error if neither
 resolves). The pane marker wins because it is re-stamped on adopt/reparent while
 `$SESH_THREAD_ID` is frozen at launch and can drift stale; on disagreement the pane is
-used and a drift note is printed to stderr. `delete` is the exception to
-inference only — it accepts a prefix but never infers the current thread (deleting an
-ambient thread is a footgun), so it always needs an explicit `--id`. The TUI shows the
-short 8-char form (`i` toggles the ID column; `y` shows the full UUID, `c` copies it).
+used and a drift note is printed to stderr. Inference happens **only when `--id` is
+omitted entirely**: passing an *explicitly empty* `--id ""` (or an empty positional id,
+e.g. from an unset shell variable) is a **loud error**, never silently treated as the
+current thread — so a stray empty `$VAR` can't make a verb act on the wrong thread. The
+same holds for the other selectors that default to "everything"/"the current thread"
+(`backup`/`restore --id`, `hooks test --thread`). `delete` and `stop` go further still —
+being destructive, they **never** infer at all (an omitted `--id` is also an error), so
+they always need an explicit `--id`. The TUI shows the short 8-char form (`i` toggles the
+ID column; `y` shows the full UUID, `c` copies it).
 
 ## Before running commands
 

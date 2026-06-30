@@ -2,11 +2,13 @@ package main
 
 // `sesh delegate --agent <a> <task>` (PARITY_ROADMAP C2, v1's delegate as a
 // composition of v2's green primitives): spawn a headless worker, give it the
-// task, await the reply, print it, DELETE the worker. Ephemeral by contract —
-// the thread disappears once it answers (--keep retains it; then `sesh new
-// --headless` semantics apply and the id is printed to stderr for follow-ups).
-// Cross-machine: `--machine X` routes the WHOLE verb (the worker spawns, runs
-// and dies on X). Failure paths never leak a worker unless --keep.
+// task, await the reply, print it, then ARCHIVE the worker. Ephemeral by
+// contract — the thread disappears from the default view once it answers, but
+// the record + transcript are retained (archived, so resumable / auditable);
+// --keep leaves it un-archived (active). Either way the id is printed to stderr
+// for follow-ups under --keep. Cross-machine: `--machine X` routes the WHOLE
+// verb (the worker spawns, runs and is archived on X). Failure paths archive
+// the worker (never leave it active) unless --keep.
 
 import (
 	"context"
@@ -26,8 +28,8 @@ func runDelegate(cfg config.Config, args []string) error {
 	agent := fs.String("agent", "", "agent kind: pi|claude|codex (required)")
 	cwd := fs.String("cwd", "", "working directory (default: $PWD)")
 	name := fs.String("name", "", "thread name (mostly for --keep; default delegate-<ts>)")
-	keep := fs.Bool("keep", false, "retain the worker thread instead of deleting it after the reply")
-	timeout := fs.Duration("timeout", 10*time.Minute, "give up after this long (the worker is still deleted unless --keep)")
+	keep := fs.Bool("keep", false, "leave the worker un-archived (active) instead of archiving it after the reply")
+	timeout := fs.Duration("timeout", 10*time.Minute, "give up after this long (the worker is still archived unless --keep)")
 	sandbox := fs.Bool("sandbox", false, "restrict the worker (codex read-only; claude default-deny; pi: refused)")
 	yolo := fs.Bool("yolo", false, "bypass the worker's permissions (overrides [spawn] config)")
 	asJSON := fs.Bool("json", false, "emit {reply, id} as JSON")
@@ -81,15 +83,17 @@ func runDelegate(cfg config.Config, args []string) error {
 		return fmt.Errorf("delegate: spawn worker: %w", err)
 	}
 	id := resp.Thread.ID
-	// The ephemeral contract: no worker outlives a failure unless --keep.
+	// The ephemeral contract: a worker is archived (not active) after it answers
+	// or fails — its record + transcript are retained, just hidden from the
+	// default view. --keep leaves it active.
 	cleanup := func() {
 		if *keep {
 			return
 		}
 		dctx, dcancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer dcancel()
-		if derr := c.ThreadDelete(dctx, id, false); derr != nil {
-			fmt.Fprintf(os.Stderr, "delegate: WARNING: worker %s not deleted: %v\n", id, derr)
+		if derr := c.ThreadArchive(dctx, id, true); derr != nil {
+			fmt.Fprintf(os.Stderr, "delegate: WARNING: worker %s not archived: %v\n", id, derr)
 		}
 	}
 
@@ -125,7 +129,7 @@ func runDelegate(cfg config.Config, args []string) error {
 		select {
 		case <-ctx.Done():
 			cleanup()
-			return fmt.Errorf("delegate: no reply within %s (worker %s deleted unless --keep)", *timeout, id)
+			return fmt.Errorf("delegate: no reply within %s (worker %s archived unless --keep)", *timeout, id)
 		case <-time.After(500 * time.Millisecond):
 		}
 	}

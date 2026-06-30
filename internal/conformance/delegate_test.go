@@ -1,10 +1,11 @@
 package conformance
 
 // thread.delegate cells (PARITY_ROADMAP C2): the ephemeral one-shot worker —
-// a REAL agent answers a real task and the worker is GONE afterwards (the
-// ephemeral contract, both directions: record absent after success AND after
-// a turn failure). --keep retains a usable thread. Remote = the whole verb
-// routed: the worker spawns, answers and dies on the PEER.
+// a REAL agent answers a real task and the worker is ARCHIVED afterwards (the
+// ephemeral contract, both directions: hidden from the active list yet RETAINED
+// in the archived list after success AND after a turn failure — never deleted).
+// --keep leaves a usable, active thread. Remote = the whole verb routed: the
+// worker spawns, answers and is archived on the PEER.
 
 import (
 	"strings"
@@ -39,11 +40,15 @@ func testDelegate(t *testing.T, agent string, loc matrix.Locality) {
 	if !strings.Contains(out, "CHARTREUSE") {
 		t.Fatalf("[%s/%s] reply missing the sentinel: %q", agent, loc, out)
 	}
-	// Ephemeral: no worker thread survives.
+	// Ephemeral, but RETAINED: the worker is gone from the active list yet
+	// present (archived) in the archived list — never deleted.
 	for _, th := range sb.listThreads(t) {
 		if strings.HasPrefix(th.Name, "delegate-") {
-			t.Errorf("[%s/%s] worker %s survived a successful delegate", agent, loc, th.ID)
+			t.Errorf("[%s/%s] worker %s still active after a successful delegate (should be archived)", agent, loc, th.ID)
 		}
+	}
+	if !delegateWorkerArchived(t, sb) {
+		t.Errorf("[%s/%s] no archived delegate worker after success (it was deleted, not archived)", agent, loc)
 	}
 
 	if agent != "pi" {
@@ -79,7 +84,19 @@ func testDelegate(t *testing.T, agent string, loc matrix.Locality) {
 	}
 	for _, th := range sb.listThreads(t) {
 		if strings.HasPrefix(th.Name, "delegate-") {
-			t.Errorf("sandbox-refused worker leaked: %s", th.ID)
+			t.Errorf("sandbox-refused worker left active: %s (should be archived)", th.ID)
 		}
 	}
+}
+
+// delegateWorkerArchived reports whether an archived worker thread (name
+// delegate-*) exists — the retained-not-deleted half of the ephemeral contract.
+func delegateWorkerArchived(t *testing.T, sb *Sandbox) bool {
+	t.Helper()
+	for _, th := range sb.listThreadsArchived(t) {
+		if strings.HasPrefix(th.Name, "delegate-") && th.Archived {
+			return true
+		}
+	}
+	return false
 }

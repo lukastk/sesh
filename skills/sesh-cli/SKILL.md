@@ -406,8 +406,8 @@ sesh thread send-headless --id <id> --text 'summarize'     # run a stateless tur
 sesh thread send-headless --id <id> --text 'quick check' --model anthropic/claude-haiku-4-5  # override the model for THIS turn only
 sesh thread headless-reply --id <id> --json                # poll a headless turn's result
 sesh await <id> --timeout 5m                               # block until a turn finishes (mesh-aware)
-sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → delete
-sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # keep the worker thread around
+sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → archive
+sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # leave the worker active instead of archiving
 sesh subscribe <subscribee> --from <subscriber>            # pipe one thread's turns into another
 ```
 

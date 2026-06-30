@@ -466,7 +466,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.delegate",
-		Description: "sesh delegate: ephemeral one-shot headless worker — spawn, ask, await, print, DELETE (the ephemeral contract holds on failure too); --keep retains; --machine routes the whole verb",
+		Description: "sesh delegate: ephemeral one-shot headless worker — spawn, ask, await, print, ARCHIVE (retained-not-deleted; the contract holds on failure too); --keep leaves it active; --machine routes the whole verb",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

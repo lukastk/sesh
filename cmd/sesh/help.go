@@ -402,7 +402,7 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh await 1a2b3c4d", "sesh await 1a2b3c4d --timeout 5m --json"},
 	},
 	"delegate": {
-		summary:  "spawn a headless worker, send it a task, await the reply, print it, then delete the worker (--keep retains it); cross-machine via --machine",
+		summary:  "spawn a headless worker, send it a task, await the reply, print it, then archive the worker (--keep leaves it active); cross-machine via --machine",
 		usage:    "sesh delegate --agent <pi|claude|codex> <task> [--cwd <dir>] [--name <name>] [--keep] [--timeout <dur>] [--sandbox|--yolo] [--machine <m>] [--json]",
 		examples: []string{"sesh delegate --agent pi 'summarize this repo'", "sesh delegate --agent claude 'run the tests' --cwd ~/proj --keep"},
 	},

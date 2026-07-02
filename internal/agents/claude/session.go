@@ -59,27 +59,12 @@ type metaLine struct {
 
 // fileInfo summarizes a session file for lineage resolution.
 type fileInfo struct {
-	born    bool   // first meaningful event is a compact_boundary (compaction-born)
-	lpu     string // born: the boundary's logicalParentUuid (its compaction-parent link)
-	root    string // non-born: first conversation (user/assistant) message uuid
-	lastTS  string // non-born: last conversation message timestamp (ISO-8601, sorts chronologically)
-	msgs    int    // non-born: conversation message count (a tie-breaker)
-	bgAgent bool   // opens with an ai-title/agent-name header => a claude BACKGROUND AGENT session
+	born   bool   // first meaningful event is a compact_boundary (compaction-born)
+	lpu    string // born: the boundary's logicalParentUuid (its compaction-parent link)
+	root   string // non-born: first conversation (user/assistant) message uuid
+	lastTS string // non-born: last conversation message timestamp (ISO-8601, sorts chronologically)
+	msgs   int    // non-born: conversation message count (a tie-breaker)
 }
-
-// A claude BACKGROUND AGENT (claude's `/agents` feature) runs `--fork-session --resume
-// <parent>.jsonl`: it COPIES the parent conversation (preserving message uuids, so it shares
-// the parent's conversation-root uuid) into a NEW session id and diverges as an independent,
-// often long-lived, separately-managed process. That makes it look, to the resume/rewind fork
-// heuristic below, like the parent thread's live tip — so a sesh thread would resolve FORWARD
-// onto the background agent's session and `claude --resume` it, which fails ("that session is
-// still running as a background agent") or, worse, hijacks the agent's transcript. A background
-// agent is NOT a continuation of the thread; it is a sibling. Its transcript is distinguishable
-// on disk: it OPENS (before any conversation message) with an "ai-title"/"agent-name" meta line
-// that a normal interactive session never has. We flag those files and drop them from lineage
-// resolution entirely — a thread never follows into a background agent. (Compaction chaining is
-// untouched: a background agent is never compaction-born, so this only affects the fork tip.)
-func isBGAgentHeaderType(t string) bool { return t == "ai-title" || t == "agent-name" }
 
 // scanFile classifies a session file. born=true iff its first meaningful event is a
 // compact_boundary (before any real conversation line) — then lpu is that boundary's
@@ -113,12 +98,6 @@ func scanFile(path string) (fileInfo, error) {
 			if ml.Type == "system" && ml.Subtype == "compact_boundary" {
 				// First meaningful event is a boundary → born by compaction.
 				return fileInfo{born: true, lpu: ml.LogicalParentUUID}, nil
-			}
-			if isBGAgentHeaderType(ml.Type) {
-				// A background-agent header before any conversation message: this file is a
-				// claude background agent (see fileInfo.bgAgent). Keep scanning so root/lastTS
-				// are still recorded, but the resolver drops the file from lineage.
-				fi.bgAgent = true
 			}
 			if !isMsg {
 				continue // meta line before any conversation
@@ -282,19 +261,6 @@ func resolveLeafUncached(dir string, sids []string, storedID string) string {
 		infos[sid] = fi
 	}
 
-	// Drop background-agent sessions from lineage entirely (see fileInfo.bgAgent): a thread
-	// never follows into one. Filtering them out of both infos and the sids we scan for
-	// compaction ownership keeps them from being picked as a resume tip OR mistaken for a
-	// compaction parent (a bg agent copies the conversation, so it holds those uuids too).
-	liveSids := make([]string, 0, len(sids))
-	for _, sid := range sids {
-		if fi, ok := infos[sid]; ok && fi.bgAgent {
-			delete(infos, sid)
-			continue
-		}
-		liveSids = append(liveSids, sid)
-	}
-
 	// (1) Compaction lineage: each born file -> its parent (the file owning the message
 	// its boundary's logicalParentUuid names).
 	born := map[string]string{} // sid -> logicalParentUuid
@@ -310,7 +276,7 @@ func resolveLeafUncached(dir string, sids []string, storedID string) string {
 			targets[lpu] = []byte(lpu)
 		}
 		occ := map[string][]occurrence{}
-		for _, sid := range liveSids {
+		for _, sid := range sids {
 			firstOccurrences(filepath.Join(dir, sid+".jsonl"), sid, targets, occ)
 		}
 		bornSet := map[string]bool{}

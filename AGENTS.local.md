@@ -1,5 +1,68 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H34 — can't enter a headless thread: resolver chased it into a claude BACKGROUND AGENT + revive returned silent success (2026-07-02, sesh 265e1ae; NO schema change; deployed 3/4, macstudio PENDING)
+Lukas: "why can't I enter thread 60a56f17?" (a claude "corkboard" thread on mymain, headless·idle).
+Entering a headless thread = resume (`claude --resume <session>`). It silently did nothing, then when
+Lukas tried manually claude said `That session is still running as a background agent … run: claude
+--resume 80bb8a63 --fork-session`. TWO bugs, one visible symptom.
+ROOT CAUSE A (why it pointed at the wrong session): claude's `/agents` BACKGROUND AGENT feature runs
+`claude --session-id <new> --fork-session --resume <parent>.jsonl` — it COPIES the parent conversation
+(preserving message uuids, so it SHARES the parent's conversation-root uuid) into a new session id and
+runs as an independent, long-lived process. The resume/rewind fork heuristic in
+internal/agents/claude/session.go (`resumeTip`/`byRoot`: files sharing a conversation-root, newest tip
+wins) therefore resolved the corkboard thread's anchor c79b8f02 FORWARD onto the background agent's
+session 80bb8a63 (a `--fork-session` sibling that was the most-recently-written file). `claude --resume
+80bb8a63` then refuses (locked by the live agent) or would hijack its transcript. Diagnosed via a probe
+using the real packages (`ResolveCurrentSession` returned 80bb8a63) + `ps` showing the live bg agent
+(`--bg-pty-host …/80bb8a63.sock … --fork-session --resume …/c79b8f02.jsonl`, Opus/xhigh, ~25h old).
+DISTINGUISHING SIGNAL (deterministic, on-disk): a bg-agent transcript OPENS (before any conversation
+message) with `{"type":"ai-title",…}` / `{"type":"agent-name",…}` meta lines a normal session never
+has. Verified system-wide: of 84 session files exactly ONE carried it — precisely 80bb8a63.
+ROOT CAUSE B (why it failed SILENTLY): reviveThread (resume.go) + handleThreadNew (thread.go) stamped
+the pane marker, wrote the store, and returned 200 the INSTANT they created the pane — never confirming
+the agent stayed up. `claude --resume` of the locked session exited a beat after spawn → the lone-pane
+session self-destructed → no pane → thread reads headless again → caller was told "promoted to headed".
+The exact silent-success class AGENTS.md forbids. REPRODUCED: `sesh thread headful --id 60a56f17`
+printed "promoted … to headed" yet no session/pane existed and the grid still showed headless.
+FIX A (internal/agents/claude/session.go, resolver): `scanFile` sets `fileInfo.bgAgent` on the
+ai-title/agent-name header; `resolveLeafUncached` filters bgAgent files out of lineage entirely (both
+the byRoot resume-tip group AND the compaction occurrence scan) so a thread NEVER follows into a bg
+agent. COMPACTION CHAINING IS UNTOUCHED (a bg agent is never compaction-born) — explicitly guarded by a
+new test. Unit tests: TestResolveLeafSessionSkipsBackgroundAgentFork +
+…CompactionTracingSurvivesBGAgent. Real-data probe now returns c79b8f02 (corkboard's own history).
+FIX B (internal/daemon/spawnverify.go, agent-agnostic safety net): `confirmAgentLaunched` polls the
+marked pane for a 3s settle window after spawn; if it vanishes (command exited) → teardown + LOUD error
+carrying the pane's last output (claude's own reason). Wired into reviveThread + handleThreadNew's three
+spawn branches; headless/fork/into-pane don't spawn a pane and skip it. There's no faster definitive
+signal — a still-booting agent ABOUT to fail on a lock also has a live process under the pane — so the
+window must simply outlast cold-start+refusal (claude boots <0.5s, fails ~1-2s; 3s has margin). Injectable
+window (confirmAgentLaunchedWithin) for a fast test. Real-tmux unit test TestConfirmAgentLaunched
+(immediate-exit → loud+captured output; long-lived → nil). Healthy path proven unbroken (the 3s settle
+does NOT false-fail real agents): thread.resume + thread.new.headed (pi AND claude) + thread.placement
+(into-session/into-window/into-pane) conformance cells all pass.
+NO api/schema change, NO CLI/flag/help/skill change (both fixes daemon-internal) ⇒ mixed-mesh safe;
+deploy = daemon REBUILD + RESTART. Only the OWNING machine (mymain) matters for a given thread.
+THE ORPHANED BG AGENT (Lukas chose "kill it now"): killing the agent process ALONE didn't work — a
+claude `claude daemon run` supervisor (pid 2834761, `--origin transient`, its spawner pid 1143907 DEAD
+so reparented to init) RESURRECTED it within 1s (even swapped model Opus→fable-5). GOTCHA: to actually
+stop a background agent you must kill its SUPERVISING claude daemon, not the agent. Verified it was the
+SINGLE claude daemon (one cc-daemon instance dir) supervising only the orphan + an idle spare, NOT shared
+with Lukas's live interactive `claude` sessions (those are plain claude under his shell, not `--bg-pty-host`
+children). Killed the daemon (SIGTERM) then SIGKILL'd the surviving pty-hosts (they ignore SIGTERM +
+reparent to init). Confirmed gone + sessions 80bb8a63/c79b8f02 free + child thread d8166e19 untouched.
+LIVE VERIFY (mymain, post-deploy): `sesh thread headful --id 60a56f17` → real claude pane came up in its
+OWN session running `claude --resume c79b8f02…` (the CORRECT corkboard history, NOT the 80bb8a63 fork);
+grid head=headful. Thread now enterable.
+DEPLOY: mymain (native build .new+mv + supervisorctl restart sesh-daemon; LIVE-VERIFIED), macbook
+(lukas@, git pull + /opt/homebrew/bin/go build + supervisorctl restart), termux (lukas@android-main:8022,
+git pull + PLAIN go build CGO=1/android per H22, mv, kill daemon by AUTHORITATIVE pid from `daemon status
+--json` + setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/sesh-master). All
+three vcs.revision=265e1ae, schema 37. **macstudio (cij@macstudio) OFFLINE — ssh :22 timed out (was
+already "peer unreachable" at session start); PENDING. Mixed-mesh safe so lagging is harmless. To finish:
+`ssh-target macstudio zsh -ls` → cd ~/mysetup/sesh && git pull && /opt/homebrew/bin/go build .new+mv +
+supervisorctl restart sesh-daemon.** (Note: `sesh daemon status` text `schema_version:18` is the STORE
+migration version; the API schema is `--json | .schema` = 37.)
+
 ## H33 — mt-enter-new-thread-here landed the thread in $HOME (cwd from $PWD, not the pane) (2026-06-29, myrig 8a4965e; NO sesh change; deployed ALL FOUR)
 Ticket 1284a9c3: ran `mt-enter-new-thread-here` inside a workspace dir to start a Claude session,
 but the session opened in $HOME. DIAGNOSIS: the recorded thread (70b8f23f) had cwd=/home/lukastk +

@@ -88,9 +88,13 @@ c79b8f02.jsonl (`.bak-preresume-1295lines`). RECOVERY options (need Lukas's OK �
 (a) TRIM c79b8f02 back to its pre-resume 1236 lines (claude only appended, so `head -1236` byte-restores
 it; then 80bb8a63 is newest → resolver returns it natively) — cleanest; or (b) force the thread onto
 80bb8a63 out-of-band + re-anchor (no CLI to set a thread's session id → needs store surgery, leaves a
-transient inconsistency). NOT DONE autonomously (his conversation data). The corkboard thread is
-currently headful on the WRONG c79b8f02 branch (detached/idle) — Lukas should NOT work in it; his real
-session is `claude --resume 80bb8a63-778e-4e4c-a317-d6b1d30cc60b` in the corkboard cwd (now unlocked).
+transient inconsistency). Left to Lukas (his conversation data).
+RESOLVED (no trim needed): Lukas resumed 80bb8a63 directly (`claude --resume 80bb8a63…` in the corkboard
+cwd) and sent a message → 80bb8a63's last-message ts (13:34) is now NEWER than the polluted c79b8f02
+(12:55), so the "newest fork wins" resolver returns 80bb8a63 on its own; entering the thread via sesh now
+lands the pane on `claude --resume 80bb8a63` (verified). The pollution self-healed — c79b8f02 is now the
+stale sibling and stays that way unless something resumes IT. The `.bak-preresume-1295lines` backup was
+left in place (harmless). So the "newest fork wins" fragility is real but did NOT need surgery here.
 LESSONS: (1) the ai-title/agent-name header does NOT mean "not the thread's session" — the user may
 drive it. (2) NEVER run a verification-`headful` on a thread whose leaf you're unsure of — a resume
 APPENDS to that branch and can flip which fork the "newest wins" heuristic picks, corrupting resolution.

@@ -110,15 +110,22 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 	return row
 }
 
-// fanOutGrid asks each peer for its grid (status included) over a real ssh hop.
+// fanOutGrid asks each peer for its grid (status included) over its configured
+// transport. Peers the liveness cache already knows are down are skipped up front, so
+// one offline machine no longer costs the caller a full per-peer timeout.
 func (d *Daemon) fanOutGrid(includeArchived bool) ([]api.ThreadRow, []string) {
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return nil, nil
 	}
+	down := d.knownOfflinePeers()
 	var rows []api.ThreadRow
 	var unreachable []string
 	for _, p := range reg.List() {
+		if down[p.Machine] {
+			unreachable = append(unreachable, p.Machine)
+			continue
+		}
 		pr, err := fetchPeerGrid(p, includeArchived)
 		if err != nil {
 			unreachable = append(unreachable, p.Machine)
@@ -152,7 +159,7 @@ func fetchPeerGrid(p peers.Peer, includeArchived bool) ([]api.ThreadRow, error) 
 	if includeArchived {
 		args = append(args, "--archived")
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), p.SSHArgs()...)
 	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
 	out, err := exec.Command("ssh", sshArgs...).Output()
 	if err != nil {

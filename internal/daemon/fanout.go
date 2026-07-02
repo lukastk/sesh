@@ -13,19 +13,47 @@ import (
 	"github.com/lukastk/sesh/internal/peers"
 )
 
+// knownOfflinePeers returns the set of peer machines the background liveness probe
+// currently has cached as unreachable (peer_snapshots.reachable = 0). It is
+// authoritative-but-conservative: a peer with NO cached snapshot yet (never synced
+// since this daemon started) is ABSENT from the map, and a read error yields an empty
+// map — so callers treat ONLY an explicit true as "known offline" and still attempt an
+// unknown peer live. This lets a fan-out skip a peer we DEFINITIVELY know is down
+// (turning an 8-15s dial into an instant "unreachable" row) without ever wrongly
+// skipping a reachable peer on a fresh daemon.
+func (d *Daemon) knownOfflinePeers() map[string]bool {
+	rows, err := d.store.LoadPeerSnapshots()
+	if err != nil {
+		return nil
+	}
+	down := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		if !r.Reachable {
+			down[r.Machine] = true
+		}
+	}
+	return down
+}
+
 // fanOutThreads is the mesh fan-out behind GET /v1/threads?all-machines: it
 // returns this machine's threads plus every reachable peer's threads (each
 // already stamped with its owning machine), and the list of peers it could not
 // reach. An offline peer is an expected state (read-replica/offline browsing),
-// so it is reported in Unreachable rather than failing the whole call.
+// so it is reported in Unreachable rather than failing the whole call. Peers the
+// liveness cache already knows are down are skipped up front (no wasted dial).
 func (d *Daemon) fanOutThreads(local []api.Thread, includeArchived bool) ([]api.Thread, []string) {
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return local, nil
 	}
+	down := d.knownOfflinePeers()
 	merged := append([]api.Thread{}, local...)
 	var unreachable []string
 	for _, p := range reg.List() {
+		if down[p.Machine] {
+			unreachable = append(unreachable, p.Machine)
+			continue
+		}
 		peerThreads, err := fetchPeerThreads(p, includeArchived)
 		if err != nil {
 			unreachable = append(unreachable, p.Machine)
@@ -74,7 +102,7 @@ func fetchPeerThreads(p peers.Peer, includeArchived bool) ([]api.Thread, error) 
 	if includeArchived {
 		args = append(args, "--archived")
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), p.SSHArgs()...)
 	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
 	cmd := exec.Command("ssh", sshArgs...)
 	var stdout, stderr bytes.Buffer
@@ -132,7 +160,7 @@ func (d *Daemon) fetchPeerMasterCurrent(machine, origin string) (api.MasterCurre
 		shQuote(p.Binary),
 		"tmux", "master-current", "--origin", shQuote(origin), "--json",
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), p.SSHArgs()...)
 	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
 	out, err := exec.Command("ssh", sshArgs...).Output()
 	if err != nil {

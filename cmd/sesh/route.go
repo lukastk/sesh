@@ -2,14 +2,39 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 )
+
+// peerKnownOffline reports whether the LOCAL daemon's liveness cache currently has
+// `machine` marked unreachable (its background probe flips a peer to reachable=0 within
+// ~8s of it going offline). It is authoritative-but-conservative: a local daemon that
+// is down, a machine absent from the cache (never synced), a machine still cached
+// reachable, or any read error ALL return false — so routing only fast-fails a peer we
+// DEFINITIVELY know is offline and otherwise dials live (no behavior change). The read
+// is a local unix-socket call (bounded to 2s), which resolves in ms or fails fast when
+// the daemon is down.
+func peerKnownOffline(cfg config.Config, machine string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mesh, err := daemonClient(cfg).Mesh(ctx)
+	if err != nil {
+		return false
+	}
+	for _, mv := range mesh.Machines {
+		if mv.Machine == machine {
+			return !mv.Self && !mv.Reachable
+		}
+	}
+	return false
+}
 
 // stageFileRemote stages content onto a remote machine by piping the BYTES over
 // ssh to the peer running `tmux stage-file --stdin` (the file is on this machine,
@@ -30,7 +55,7 @@ func stageFileRemote(cfg config.Config, machine, name string, content []byte) er
 		shellQuote(peer.Binary),
 		"tmux", "stage-file", "--to", shellQuote(peer.Machine), "--stdin", "--name", shellQuote(name),
 	}, " ")
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, remote)
 	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdin = bytes.NewReader(content)
@@ -121,6 +146,14 @@ func routeMachine(cfg config.Config, machine string, rest []string) (handled boo
 	if !ok {
 		return false, fmt.Errorf("unknown machine %q: no peer registered (see `sesh peer add`)", machine)
 	}
+	// Fast-fail a peer the local daemon's liveness cache DEFINITIVELY knows is offline,
+	// instead of stalling on a dial (15s HTTP client timeout, or an ssh TCP-connect
+	// wait). Same failure the dial would eventually produce — just instant and clearer.
+	// Conservative: an unknown/never-synced peer, a reachable peer, or a down local
+	// daemon all fall through to the live dial (no behavior change).
+	if peerKnownOffline(cfg, machine) {
+		return false, fmt.Errorf("machine %q is offline per the local mesh cache; not routing (check `sesh mesh`, retry when it is back)", machine)
+	}
 	// HTTP transport for a client-only command: aim this process at the peer's API.
 	if peer.Transport() == "http" && httpRoutable(rest) {
 		token, err := peer.ResolveAPIToken()
@@ -157,7 +190,7 @@ func routeToMachineSSH(peer peers.Peer, rest []string) error {
 	for _, a := range rest {
 		remote = append(remote, shellQuote(a))
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, strings.Join(remote, " "))
 	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdin = os.Stdin

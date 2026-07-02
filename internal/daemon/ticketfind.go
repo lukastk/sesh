@@ -114,10 +114,15 @@ func (d *Daemon) fanOutFindTicket(id string) (*api.TicketFindResponse, []string)
 		resp api.TicketFindResponse
 		ok   bool // transport succeeded (resp valid, found may be true/false)
 	}
+	down := d.knownOfflinePeers()
 	results := make([]result, len(list))
 	var wg sync.WaitGroup
 	for i, p := range list {
 		i, p := i, p
+		if down[p.Machine] {
+			results[i] = result{ok: false}
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -218,10 +223,15 @@ func (d *Daemon) fanOutListTickets() ([]api.TicketListEntry, []string) {
 		entries []api.TicketListEntry
 		ok      bool
 	}
+	down := d.knownOfflinePeers()
 	results := make([]result, len(list))
 	var wg sync.WaitGroup
 	for i, p := range list {
 		i, p := i, p
+		if down[p.Machine] {
+			results[i] = result{ok: false}
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -272,7 +282,7 @@ func fetchPeerTicketList(p peers.Peer) ([]api.TicketListEntry, error) {
 		shQuote(p.Binary),
 		"ticket", "list", "--all-machines", "--local", "--json",
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), p.SSHArgs()...)
 	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
 	cmd := exec.Command("ssh", sshArgs...)
 	var stdout, stderr bytes.Buffer
@@ -316,7 +326,7 @@ func fetchPeerTicketFind(p peers.Peer, id string) (api.TicketFindResponse, error
 		shQuote(p.Binary),
 		"ticket", "find", "--id", shQuote(id), "--local", "--json",
 	}
-	sshArgs := append([]string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, p.SSHArgs()...)
+	sshArgs := append(peers.SSHMultiplexArgs(), p.SSHArgs()...)
 	sshArgs = append(sshArgs, p.SSH, strings.Join(args, " "))
 	cmd := exec.Command("ssh", sshArgs...)
 	var stdout, stderr bytes.Buffer

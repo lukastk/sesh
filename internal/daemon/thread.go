@@ -220,6 +220,15 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Confirm the agent actually came up and did not exit immediately (a bad command, a
+	// missing binary, a refused session). Silent success on a dead spawn was a bug; fail
+	// LOUDLY and tear down exactly what this spawn created before recording the thread.
+	if err := d.confirmAgentLaunched(id); err != nil {
+		teardown()
+		writeError(w, http.StatusInternalServerError, "thread new: "+err.Error())
+		return
+	}
+
 	thread := api.Thread{
 		ID:             id,
 		Machine:        d.cfg.Machine,

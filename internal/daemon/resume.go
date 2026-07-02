@@ -196,6 +196,16 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		return
 	}
 
+	// Confirm the agent actually launched and did not exit immediately — e.g. `claude
+	// --resume` refusing a session another live process holds. Without this a revive that
+	// self-destructed a beat after spawning still returned success and left the thread
+	// silently un-enterable. Tear down what we created and report the reason LOUDLY.
+	if err := d.confirmAgentLaunched(id); err != nil {
+		teardown()
+		writeError(w, http.StatusConflict, "revive: "+err.Error())
+		return
+	}
+
 	// Persist the (possibly newly minted) session name; reviving also marks the
 	// conversation begun. On failure tear down exactly what we created — store
 	// and runtime stay consistent, siblings untouched.

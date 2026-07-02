@@ -143,6 +143,13 @@ type Model struct {
 	allMachines bool
 	view        View
 	showID      bool // `i` toggles an ID column (tid8) — the only id surface in the TUI
+	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
+	// hide the last-known threads of a mesh machine that is currently unreachable.
+	// Their owner can't be reached, so every action on them would hang on the routing
+	// timeout (see requiresReachableOwner) and fail — hiding them by default keeps the
+	// grid to threads you can actually act on. The OFFLINE footer line still shows the
+	// machine exists (and how many threads are hidden), so nothing silently vanishes.
+	hideOffline bool
 
 	// Line-prompt input mode (rename / tag-add). While prompting, ordinary keys
 	// edit the input; Enter submits, Esc cancels. promptCursor is the insertion
@@ -312,7 +319,15 @@ func New(socketPath string, allMachines bool) Model {
 	home, _ := os.UserHomeDir()
 	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
 		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home,
-		scrollDivV: 1, scrollDivH: 1}
+		scrollDivV: 1, scrollDivH: 1, hideOffline: true}
+}
+
+// WithShowOffline sets whether an OFFLINE mesh machine's stale threads are shown by
+// default ([tui] show_offline / --show-offline). Default (false) hides them; the `o`
+// key toggles it per-session regardless.
+func (m Model) WithShowOffline(show bool) Model {
+	m.hideOffline = !show
+	return m
 }
 
 // WithMouseScroll sets the wheel sensitivity divisors ([tui] mouse_scroll_v/h): how
@@ -444,7 +459,7 @@ func (m Model) Init() tea.Cmd {
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
-	c, view, all, preselect := m.client, m.view, m.allMachines, m.preselectID
+	c, view, all, preselect, hideOffline := m.client, m.view, m.allMachines, m.preselectID, m.hideOffline
 	var pred *Predicate
 	if i := int(view - viewBuiltins); i >= 0 && i < len(m.customViews) {
 		p := m.customViews[i].pred
@@ -457,49 +472,66 @@ func (m Model) fetch() tea.Cmd {
 		if err != nil {
 			return meshMsg{err: err}
 		}
-		var rows []api.ThreadRow
-		var preselectSeen bool
-		for _, mv := range mesh.Machines {
-			if !all && !mv.Self {
-				continue
-			}
-			for _, t := range mv.Threads {
-				row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix}
-				if preselect != "" && t.ID == preselect {
-					preselectSeen = true // present in the mesh, regardless of the view filter
-				}
-				if pred != nil {
-					// A custom view sees EVERYTHING its predicate admits
-					// (archived/on-hold included — `not archived`/`not onhold` is the user's call).
-					if !pred.Eval(row) {
-						continue
-					}
-				} else if !builtinViewAdmits(view, row) {
-					continue
-				}
-				rows = append(rows, row)
-			}
-		}
-		// Stable order (machine, then name, then id) so the cursor never jumps —
-		// the maintainer's snapshot map iteration is unordered. The ARCHIVED view is
-		// the exception: it orders by most-recently-archived first (archived_at DESC),
-		// the order a user reaches for when reviewing what they just parked. Ties and
-		// pre-37 records (archived_at=0) fall back to the stable order. The tree walk
-		// (visibleMatches) inherits this as its sibling/root order.
-		sort.Slice(rows, func(i, j int) bool {
-			if view == ViewArchived && rows[i].ArchivedAtUnix != rows[j].ArchivedAtUnix {
-				return rows[i].ArchivedAtUnix > rows[j].ArchivedAtUnix
-			}
-			if rows[i].Machine != rows[j].Machine {
-				return rows[i].Machine < rows[j].Machine
-			}
-			if rows[i].Name != rows[j].Name {
-				return rows[i].Name < rows[j].Name
-			}
-			return rows[i].ID < rows[j].ID
-		})
+		rows, preselectSeen := flattenMeshRows(mesh.Machines, view, pred, all, hideOffline, preselect)
 		return meshMsg{rows: rows, machines: mesh.Machines, fetchedAt: time.Now().Unix(), preselectSeen: preselectSeen}
 	}
+}
+
+// flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
+// applying the machine-level and view-level filters. It is a pure function (no client,
+// no clock) so the filtering — especially the offline-hide — is unit-testable without a
+// daemon. all=false keeps self only; hideOffline drops an unreachable peer's last-known
+// threads (self is never dropped). preselectSeen reports whether the preselect id is
+// present in the mesh at all (before the view filter) — it drives the ViewAll auto-switch.
+func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all, hideOffline bool, preselect string) ([]api.ThreadRow, bool) {
+	var rows []api.ThreadRow
+	var preselectSeen bool
+	for _, mv := range machines {
+		if !all && !mv.Self {
+			continue
+		}
+		// Hide a disconnected machine's last-known threads (the default): its owner is
+		// unreachable, so they can't be entered or mutated. `o` shows them again; the
+		// OFFLINE footer keeps them discoverable. Self is never hidden.
+		if hideOffline && !mv.Self && !mv.Reachable {
+			continue
+		}
+		for _, t := range mv.Threads {
+			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix}
+			if preselect != "" && t.ID == preselect {
+				preselectSeen = true // present in the mesh, regardless of the view filter
+			}
+			if pred != nil {
+				// A custom view sees EVERYTHING its predicate admits
+				// (archived/on-hold included — `not archived`/`not onhold` is the user's call).
+				if !pred.Eval(row) {
+					continue
+				}
+			} else if !builtinViewAdmits(view, row) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+	}
+	// Stable order (machine, then name, then id) so the cursor never jumps —
+	// the maintainer's snapshot map iteration is unordered. The ARCHIVED view is
+	// the exception: it orders by most-recently-archived first (archived_at DESC),
+	// the order a user reaches for when reviewing what they just parked. Ties and
+	// pre-37 records (archived_at=0) fall back to the stable order. The tree walk
+	// (visibleMatches) inherits this as its sibling/root order.
+	sort.Slice(rows, func(i, j int) bool {
+		if view == ViewArchived && rows[i].ArchivedAtUnix != rows[j].ArchivedAtUnix {
+			return rows[i].ArchivedAtUnix > rows[j].ArchivedAtUnix
+		}
+		if rows[i].Machine != rows[j].Machine {
+			return rows[i].Machine < rows[j].Machine
+		}
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].ID < rows[j].ID
+	})
+	return rows, preselectSeen
 }
 
 func tick() tea.Cmd {
@@ -953,6 +985,59 @@ type attachMsg struct{ target, thread string }
 // TUI quits. (A FAILED nav stays an actionMsg with the error, keeping the TUI open.)
 type navDoneMsg struct{}
 
+// machineReachable reports whether `machine` was reachable at the last mesh read. This
+// machine (self, or an empty machine id) is always reachable. A machine not present in
+// the last mesh view is treated as reachable — we never block an action on missing data
+// (the routed call surfaces its own loud error if it's genuinely wrong); every real row's
+// machine is self or a mesh peer, so it is always present in practice.
+// offlineRowLabel is a short human label for a thread in an error message: its name, or
+// its tid8 when nameless.
+func offlineRowLabel(row api.ThreadRow) string {
+	if row.Name != "" {
+		return row.Name
+	}
+	return tid8(row.ID)
+}
+
+func (m Model) machineReachable(machine string) bool {
+	if machine == "" || machine == m.machine {
+		return true
+	}
+	for _, mv := range m.machines {
+		if mv.Machine == machine {
+			return mv.Reachable
+		}
+	}
+	return true
+}
+
+// requiresReachableOwner reports whether a normal-mode key triggers an action that
+// mutates or enters a thread ON ITS OWNING MACHINE (and so routes over the mesh). Such
+// an action on an OFFLINE machine's thread would shell out and hang on the 6–15s routing
+// timeout before failing — so handleKey refuses it instantly instead. Navigation/read-only
+// keys (movement, scroll, fold, filter, view cycle, uuid, id, copy, refresh) are exempt:
+// they never touch the owner. A new owner-routed key MUST be added here (a test enforces
+// that every routed action's key is covered — see TestRequiresReachableOwnerCoversActions).
+func requiresReachableOwner(key string) bool {
+	switch key {
+	case "enter", // navSelected (resume/nav on the owner)
+		"a", // archive/unarchive
+		"d", // delete
+		"x", // stop
+		"f", // fork (thread new --fork-from on the owner)
+		"r", // rename
+		"t", // tag add
+		"T", // tag remove
+		"P", // reparent
+		"h", // hold toggle
+		"H", // hold until date
+		"n", // notify on/off
+		"K": // tickets view (loadTickets routes to the owner)
+		return true
+	}
+	return false
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ticketMode != ticketNone {
 		return m.handleTicketKey(msg)
@@ -971,6 +1056,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
+	}
+	// Refuse an owner-routed action on an OFFLINE machine's thread instantly (loud, no
+	// popup, no shell-out) instead of hanging on the routing timeout. Gating here — before
+	// any confirm/prompt popup opens — means `a`/`d`/`r`/… don't even prompt for a thread
+	// you can't reach.
+	if requiresReachableOwner(msg.String()) {
+		if row, ok := m.Selected(); ok && !m.machineReachable(row.Machine) {
+			m.note = ""
+			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", row.Machine, offlineRowLabel(row))
+			return m, nil
+		}
 	}
 	switch msg.String() {
 	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
@@ -1022,6 +1118,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "i":
 		m.showID = !m.showID
+	case "o":
+		// Toggle whether OFFLINE machines' last-known threads are shown. Refetch so the
+		// change lands immediately; reset the cursor since the visible row set shifts.
+		m.hideOffline = !m.hideOffline
+		m.cursor = 0
+		return m, m.fetch()
 	case "n":
 		return m, m.notifySelected()
 	case "y":
@@ -1681,7 +1783,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
@@ -1894,17 +1996,22 @@ func (m Model) View() string {
 	if end < len(vis) {
 		b.WriteString(styleDim.Render(fmt.Sprintf("  ▼ %d more", len(vis)-end)) + "\n")
 	}
-	// Per-machine freshness (offline browsing): show every peer's staleness, and
-	// flag any that are offline (their last-known threads are still listed above).
+	// Per-machine freshness (offline browsing): show every peer's staleness, and flag any
+	// that are offline. When hidden (the default), the OFFLINE line reports how many
+	// last-known threads are tucked away + the `o` toggle to reveal them, so nothing
+	// silently disappears; when shown, its threads are listed above (dimmed context).
 	for _, mv := range m.machines {
 		if mv.Self {
 			continue
 		}
 		age := m.fetchedAt - mv.SyncedAtUnix
-		if mv.Reachable {
+		switch {
+		case mv.Reachable:
 			b.WriteString(styleDim.Render(fmt.Sprintf("  %s · synced %ds ago", mv.Machine, age)) + "\n")
-		} else {
-			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · last seen %ds ago", mv.Machine, age)) + "\n")
+		case m.hideOffline:
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · %d threads hidden · last seen %ds ago · o to show", mv.Machine, len(mv.Threads), age)) + "\n")
+		default:
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ! %s OFFLINE · last seen %ds ago · o to hide", mv.Machine, age)) + "\n")
 		}
 	}
 	switch {

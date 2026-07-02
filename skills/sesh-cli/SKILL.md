@@ -234,6 +234,7 @@ t            add tag                T          remove tag (picker)
 P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
              are refused with a persistent on-screen warning)
 n            toggle notify          i          toggle the ID column
+o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
 f            fork: copy the selected thread into a new HEADLESS thread (same
@@ -260,6 +261,18 @@ resolved per machine (a cross-machine parent's hold is not inherited).
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
 width instead of clipping, so every binding stays visible on a narrow pane.
+
+**Offline machines.** A machine's threads keep showing in the mesh view (for offline
+browsing) even after it disconnects, but every action on them routes to the *owning*
+daemon — which is unreachable — so entering/archiving/holding one would hang on the
+routing timeout (~6–15 s) and then fail. So the TUI **hides an OFFLINE machine's
+last-known threads by default**, and if you're pointed at one, an owner-routed key
+(`enter`, `a`, `h`, `x`, `r`, `t`, `P`, `K`, …) **refuses instantly** with a loud
+`<machine> is offline …` message instead of freezing. The OFFLINE footer line still
+shows the machine (and how many threads are hidden); press **`o`** to reveal/re-hide
+them (e.g. to browse a powered-off machine). Default the reveal on with `[tui]
+show_offline = true` or `--show-offline`. Reachability comes from the mesh sync, so it
+can lag a real disconnect by a sync tick or two.
 
 The **`archived`** view (in the `tab` cycle) orders by **most recently archived first**
 (the daemon stamps `archived_at` on each archive; un-archiving clears it, so re-archiving
@@ -438,6 +451,7 @@ label = 'mysetup/{rel}'
 [tui]
 columns = ["machine","agent","name","cwd","tags","notify"]
 all_machines = true              # default `sesh tui` to the cross-machine view (= --all-machines)
+show_offline = true              # show OFFLINE machines' threads by default (else hidden; `o` toggles)
 [[tui.column_color]]             # NAME blue / CWD green by default; override here
 name = "cwd"
 color = "green"

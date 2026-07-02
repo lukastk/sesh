@@ -76,3 +76,27 @@ func TestLoadTUIAllMachines(t *testing.T) {
 		t.Errorf("all_machines should default to false when unset")
 	}
 }
+
+// TestLoadTUIShowOffline covers the [tui] show_offline default (whether an OFFLINE
+// machine's stale threads are shown by default; unset → hidden).
+func TestLoadTUIShowOffline(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, "[tui]\nshow_offline = true\n")
+	c, err := LoadTUI(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || !c.ShowOffline {
+		t.Fatalf("show_offline = true not parsed: %+v", c)
+	}
+	// Unset → false (offline threads hidden by default).
+	home2 := t.TempDir()
+	writeConfig(t, home2, "[tui]\ncolumns = [\"name\"]\n")
+	c2, err := LoadTUI(home2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.ShowOffline {
+		t.Errorf("show_offline should default to false when unset")
+	}
+}

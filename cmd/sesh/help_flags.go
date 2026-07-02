@@ -468,6 +468,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"tui": {
 		{"--all-machines", "show threads from every machine in the mesh (also defaults on via [tui] all_machines in config.toml)"},
+		{"--show-offline", "show the last-known threads of OFFLINE mesh machines (default: hidden — their owner is unreachable, so they can't be entered/mutated; toggle in-TUI with `o`; default via [tui] show_offline)"},
 		{"--cursor", "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)"},
 		{"--filter", "start in filter mode (type-to-narrow immediately)"},
 		{"--expand", "start with tree nodes expanded (default from [tui] expand_children in config.toml)"},

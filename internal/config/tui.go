@@ -61,6 +61,13 @@ type TUIConfig struct {
 	//	[tui]
 	//	all_machines = true
 	AllMachines bool `toml:"all_machines"`
+	// ShowOffline makes `sesh tui` show the last-known threads of OFFLINE mesh machines
+	// by default (same as pressing `o` / passing --show-offline). Default (unset/false)
+	// hides them — their owner is unreachable, so they can't be entered or mutated.
+	//
+	//	[tui]
+	//	show_offline = true
+	ShowOffline bool `toml:"show_offline"`
 }
 
 // ScrollV / ScrollH resolve the effective wheel divisor (unset/0 → 1).

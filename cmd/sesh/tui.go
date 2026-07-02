@@ -22,6 +22,7 @@ import (
 func runTUI(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	allMachines := fs.Bool("all-machines", false, "show threads from every machine in the mesh")
+	showOffline := fs.Bool("show-offline", false, "show the last-known threads of OFFLINE mesh machines (default: hidden; toggle in-TUI with `o`)")
 	cursor := fs.Bool("cursor", false, "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)")
 	filter := fs.Bool("filter", false, "start in filter mode (type-to-narrow immediately)")
 	expand := fs.Bool("expand", false, "start with tree nodes expanded (default from [tui] expand_children)")
@@ -122,7 +123,10 @@ func runTUI(args []string) error {
 	// --all-machines from the flag OR the [tui] all_machines config default (the latter
 	// lets the popup bindings drop the wrapper that used to add the flag).
 	useAllMachines := *allMachines || (tcfg != nil && tcfg.AllMachines)
-	m := tui.New(cfg.SocketPath(), useAllMachines).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
+	// Offline machines' stale threads are hidden by default; --show-offline or
+	// [tui] show_offline reveals them (the `o` key toggles it per-session either way).
+	showOfflineDefault := *showOffline || (tcfg != nil && tcfg.ShowOffline)
+	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

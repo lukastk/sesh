@@ -1,6 +1,7 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H34 — can't enter a headless thread: resolver chased it into a claude BACKGROUND AGENT + revive returned silent success (2026-07-02, sesh 265e1ae; NO schema change; deployed 3/4, macstudio PENDING)
+## H34 — can't enter a headless thread: silent-revive (Fix B, KEPT) + a WRONG bg-agent resolver change (Fix A, REVERTED) (2026-07-02, sesh 265e1ae then revert 8e9fef7; NO schema change)
+**READ THE CORRECTION AT THE END OF THIS ENTRY FIRST — Fix A below was WRONG and was reverted; only Fix B shipped.**
 Lukas: "why can't I enter thread 60a56f17?" (a claude "corkboard" thread on mymain, headless·idle).
 Entering a headless thread = resume (`claude --resume <session>`). It silently did nothing, then when
 Lukas tried manually claude said `That session is still running as a background agent … run: claude
@@ -62,6 +63,42 @@ already "peer unreachable" at session start); PENDING. Mixed-mesh safe so laggin
 `ssh-target macstudio zsh -ls` → cd ~/mysetup/sesh && git pull && /opt/homebrew/bin/go build .new+mv +
 supervisorctl restart sesh-daemon.** (Note: `sesh daemon status` text `schema_version:18` is the STORE
 migration version; the API schema is `--json | .schema` = 37.)
+
+### CORRECTION (same day) — Fix A was WRONG; REVERTED in 8e9fef7. Fix B kept.
+Lukas: "the corkboard resumed into an OLDER version of the session I was on … 80bb8a63 is the one it
+should be." Fix A's PREMISE WAS FALSE. A claude session that carries the ai-title/agent-name header is
+NOT necessarily an autonomous sub-agent divorced from the thread — the USER can be actively driving it
+(80bb8a63's transcript shows real interactive turns: switch to Fable, "write a concise description of
+Corkboard", "now a one-pager, put it into a pad" through 12:02). So 80bb8a63 WAS the corkboard thread's
+real latest work; Fix A excluded it and made the thread resolve to the STALE pre-fork anchor c79b8f02.
+THE ORIGINAL RESOLVER WAS CORRECT (follow the anchor forward to the most-recently-extended fork = the
+real continuation). The ONLY genuine bug was that that fork was LOCKED by the still-running process, so
+`claude --resume` exited immediately → SILENT SUCCESS. That is exactly what **Fix B fixes and is KEPT**
+(confirmAgentLaunched → loud "session may be held by another running agent" instead of a silent no-op).
+So the correct fix for the reported symptom = Fix B + kill the locking bg agent (done); Fix A was
+unnecessary AND a regression (it would mis-resolve ANY thread whose real continuation is a header-bearing
+session). Reverted internal/agents/claude/session.go + its test to pre-265e1ae; redeployed 8e9fef7 to
+mymain/macbook/termux (macstudio was OFFLINE for the whole episode so it never got Fix A — it's on
+feac1f5, correct resolver, and still needs Fix B whenever it's back).
+SELF-INFLICTED POLLUTION (unresolved, awaiting Lukas): my Fix-A-era VERIFICATION `sesh thread headful
+--id 60a56f17` resumed the WRONG branch (c79b8f02) and Lukas then typed into it — claude APPENDED 59
+lines (1236→1295), so c79b8f02's last-message ts (12:55) is now NEWER than 80bb8a63's (12:31). The
+"newest fork wins" resolver therefore STILL returns c79b8f02 even after the revert. Backed up
+c79b8f02.jsonl (`.bak-preresume-1295lines`). RECOVERY options (need Lukas's OK — touches his data):
+(a) TRIM c79b8f02 back to its pre-resume 1236 lines (claude only appended, so `head -1236` byte-restores
+it; then 80bb8a63 is newest → resolver returns it natively) — cleanest; or (b) force the thread onto
+80bb8a63 out-of-band + re-anchor (no CLI to set a thread's session id → needs store surgery, leaves a
+transient inconsistency). NOT DONE autonomously (his conversation data). The corkboard thread is
+currently headful on the WRONG c79b8f02 branch (detached/idle) — Lukas should NOT work in it; his real
+session is `claude --resume 80bb8a63-778e-4e4c-a317-d6b1d30cc60b` in the corkboard cwd (now unlocked).
+LESSONS: (1) the ai-title/agent-name header does NOT mean "not the thread's session" — the user may
+drive it. (2) NEVER run a verification-`headful` on a thread whose leaf you're unsure of — a resume
+APPENDS to that branch and can flip which fork the "newest wins" heuristic picks, corrupting resolution.
+(3) The "newest fork among a shared root" heuristic is fragile when a conversation has TWO concurrently-
+extended branches and CANNOT be overridden by an explicit anchor (re-anchoring doesn't help — the walk
+always jumps to the newest sibling). A durable fix would PIN the thread's session id (update the stored
+anchor when claude drifts to a new file) instead of re-deriving by newest-tip — a real design change to
+discuss with Lukas, not to hack.
 
 ## H33 — mt-enter-new-thread-here landed the thread in $HOME (cwd from $PWD, not the pane) (2026-06-29, myrig 8a4965e; NO sesh change; deployed ALL FOUR)
 Ticket 1284a9c3: ran `mt-enter-new-thread-here` inside a workspace dir to start a Claude session,

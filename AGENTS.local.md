@@ -1,5 +1,66 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H36 — TUI property-set lag + archive disappear→REAPPEAR→disappear flicker: meshsync stall + fetch-count patch TTL (2026-07-04, sesh 021b316; NO schema change; deployed 4/5 — macstudio OFFLINE, pending)
+Ticket 0b3d2774 "Large lag when setting properties in sesh tui": a/h/stop laggy; archiving hid the row,
+then it RESURFACED ~a second later, then vanished for good. Lukas asked diagnose→plan→confer; plan agreed
+as items 1+2+4 (item 3 = optimism-at-keypress DEFERRED: needs action-scoped patches for revert-on-failure,
+reassess after living with the rest; item 5 = post-write sync nudge dropped as invisible once patches hold).
+THREE DEFECTS, one measured live:
+1. MESHSYNC STALL (the amplifier). meshsync.tick() fetched all peers concurrently but wrote ALL results
+   only after wg.Wait(), and run() calls tick() serially — so ONE asleep peer (blackholed TCP dial hanging
+   the full 8s meshFetchTimeout; macstudio was down ~41h) gated EVERY peer's cache write. MEASURED on
+   mymain: peer synced_at saw-toothed 1s→9s (≈8s period = the timeout) instead of ≤2s. So remote-thread
+   truth lagged up to ~12s (owner republish ≤0.3s + pull ≤9s + TUI poll ≤3s). FIX: tick() launches a
+   goroutine per peer UNLESS one is in flight (inflight map); each fetch writes its own result on
+   completion (store writes serialize via SetMaxOpenConns(1)); meshSync has ctx/cancel so stopAndWait
+   aborts hangs promptly, and a shutdown-canceled fetch does NOT MarkPeerUnreachable (cancellation ≠ peer
+   health); fetchTimeout injectable. Tests (real store + real httptest peer + a listener that ACCEPTS AND
+   NEVER RESPONDS, broken ssh dests so only http can serve): healthy peer lands per-tick mid-hang; dead
+   peer flips unreachable after timeout with last-known payload retained; prompt shutdown. LIVE-PROVEN
+   post-deploy: staleness steady 1-2s with macstudio still dead.
+2. FETCH-COUNT PATCH TTL (the flicker). rowPatch.ttl = 4 reconcile fetches, but EVERY fetch decrements
+   EVERY pending patch and each action fires 2 fetches — park a few threads back-to-back and the first
+   patch died in ~1-2s while the cache was still stale ⇒ archived row RESURFACED until the next
+   post-catch-up poll. FIX: wall-clock deadline (optimisticPatchTTL=15s, stamped at CONFIRMATION in
+   stampPatch ← routedVerb/renameRow/tagRow, carrying machine+desc). applyPending GC: satisfied-by-field
+   on a present row; row ABSENT counts as landed ONLY if its owning machine reports reachable in
+   m.machines (absence with machine offline/missing proves nothing — closes the reachability-flap
+   resurface too); deadline expiry drops the patch AND sets actionErr LOUDLY ("confirmed by X but still
+   not reflected... sync may be degraded"). rowPatch gained archived/head/busy overrides; archiveRow
+   patches the archived FIELD (not just hide) so ViewAll reconciles by field instead of wrongly hiding.
+   satisfied(): PURE hide (delete) never satisfied by presence.
+3. NO OPTIMISM on stop/hold-clear. stopSelected now patches {head:headless, busy:idle} (● flips ◌
+   instantly, reconciles when the owner's maintainer publishes the pane death). holdRow --clear uses
+   holdClearPatch: optimistic {onHold:false,+hide} ONLY when OnHoldEffectiveUnix <= OnHoldUntilUnix — a
+   DOMINATING INHERITED hold stays non-optimistic (only the owner derives the H26 max).
+Lukas's cache-optimism question answered during diagnosis: his eventual-consistency reasoning was RIGHT,
+but daemon-cache-level optimism would be clobbered by the next stale pull (same flicker one layer down);
+the TUI rowPatch layer was the right place and just had the two bugs above.
+TESTS: meshsync_test.go (2, above); pending_hide_test.go rewritten for deadlines + NEW absence-keeps-
+patch-when-machine-not-reporting, survives-20-stale-fetches (the regression), loud-expiry (names
+desc+machine), archived-field-satisfies-in-ViewAll, head/busy overrides, inherited-hold-not-optimistic;
+columns_test deadline expiry. GATE: build+vet; daemon/store/tui -race; conformance mesh.snapshot(.http),
+mesh.offline-listing(.http), thread.hold local+remote, TUI claims action-{archive,hold,stop,delete},
+view-hold — all green. LIVE SMOKE (isolated tmux ttest-flicker, real sesh tui --all-machines --cursor,
+scratch headless pi thread on ideapad): archive gone <1s, ZERO reappearance over 13 frames/13s, no ✗,
+record archived=True on ideapad; scratch deleted after.
+NB (bit me): `thread new --json` prints a FLAT object (id at top level, no .thread); `thread list --json`
+is JSONL (one object per line, not an array).
+NEW MACHINE: **ideapad** (5th mesh member, http peer ideapad:7878, lukastk@, /home/lukastk/.sesh, native
+`go build`, supervisorctl sesh-daemon — same recipe as mymain; reached via ssh-target ideapad).
+DEPLOY (NO schema change; daemon RESTART for item 1, TUI binary-only): mymain (native build .new+mv +
+supervisorctl restart), macbook (lukas@, /opt/homebrew/bin/go + restart), ideapad (as above), termux
+(lukas@android-main:8022, PLAIN go build = CGO=1/android per H22, .new+mv, kill by explicit pid — the
+zshenv login-guard relaunched the daemon itself within my 2s sleep window, with the FULL env incl.
+API token; my manual setsid relaunch lost the race with a loud "already listens" — harmless, verified
+single daemon pid 28161 on the new binary). All four vcs.revision=021b316. **macstudio OFFLINE the whole
+episode (down ~41h) — PENDING this + H34 Fix B + H35; when back: ssh-target macstudio → cd ~/mysetup/sesh
+&& git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new
+~/.local/bin/sesh && supervisorctl restart sesh-daemon.** Ticket 0b3d2774 marked done.
+DEFERRED (Lukas may ask later): item 3 optimism-at-keypress (~200ms→0ms; needs per-action patch identity
+so a failed action reverts without disturbing merged sibling patches); item 5 post-write per-peer sync
+nudge (sub-second server truth — invisible while patches hold).
+
 ## H35 — DISCONNECTED threads: hide OFFLINE machines' threads by default + refuse owner-routed TUI actions instantly (no freeze) (2026-07-02, sesh 074d191; NO schema change; deployed 3/4 — macstudio OFFLINE, pending)
 Ticket 23b0ecf2 "Disconnected threads": macstudio was offline but its threads still showed in `sesh tui`; entering one FROZE the TUI for seconds, and archive/hold "didn't work". Lukas: diagnose + confer first.
 DIAGNOSIS (measured, not guessed): macstudio is an **http peer** (macstudio:7878). Its last-known threads keep showing because the mesh cache RETAINS an offline peer's threads (deliberate offline-browsing feature — meshsync `MarkPeerUnreachable`). Every TUI action ROUTES to the owning daemon by shelling out `sesh <verb> --machine macstudio` (navSelected/routedVerb/holdRow/archiveRow/rename/tag/…), which for a dead http peer hangs on `client.Client` http.Timeout = **15s** (measured: `time sesh thread list --machine macstudio` → "context deadline exceeded" 15.02s; ~6s for the ssh `tmux nav` carve-out). Actions run in a bubbletea goroutine so the key-loop isn't hard-deadlocked, but you get zero feedback for 6–15s + (via the master cockpit) navving a headed offline thread switches the master window to macstudio's dead ssh-reconnecting pane = looks frozen. archive/hold "don't work" because `archived`/`on_hold` are OWNER-authoritative (owner's store + maintainer-derived), so a viewer can't mutate them without reaching the owner. KEY LEVER: the TUI ALREADY KNEW macstudio was offline — `m.machines[].Reachable` (rendered in the OFFLINE footer) — it just didn't use it to gate actions.

@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lukastk/sesh/internal/api"
@@ -229,8 +230,8 @@ func TestOptimisticPending(t *testing.T) {
 	m := Model{rows: []api.ThreadRow{row}, pending: map[string]*rowPatch{}}
 
 	// Record a rename + a tag + a notify-off, all confirmed.
-	m.pending["t1"] = &rowPatch{name: sptr("new"), ttl: optimisticTTL}
-	m.pending["t1"].merge(&rowPatch{addTags: []string{"b"}, notify: bptr(false), ttl: optimisticTTL})
+	m.pending["t1"] = &rowPatch{name: sptr("new"), deadline: futureDeadline()}
+	m.pending["t1"].merge(&rowPatch{addTags: []string{"b"}, notify: bptr(false), deadline: futureDeadline()})
 	m.applyPending(false) // instant overlay, no GC
 	got := m.rows[0]
 	if got.Name != "new" || got.Notify != false || !containsStr(got.Tags, "b") {
@@ -254,15 +255,16 @@ func TestOptimisticPending(t *testing.T) {
 		t.Errorf("satisfied patch not GC'd: %+v", m.pending)
 	}
 
-	// TTL expiry: a patch the server NEVER confirms is dropped after optimisticTTL cycles.
+	// Deadline expiry: a patch the server NEVER confirms is dropped once its
+	// wall-clock deadline passes (and surfaces loudly via actionErr).
 	m.rows = []api.ThreadRow{row}
-	m.pending = map[string]*rowPatch{"t1": {name: sptr("never"), ttl: optimisticTTL}}
-	for i := 0; i < optimisticTTL; i++ {
-		m.rows = []api.ThreadRow{row}
-		m.applyPending(true)
-	}
+	m.pending = map[string]*rowPatch{"t1": {name: sptr("never"), deadline: time.Now().Add(-time.Second)}}
+	m.applyPending(true)
 	if len(m.pending) != 0 {
 		t.Errorf("unconfirmed patch never expired (would mask a silent failure)")
+	}
+	if m.actionErr == nil {
+		t.Errorf("deadline expiry must surface loudly via actionErr")
 	}
 }
 

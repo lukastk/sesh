@@ -29,6 +29,22 @@ type meshSync struct {
 	stop    chan struct{}
 	done    chan struct{}
 
+	// ctx is canceled at stop so in-flight fetches abort promptly instead of
+	// holding shutdown for up to fetchTimeout.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// fetchTimeout bounds one peer fetch (meshFetchTimeout; injectable in tests).
+	fetchTimeout time.Duration
+
+	// inflight tracks peers with a fetch currently running, so a tick launches at
+	// most one fetch per peer: a hanging peer's next fetch waits for its previous
+	// one to time out, while every OTHER peer keeps its 1s cadence. wg tracks the
+	// fetch goroutines for stopAndWait.
+	imu      sync.Mutex
+	inflight map[string]bool
+	wg       sync.WaitGroup
+
 	// Reused HTTP clients for peers on the http transport, keyed by addr+token, so
 	// the ~1s sync keeps connections alive across ticks (the whole point of HTTP
 	// over ssh-exec: hit the peer's running daemon, don't reconnect every tick).
@@ -37,7 +53,14 @@ type meshSync struct {
 }
 
 func newMeshSync(d *Daemon) *meshSync {
-	return &meshSync{d: d, stop: make(chan struct{}), done: make(chan struct{}), clients: map[string]*client.Client{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &meshSync{
+		d: d, stop: make(chan struct{}), done: make(chan struct{}),
+		ctx: ctx, cancel: cancel,
+		fetchTimeout: meshFetchTimeout,
+		inflight:     map[string]bool{},
+		clients:      map[string]*client.Client{},
+	}
 }
 
 func (s *meshSync) start() {
@@ -55,7 +78,9 @@ func (s *meshSync) stopAndWait() {
 		return
 	}
 	close(s.stop)
+	s.cancel() // abort in-flight fetches instead of waiting out their timeouts
 	<-s.done
+	s.wg.Wait()
 }
 
 func (s *meshSync) run() {
@@ -73,55 +98,59 @@ func (s *meshSync) run() {
 	}
 }
 
-// tick fetches every peer's snapshot CONCURRENTLY (a slow/offline peer cannot stall
-// the others — each fetch has its own timeout), then writes the results to the
-// cache SEQUENTIALLY (one SQLite writer). A failed fetch keeps the peer's last-known
-// payload and only flips it stale (offline browsing).
+// tick launches a fetch for every peer that doesn't already have one in flight.
+// Each fetch writes its OWN result to the cache the moment it completes — there is
+// deliberately no barrier here: gating all writes on the slowest peer meant one
+// offline peer (a blackholed TCP dial hanging until fetchTimeout) stalled EVERY
+// peer's cache update to ~8s, making the whole mesh view seconds stale whenever any
+// machine was asleep. A hanging peer now only skips its own subsequent ticks (the
+// in-flight guard); the others keep the 1s cadence. A failed fetch keeps the peer's
+// last-known payload and only flips it stale (offline browsing).
 func (s *meshSync) tick() {
 	reg, err := peers.Load(s.d.cfg.PeersPath())
 	if err != nil {
 		return
 	}
-	list := reg.List()
-	if len(list) == 0 {
+	for _, p := range reg.List() {
+		s.imu.Lock()
+		if s.inflight[p.Machine] {
+			s.imu.Unlock()
+			continue
+		}
+		s.inflight[p.Machine] = true
+		s.imu.Unlock()
+		s.wg.Add(1)
+		go func(p peers.Peer) {
+			defer s.wg.Done()
+			defer func() {
+				s.imu.Lock()
+				delete(s.inflight, p.Machine)
+				s.imu.Unlock()
+			}()
+			s.syncPeer(p)
+		}(p)
+	}
+}
+
+// syncPeer fetches one peer's snapshot and records the outcome. The SQLite writes
+// serialize in the store (SetMaxOpenConns(1)), so concurrent completions are safe.
+func (s *meshSync) syncPeer(p peers.Peer) {
+	threads, err := s.fetchPeerSnapshot(p)
+	if err != nil {
+		// A fetch aborted by shutdown says nothing about the peer — don't flip it
+		// stale on the way out.
+		if s.ctx.Err() != nil {
+			return
+		}
+		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck — next tick retries
 		return
 	}
-
-	type result struct {
-		machine string
-		ok      bool
-		payload string
+	payload, err := json.Marshal(threads)
+	if err != nil {
+		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
+		return
 	}
-	results := make([]result, len(list))
-	var wg sync.WaitGroup
-	for i, p := range list {
-		i, p := i, p
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			threads, err := s.fetchPeerSnapshot(p)
-			if err != nil {
-				results[i] = result{machine: p.Machine, ok: false}
-				return
-			}
-			payload, err := json.Marshal(threads)
-			if err != nil {
-				results[i] = result{machine: p.Machine, ok: false}
-				return
-			}
-			results[i] = result{machine: p.Machine, ok: true, payload: string(payload)}
-		}()
-	}
-	wg.Wait()
-
-	now := time.Now().Unix()
-	for _, r := range results {
-		if r.ok {
-			s.d.store.UpsertPeerSnapshot(r.machine, now, r.payload) //nolint:errcheck — next tick retries
-		} else {
-			s.d.store.MarkPeerUnreachable(r.machine) //nolint:errcheck
-		}
-	}
+	s.d.store.UpsertPeerSnapshot(p.Machine, time.Now().Unix(), string(payload)) //nolint:errcheck — next tick retries
 }
 
 // fetchPeerSnapshot pulls a peer's maintained snapshot over the peer's CONFIGURED
@@ -130,7 +159,7 @@ func (s *meshSync) tick() {
 // maintainer. A transport failure is returned LOUDLY (the caller marks the peer
 // unreachable); there is no silent ssh fallback for an http peer.
 func (s *meshSync) fetchPeerSnapshot(p peers.Peer) ([]api.ThreadSnapshot, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, s.fetchTimeout)
 	defer cancel()
 	if p.Transport() == "http" {
 		return s.fetchPeerSnapshotHTTP(ctx, p)

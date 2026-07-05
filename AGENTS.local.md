@@ -74,6 +74,24 @@ surfaces, realize affordance). Cross-machine parenting = future feature (TUI tre
 across the merged mesh set; the blockers are owner-side parent validation + H35 offline-hiding
 promoting children to root + H26 same-machine hold walk). Tickets 181d3ca6 + 149339a1 marked done.
 
+### H37 follow-up — TUI `v` key creates a virtual group (2026-07-05, sesh a04b6bc; binary-only; ticket 0b09f7aa)
+Lukas chose "option 1": `v` in normal mode opens the line prompt for a NAME → exec `thread new
+--virtual --name X --no-parent --json` → actionMsg{preselect} lands the cursor on the new root group;
+you then `P` children under it. DECISIONS baked in: (a) created on the SELECTED row's MACHINE (a
+virtual parent only groups same-machine threads — the prompt header shows the target machine, e.g.
+`new virtual group (empty=cancel) "macbook">`; no selection = local); (b) EMPTY submit CANCELS (no
+accidental nameless groups — unlike the CLI, which allows nameless); (c) `--no-parent` is LOAD-BEARING:
+the TUI's subprocess inherits its launcher's env, so parent inference would silently child the group to
+whatever sesh thread the TUI runs inside (this exact footgun bit the H37 smoke); (d) `v` added to
+requiresReachableOwner + BOTH offline_test key lists (the H35 gate refuses instantly on an offline
+owner's row). New TUI claim action-new-virtual (registered AND declared, the H25 gotcha) + units
+(prompt opens/names target machine, empty-cancel no-cmd, no-selection→local, offline refusal). Legend
+`v group`, help.go tui keymap, SKILL keymap + virtual section. Binary-only (no daemon/schema change) —
+deployed mymain/macbook/ideapad at a04b6bc (no restart); termux + macstudio catch up with the H37
+pending recipe (git pull covers both commits). LIVE-PROVEN on the real mesh: `v` from mymain's TUI
+with the cursor on a macbook row created the group ON macbook + preselected the ◇ row; routed delete
+cleaned it up. Ticket 0b09f7aa marked done.
+
 ## H36 — TUI property-set lag + archive disappear→REAPPEAR→disappear flicker: meshsync stall + fetch-count patch TTL (2026-07-04, sesh 021b316; NO schema change; deployed 4/5 — macstudio OFFLINE, pending)
 Ticket 0b3d2774 "Large lag when setting properties in sesh tui": a/h/stop laggy; archiving hid the row,
 then it RESURFACED ~a second later, then vanished for good. Lukas asked diagnose→plan→confer; plan agreed

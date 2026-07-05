@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -88,5 +90,80 @@ func TestVirtualHeadGlyph(t *testing.T) {
 	}
 	if got := BusyGlyph(virtualRow("mymain")); got != "·" {
 		t.Fatalf("virtual busy glyph: want ·, got %q", got)
+	}
+}
+
+// keyMsg builds the tea.KeyMsg for a named key ("enter") or a rune key ("v").
+func keyMsg(k string) tea.KeyMsg {
+	if k == "enter" {
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+}
+
+// `v` opens the new-virtual-group name prompt; an empty submit cancels with no
+// command (nothing shells out); the prompt label names the TARGET MACHINE (the
+// selection is only a machine carrier), and a remote selection routes creation
+// to that machine.
+func TestNewVirtualGroupPrompt(t *testing.T) {
+	m := Model{
+		machine: "mymain",
+		rows: []api.ThreadRow{{Thread: api.Thread{ID: "aaaa1111-0000-0000-0000-000000000000",
+			Name: "some-thread", Machine: "macbook", AgentKind: "pi"}}},
+		machines: []api.MachineView{
+			{Machine: "mymain", Self: true, Reachable: true},
+			{Machine: "macbook", Reachable: true},
+		},
+	}
+	nm, _ := m.Update(keyMsg("v"))
+	m = nm.(Model)
+	if m.prompting != promptNewVirtual {
+		t.Fatalf("v did not open the new-virtual prompt (got %v)", m.prompting)
+	}
+	if view := m.View(); !strings.Contains(view, `"macbook"`) {
+		t.Errorf("prompt should name the target machine (the selected row's), view:\n%s", view)
+	}
+	// Empty submit cancels: prompt closes, no cmd returned.
+	nm, cmd := m.Update(keyMsg("enter"))
+	m = nm.(Model)
+	if m.prompting != promptNone {
+		t.Fatalf("empty submit did not close the prompt")
+	}
+	if cmd != nil {
+		t.Fatalf("empty submit must not run anything")
+	}
+}
+
+// With no selection the group is created locally — the prompt still opens and
+// names the local machine.
+func TestNewVirtualGroupPromptNoSelection(t *testing.T) {
+	m := Model{machine: "mymain"}
+	nm, _ := m.Update(keyMsg("v"))
+	m = nm.(Model)
+	if m.prompting != promptNewVirtual {
+		t.Fatalf("v with no selection should still open the prompt")
+	}
+	if view := m.View(); !strings.Contains(view, `"mymain"`) {
+		t.Errorf("prompt should fall back to the local machine, view:\n%s", view)
+	}
+}
+
+// `v` on an OFFLINE machine's row is refused by the reachability gate before
+// the prompt opens (creating there would hang on the routing timeout).
+func TestNewVirtualGroupOfflineRefused(t *testing.T) {
+	m := Model{
+		machine: "mymain",
+		rows: []api.ThreadRow{{Thread: api.Thread{ID: "bbbb2222-0000-0000-0000-000000000000",
+			Name: "stuck", Machine: "macstudio", AgentKind: "pi"}}},
+		machines: []api.MachineView{
+			{Machine: "mymain", Self: true, Reachable: true},
+			{Machine: "macstudio", Reachable: false},
+		},
+	}
+	nm, cmd := m.Update(keyMsg("v"))
+	m = nm.(Model)
+	if m.prompting != promptNone || cmd != nil || m.ActionErr() == nil {
+		t.Fatalf("v on an offline row must refuse instantly (prompting=%v cmd=%v err=%v)",
+			m.prompting, cmd, m.ActionErr())
 	}
 }

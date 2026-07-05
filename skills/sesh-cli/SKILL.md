@@ -89,7 +89,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
   Deleting a thread **promotes its children** to the deleted thread's own parent
   (grandparent; root if it had none) — parent ids never dangle.
-- **Virtual threads** (`thread new --virtual --name X`) are grouping nodes WITHOUT an
+- **Virtual threads** (`thread new --virtual --name X`, or the `v` key in the TUI) are
+  grouping nodes WITHOUT an
   agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
   group threads under a parent that isn't (yet) real work: parent/reparent threads under
   it, tag/archive/hold it (a hold on the group parks the whole subtree via inheritance).
@@ -247,6 +248,10 @@ r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit i
 t            add tag                T          remove tag (picker)
 P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
              are refused with a persistent on-screen warning)
+v            new VIRTUAL group (name prompt; empty cancels). Creates a root
+             grouping thread on the SELECTED row's machine (virtual parents only
+             group same-machine threads) and lands the cursor on it — then `P`
+             children under it. No selection = the local machine.
 n            toggle notify          i          toggle the ID column
 o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh

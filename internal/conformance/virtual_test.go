@@ -46,6 +46,7 @@ func init() {
 			func(t *testing.T) { testRealizeRemote(t, string(a)) })
 	}
 	registerTUIClaim("action-virtual-enter", claimActionVirtualEnter)
+	registerTUIClaim("action-new-virtual", claimActionNewVirtual)
 }
 
 // newVirtualThread creates a virtual grouping thread via the CLI (routed over
@@ -372,5 +373,74 @@ func claimActionVirtualEnter(t *testing.T) {
 	m = runKey(t, m, "f")
 	if m.ActionErr() == nil || !strings.Contains(m.ActionErr().Error(), "virtual") {
 		t.Errorf("fork on a virtual row should warn about virtualness, got %v", m.ActionErr())
+	}
+}
+
+// claimActionNewVirtual: `v` opens a name prompt and creates a NEW root virtual
+// grouping thread on the daemon (option 1 of the design: create the group, then
+// `P` children under it) — root even though parent inference would apply (the
+// exec'd `thread new` passes --no-parent), and the cursor preselects the new
+// row. An empty submit cancels and creates nothing.
+func claimActionNewVirtual(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "anchor") // the selection (the machine carrier)
+
+	before := map[string]bool{}
+	for _, th := range sb.listThreads(t) {
+		before[th.ID] = true
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false).
+		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
+		WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "anchor")
+
+	// Empty submit cancels: no new record.
+	m = runKey(t, m, "v")
+	if !m.Prompting() {
+		t.Fatalf("v did not open the name prompt")
+	}
+	m = runSpecial(t, m, tea.KeyEnter)
+	for _, th := range sb.listThreads(t) {
+		if !before[th.ID] {
+			t.Fatalf("empty submit created a thread: %q", th.Name)
+		}
+	}
+
+	// Named submit creates a ROOT virtual thread on the daemon.
+	m = runKey(t, m, "v")
+	m = typeText(t, m, "grp x")
+	m = runSpecial(t, m, tea.KeyEnter)
+	if m.ActionErr() != nil {
+		t.Fatalf("new virtual group errored: %v", m.ActionErr())
+	}
+	var created api.Thread
+	for _, th := range sb.listThreads(t) {
+		if before[th.ID] {
+			continue
+		}
+		created = th
+	}
+	if created.ID == "" {
+		t.Fatalf("v did not create a thread")
+	}
+	if created.AgentKind != api.VirtualAgentKind || created.Name != "grp x" || created.Parent != "" {
+		t.Fatalf("created record wrong: kind=%s name=%q parent=%q (want virtual/grp x/root)",
+			created.AgentKind, created.Name, created.Parent)
+	}
+	// The cursor preselects the new group once the refetch brings it in.
+	if !waitUntil(15*time.Second, func() bool {
+		var v string
+		m, v = render(t, m)
+		_ = v
+		row, ok := m.Selected()
+		return ok && row.ID == created.ID
+	}) {
+		row, _ := m.Selected()
+		t.Errorf("cursor did not land on the new group (selected %q)", row.Name)
 	}
 }

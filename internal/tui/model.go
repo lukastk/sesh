@@ -122,11 +122,12 @@ func CompileViews(specs []ViewSpec) ([]customView, error) {
 type promptKind int
 
 const (
-	promptNone     promptKind = iota
-	promptRename              // rename the selected thread
-	promptTag                 // add a tag to the selected thread
-	promptReparent            // set the selected thread's parent (paste a uuid; empty = root)
-	promptHold                // hold the selected thread until a date (YYYY-MM-DD; empty = clear)
+	promptNone       promptKind = iota
+	promptRename                // rename the selected thread
+	promptTag                   // add a tag to the selected thread
+	promptReparent              // set the selected thread's parent (paste a uuid; empty = root)
+	promptHold                  // hold the selected thread until a date (YYYY-MM-DD; empty = clear)
+	promptNewVirtual            // name a NEW virtual grouping thread (empty = cancel)
 )
 
 // confirmKind says which destructive action a y/n confirmation popup gates.
@@ -1110,6 +1111,7 @@ func requiresReachableOwner(key string) bool {
 		"h", // hold toggle
 		"H", // hold until date
 		"n", // notify on/off
+		"v", // new virtual group (created on the selected row's machine)
 		"K": // tickets view (loadTickets routes to the owner)
 		return true
 	}
@@ -1232,6 +1234,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptReparent, row, nil, 0
 		}
+	case "v":
+		// New VIRTUAL grouping thread (a root group; reparent children under it
+		// with P). The selection is only a MACHINE carrier — the group is created
+		// on the selected row's machine, because a virtual parent can only group
+		// same-machine threads, so it must live where the threads being grouped
+		// live. No selection (empty grid) = a zero row = the local machine.
+		row, _ := m.Selected()
+		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewVirtual, row, nil, 0
 	case "f":
 		// Fork: copy the selected thread into a new headless thread (same
 		// conversation, branched). It doesn't start anything — enter it to continue.
@@ -1379,6 +1389,12 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.holdRow(row, d.Unix())
+		case promptNewVirtual:
+			// Empty = cancel (a group without a name is an accident, not an ask).
+			if input == "" {
+				return m, nil
+			}
+			return m, m.newVirtualRow(row, input)
 		}
 		return m, nil
 	case "left", "ctrl+b":
@@ -1732,6 +1748,35 @@ func (m Model) forkSelected() tea.Cmd {
 	}
 }
 
+// newVirtualRow creates a NEW virtual grouping thread named by the `v` prompt —
+// a root group on the given row's machine (routed like every other action; a
+// zero row = local). --no-parent is load-bearing: this subprocess inherits the
+// TUI's environment, and `thread new`'s parent inference would otherwise
+// silently child the group to whatever sesh thread the TUI itself runs inside.
+func (m Model) newVirtualRow(row api.ThreadRow, name string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "new", "--virtual", "--name", name, "--no-parent", "--json"}
+		if row.Machine != "" && (machine == "" || row.Machine != machine) {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return actionMsg{err: fmt.Errorf("new virtual group %q: %v: %s", name, err, strings.TrimSpace(string(out)))}
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		if e := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &created); e != nil || created.ID == "" {
+			return actionMsg{err: fmt.Errorf("new virtual group %q: parse new thread id: %v", name, e)}
+		}
+		// Land the cursor on the new group once it shows up in the refetched grid.
+		return actionMsg{preselect: created.ID}
+	}
+}
+
 // deleteSelected drops the selected thread's record. The daemon refuses a live
 // thread (orphan guard); stop it first. Surfaced as an error in actionErr.
 func (m Model) deleteSelected() tea.Cmd {
@@ -1927,7 +1972,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
@@ -2069,7 +2114,7 @@ func (m Model) View() string {
 		b.WriteString(styleDim.Render("  ↑/↓ move · enter remove · esc close") + "\n")
 	}
 	if m.prompting != promptNone {
-		label := "rename"
+		label, target := "rename", m.promptRow.Name
 		switch m.prompting {
 		case promptTag:
 			label = "tag"
@@ -2077,8 +2122,19 @@ func (m Model) View() string {
 			label = "parent uuid (empty=root)"
 		case promptHold:
 			label = "hold until YYYY-MM-DD (empty=clear)"
+		case promptNewVirtual:
+			// The row is only a machine carrier here — show WHERE the group will
+			// be created, not the selected thread's name.
+			label = "new virtual group (empty=cancel)"
+			target = m.promptRow.Machine
+			if target == "" {
+				target = m.machine
+			}
+			if target == "" {
+				target = "local"
+			}
 		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, m.promptRow.Name, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
+		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, target, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
 	}
 	cols := m.activeColumns()
 	vis := m.visibleMatches()

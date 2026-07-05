@@ -1,5 +1,79 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H37 — VIRTUAL parent threads + realize; delete promotes children; codex lost-since-wipe restored (2026-07-05, sesh 7e806ee api 37→38 store 20, myrig 1d44d2f; deployed 3/5 — termux + macstudio unreachable, pending)
+Ticket 181d3ca6 "Virtual parents" (explore) → ticket 149339a1 (implement). Lukas's ask: parent threads
+under something that isn't a thread; later convert the parent into a real thread. DESIGN (explored first,
+Lukas locked 4 decisions): a virtual parent = a THREAD RECORD with agent_kind="virtual" — NOT a new
+entity, NO store migration for the record (agent_kind is a TEXT column). All grouping machinery (tree,
+reparent, H26 hold inheritance, tags, archive, mesh sync) applies unchanged; maintainer resolves it
+headless·idle for free (no pane). Decisions: (1) kind string "virtual" (not "none"/empty — empty must
+stay "bug"); (2) TUI Enter = LOUD WARNING, not fold-toggle; (3) cross-machine parenting OUT of scope
+(parent existence is validated against the OWNER's local store — virtual groups are per-machine like
+hold inheritance); (4) dangling parent ids must be fixed for ALL deletes.
+IMPLEMENTATION:
+- api 37→38 (additive/mixed-mesh safe): api.VirtualAgentKind, NewThreadRequest.Virtual,
+  RealizeThreadRequest + POST /v1/threads/realize. Only the OWNER needs 38 (virtual threads can only be
+  created there); pre-38 viewers render the kind string, their routed verbs hit the owner's loud refusal.
+- KEY INSIGHT that made realize trivial: a converted virtual thread == the EXISTING never-started
+  headless state (newHeadlessThread). handleThreadRealize sets kind, pre-mints AgentSessionID (pi/claude;
+  codex mints on first turn), renames session to headless-<id> (so headful revival mints via
+  [[session_name]]), requires a cwd by then (--cwd else the one stored at creation; virtual cwd is
+  OPTIONAL at create). store.RealizeThread guards `WHERE agent_kind='virtual'` → concurrent realizes
+  can't double-convert. Id/children/tags/holds/ticket bindings all survive (in-place).
+- FAIL-CLOSED gates: virtualGate (409 naming the realize command) on send, capture, send-headless,
+  revive (=resume+headful), fork source, transcript. agents.ParseKind never accepts "virtual", so any
+  UNGUARDED agent path still fails loudly. CLI `thread new --virtual` refuses --agent; daemon refuses
+  every other agent-shaped field. TUI: HeadGlyph ◇ for virtual; Enter + f warn via actionMsg (instant,
+  nothing shells out); fork gated client-side too (daemon's would be the opaque "unknown agent" parse).
+- DELETE PROMOTION (all threads, not just virtual): store.DeleteThread promotes children to the deleted
+  thread's parent in the same tx; store migration 19 (VERSION 20 — comment numbering is offset from
+  element index, the "4" comment spans 2 elements; the migration test rolls back meta.version to
+  len(migrations)-1 rather than a literal) clears HISTORICAL danglers to root. Live store verified: 81
+  threads, zero dangling parents post-restart.
+- conformance: features thread.virtual (agnostic × both loc: create/no-session/refusals/grouping + hold
+  inheritance THROUGH a virtual parent + delete-promotes) + thread.realize (3 agents × both loc: REAL
+  first turn + continuity locally; stored-cwd default + one routed real turn remotely); thread.delete
+  cells extended w/ promotion; TUI claim action-virtual-enter (added to declaredTUIClaims — the H25
+  register-only-never-runs gotcha). All 16 blast-radius cells + claims green.
+- REPAIRED STALE CLAIM: mesh-render-offline still asserted the PRE-H35 "offline threads stay listed"
+  contract → failing on clean HEAD since H35 made hide-offline the default (verified via a HEAD
+  worktree). Now asserts OFFLINE + "hidden" footer + `o` reveals last-known rows. Green.
+CODEX SIDE-QUEST (Lukas: "codex should be installed; check myrig for what went wrong"): my codex realize
+cells failed "command not found: codex" — and so did the long-green thread.send.headless/codex cell.
+ROOT CAUSE: the 2026-06-29 `rm -rf ~` wipe on mymain. Recovery re-provisioned node via mise (14:27 that
+day) but myrig has NO step installing the agent npm globals — pi was manually reinstalled 2026-07-03,
+codex NEVER was, and ~/.codex/auth.json was also lost (only the myrig hooks.json symlink came back).
+FIX: `mise x node@lts -- npm install -g @openai/codex@latest` + `mise reshim` on mymain AND ideapad
+(also missing there); auth.json scp'd from macbook (0600). myrig 1d44d2f adds an idempotent post step
+(scripts/post/all.sh): ensure @earendil-works/pi-coding-agent + @openai/codex under mise npm (skips
+termux; claude has its own installer; auth is a credential — copy manually after a wipe). codex cells
+then green.
+LIVE SMOKE GOTCHAS (bit me, worth remembering):
+- `thread new` PARENT INFERENCE strikes again: creating the smoke virtual group from inside this sesh
+  thread silently childed it to MY session thread → the TUI filter (children:off by default) showed
+  0 matches and I chased a phantom bug. Pass --no-parent for standalone smoke rows.
+- tmux send-keys with a whole string ("/query") arrives as ONE bubbletea KeyRunes burst → normal-mode
+  switch matches nothing → the `/` never opened the filter, and my Esc QUIT the TUI. Type the `/` and
+  the query as separate send-keys (with small sleeps).
+- In filter mode the SELECTED row is the top MATCH — I pressed Enter while the cursor sat on the pi
+  CHILD row and revived it into a real pane on the LIVE work server (nav success quit the TUI = the
+  "exited 0" mystery). Stopped it immediately; no user client was disturbed (verified list-clients
+  before/after). ALWAYS capture and confirm 1/N matches + the `>` cursor before driving Enter.
+LIVE-VERIFIED on mymain (real daemon): create virtual (kind/no-cwd/virtual-<id> session), all refusals
+loud + actionable, TUI ◇ + AGENT=virtual + Enter ✗ warning persists w/o quitting, realize→pi + real
+headless turn ("VIRTUAL-REALIZED-OK"), delete → child promoted to the group's parent, migration clean.
+DEPLOY (schema 38 = binary + daemon RESTART): mymain (native .new+mv + supervisorctl), macbook (lukas@,
+/opt/homebrew/bin/go + supervisorctl), ideapad (native + supervisorctl) — all api 38, mesh synced 0s.
+**termux UNREACHABLE (android-main:8022 timed out) + macstudio still OFFLINE (~2.8d) — BOTH PENDING;
+additive schema so lagging is harmless. termux when back: git pull, plain `go build` (CGO=1/android per
+H22), .new+mv, kill daemon by explicit pid (login-guard relaunches). macstudio when back: it now owes
+H34-Fix-B + H35 + H36 + this — git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new
+./cmd/sesh && mv -f && supervisorctl restart sesh-daemon.**
+FOLLOW-UPS: sesh-ui virtual-thread support = ticket 7d09e0f5 (triage; render ◇/virtual, refuse chat
+surfaces, realize affordance). Cross-machine parenting = future feature (TUI tree already joins by id
+across the merged mesh set; the blockers are owner-side parent validation + H35 offline-hiding
+promoting children to root + H26 same-machine hold walk). Tickets 181d3ca6 + 149339a1 marked done.
+
 ## H36 — TUI property-set lag + archive disappear→REAPPEAR→disappear flicker: meshsync stall + fetch-count patch TTL (2026-07-04, sesh 021b316; NO schema change; deployed 4/5 — macstudio OFFLINE, pending)
 Ticket 0b3d2774 "Large lag when setting properties in sesh tui": a/h/stop laggy; archiving hid the row,
 then it RESURFACED ~a second later, then vanished for good. Lukas asked diagnose→plan→confer; plan agreed

@@ -308,7 +308,18 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.delete",
-		Description: "drop a record without touching the runtime (unlike kill)",
+		Description: "drop a record without touching the runtime (unlike kill); children are promoted to the deleted thread's parent (a parent id never dangles)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.virtual",
+		Description: "virtual threads: `thread new --virtual` records a pure grouping node (agent_kind virtual — no agent/pane/transcript) to parent threads under; grouping machinery (parent, reparent, hold inheritance) applies unchanged; every agent verb refuses loudly until realized",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.realize",
+		Description: "thread realize: convert a virtual grouping thread IN PLACE into a real never-started headless thread (id/children/tags survive) — proven by a REAL first turn (+continuity); a non-virtual thread refuses loudly",
+		Agents:      agentic,
 		Localities:  bothLoc,
 	})
 	Register(Feature{
@@ -323,7 +334,7 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
-		ID: "thread.model",
+		ID:          "thread.model",
 		Description: "agent model selection: `thread new --model <m>` pins an opaque model on the thread (applied on spawn/resume/every headless turn), `send-headless --model` overrides it for one turn. Asserted on the OBSERVABLE model the agent actually ran (pi/claude: the model recorded in their transcript; codex: the exact model string reaching codex, proved by its loud rejection echoing it). LOCAL-only: the model is stored on the record + injected by the agent command builder, locality-independent; `--machine` routing of `thread new`/`send-headless` is proven by route.parity",
 		Agents:      agentic,
 		Localities:  []Locality{Local},

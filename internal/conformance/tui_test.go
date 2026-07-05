@@ -26,7 +26,7 @@ var declaredTUIClaims = []string{
 	"descendant-running-glyph",  // a parent's HB ↓ glyph tracks whether a REAL descendant is running a turn, both directions
 	"grid-fanout-cross-machine", // the grid shows a peer's thread via the mesh
 	"navigation-cursor",         // key nav moves the selection over real rows
-	"mesh-render-offline",       // a downed peer renders OFFLINE, its threads still listed
+	"mesh-render-offline",       // a downed peer renders OFFLINE, threads hidden by default (H35), `o` reveals the last-known rows
 	"action-stop",               // the stop key really ends the runtime, keeps the record
 	"action-delete",             // the delete key really drops the record
 	"action-archive",            // the archive key really parks the thread
@@ -73,6 +73,7 @@ var declaredTUIClaims = []string{
 	"tickets-view-remote",       // tickets view on a thread owned by ANOTHER machine: every op routes to the thread's machine (the cross-machine "bound thread not found" bug)
 	"tickets-view-filter",       // the K view defaults to showing ACTIVE tickets; Tab opens a status picker (incl. all) that narrows the list
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
+	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ◇ glyph rendered; f refuses too; record untouched
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -1061,9 +1062,12 @@ func claimGridFanout(t *testing.T) {
 	}
 }
 
-// claimMeshRenderOffline: the rendered mesh view reflects offline browsing — a
-// peer that goes down renders as OFFLINE, and its last-known threads stay listed
-// (not dropped). The TUI's whole point for a multi-machine rig.
+// claimMeshRenderOffline: the rendered mesh view reflects offline browsing under
+// the H35 contract — a peer that goes down renders as OFFLINE with its threads
+// HIDDEN by default (the footer reports the hidden count), and pressing `o`
+// reveals the last-known threads (retained, not dropped). The pre-H35 version of
+// this claim asserted the old always-listed behavior and had been failing since
+// hide-offline became the default.
 func claimMeshRenderOffline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -1082,17 +1086,29 @@ func claimMeshRenderOffline(t *testing.T) {
 	m := tui.New(local.Home+"/daemon.sock", true) // all-machines
 	m, _ = renderUntilRow(t, m, "onpeer")         // synced and rendered while up
 
-	// Take the peer down: the render must show it OFFLINE while STILL listing onpeer.
+	// Take the peer down: the render must flag it OFFLINE, hide its threads by
+	// default, and report the hidden count in the footer (H35).
 	if _, stderr, err := peer.daemonRunner.Run(t, "daemon", "stop"); err != nil {
 		t.Fatalf("stop peer daemon: %v\n%s", err, stderr)
 	}
 	if !waitUntil(20*time.Second, func() bool {
 		mm, view := render(t, m)
 		m = mm
-		return strings.Contains(view, "OFFLINE") && rowLine(view, "onpeer") != ""
+		return strings.Contains(view, "OFFLINE") && strings.Contains(view, "hidden") && rowLine(view, "onpeer") == ""
 	}) {
 		_, view := render(t, m)
-		t.Fatalf("TUI never rendered the downed peer as OFFLINE-with-threads; view:\n%s", view)
+		t.Fatalf("TUI never rendered the downed peer as OFFLINE with its threads hidden; view:\n%s", view)
+	}
+	// `o` reveals the peer's LAST-KNOWN threads — offline browsing (retained,
+	// not dropped).
+	m = runKey(t, m, "o")
+	if !waitUntil(15*time.Second, func() bool {
+		mm, view := render(t, m)
+		m = mm
+		return rowLine(view, "onpeer") != ""
+	}) {
+		_, view := render(t, m)
+		t.Fatalf("`o` did not reveal the downed peer's last-known threads; view:\n%s", view)
 	}
 }
 

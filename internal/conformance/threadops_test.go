@@ -105,11 +105,17 @@ func testThreadDelete(t *testing.T, loc matrix.Locality) {
 	// like every other verb (the daemon's delete is an exact-match lookup, so a bare
 	// prefix used to 404). An unknown prefix is loud — never a silent no-op.
 	pre := sb.newHeadlessThread(t, "pi", "delpre")
+	// Child promotion: deleting a parent promotes its children to the deleted
+	// thread's OWN parent (grandparent; root here) — a parent id never dangles.
+	kid := sb.newHeadlessThreadParented(t, "pi", "delkid", pre.ID)
 	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", pre.ID[:8]); err != nil {
 		t.Fatalf("delete by id prefix failed: %v\n%s", err, stderr)
 	}
 	if hasThread(sb.listThreads(t), pre.ID) {
 		t.Errorf("prefix delete did not drop the record")
+	}
+	if got := sb.threadFromList(t, kid.ID).Parent; got != "" {
+		t.Errorf("child not promoted to root after parent delete: parent=%q", got)
 	}
 	if _, _, err := sb.Runner.Run(t, "thread", "delete", "--id", "zzzzzzzz"); err == nil {
 		t.Errorf("delete of an unknown id prefix should be loud, not a silent no-op")

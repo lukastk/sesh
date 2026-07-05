@@ -114,9 +114,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
-		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec).",
-		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
-		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec"},
+		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec). --virtual creates a VIRTUAL thread instead: a pure grouping node with NO agent (parent other threads under it; renders ◇ in the TUI) — takes no agent-shaped flag, cwd is optional (kept as the default for a later `thread realize`), and agent verbs on it refuse loudly until realized.",
+		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec", "sesh thread new --virtual --name 'project X'"},
 	},
 	"thread list": {
 		summary:  "list threads (id, agent, name, session, cwd); optionally archived and/or fanned out across the mesh",
@@ -217,6 +217,11 @@ var helpRegistry = map[string]cmdHelp{
 		summary:  "promote a live headless thread into a headed tmux pane; 409 if a turn is in flight, N/A for a codex thread with no first turn yet",
 		usage:    "sesh thread headful --id <id> [--machine <m>] [--json]",
 		examples: []string{"sesh thread headful --id 1a2b3c4d", "sesh thread headful 1a2b3c4d"},
+	},
+	"thread realize": {
+		summary:  "convert a VIRTUAL grouping thread in place into a real thread — sets the agent kind and cwd; the result is exactly a fresh never-started headless thread (id, children, tags, holds and ticket bindings all survive), so enter it or send-headless afterwards to start the conversation. --cwd defaults to the cwd stored at creation and is required if none was; --id must be explicit (a prefix resolves; the current thread is never inferred). Refuses a non-virtual thread loudly.",
+		usage:    "sesh thread realize --id <id> --agent <claude|codex|pi> [--cwd <dir>] [--model <m>] [--machine <m>] [--json]",
+		examples: []string{"sesh thread realize --id 1a2b3c4d --agent claude --cwd ~/proj", "sesh thread realize --id 1a2b3c4d --agent pi"},
 	},
 	"thread grid": {
 		summary:  "emit the live thread grid rows (head, busy, attachment, machine, agent, name, id); optionally archived and/or across the mesh",

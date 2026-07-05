@@ -28,6 +28,9 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		writeError(w, http.StatusNotFound, "fork: source thread "+req.ForkFrom+" not found on this machine")
 		return
 	}
+	if virtualGate(w, src, "fork") {
+		return
+	}
 	if src.AgentKind != string(kind) {
 		writeError(w, http.StatusBadRequest, "fork: source is "+src.AgentKind+", not "+string(kind)+" (a fork stays the same agent)")
 		return

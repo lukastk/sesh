@@ -73,6 +73,9 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if virtualGate(w, thread, "send-headless") {
+		return
+	}
 	// Unified model: a headless turn is valid on any IDLE thread — including one
 	// that previously ran headed (its conversation resumes per-turn). A LIVE pane
 	// owns the conversation, so a concurrent headless turn would fork it: loud 409.

@@ -138,6 +138,13 @@ var migrations = []string{
 	// re-archive and clears it to 0 on un-archive). The TUI's archived view orders by
 	// it (most recently archived first). APPENDED last.
 	`ALTER TABLE threads ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0;`,
+	// 19: data fix — clear DANGLING parent ids. Historically DeleteThread left
+	// children pointing at the deleted id (they silently rendered as roots and
+	// could never be repaired, the grandparent being gone). DeleteThread now
+	// promotes children in the same tx; this one-time sweep resets the already-
+	// dangling ones to root ('' — the grandparent is unrecoverable for these).
+	// APPENDED last.
+	`UPDATE threads SET parent = '' WHERE parent != '' AND parent NOT IN (SELECT id FROM threads);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

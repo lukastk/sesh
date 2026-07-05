@@ -2,8 +2,8 @@ package client
 
 import (
 	"context"
-	"strconv"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -44,7 +44,7 @@ func (c *Client) ThreadHold(ctx context.Context, id string, onHoldUntilUnix int6
 	return c.postJSON(ctx, "http://unix/v1/threads/hold", api.HoldThreadRequest{ID: id, OnHoldUntilUnix: onHoldUntilUnix}, nil)
 }
 
-// ThreadReparent posts POST /v1/threads/reparent ('' parent = make root).
+// ThreadReparent posts POST /v1/threads/reparent (” parent = make root).
 func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)
 }
@@ -119,6 +119,13 @@ func (c *Client) ThreadHeadful(ctx context.Context, id string) (api.ThreadRespon
 	return out, c.postJSON(ctx, "http://unix/v1/threads/headful", api.ThreadHeadfulRequest{ID: id}, &out)
 }
 
+// ThreadRealize posts POST /v1/threads/realize (convert a VIRTUAL grouping
+// thread in place into a real, never-started headless thread).
+func (c *Client) ThreadRealize(ctx context.Context, req api.RealizeThreadRequest) (api.ThreadResponse, error) {
+	var out api.ThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/realize", req, &out)
+}
+
 // ThreadPane fetches GET /v1/threads/pane?id= (thread.resolve-pane).
 func (c *Client) ThreadPane(ctx context.Context, id string) (api.ResolvePaneResponse, error) {
 	var out api.ResolvePaneResponse
@@ -155,13 +162,13 @@ func (c *Client) ThreadSendHeadless(ctx context.Context, id, text string) error 
 }
 
 // ThreadSendHeadlessMode is ThreadSendHeadless with a [spawn]-mode override
-// for the turn ('' = the config default).
+// for the turn (” = the config default).
 func (c *Client) ThreadSendHeadlessMode(ctx context.Context, id, text, mode string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text, Mode: mode}, nil)
 }
 
 // ThreadSendHeadlessModel is ThreadSendHeadless with a per-turn model override
-// ('' = the thread's pinned model / the agent default).
+// (” = the thread's pinned model / the agent default).
 func (c *Client) ThreadSendHeadlessModel(ctx context.Context, id, text, model string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/send-headless", api.ThreadSendRequest{ID: id, Text: text, Model: model}, nil)
 }
@@ -193,7 +200,7 @@ func (c *Client) ThreadAdopt(ctx context.Context, pane, name, sessionID, agentKi
 	return out, c.postJSON(ctx, "http://unix/v1/threads/adopt", api.AdoptThreadRequest{Pane: pane, Name: name, SessionID: sessionID, AgentKind: agentKind, Cwd: cwd}, &out)
 }
 
-// ThreadMeta posts POST /v1/threads/meta ('' value deletes the key).
+// ThreadMeta posts POST /v1/threads/meta (” value deletes the key).
 func (c *Client) ThreadMeta(ctx context.Context, id, key, value string) (api.ThreadResponse, error) {
 	var out api.ThreadResponse
 	return out, c.postJSON(ctx, "http://unix/v1/threads/meta", api.MetaThreadRequest{ID: id, Key: key, Value: value}, &out)

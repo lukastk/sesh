@@ -306,6 +306,9 @@ func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if virtualGate(w, th, "transcript") {
+		return
+	}
 	tail := -1
 	if t := r.URL.Query().Get("tail"); t != "" {
 		n, perr := strconv.Atoi(t)
@@ -334,7 +337,7 @@ func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleThreadMeta sets ('' value = deletes) one meta key.
+// handleThreadMeta sets (” value = deletes) one meta key.
 func (d *Daemon) handleThreadMeta(w http.ResponseWriter, r *http.Request) {
 	var req api.MetaThreadRequest
 	if err := decodeJSON(r, &req); err != nil {

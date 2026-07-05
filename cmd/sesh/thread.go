@@ -88,6 +88,8 @@ func runThread(args []string) error {
 		return threadResume(cfg, rest)
 	case "headful":
 		return threadHeadful(cfg, rest)
+	case "realize":
+		return threadRealize(cfg, rest)
 	case "grid":
 		return threadGrid(cfg, rest)
 	case "snapshot":
@@ -250,6 +252,54 @@ func threadHeadful(cfg config.Config, args []string) error {
 		return emitJSON(resp.Thread)
 	}
 	fmt.Printf("promoted %s to headed (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
+	return nil
+}
+
+// threadRealize converts a VIRTUAL grouping thread in place into a real,
+// never-started headless thread (id/children/tags/holds preserved); enter it or
+// send-headless afterwards to start the conversation. Explicit --id only (a
+// prefix resolves; realize never infers the current thread — no agent ever runs
+// inside a virtual thread, so an inferred id could only be a mistake).
+func threadRealize(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("realize", flag.ContinueOnError)
+	id := fs.String("id", "", "virtual thread id/prefix (required)")
+	agent := fs.String("agent", "", "agent to realize as: claude|codex|pi (required)")
+	cwd := fs.String("cwd", "", "start directory (default: the cwd stored at creation; required if none was)")
+	model := fs.String("model", "", "agent model to pin to the thread (opaque pass-through; empty = the agent's default)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return errors.New("thread realize: --id is required")
+	}
+	if *agent == "" {
+		return errors.New("thread realize: --agent is required")
+	}
+	if *cwd != "" {
+		// Relative --cwd expands against the invocation dir; a leading ~ passes
+		// through for the owner daemon to resolve (portable cross-machine).
+		abs, err := absCwd(*cwd)
+		if err != nil {
+			return fmt.Errorf("thread realize: --cwd: %w", err)
+		}
+		*cwd = abs
+	}
+	c := daemonClient(cfg)
+	rid, err := resolveIDPrefix(c, *id)
+	if err != nil {
+		return err
+	}
+	resp, err := c.ThreadRealize(context.Background(), api.RealizeThreadRequest{
+		ID: rid, Agent: *agent, Cwd: *cwd, Model: *model,
+	})
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp.Thread)
+	}
+	fmt.Printf("realized %s as %s (enter it or send-headless to start the conversation)\n", resp.Thread.ID, resp.Thread.AgentKind)
 	return nil
 }
 
@@ -440,9 +490,13 @@ func threadNew(cfg config.Config, args []string) error {
 	intoWindow := fs.String("into-window", "", "place the thread as a SPLIT pane of target (a pane id or session:window)")
 	intoPane := fs.String("into-pane", "", "bind the thread to an EXISTING shell pane and run the agent in place (register-then-exec; with --exec)")
 	doExec := fs.Bool("exec", false, "with --into-pane: replace THIS process with the agent (run it in the calling pane)")
+	virtual := fs.Bool("virtual", false, "create a VIRTUAL thread — a pure grouping node with no agent (parent other threads under it; convert later with `thread realize`)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *virtual && *agent != "" {
+		return errors.New("thread new: --virtual takes no --agent (a virtual thread has none; realize it later)")
 	}
 	var forkID string
 	if *forkFrom != "" {
@@ -473,14 +527,17 @@ func threadNew(cfg config.Config, args []string) error {
 	if *doExec && *intoPane == "" {
 		return errors.New("thread new: --exec requires --into-pane")
 	}
-	// --name is OPTIONAL (empty = a nameless thread). --agent is required.
-	if *agent == "" {
+	// --name is OPTIONAL (empty = a nameless thread). --agent is required —
+	// except for a VIRTUAL thread, which by definition has none.
+	if *agent == "" && !*virtual {
 		return errors.New("thread new: --agent is required")
 	}
 	// --cwd defaults to the current dir ('.'); --into-pane inherits the pane's cwd
 	// (leave it empty so the daemon takes the pane's path); a fork already defaulted
-	// it to the source's cwd above.
-	if *cwd == "" && *intoPane == "" {
+	// it to the source's cwd above; a VIRTUAL thread needs no cwd at all (an empty
+	// one stays empty — baking the invocation dir into a grouping node would be
+	// meaningless data; a cwd becomes required at realize time).
+	if *cwd == "" && *intoPane == "" && !*virtual {
 		*cwd = "."
 	}
 	if *cwd != "" {
@@ -528,6 +585,7 @@ func threadNew(cfg config.Config, args []string) error {
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
 		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg, Model: *model,
 		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
+		Virtual: *virtual,
 	})
 	if err != nil {
 		return err

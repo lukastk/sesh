@@ -1521,6 +1521,12 @@ func (m Model) navSelected() tea.Cmd {
 	useInClient := local && onWorkSocket(m.tmux, m.tmuxSocket)
 	return func() tea.Msg {
 		sessionName := row.SessionName
+		// VIRTUAL: a pure grouping node — there is no agent to enter, ever
+		// (Lukas's choice: a loud warning, not a fold toggle). Checked before
+		// anything shells out, so the refusal is instant.
+		if row.AgentKind == api.VirtualAgentKind {
+			return actionMsg{err: fmt.Errorf("%q is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id %s --agent claude|codex|pi", row.Name, row.ID)}
+		}
 		// headless·busy: a turn is mid-flight — there is no pane to enter and a
 		// revival would fork the conversation (the daemon would 409 anyway): loud.
 		if row.Head == api.Headless && row.Busy == api.BusyBusy {
@@ -1699,6 +1705,12 @@ func (m Model) forkSelected() tea.Cmd {
 		name = row.Name + " (fork)"
 	}
 	return func() tea.Msg {
+		// A VIRTUAL thread has no conversation to branch — refuse with a clear
+		// message here (the daemon would refuse too, but via the opaque
+		// "unknown agent" parse error, since a fork inherits the source's kind).
+		if row.AgentKind == api.VirtualAgentKind {
+			return actionMsg{err: fmt.Errorf("fork %q: a virtual thread has no conversation to fork — realize it first", row.Name)}
+		}
 		args := []string{"thread", "new", "--fork-from", row.ID, "--name", name, "--json"}
 		if machine == "" || row.Machine != machine {
 			args = append(args, "--machine", row.Machine)
@@ -1939,7 +1951,11 @@ func (m *Model) legendLines() int {
 // HeadGlyph renders the runtime-form axis:
 //
 //	● headful (a live pane — enterable)   ◌ headless (no pane)   ? unknown
+//	◇ virtual (a grouping node — no agent at all; realize to convert)
 func HeadGlyph(row api.ThreadRow) string {
+	if row.AgentKind == api.VirtualAgentKind {
+		return "◇"
+	}
 	switch row.Head {
 	case api.Headful:
 		return "●"

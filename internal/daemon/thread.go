@@ -42,12 +42,16 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread send: id and text are required")
 		return
 	}
-	if _, err := d.store.GetThread(req.ID); err != nil {
+	thread, err := d.store.GetThread(req.ID)
+	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
 			writeError(w, http.StatusNotFound, "thread not found: "+req.ID)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if virtualGate(w, thread, "thread send") {
 		return
 	}
 	loc, found, err := d.tmux.FindPaneByThreadID(req.ID)
@@ -88,6 +92,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	// machine that actually runs the agent. Done once, up front, so every
 	// spawn path (headed/headless/fork) sees the expanded cwd.
 	req.Cwd = expandHomeCwd(req.Cwd)
+	// A VIRTUAL thread has no agent — branch before agent parsing; it does its
+	// own validation (agent-shaped fields refused, cwd optional).
+	if req.Virtual {
+		d.newVirtualThread(w, req)
+		return
+	}
 	kind, err := agents.ParseKind(req.Agent)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -429,12 +439,16 @@ func (d *Daemon) handleThreadCapture(w http.ResponseWriter, r *http.Request) {
 		}
 		lines = n
 	}
-	if _, err := d.store.GetThread(id); err != nil {
+	thread, err := d.store.GetThread(id)
+	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
 			writeError(w, http.StatusNotFound, "thread not found: "+id)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if virtualGate(w, thread, "thread capture") {
 		return
 	}
 	loc, found, err := d.tmux.FindPaneByThreadID(id)

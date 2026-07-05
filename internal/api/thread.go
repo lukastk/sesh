@@ -1,5 +1,15 @@
 package api
 
+// VirtualAgentKind is the agent_kind of a VIRTUAL thread — a pure grouping node
+// in the thread tree with NO agent, pane, or transcript. It exists so threads
+// can be parented under something that is not (yet) a real thread; all record
+// machinery (tree, reparent, hold inheritance, tags, archive, mesh sync) applies
+// unchanged. It is deliberately NOT a valid agents.Kind: every agent-shaped code
+// path that parses the kind refuses it loudly, so an unguarded path fails closed
+// instead of doing something plausible-but-wrong. `thread realize` converts a
+// virtual thread in place into a real (never-started headless) one.
+const VirtualAgentKind = "virtual"
+
 // Thread is the persistent thread record. Pane and runtime state are NOT stored
 // here — they are resolved live (see ThreadStatusResponse).
 type Thread struct {
@@ -135,9 +145,30 @@ type NewThreadRequest struct {
 	IntoSession string `json:"into_session,omitempty"`
 	IntoWindow  string `json:"into_window,omitempty"`
 	IntoPane    string `json:"into_pane,omitempty"`
+	// Virtual creates a VIRTUAL thread — a pure grouping node (agent_kind
+	// "virtual", no agent/pane/transcript) for parenting other threads under.
+	// Mutually exclusive with every agent-shaped field (agent, headless,
+	// fork_from, placement, msg, mode, model) — all refused loudly. Cwd is
+	// OPTIONAL here (kept as the default for a later realize).
+	Virtual bool `json:"virtual,omitempty"`
 }
 
-// ReparentThreadRequest re-parents a thread ('' = make it a root).
+// RealizeThreadRequest is the body of POST /v1/threads/realize: convert a
+// VIRTUAL thread in place into a real one. The result is exactly a fresh
+// never-started headless thread (agent kind set, session id pre-minted for
+// pi/claude, no conversation until the first turn) — id, children, tags, holds
+// and ticket bindings all survive because nothing but the record changes.
+type RealizeThreadRequest struct {
+	ID    string `json:"id"`
+	Agent string `json:"agent"` // claude | codex | pi (never "virtual")
+	// Cwd ('' = keep the record's stored cwd). A cwd must exist by realize time
+	// (agents need one); missing both is a loud refusal.
+	Cwd string `json:"cwd,omitempty"`
+	// Model pins the agent model (opaque pass-through; '' = the agent's default).
+	Model string `json:"model,omitempty"`
+}
+
+// ReparentThreadRequest re-parents a thread (” = make it a root).
 type ReparentThreadRequest struct {
 	ID     string `json:"id"`
 	Parent string `json:"parent"`
@@ -311,9 +342,9 @@ type ThreadGridResponse struct {
 // _dev/MESH.md.
 type ThreadSnapshot struct {
 	Thread
-	Head           Head       `json:"head"`
-	Busy           Busy       `json:"busy"`
-	Attachment     Attachment `json:"attachment"`
+	Head             Head       `json:"head"`
+	Busy             Busy       `json:"busy"`
+	Attachment       Attachment `json:"attachment"`
 	TicketsOpen      int        `json:"tickets_open"`
 	TicketName       string     `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
 	TicketNeedsInput bool       `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
@@ -416,7 +447,7 @@ type AdoptThreadRequest struct {
 	Cwd string `json:"cwd,omitempty"`
 }
 
-// MetaThreadRequest sets ('' value = deletes) one meta key.
+// MetaThreadRequest sets (” value = deletes) one meta key.
 type MetaThreadRequest struct {
 	ID    string `json:"id"`
 	Key   string `json:"key"`

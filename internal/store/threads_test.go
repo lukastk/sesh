@@ -187,3 +187,101 @@ func TestThreadHold(t *testing.T) {
 		t.Fatalf("hold on missing thread: want ErrThreadNotFound, got %v", err)
 	}
 }
+
+func TestDeleteThreadPromotesChildren(t *testing.T) {
+	s := openTestStore(t)
+	mk := func(id, parent string) {
+		t.Helper()
+		if err := s.InsertThread(api.Thread{ID: id, Machine: "m", SessionName: "s-" + id, Cwd: "/x", AgentKind: "pi", Name: id, Tags: []string{}, Parent: parent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("g", "")
+	mk("p", "g")
+	mk("c1", "p")
+	mk("c2", "p")
+	mk("u", "")
+
+	// Deleting a mid-tree node promotes its children to the grandparent.
+	if err := s.DeleteThread("p"); err != nil {
+		t.Fatalf("delete p: %v", err)
+	}
+	for _, id := range []string{"c1", "c2"} {
+		if got, _ := s.GetThread(id); got.Parent != "g" {
+			t.Fatalf("%s: want parent g after promote, got %q", id, got.Parent)
+		}
+	}
+	if got, _ := s.GetThread("u"); got.Parent != "" {
+		t.Fatalf("unrelated thread reparented: %q", got.Parent)
+	}
+	// Deleting a root promotes its children to root.
+	if err := s.DeleteThread("g"); err != nil {
+		t.Fatalf("delete g: %v", err)
+	}
+	if got, _ := s.GetThread("c1"); got.Parent != "" {
+		t.Fatalf("c1: want root after deleting g, got %q", got.Parent)
+	}
+	if err := s.DeleteThread("nope"); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("delete missing: want ErrThreadNotFound, got %v", err)
+	}
+}
+
+func TestRealizeThread(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.InsertThread(api.Thread{ID: "v1", Machine: "m", SessionName: "virtual-v1", Cwd: "", AgentKind: api.VirtualAgentKind, Name: "group", Tags: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RealizeThread("v1", "pi", "sess-123", "/work", "headless-v1", "somemodel"); err != nil {
+		t.Fatalf("realize: %v", err)
+	}
+	got, err := s.GetThread("v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentKind != "pi" || got.AgentSessionID != "sess-123" || got.Cwd != "/work" || got.SessionName != "headless-v1" || got.Model != "somemodel" {
+		t.Fatalf("realize did not apply: %+v", got)
+	}
+	if got.HeadlessStarted {
+		t.Fatal("a realized thread must be never-started (first turn creates the conversation)")
+	}
+	// Realizing a NON-virtual thread must refuse (the WHERE guard — also the
+	// concurrent double-realize case).
+	if err := s.RealizeThread("v1", "claude", "x", "/work", "headless-v1", ""); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("realize non-virtual: want ErrThreadNotFound, got %v", err)
+	}
+	if err := s.RealizeThread("missing", "pi", "x", "/work", "h", ""); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("realize missing: want ErrThreadNotFound, got %v", err)
+	}
+}
+
+// TestMigrationClearsDanglingParents proves the one-time data-fix sweep
+// (migration 19): a parent id pointing at no existing thread is reset to root,
+// while valid parent links survive. Simulated by rolling meta.version back to
+// the pre-sweep version and re-running migrate on rows seeded with a dangler.
+func TestMigrationClearsDanglingParents(t *testing.T) {
+	s := openTestStore(t)
+	mk := func(id, parent string) {
+		t.Helper()
+		if err := s.InsertThread(api.Thread{ID: id, Machine: "m", SessionName: "s-" + id, Cwd: "/x", AgentKind: "pi", Name: id, Tags: []string{}, Parent: parent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("a", "")
+	mk("b", "a")
+	mk("c", "ghost") // dangling: ghost never existed (historical delete)
+	// Roll back to just before the sweep (the LAST migration) so re-migrating
+	// runs exactly it. len-1, not a literal: the comment numbering is offset
+	// from the element indexes (one historical comment spans two elements).
+	if _, err := s.db.Exec(`UPDATE meta SET version = ? WHERE id = 1`, len(migrations)-1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatalf("re-migrate: %v", err)
+	}
+	if got, _ := s.GetThread("c"); got.Parent != "" {
+		t.Fatalf("dangling parent not cleared: %q", got.Parent)
+	}
+	if got, _ := s.GetThread("b"); got.Parent != "a" {
+		t.Fatalf("valid parent link damaged: %q", got.Parent)
+	}
+}

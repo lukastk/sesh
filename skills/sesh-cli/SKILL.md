@@ -69,7 +69,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   tmux pane; a *headless* thread is a durable conversation with no pane (turns run
   stateless via `--resume`). The two are not a stored mode — they're inferred at runtime.
 - **Two orthogonal state axes** (what the glyphs mean):
-  - **head**: `●` headful (a live pane) / `◌` headless (no pane).
+  - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `◇` **virtual**
+    (a pure grouping node — no agent at all; see *Virtual threads* below).
   - **busy**: `▶` busy (mid-turn) / `·` idle.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
@@ -86,6 +87,19 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 - **Parent/child** threads form a tree (a supervisor thread and its sub-agents); the TUI
   renders it collapsibly. **`thread new` defaults to childing the new thread to the current
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
+  Deleting a thread **promotes its children** to the deleted thread's own parent
+  (grandparent; root if it had none) — parent ids never dangle.
+- **Virtual threads** (`thread new --virtual --name X`) are grouping nodes WITHOUT an
+  agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
+  group threads under a parent that isn't (yet) real work: parent/reparent threads under
+  it, tag/archive/hold it (a hold on the group parks the whole subtree via inheritance).
+  Every agent verb (`send`, `send-headless`, `headful`/`resume`, `capture`, `transcript`,
+  fork) refuses loudly; in the TUI, Enter shows a warning instead of entering. Convert it
+  into a REAL thread in place with `thread realize --id <id> --agent claude|codex|pi
+  [--cwd <dir>]` — the id (and children, tags, holds, ticket bindings) survive, and the
+  result is a fresh never-started headless thread: enter it or `send-headless` to start
+  the conversation. `--cwd` at realize defaults to the cwd stored at creation (creation
+  cwd is optional; one is required by realize time).
 - **Tickets** are work items (a name + a prompt) optionally bound to a thread (`needs-input`
   derives from the thread's axes). Single-owner: every ticket command auto-routes to the
   configured ticket owner. CLI:
@@ -245,6 +259,10 @@ x            stop      d  delete    a  archive/unarchive   (d and a ask y/n firs
 q / esc      quit
 ```
 
+On a **virtual** row (`◇` — a grouping node with no agent), Enter and `f` show a
+warning instead of acting; convert it first with `sesh thread realize`. Grouping keys
+(`h`/`H`, `t`/`T`, `r`, `P`, `a`, `d`) work normally on it.
+
 **Hold** parks a thread you're not working on today. It sets the thread's
 `on_hold_until` to an absolute instant and the owning daemon derives a live "on hold"
 flag against its clock, so a hold **auto-expires** — `h` defaults to the start of
@@ -379,10 +397,13 @@ exec sesh thread new --agent claude --name here --into-pane "$TMUX_PANE" --exec 
 #   then (with --exec) replaces THIS process with the agent so it takes over the
 #   pane. cwd defaults to the pane's. Without --exec it prints the launch command.
 
+sesh thread new --virtual --name "project X"                         # a VIRTUAL grouping node (no agent; cwd optional)
+sesh thread realize --id <id> --agent claude --cwd ~/proj            # convert a virtual thread into a real one, in place
+
 sesh thread stop --id <id>           # end runtime (kills the thread's PANE; a session shared with siblings survives), keep the record (revivable)
 sesh thread resume --id <id>         # revive a dead thread into a fresh pane (restores convo)
 sesh thread headful --id <id>        # promote a live HEADLESS thread into a pane
-sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first)
+sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first); children promote to the grandparent
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --clear                     # release the hold now

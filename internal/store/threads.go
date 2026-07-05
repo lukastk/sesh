@@ -75,10 +75,52 @@ func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
 }
 
 // DeleteThread removes a thread record. Returns ErrThreadNotFound if absent.
+// Its children are PROMOTED to the deleted thread's own parent (the grandparent;
+// ” = root) in the same transaction — a parent id must never dangle (a dangling
+// id silently renders children as roots and can never be cleaned up later, since
+// the grandparent is unknowable once the row is gone).
 func (s *Store) DeleteThread(id string) error {
-	res, err := s.db.Exec(`DELETE FROM threads WHERE id = ?`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return fmt.Errorf("store: delete thread: begin: %w", err)
+	}
+	defer tx.Rollback()
+	var parent string
+	if err := tx.QueryRow(`SELECT parent FROM threads WHERE id = ?`, id).Scan(&parent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrThreadNotFound
+		}
+		return fmt.Errorf("store: delete thread: read parent: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE threads SET parent = ? WHERE parent = ?`, parent, id); err != nil {
+		return fmt.Errorf("store: delete thread: promote children: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM threads WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("store: delete thread: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete thread: commit: %w", err)
+	}
+	return nil
+}
+
+// RealizeThread converts a VIRTUAL thread into a real one in place: agent kind,
+// pre-minted agent session id (pi/claude; ” for codex, which mints its own on
+// the first turn), a definite cwd, the headless-style session name (so a later
+// headful revival mints a real session name, exactly like a fresh headless
+// thread), and an optional pinned model. The WHERE clause requires the row to
+// still be virtual, so two concurrent realizes cannot double-convert (the loser
+// reads back the row and reports what it actually is). Returns ErrThreadNotFound
+// when the row is missing OR no longer virtual — the caller distinguishes by
+// re-reading the record.
+func (s *Store) RealizeThread(id, agentKind, agentSessionID, cwd, sessionName, model string) error {
+	res, err := s.db.Exec(
+		`UPDATE threads SET agent_kind = ?, agent_session_id = ?, cwd = ?, session_name = ?, model = ?
+		 WHERE id = ? AND agent_kind = ?`,
+		agentKind, agentSessionID, cwd, sessionName, model, id, api.VirtualAgentKind,
+	)
+	if err != nil {
+		return fmt.Errorf("store: realize thread: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -209,7 +251,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	return t, nil
 }
 
-// SetThreadParent re-parents a thread ('' = make it a root). Existence and
+// SetThreadParent re-parents a thread (” = make it a root). Existence and
 // cycle guards live at the daemon layer.
 func (s *Store) SetThreadParent(id, parent string) error {
 	res, err := s.db.Exec(`UPDATE threads SET parent = ? WHERE id = ?`, parent, id)

@@ -154,7 +154,18 @@ package api
 // recently archived first). Additive/omitempty on the Thread record (flows through ThreadRow/
 // ThreadSnapshot automatically) ⇒ mixed-mesh safe: a pre-37 peer omits it (its archived rows
 // sort as archived_at=0, i.e. by the stable fallback) until upgraded.
-const SchemaVersion = 37
+//
+// 38: VIRTUAL threads — a thread record with agent_kind "virtual" is a pure grouping
+// node (no agent/pane/transcript) for parenting other threads under. NewThreadRequest
+// gains `virtual`; POST /v1/threads/realize converts a virtual thread in place into a
+// real never-started headless one (id/children/tags/holds preserved). Agent verbs on a
+// virtual thread refuse loudly. Also: deleting ANY thread now promotes its children to
+// the deleted thread's parent (no more dangling parent ids), with a store data-fix
+// migration clearing historical danglers. Additive ⇒ mixed-mesh safe: only the OWNING
+// daemon needs 38 (virtual threads can only be created there); a pre-38 viewer renders
+// the kind string and its routed agent verbs hit the upgraded owner's loud refusal; a
+// pre-38 daemon 404s the realize route loudly.
+const SchemaVersion = 38
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

@@ -205,6 +205,14 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
+	"thread realize": {
+		{"--id", "virtual thread id or unique prefix (required; the current thread is never inferred)"},
+		{"--agent", "agent to realize as: claude | codex | pi (required)"},
+		{"--cwd", "start directory; relative expands against the invocation dir, ~/… resolves against the OWNER machine's home (default: the cwd stored at creation; required if none was)"},
+		{"--model", "agent model to pin to the thread (opaque pass-through; empty = the agent's default)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+	},
 	"thread info": {
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
@@ -222,6 +230,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--name", "thread name (optional; empty = a nameless thread)"},
 		{"--model", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default; applied on spawn, resume, and every headless turn)"},
 		{"--headless", "spawn headless (a durable conversation with no tmux window)"},
+		{"--virtual", "create a VIRTUAL thread — a pure grouping node with no agent (no agent-shaped flags allowed; cwd optional; convert later with `thread realize`)"},
 		{"--parent", "parent thread id/prefix (default: the CURRENT thread when run inside one)"},
 		{"--no-parent", "force a root thread, suppressing parent inference"},
 		{"--fork-from", "branch this thread's conversation from a source thread; agent/cwd default to the source's"},

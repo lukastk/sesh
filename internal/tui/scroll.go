@@ -5,8 +5,8 @@ package tui
 // unclipped — so tests that never send a size still see every row/column.
 //
 // Keys: j/k move the cursor and the viewport follows; ctrl+j/ctrl+k scroll the
-// viewport a half-page (the cursor is pulled into the new window); h/l pan the
-// columns so a clipped column can be brought into view. Fold/unfold is on the
+// viewport a half-page (the cursor is pulled into the new window); ctrl+h/ctrl+l pan
+// the columns so a clipped column can be brought into view. Fold/unfold is on the
 // arrow keys.
 
 // gutterWidth is the fixed leading state gutter:

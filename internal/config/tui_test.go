@@ -53,6 +53,51 @@ color = "green"
 	}
 }
 
+// TestLoadTUIColumnWidths covers the [tui] max-column-width cap default and the
+// [[tui.column_width]] per-column overrides.
+func TestLoadTUIColumnWidths(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, `
+[tui]
+max_column_widths = false
+
+[[tui.column_width]]
+name = "name"
+max  = 60
+
+[[tui.column_width]]
+name = "cwd"
+max  = 24
+`)
+	c, err := LoadTUI(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil {
+		t.Fatal("nil TUI config")
+	}
+	if c.MaxColumnWidthsDefault() {
+		t.Errorf("max_column_widths = false should disable the cap default")
+	}
+	if len(c.ColumnWidths) != 2 || c.ColumnWidths[0].Name != "name" || c.ColumnWidths[0].Max != 60 {
+		t.Errorf("column_width overrides not parsed: %+v", c.ColumnWidths)
+	}
+
+	// Unset → the cap defaults to ON, and a nil config resolves the same.
+	home2 := t.TempDir()
+	writeConfig(t, home2, "[tui]\ncolumns = [\"name\"]\n")
+	c2, err := LoadTUI(home2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c2.MaxColumnWidthsDefault() {
+		t.Errorf("unset max_column_widths should default to on")
+	}
+	if !(*TUIConfig)(nil).MaxColumnWidthsDefault() {
+		t.Errorf("a nil TUI config must default the cap to on")
+	}
+}
+
 // TestLoadTUIAllMachines covers the [tui] all_machines default (makes the TUI a
 // cross-machine view without --all-machines / the shell wrapper).
 func TestLoadTUIAllMachines(t *testing.T) {

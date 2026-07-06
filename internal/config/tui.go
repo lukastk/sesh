@@ -34,6 +34,22 @@ type TUIConfig struct {
 	//	name  = "cwd"
 	//	color = "green"   # a name, a 0-255 number, or #rrggbb
 	ColumnColors []ColumnColor `toml:"column_color"`
+	// MaxColumnWidths caps each column at a maximum render width (the default: a
+	// long name/cwd is truncated so it can't blow out the layout; the `w` key toggles
+	// it per session). Set false to disable the cap entirely so every column grows to
+	// its content. Pointer so unset ≠ false — unset means the built-in default (on).
+	//
+	//	[tui]
+	//	max_column_widths = false
+	MaxColumnWidths *bool `toml:"max_column_widths"`
+	// ColumnWidths override the built-in per-column max width used when the cap is on
+	// (full-width NAME/CWD/TKT-NAME default to 40/40/30; a fixed column's reserved
+	// width). Only consulted while the cap is on.
+	//
+	//	[[tui.column_width]]
+	//	name = "name"
+	//	max  = 60
+	ColumnWidths []ColumnWidth `toml:"column_width"`
 	// ExpandChildren makes tree nodes start EXPANDED (default false: children
 	// start collapsed under their parent, per v1).
 	ExpandChildren bool `toml:"expand_children"`
@@ -92,6 +108,22 @@ type TUIView struct {
 type ColumnColor struct {
 	Name  string `toml:"name"`
 	Color string `toml:"color"`
+}
+
+// ColumnWidth overrides one column's max render width (used when the width cap is
+// on). Max must be >= 1 (validated by the TUI's ResolveColumnWidths, which also
+// checks the name is a known column).
+type ColumnWidth struct {
+	Name string `toml:"name"`
+	Max  int    `toml:"max"`
+}
+
+// MaxColumnWidthsDefault resolves the max-column-width cap default (unset = on).
+func (c *TUIConfig) MaxColumnWidthsDefault() bool {
+	if c == nil || c.MaxColumnWidths == nil {
+		return true
+	}
+	return *c.MaxColumnWidths
 }
 
 // ColumnMove repositions one column, applied over the base set. Exactly one

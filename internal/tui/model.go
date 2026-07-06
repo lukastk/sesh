@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -231,6 +232,18 @@ type Model struct {
 	// colColors tints individual columns ([[tui.column_color]] + built-in defaults).
 	// Applied to non-selected, non-highlighted cells only (see renderCells).
 	colColors map[string]lipgloss.Style
+	// maxColWidth caps each column at a maximum render width (the default, set via
+	// New / [tui] max_column_widths). The `w` key toggles it per session: off, every
+	// column grows to its content so clipped text (a long name/cwd) is fully visible.
+	// colMax holds per-column [[tui.column_width]] overrides of the built-in caps.
+	maxColWidth bool
+	colMax      map[string]int
+
+	// detailsPopup: `I` opens a full-screen takeover showing ALL of the selected
+	// thread's fields (the record + live axes); detailsRow is captured when it opens.
+	// Any of esc/q/enter closes it. It's read-only — nothing routes or shells out.
+	detailsPopup bool
+	detailsRow   api.ThreadRow
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -320,7 +333,7 @@ func New(socketPath string, allMachines bool) Model {
 	home, _ := os.UserHomeDir()
 	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
 		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home,
-		scrollDivV: 1, scrollDivH: 1, hideOffline: true}
+		scrollDivV: 1, scrollDivH: 1, hideOffline: true, maxColWidth: true}
 }
 
 // WithShowOffline sets whether an OFFLINE mesh machine's stale threads are shown by
@@ -1125,6 +1138,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirming != confirmNone {
 		return m.handleConfirmKey(msg)
 	}
+	if m.detailsPopup {
+		return m.handleDetailsKey(msg)
+	}
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
 	}
@@ -1198,6 +1214,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "i":
 		m.showID = !m.showID
+	case "w":
+		// Toggle the per-column max-width cap. Off = every column grows to its
+		// content, so a clipped name/cwd becomes fully readable. Re-clamp the
+		// horizontal pan since the column widths (and so maxHOffset) just changed.
+		m.maxColWidth = !m.maxColWidth
+		if m.hOffset > m.maxHOffset() {
+			m.hOffset = m.maxHOffset()
+		}
 	case "o":
 		// Toggle whether OFFLINE machines' last-known threads are shown. Refetch so the
 		// change lands immediately; reset the cursor since the visible row set shifts.
@@ -1209,6 +1233,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		if _, ok := m.Selected(); ok {
 			m.uuidPopup = true
+		}
+	case "I":
+		// Thread details: a read-only full-screen takeover of every field of the
+		// selected thread (the record + live axes). Local data — nothing routes.
+		if row, ok := m.Selected(); ok {
+			m.detailsPopup, m.detailsRow = true, row
 		}
 	case "R":
 		return m, m.fetch()
@@ -1298,6 +1328,16 @@ func (m Model) handleUUIDKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.note = "UUID copied to clipboard"
 			}
 		}
+	}
+	return m, nil
+}
+
+// handleDetailsKey drives the thread-details takeover: esc/q/enter close it, any
+// other key is ignored (it's a read-only view — no action to take).
+func (m Model) handleDetailsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "ctrl+c", "enter", "I":
+		m.detailsPopup = false
 	}
 	return m, nil
 }
@@ -1953,6 +1993,12 @@ func (m Model) ActionErr() error { return m.actionErr }
 // Confirming reports whether a y/n destructive-action popup is open (for tests).
 func (m Model) Confirming() bool { return m.confirming != confirmNone }
 
+// MaxColWidth reports whether the per-column width cap is on (for tests).
+func (m Model) MaxColWidth() bool { return m.maxColWidth }
+
+// DetailsOpen reports whether the thread-details takeover is open (for tests).
+func (m Model) DetailsOpen() bool { return m.detailsPopup }
+
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -1972,7 +2018,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · K tickets · I details · i ids · w widths · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
@@ -2071,6 +2117,9 @@ func descendantsRunning(rows []api.ThreadRow) map[string]bool {
 func (m Model) View() string {
 	if m.ticketMode != ticketNone {
 		return m.ticketView() // full-screen takeover
+	}
+	if m.detailsPopup {
+		return m.detailsView() // full-screen takeover: all fields of one thread
 	}
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")
@@ -2228,6 +2277,147 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.renderLegend() + "\n")
 	}
 	return b.String()
+}
+
+// detailsView renders the full-screen thread-details takeover (`I`): every field of
+// the selected thread — the record plus its live runtime axes — as an aligned
+// label/value list. Read-only; esc/q/enter return to the grid.
+func (m Model) detailsView() string {
+	r := m.detailsRow
+	type kv struct{ k, v string }
+	fields := []kv{
+		{"id", r.ID},
+		{"name", r.Name},
+		{"machine", r.Machine},
+		{"agent", detailAgent(r)},
+		{"model", orDash(r.Model)},
+		{"state", fmt.Sprintf("%s %s  (head=%s busy=%s attach=%s)",
+			HeadGlyph(r), BusyGlyph(r), orUnknown(string(r.Head)), orUnknown(string(r.Busy)), orUnknown(string(r.Attachment)))},
+		{"session", orDash(r.SessionName)},
+		{"cwd", orDash(r.Cwd)},
+		{"cwd (rel)", orDash(m.cwdDisplay(r))},
+		{"parent", detailParent(r)},
+		{"tags", detailTags(r.Tags)},
+		{"created", detailTime(r.CreatedAtUnix)},
+		{"archived", detailArchived(r)},
+		{"on hold", detailHold(r)},
+		{"notify", yesNo(r.Notify)},
+		{"tickets open", strconv.Itoa(r.TicketsOpen)},
+		{"ticket name", detailTicket(r)},
+		{"agent session", orDash(r.AgentSessionID)},
+		{"started", yesNo(r.HeadlessStarted)},
+	}
+	// Meta is arbitrary per-thread KV — list each pair (sorted for a stable view).
+	if len(r.Meta) > 0 {
+		keys := make([]string, 0, len(r.Meta))
+		for k := range r.Meta {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fields = append(fields, kv{"meta." + k, r.Meta[k]})
+		}
+	}
+	labelW := 0
+	for _, f := range fields {
+		if n := len([]rune(f.k)); n > labelW {
+			labelW = n
+		}
+	}
+	var b strings.Builder
+	title := r.Name
+	if title == "" {
+		title = tid8(r.ID)
+	}
+	b.WriteString(styleHeader.Render("thread details · "+title) + "\n\n")
+	for _, f := range fields {
+		b.WriteString("  " + styleDim.Render(pad(f.k, labelW)) + "  " + f.v + "\n")
+	}
+	b.WriteString("\n" + styleDim.Render("  esc/q to close") + "\n")
+	return b.String()
+}
+
+func detailAgent(r api.ThreadRow) string {
+	if r.AgentKind == api.VirtualAgentKind {
+		return "virtual (grouping node — no agent)"
+	}
+	return orDash(r.AgentKind)
+}
+
+func detailParent(r api.ThreadRow) string {
+	if r.Parent == "" {
+		return "(root)"
+	}
+	return r.Parent
+}
+
+func detailTags(tags []string) string {
+	if len(tags) == 0 {
+		return "—"
+	}
+	return strings.Join(tags, ", ")
+}
+
+func detailTime(unix int64) string {
+	if unix == 0 {
+		return "—"
+	}
+	return time.Unix(unix, 0).Format("2006-01-02 15:04:05")
+}
+
+func detailArchived(r api.ThreadRow) string {
+	if !r.Archived {
+		return "no"
+	}
+	if r.ArchivedAtUnix == 0 {
+		return "yes"
+	}
+	return "yes · " + detailTime(r.ArchivedAtUnix)
+}
+
+// detailHold reports the hold state: not held, or the effective deadline plus (when
+// it differs from this thread's own) a note that it is inherited from an ancestor.
+func detailHold(r api.ThreadRow) string {
+	if !r.OnHold || r.OnHoldEffectiveUnix == 0 {
+		return "no"
+	}
+	eff := time.Unix(r.OnHoldEffectiveUnix, 0).Format("2006-01-02")
+	if r.OnHoldEffectiveUnix > r.OnHoldUntilUnix {
+		return "until " + eff + " (inherited)"
+	}
+	return "until " + eff
+}
+
+func detailTicket(r api.ThreadRow) string {
+	if r.TicketName == "" {
+		return "—"
+	}
+	s := r.TicketName
+	if r.TicketNeedsInput {
+		s += " (needs input)"
+	}
+	return s
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "?"
+	}
+	return s
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 // trunc shortens to n COLUMNS' worth of runes (byte slicing would split

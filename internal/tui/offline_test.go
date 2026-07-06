@@ -50,7 +50,7 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	}
 	// Keys that never touch the owner — gating them would wrongly block offline browsing.
 	local := []string{"up", "down", "k", "j", "ctrl+j", "ctrl+k", "ctrl+h", "ctrl+l",
-		"left", "right", "/", "tab", "i", "o", "y", "R", "q", "esc"}
+		"left", "right", "/", "tab", "i", "w", "I", "o", "y", "R", "q", "esc"}
 	for _, k := range local {
 		if requiresReachableOwner(k) {
 			t.Errorf("read-only key %q must NOT be gated (breaks offline browsing/navigation)", k)

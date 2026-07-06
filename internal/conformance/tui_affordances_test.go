@@ -47,6 +47,114 @@ func init() {
 	registerTUIClaim("action-hold", claimActionHold)
 	registerTUIClaim("view-hold", claimViewHold)
 	registerTUIClaim("view-archived-order", claimViewArchivedOrder)
+	registerTUIClaim("column-max-width", claimColumnMaxWidth)
+	registerTUIClaim("thread-details", claimThreadDetails)
+}
+
+// claimColumnMaxWidth: the per-column width cap against a REAL thread. By default a
+// full-width NAME longer than the built-in cap is truncated with an ellipsis; the `w`
+// key toggles the cap off so the full name is shown; and a [[tui.column_width]] config
+// override raises the cap so a wide name fits again (config -> render).
+func claimColumnMaxWidth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	// 50 chars — longer than the default 40-char NAME cap. "TAILEND" is the last 7 chars,
+	// so it is present iff the whole name renders (uncapped / a big-enough cap).
+	longName := "capdemo-" + strings.Repeat("z", 35) + "-TAILEND"
+	sb.newHeadlessThread(t, "pi", longName)
+
+	cols := []string{tui.ColName}
+	// Default: cap ON. The rendered NAME is truncated — no TAILEND, an ellipsis present.
+	m := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols)
+	m, view := renderUntilRowView(t, m, longName)
+	if !m.MaxColWidth() {
+		t.Fatalf("the width cap should default ON")
+	}
+	if strings.Contains(view, "TAILEND") {
+		t.Errorf("capped NAME should not show the tail of a >40-char name:\n%s", view)
+	}
+	if !strings.Contains(view, "…") {
+		t.Errorf("capped NAME should show a truncation ellipsis:\n%s", view)
+	}
+
+	// `w` toggles the cap OFF: the full name (incl. TAILEND) is now visible.
+	m = runKey(t, m, "w")
+	if m.MaxColWidth() {
+		t.Fatalf("`w` did not toggle the cap off")
+	}
+	if v := m.View(); !strings.Contains(v, "TAILEND") {
+		t.Errorf("with the cap off the full NAME should be visible:\n%s", v)
+	}
+
+	// A [[tui.column_width]] override raises the cap above the name length, so the full
+	// name shows even with the cap ON (proves config -> render).
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"),
+		[]byte("[[tui.column_width]]\nname = \"name\"\nmax = 60\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tcfg, err := config.LoadTUI(sb.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var specs []tui.ColumnWidthSpec
+	for _, cw := range tcfg.ColumnWidths {
+		specs = append(specs, tui.ColumnWidthSpec{Name: cw.Name, Max: cw.Max})
+	}
+	widths, err := tui.ResolveColumnWidths(specs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols).
+		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(widths)
+	m2, view2 := renderUntilRowView(t, m2, longName)
+	if !m2.MaxColWidth() {
+		t.Fatalf("the cap should still be ON (only the width was overridden)")
+	}
+	if !strings.Contains(view2, "TAILEND") {
+		t.Errorf("a column_width override of 60 should show the full 50-char NAME:\n%s", view2)
+	}
+}
+
+// claimThreadDetails: `I` opens a read-only takeover showing the selected thread's
+// REAL fields (its full uuid, machine, agent, cwd, and live runtime axis), and esc
+// closes it back to the grid.
+func claimThreadDetails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThreadAt(t, "pi", "detailme", "/tmp")
+
+	m := tui.New(sb.Home+"/daemon.sock", false).WithLocal(sb.Machine, sb.TmuxSocket)
+	m, _ = renderUntilRow(t, m, "detailme")
+
+	m = runKey(t, m, "I")
+	if !m.DetailsOpen() {
+		t.Fatalf("`I` did not open the thread-details view")
+	}
+	view := m.View()
+	for _, want := range []string{th.ID, "detailme", sb.Machine, "pi", "/tmp", "headless"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details view missing %q:\n%s", want, view)
+		}
+	}
+	// The FULL uuid is shown (not just tid8) — this is real thread data, not a fixture.
+	if strings.Count(view, th.ID) == 0 {
+		t.Errorf("details view should show the full real uuid %s", th.ID)
+	}
+
+	// esc closes it — back to the grid (the row is visible again).
+	m = runSpecial(t, m, tea.KeyEsc)
+	if m.DetailsOpen() {
+		t.Fatalf("esc should close the details view")
+	}
+	if !strings.Contains(m.View(), "detailme") {
+		t.Errorf("closing details should return to the grid:\n%s", m.View())
+	}
 }
 
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
@@ -841,7 +949,10 @@ func claimColumnsConfig(t *testing.T) {
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
-	longName := "a-very-long-thread-name-for-column-sizing"
+	// Longer than any fixed column (so it proves NAME is full-width) but within the
+	// default width cap (40) so it renders untruncated here — the cap itself is proven
+	// by the column-max-width claim.
+	longName := "a-long-thread-name-under-the-cap"
 	th := sb.newHeadlessThread(t, "pi", longName)
 
 	// Default set: HEAD/BUSY text columns absent, NAME full-width (untruncated).
@@ -937,8 +1048,10 @@ func claimCwdLabelColumn(t *testing.T) {
 		t.Errorf("raw cwd leaked into the labeled column: %q", line)
 	}
 
-	// Unconfigured: the same row falls back to the raw path (outside ~ here).
-	m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns([]string{tui.ColName, tui.ColCwd})
+	// Unconfigured: the same row falls back to the raw path (outside ~ here). The temp
+	// boxDir is longer than the default CWD width cap, so disable the cap (`w`) for this
+	// assertion — it's about labeling/fallback, not width (covered by column-max-width).
+	m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns([]string{tui.ColName, tui.ColCwd}).WithMaxColumnWidths(false)
 	m2, _ = renderUntilRow(t, m2, "labelme")
 	if !strings.Contains(rowLine(m2.View(), "labelme"), boxDir) {
 		t.Errorf("fallback CWD column missing the real path: %q", rowLine(m2.View(), "labelme"))

@@ -117,9 +117,11 @@ func claimScrollVertical(t *testing.T) {
 	}
 }
 
-// claimScrollHorizontal: when the row is wider than the window, h/l pan the columns.
+// claimScrollHorizontal: when the row is wider than the window, ^h/^l pan the columns.
 // ‹/› in the header flag clipped columns, and a column clipped off the right is
 // brought into view by panning right (then panning back restores the left columns).
+// (The pan keys are ^h/^l — H25 moved them off plain h/l, which now hold/... — so this
+// claim drives ctrl+l/ctrl+h.)
 func claimScrollHorizontal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -151,7 +153,7 @@ func claimScrollHorizontal(t *testing.T) {
 
 	// Pan right until the rightmost column (CREATED) comes into view.
 	for i := 0; i < len(cols)+2 && !strings.Contains(m.View(), "CREATED"); i++ {
-		m = runKey(t, m, "l")
+		m = runSpecial(t, m, tea.KeyCtrlL)
 	}
 	if !strings.Contains(m.View(), "CREATED") {
 		t.Fatalf("panning right never revealed the clipped column:\n%s", m.View())
@@ -168,7 +170,7 @@ func claimScrollHorizontal(t *testing.T) {
 
 	// Pan all the way back: the left columns return, hOffset is 0.
 	for i := 0; i < len(cols)+2 && m.HOffset() > 0; i++ {
-		m = runKey(t, m, "h")
+		m = runSpecial(t, m, tea.KeyCtrlH)
 	}
 	if m.HOffset() != 0 {
 		t.Errorf("panning left did not return to offset 0: hOffset=%d", m.HOffset())

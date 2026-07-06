@@ -253,6 +253,13 @@ v            new VIRTUAL group (name prompt; empty cancels). Creates a root
              grouping thread on the SELECTED row's machine (virtual parents only
              group same-machine threads) and lands the cursor on it — then `P`
              children under it. No selection = the local machine.
+p            pin the selected top-level thread to the TOP of the manual-order block
+             (pinned threads render ABOVE the auto-sorted list, marked `•`)
+u            unpin (remove the manual ordering; the thread rejoins the auto block)
+m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it within the
+             block, enter/esc commit-and-exit (an unpinned top-level row is pinned first)
+D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal line
+             in the pinned block, on the SELECTED row's machine; reposition it with `m`
 n            toggle notify          i          toggle the ID column
 o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh
@@ -281,6 +288,20 @@ its ancestors' holds)`, so holding a parent parks its whole subtree (the childre
 `↑<date>` in the HOLD column — an inherited hold). `h` manages a thread's OWN hold; a
 child can't be un-held below its parent's hold (that's the `max`). Inheritance is
 resolved per machine (a cross-machine parent's hold is not inherited).
+
+**Manual ordering (pinning + dividers).** Threads are otherwise auto-sorted, but you can
+**pin** top-level threads to a manually-ordered block that renders **above** the
+auto-sorted list. `p` pins the selected thread to the top of the block (pinned rows show
+a `•` marker); `u` unpins it (it rejoins the auto block). `m` enters **move mode** — ↑/↓
+reposition the pinned row within the block, enter/esc exit (a still-unpinned top-level row
+is pinned first). Only **top-level** threads can be pinned; a thread loses its pin when
+**archived** or **reparented under another thread**. `D` spawns a **divider** — a
+horizontal rule (with an optional label) you place between pinned threads to group them;
+dividers live in the pinned block, are repositioned like any pinned row (`m`), and are
+removed with `d` (delete), not archived/unpinned. Pinning is a real thread property
+(`pin_order`), synced across the mesh, so the order is the same viewed from any machine.
+The CLI verbs are `sesh thread pin` / `sesh thread unpin` / `sesh thread new --divider`
+(see below).
 
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
 other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
@@ -413,6 +434,15 @@ sesh thread delete --id <id>         # drop the record (refuses a live thread; s
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --clear                     # release the hold now
+
+# Manual ordering: pin a top-level thread ABOVE the auto-sorted list (default: top).
+sesh thread pin --id <id>                              # pin to the top of the manual block
+sesh thread pin --id <id> --after <other>             # or --before <other> / --bottom / --top / --order <f>
+sesh thread unpin --id <id>                            # remove the manual ordering (rejoins the auto block)
+sesh thread new --divider --name "today"              # a DIVIDER: a labeled rule in the pinned block (reposition with pin)
+#   Only top-level threads can be pinned; archiving or reparenting-under-another clears it.
+#   A divider takes no agent-shaped flags; delete it with `thread delete` (not archive/unpin).
+
 sesh thread rename --id <id> --name <new>
 sesh thread tag --id <id> --add wip --remove stale     # repeatable --add/--remove
 sesh thread reparent --id <id> --parent <p>            # or --root to detach

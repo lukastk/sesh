@@ -75,6 +75,9 @@ var declaredTUIClaims = []string{
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ◇ glyph rendered; f refuses too; record untouched
 	"action-new-virtual",        // v opens a name prompt and creates a ROOT virtual group on the daemon (--no-parent beats inference); empty submit cancels; cursor preselects the new row
+	"action-pin",                // p pins the selected top-level thread on the daemon (• marker renders); u un-pins it
+	"action-reorder",            // m enters move mode; ↑ repositions the pinned row above another on the daemon
+	"action-new-divider",        // D opens a label prompt and creates a real pinned divider on the daemon
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

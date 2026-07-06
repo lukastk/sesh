@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,6 +129,7 @@ const (
 	promptReparent              // set the selected thread's parent (paste a uuid; empty = root)
 	promptHold                  // hold the selected thread until a date (YYYY-MM-DD; empty = clear)
 	promptNewVirtual            // name a NEW virtual grouping thread (empty = cancel)
+	promptNewDivider            // label a NEW divider (empty = an unlabeled divider; Esc cancels)
 )
 
 // confirmKind says which destructive action a y/n confirmation popup gates.
@@ -184,6 +186,13 @@ type Model struct {
 	// (captured when the popup opened). `y` runs it, anything else cancels.
 	confirming confirmKind
 	confirmRow api.ThreadRow
+
+	// reordering, when true, means MOVE MODE is active for the manual-ordering block:
+	// ↑/↓ (or k/j) reposition the pinned row reorderID within the block, Enter/Esc
+	// commit-and-exit. Entered with `m` on a top-level row (auto-pinning it to the top
+	// first if it wasn't pinned). See handleReorderKey.
+	reordering bool
+	reorderID  string
 
 	// actionErr is the last in-app ACTION error (reparent/delete/tag/…). Unlike
 	// lastErr (fetch/daemon reachability), it PERSISTS across reconcile fetches so a
@@ -680,6 +689,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.fetch(), reconcileAfter(postActionReconcileDelay))
 		}
 		return m, m.fetch() // reconcile against the daemon
+	case pinDoneMsg:
+		// The optimistic pin patch is already applied (instant feel). Success needs
+		// nothing — the next poll reconciles. A failure surfaces loudly and drops the
+		// optimism, then refetches so the server's true order shows.
+		if msg.err != nil {
+			m.actionErr = msg.err
+			delete(m.pending, msg.id)
+			m.applyPending(false)
+			return m, m.fetch()
+		}
+		return m, nil
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us) —
 		// quit so the TUI (and the popup hosting it) gets out of the way. Staying
@@ -833,6 +853,11 @@ type rowPatch struct {
 	busy       *api.Busy
 	addTags    []string
 	removeTags []string
+	// pinSet, when true, overrides the row's manual-ordering key to pinOrder (which may
+	// be nil = un-pinned). It re-sorts the row instantly (pinned block above the auto
+	// block) — the optimism behind `p`/`u`/`m` while the mesh read path catches up.
+	pinSet   bool
+	pinOrder *float64
 	// hide drops the row from the CURRENT view instantly (archive/unarchive/delete/
 	// hold remove it from this view; the mesh read path lags the write). Unlike the
 	// field overlays, it removes the row rather than editing it.
@@ -871,6 +896,9 @@ func (p *rowPatch) merge(o *rowPatch) {
 	if o.hide {
 		p.hide = true
 	}
+	if o.pinSet {
+		p.pinSet, p.pinOrder = true, o.pinOrder // latest reorder wins
+	}
 	p.addTags = append(p.addTags, o.addTags...)
 	p.removeTags = append(p.removeTags, o.removeTags...)
 	if o.machine != "" {
@@ -907,6 +935,9 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 	if p.busy != nil {
 		r.Busy = *p.busy
 	}
+	if p.pinSet {
+		r.PinOrder = p.pinOrder
+	}
 	for _, t := range p.addTags {
 		if !containsStr(r.Tags, t) {
 			r.Tags = append(append([]string(nil), r.Tags...), t)
@@ -929,7 +960,7 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 // applyPending) or the deadline ends it.
 func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 	if p.hide && p.name == nil && p.notify == nil && p.onHold == nil &&
-		p.archived == nil && p.head == nil && p.busy == nil &&
+		p.archived == nil && p.head == nil && p.busy == nil && !p.pinSet &&
 		len(p.addTags) == 0 && len(p.removeTags) == 0 {
 		return false
 	}
@@ -949,6 +980,9 @@ func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 		return false
 	}
 	if p.busy != nil && r.Busy != *p.busy {
+		return false
+	}
+	if p.pinSet && !samePinOrder(r.PinOrder, p.pinOrder) {
 		return false
 	}
 	for _, t := range p.addTags {
@@ -1112,6 +1146,10 @@ func requiresReachableOwner(key string) bool {
 		"H", // hold until date
 		"n", // notify on/off
 		"v", // new virtual group (created on the selected row's machine)
+		"p", // pin to top (routed pin on the owner)
+		"u", // unpin (routed pin --clear on the owner)
+		"m", // enter move mode (auto-pins on the owner)
+		"D", // new divider (created on the selected row's machine)
 		"K": // tickets view (loadTickets routes to the owner)
 		return true
 	}
@@ -1136,6 +1174,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
+	}
+	// Move mode (manual ordering): ↑/↓ reposition the pinned row, Enter/Esc exit.
+	// Dispatched before the offline gate — entry (`m`) is already gated, and a routed
+	// reorder that fails on an owner going offline mid-move surfaces loudly on its own.
+	if m.reordering {
+		return m.handleReorderKey(msg)
 	}
 	// Refuse an owner-routed action on an OFFLINE machine's thread instantly (loud, no
 	// popup, no shell-out) instead of hanging on the routing timeout. Gating here — before
@@ -1242,6 +1286,53 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// live. No selection (empty grid) = a zero row = the local machine.
 		row, _ := m.Selected()
 		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewVirtual, row, nil, 0
+	case "p":
+		// Pin the selected top-level thread to the TOP of the manual-order block.
+		if row, ok := m.Selected(); ok {
+			if row.Parent != "" {
+				m.actionErr = fmt.Errorf("only top-level threads can be pinned — %q is nested", rowDisplayName(row))
+				return m, nil
+			}
+			order := m.pinTopOrder()
+			m.applyPinPatch(row, &order)
+			return m, m.persistPin(row, &order)
+		}
+	case "u":
+		// Unpin: remove the manual ordering (the row rejoins the auto block).
+		if row, ok := m.Selected(); ok {
+			if row.PinOrder == nil {
+				m.note = "not pinned"
+				return m, nil
+			}
+			if row.AgentKind == api.DividerAgentKind {
+				m.actionErr = fmt.Errorf("a divider can't be un-pinned — delete it (d)")
+				return m, nil
+			}
+			m.applyPinPatch(row, nil)
+			return m, m.persistPin(row, nil)
+		}
+	case "m":
+		// Enter MOVE MODE: reposition the selected pinned row (auto-pinning a top-level
+		// row to the top first). ↑/↓ then move it within the block; Enter/Esc exit.
+		if row, ok := m.Selected(); ok {
+			if row.Parent != "" {
+				m.actionErr = fmt.Errorf("only top-level threads can be ordered — %q is nested", rowDisplayName(row))
+				return m, nil
+			}
+			var cmd tea.Cmd
+			if row.PinOrder == nil {
+				order := m.pinTopOrder()
+				m.applyPinPatch(row, &order)
+				cmd = m.persistPin(row, &order)
+			}
+			m.reordering, m.reorderID = true, row.ID
+			return m, cmd
+		}
+	case "D":
+		// New DIVIDER: a visual rule in the pinned block. Prompt for an optional label
+		// (empty = an unlabeled line; Esc cancels). Created on the selected row's machine.
+		row, _ := m.Selected()
+		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewDivider, row, nil, 0
 	case "f":
 		// Fork: copy the selected thread into a new headless thread (same
 		// conversation, branched). It doesn't start anything — enter it to continue.
@@ -1395,6 +1486,9 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.newVirtualRow(row, input)
+		case promptNewDivider:
+			// Empty label is legitimate (a plain rule); Esc (above) is how you cancel.
+			return m, m.newDividerRow(row, input)
 		}
 		return m, nil
 	case "left", "ctrl+b":
@@ -1542,6 +1636,10 @@ func (m Model) navSelected() tea.Cmd {
 		// anything shells out, so the refusal is instant.
 		if row.AgentKind == api.VirtualAgentKind {
 			return actionMsg{err: fmt.Errorf("%q is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id %s --agent claude|codex|pi", row.Name, row.ID)}
+		}
+		// DIVIDER: a visual separator — nothing to enter. Loud, before any shell-out.
+		if row.AgentKind == api.DividerAgentKind {
+			return actionMsg{err: fmt.Errorf("%q is a divider (a visual separator — no conversation); delete it with d", dividerLabel(row))}
 		}
 		// headless·busy: a turn is mid-flight — there is no pane to enter and a
 		// revival would fork the conversation (the daemon would 409 anyway): loud.
@@ -1777,6 +1875,208 @@ func (m Model) newVirtualRow(row api.ThreadRow, name string) tea.Cmd {
 	}
 }
 
+// newDividerRow creates a NEW divider (a visual rule) on the selected row's machine,
+// labeled by the `D` prompt (empty = unlabeled). The daemon places it at the top of
+// the pinned block; reposition it with move mode / `thread pin`. Routed like `v`.
+func (m Model) newDividerRow(row api.ThreadRow, name string) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"thread", "new", "--divider", "--name", name, "--json"}
+		if row.Machine != "" && (machine == "" || row.Machine != machine) {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return actionMsg{err: fmt.Errorf("new divider: %v: %s", err, strings.TrimSpace(string(out)))}
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		if e := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &created); e != nil || created.ID == "" {
+			return actionMsg{err: fmt.Errorf("new divider: parse new thread id: %v", e)}
+		}
+		return actionMsg{preselect: created.ID}
+	}
+}
+
+// pinDoneMsg is the result of a routed pin/unpin/reorder write. The optimistic patch
+// is already applied at keypress time (instant feel), so success is a no-op (the next
+// poll reconciles); a failure surfaces loudly AND drops the optimism, then refetches
+// the server's true order.
+type pinDoneMsg struct {
+	id  string
+	err error
+}
+
+// pinnedRowsSorted returns the currently-pinned rows (PinOrder != nil), in the exact
+// order the pinned block renders them: ascending (pin_order, machine, id).
+func (m Model) pinnedRowsSorted() []api.ThreadRow {
+	var out []api.ThreadRow
+	for _, r := range m.rows {
+		if r.PinOrder != nil {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if *out[i].PinOrder != *out[j].PinOrder {
+			return *out[i].PinOrder < *out[j].PinOrder
+		}
+		if out[i].Machine != out[j].Machine {
+			return out[i].Machine < out[j].Machine
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// pinTopOrder is the order key that lands a row at the TOP of the pinned block (below
+// the current minimum; 0 for an empty block).
+func (m Model) pinTopOrder() float64 {
+	pinned := m.pinnedRowsSorted()
+	if len(pinned) == 0 {
+		return 0
+	}
+	return *pinned[0].PinOrder - 1
+}
+
+// reorderTarget computes the order key that moves row one step (dir -1 up, +1 down)
+// within the pinned block, or ok=false when it's already at that end (the block is
+// bounded — there is no bottom zone to fall into). It leapfrogs the adjacent node:
+// the midpoint to the node beyond it, or ±1 past the current end.
+func (m Model) reorderTarget(row api.ThreadRow, dir int) (float64, bool) {
+	pinned := m.pinnedRowsSorted()
+	idx := -1
+	for i, r := range pinned {
+		if r.ID == row.ID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return 0, false
+	}
+	if dir < 0 { // up
+		if idx == 0 {
+			return 0, false
+		}
+		if idx == 1 {
+			return *pinned[0].PinOrder - 1, true
+		}
+		return (*pinned[idx-2].PinOrder + *pinned[idx-1].PinOrder) / 2, true
+	}
+	// down
+	if idx == len(pinned)-1 {
+		return 0, false
+	}
+	if idx == len(pinned)-2 {
+		return *pinned[len(pinned)-1].PinOrder + 1, true
+	}
+	return (*pinned[idx+1].PinOrder + *pinned[idx+2].PinOrder) / 2, true
+}
+
+// applyPinPatch stamps and applies an optimistic pin override (order nil = un-pin) for
+// row, so the block re-sorts instantly, then keeps the cursor on the row. The routed
+// write (persistPin) runs alongside; the reconcile poll GCs the patch once the server
+// agrees (or the deadline surfaces a genuine failure).
+func (m *Model) applyPinPatch(row api.ThreadRow, order *float64) {
+	desc := "unpin"
+	if order != nil {
+		desc = "pin"
+	}
+	patch := &rowPatch{
+		pinSet:   true,
+		pinOrder: order,
+		machine:  row.Machine,
+		desc:     fmt.Sprintf("%s %q", desc, rowDisplayName(row)),
+		deadline: time.Now().Add(optimisticPatchTTL),
+	}
+	if m.pending == nil {
+		m.pending = map[string]*rowPatch{}
+	}
+	if cur, ok := m.pending[row.ID]; ok {
+		cur.merge(patch)
+	} else {
+		m.pending[row.ID] = patch
+	}
+	m.applyPending(false)
+	m.positionCursorOn(row.ID) // the re-sort moved the row — keep the cursor on it
+}
+
+// persistPin writes the pin change to the owning daemon (order nil = un-pin). The
+// optimistic patch already shows the result, so this only persists + reports failure.
+func (m Model) persistPin(row api.ThreadRow, order *float64) tea.Cmd {
+	bin, env, machine := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		var args []string
+		if order == nil {
+			args = []string{"thread", "unpin", "--id", row.ID}
+		} else {
+			args = []string{"thread", "pin", "--id", row.ID, "--order", strconv.FormatFloat(*order, 'g', -1, 64)}
+		}
+		if machine == "" || row.Machine != machine {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return pinDoneMsg{id: row.ID, err: fmt.Errorf("pin %q: %v: %s", rowDisplayName(row), err, strings.TrimSpace(string(out)))}
+		}
+		return pinDoneMsg{id: row.ID}
+	}
+}
+
+// handleReorderKey drives MOVE MODE: ↑/↓ (k/j) reposition the reordered row within the
+// pinned block (optimistic patch + routed write per step), Enter/Esc/q commit-and-exit,
+// any other key exits without acting. A no-op at a block end simply stays in the mode.
+func (m Model) handleReorderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	row, ok := m.rowByID(m.reorderID)
+	if !ok { // the row vanished (deleted elsewhere) — leave the mode
+		m.reordering, m.reorderID = false, ""
+		return m, nil
+	}
+	switch msg.String() {
+	case "up", "k", "down", "j":
+		dir := -1
+		if s := msg.String(); s == "down" || s == "j" {
+			dir = 1
+		}
+		order, moved := m.reorderTarget(row, dir)
+		if !moved {
+			return m, nil // already at that end of the block
+		}
+		m.applyPinPatch(row, &order)
+		m.ensureCursorVisible()
+		return m, m.persistPin(row, &order)
+	case "enter", "esc", "q", "ctrl+c":
+		m.reordering, m.reorderID = false, ""
+		return m, nil
+	default:
+		// Any other key ends move mode without acting (so it can't fire a stray action).
+		m.reordering, m.reorderID = false, ""
+		return m, nil
+	}
+}
+
+// rowByID finds a fetched row by id (after optimistic patches are applied to m.rows).
+func (m Model) rowByID(id string) (api.ThreadRow, bool) {
+	for _, r := range m.rows {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return api.ThreadRow{}, false
+}
+
+// samePinOrder compares two optional pin-order keys (both nil, or both set & equal).
+func samePinOrder(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // deleteSelected drops the selected thread's record. The daemon refuses a live
 // thread (orphan guard); stop it first. Surfaced as an error in actionErr.
 func (m Model) deleteSelected() tea.Cmd {
@@ -1972,16 +2272,24 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · i ids · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+
+// reorderLegendText is the legend while MOVE MODE is active — only the reposition
+// keys are live.
+const reorderLegendText = "MOVE MODE — ↑/↓ reposition the pinned row · enter/esc done"
 
 // renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
 // soft-wraps on spaces) so every binding stays visible instead of being clipped at
 // the right edge. Width unknown (no WindowSizeMsg yet — tests) renders one line.
 func (m Model) renderLegend() string {
-	if m.width > 1 {
-		return styleDim.Width(m.width).Render(legendText)
+	text := legendText
+	if m.reordering {
+		text = reorderLegendText
 	}
-	return styleDim.Render(legendText)
+	if m.width > 1 {
+		return styleDim.Width(m.width).Render(text)
+	}
+	return styleDim.Render(text)
 }
 
 // legendLines is the wrapped legend's height in lines (for the scroll budget —
@@ -2000,6 +2308,9 @@ func (m *Model) legendLines() int {
 func HeadGlyph(row api.ThreadRow) string {
 	if row.AgentKind == api.VirtualAgentKind {
 		return "◇"
+	}
+	if row.AgentKind == api.DividerAgentKind {
+		return "─" // dividers render as a full rule (see the View loop); this is a fallback
 	}
 	switch row.Head {
 	case api.Headful:
@@ -2023,6 +2334,60 @@ func BusyGlyph(row api.ThreadRow) string {
 	default:
 		return "?"
 	}
+}
+
+// pinMark renders the 1-cell manual-ordering marker at the very left of a row: ↕
+// while the row is being MOVED (move mode), • when it's PINNED (in the block above
+// the auto-sorted list), a space otherwise (so columns stay aligned across all rows).
+func pinMark(row api.ThreadRow, moving bool) string {
+	switch {
+	case moving:
+		return "↕"
+	case row.PinOrder != nil:
+		return "•"
+	default:
+		return " "
+	}
+}
+
+// dividerLabel is a divider's display label, falling back to "divider" (for messages
+// where a name is expected); an unlabeled divider renders as a bare rule elsewhere.
+func dividerLabel(row api.ThreadRow) string {
+	if row.Name != "" {
+		return row.Name
+	}
+	return "divider"
+}
+
+// renderDividerLine draws a divider row as a full-width horizontal rule with its
+// optional label ("── today ─────"); an unlabeled divider is a bare rule. A ↕ head
+// shows while it's being moved. Selected = reverse video, else dim.
+func (m Model) renderDividerLine(row api.ThreadRow, selected bool) string {
+	width := m.width
+	if width <= 0 {
+		width = 40 // unknown width (tests / pre-resize): a deterministic fixed rule
+	}
+	avail := width - 2 // the 2-cell leading ("> " / "  ")
+	if avail < 6 {
+		avail = 6
+	}
+	head := "──"
+	if m.reordering && row.ID == m.reorderID {
+		head = "↕─"
+	}
+	text := head
+	if row.Name != "" {
+		text = head + " " + row.Name + " "
+	}
+	if n := len([]rune(text)); n < avail {
+		text += strings.Repeat("─", avail-n)
+	} else {
+		text = string([]rune(text)[:avail])
+	}
+	if selected {
+		return styleSelected.Render("> " + text)
+	}
+	return styleDim.Render("  " + text)
 }
 
 // DescendantGlyph renders the descendant-activity slot (the third HB glyph): a
@@ -2182,18 +2547,28 @@ func (m Model) View() string {
 	for i := start; i < end; i++ {
 		tr := vis[i]
 		row := tr.row
+		selected := i == m.cursor
+		// A DIVIDER renders as a full-width horizontal rule (with its optional label),
+		// not as a normal thread row — it has no state/columns.
+		if row.AgentKind == api.DividerAgentKind {
+			b.WriteString(m.renderDividerLine(row, selected) + "\n")
+			continue
+		}
 		att := " "
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
+		// A 1-cell manual-ordering marker: ↕ while this row is being moved, ▏ when it's
+		// pinned (in the block above the auto list), a space otherwise (keeps columns aligned).
+		mark := pinMark(row, m.reordering && row.ID == m.reorderID)
 		desc := DescendantGlyph(descRun[row.ID])
-		if i == m.cursor {
+		if selected {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
+			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
+			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

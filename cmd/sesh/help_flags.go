@@ -231,6 +231,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--model", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default; applied on spawn, resume, and every headless turn)"},
 		{"--headless", "spawn headless (a durable conversation with no tmux window)"},
 		{"--virtual", "create a VIRTUAL thread — a pure grouping node with no agent (no agent-shaped flags allowed; cwd optional; convert later with `thread realize`)"},
+		{"--divider", "create a DIVIDER — a visual horizontal rule in the pinned block (--name is its optional label; no agent-shaped flags allowed; placed at the top, reposition with `thread pin`)"},
 		{"--parent", "parent thread id/prefix (default: the CURRENT thread when run inside one)"},
 		{"--no-parent", "force a root thread, suppressing parent inference"},
 		{"--fork-from", "branch this thread's conversation from a source thread; agent/cwd default to the source's"},
@@ -271,6 +272,19 @@ var flagDocs = map[string][]flagDoc{
 	"thread reparent": {
 		{"--parent", "new parent thread id/prefix (mutually exclusive with --root)"},
 		{"--root", "make the thread a root with no parent (mutually exclusive with --parent)"},
+		{"--id", "thread id or unique prefix (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"thread pin": {
+		{"--id", "thread id or unique prefix (default: the current thread)"},
+		{"--top", "place at the TOP of the pinned block (the default when no placement is given)"},
+		{"--bottom", "place at the BOTTOM of the pinned block"},
+		{"--before", "place immediately BEFORE this pinned thread/divider (id/prefix)"},
+		{"--after", "place immediately AFTER this pinned thread/divider (id/prefix)"},
+		{"--order", "set an explicit fractional order key (advanced; skips the relative placement math)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"thread unpin": {
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

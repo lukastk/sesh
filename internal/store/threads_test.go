@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -258,6 +259,91 @@ func TestRealizeThread(t *testing.T) {
 // (migration 19): a parent id pointing at no existing thread is reset to root,
 // while valid parent links survive. Simulated by rolling meta.version back to
 // the pre-sweep version and re-running migrate on rows seeded with a dangler.
+// TestThreadPin covers the manual-ordering key: set/reposition, unpin (clear),
+// and the two implicit clears — archiving a pinned thread and reparenting it under
+// another thread both drop pin_order back to NULL.
+func TestThreadPin(t *testing.T) {
+	s := openTestStore(t)
+	mk := func(id, parent string) {
+		t.Helper()
+		if err := s.InsertThread(api.Thread{ID: id, Machine: "m", SessionName: "s-" + id, Cwd: "/x", AgentKind: "pi", Name: id, Tags: []string{}, Parent: parent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pinOf := func(id string) *float64 {
+		t.Helper()
+		th, err := s.GetThread(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return th.PinOrder
+	}
+	mk("root", "")
+	mk("a", "")
+
+	if pinOf("a") != nil {
+		t.Fatalf("fresh thread should be unpinned, got %v", *pinOf("a"))
+	}
+	// Set — including a 0 key, which must read back as pinned (NOT "unpinned").
+	zero := 0.0
+	if err := s.SetThreadPin("a", &zero); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("a"); p == nil || *p != 0 {
+		t.Fatalf("pin=0: want &0, got %v", p)
+	}
+	// Reposition.
+	v := -2.5
+	if err := s.SetThreadPin("a", &v); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("a"); p == nil || *p != -2.5 {
+		t.Fatalf("reposition: want &-2.5, got %v", p)
+	}
+	// Unpin.
+	if err := s.SetThreadPin("a", nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("a"); p != nil {
+		t.Fatalf("unpin: want nil, got %v", *p)
+	}
+	// Archive clears the pin.
+	if err := s.SetThreadPin("a", &v); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadArchived("a", true, 100); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("a"); p != nil {
+		t.Fatalf("archive should clear pin, got %v", *p)
+	}
+	// Reparent under another thread clears the pin; reparent-to-root leaves it.
+	if err := s.SetThreadArchived("a", false, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadPin("a", &v); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadParent("a", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("a"); p != nil {
+		t.Fatalf("reparent-to-child should clear pin, got %v", *p)
+	}
+	if err := s.SetThreadPin("root", &v); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadParent("root", ""); err != nil {
+		t.Fatal(err)
+	}
+	if p := pinOf("root"); p == nil || *p != -2.5 {
+		t.Fatalf("reparent-to-root must keep pin, got %v", p)
+	}
+	if err := s.SetThreadPin("missing", &v); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("pin missing: want ErrThreadNotFound, got %v", err)
+	}
+}
+
 func TestMigrationClearsDanglingParents(t *testing.T) {
 	s := openTestStore(t)
 	mk := func(id, parent string) {
@@ -269,14 +355,22 @@ func TestMigrationClearsDanglingParents(t *testing.T) {
 	mk("a", "")
 	mk("b", "a")
 	mk("c", "ghost") // dangling: ghost never existed (historical delete)
-	// Roll back to just before the sweep (the LAST migration) so re-migrating
-	// runs exactly it. len-1, not a literal: the comment numbering is offset
-	// from the element indexes (one historical comment spans two elements).
-	if _, err := s.db.Exec(`UPDATE meta SET version = ? WHERE id = 1`, len(migrations)-1); err != nil {
-		t.Fatal(err)
+	// Re-run EXACTLY the dangling-parent sweep (migration 19). It's an idempotent
+	// UPDATE, so applying it directly is faithful — and unlike re-running migrate()
+	// from an earlier version, it doesn't re-apply the later non-idempotent
+	// migrations (e.g. the ADD COLUMN steps that followed it). Located by content so
+	// the test survives further appends.
+	var sweep string
+	for _, m := range migrations {
+		if strings.Contains(m, "parent NOT IN (SELECT id FROM threads)") {
+			sweep = m
+		}
 	}
-	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate: %v", err)
+	if sweep == "" {
+		t.Fatal("dangling-parent sweep migration not found")
+	}
+	if _, err := s.db.Exec(sweep); err != nil {
+		t.Fatalf("re-run sweep: %v", err)
 	}
 	if got, _ := s.GetThread("c"); got.Parent != "" {
 		t.Fatalf("dangling parent not cleared: %q", got.Parent)

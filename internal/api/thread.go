@@ -10,6 +10,22 @@ package api
 // virtual thread in place into a real (never-started headless) one.
 const VirtualAgentKind = "virtual"
 
+// DividerAgentKind is the agent_kind of a DIVIDER — a purely visual node the TUI
+// renders as a horizontal rule (with an optional label) to separate groups of
+// manually-ordered threads. Like a virtual thread it has NO agent, pane, or
+// transcript, and is NOT a valid agents.Kind (every agent-shaped path refuses it
+// loudly). Unlike a virtual thread it is childless and lives ONLY in the pinned
+// block — it always carries a PinOrder and cannot be un-pinned (delete it to
+// remove it).
+const DividerAgentKind = "divider"
+
+// NonAgentKind reports whether an agent_kind is one of the non-agent node kinds
+// (virtual grouping node, divider) — records that have no conversation and refuse
+// every agent-shaped operation.
+func NonAgentKind(kind string) bool {
+	return kind == VirtualAgentKind || kind == DividerAgentKind
+}
+
 // Thread is the persistent thread record. Pane and runtime state are NOT stored
 // here — they are resolved live (see ThreadStatusResponse).
 type Thread struct {
@@ -56,6 +72,15 @@ type Thread struct {
 	// derives the live OnHold flag against ITS clock. Auto-expires — once the instant
 	// passes the thread silently returns to the active view (no explicit unhold).
 	OnHoldUntilUnix int64 `json:"on_hold_until_unix,omitempty"`
+	// PinOrder is the manual-ordering sort key. nil = not pinned (the thread sits in
+	// the auto-sorted block); non-nil = pinned, rendered ABOVE the auto block ordered
+	// by this key ascending. Only TOP-LEVEL (parentless) threads may be pinned; a
+	// divider always carries one. The value is a fractional float computed CLIENT-SIDE
+	// from the merged cross-machine view (the daemon is a pure setter, like hold), so
+	// pinning/reordering is a single write to one owner and never renumbers siblings
+	// (which may live on offline machines). Cleared when the thread is archived or
+	// reparented under another thread.
+	PinOrder *float64 `json:"pin_order,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -151,6 +176,27 @@ type NewThreadRequest struct {
 	// fork_from, placement, msg, mode, model) — all refused loudly. Cwd is
 	// OPTIONAL here (kept as the default for a later realize).
 	Virtual bool `json:"virtual,omitempty"`
+	// Divider creates a DIVIDER node — a visual horizontal rule in the pinned
+	// block (agent_kind "divider", no agent/pane/transcript/children). Mutually
+	// exclusive with every agent-shaped field (all refused loudly); Cwd is ignored.
+	// Name is the optional label. A divider is created straight into the manual
+	// order, so PinOrder MUST be set (the client computes it from the merged view).
+	Divider bool `json:"divider,omitempty"`
+	// PinOrder places a newly-created DIVIDER in the manual order (the client-side
+	// fractional key). Ignored for non-divider spawns (a normal thread is pinned
+	// after creation via POST /v1/threads/pin).
+	PinOrder *float64 `json:"pin_order,omitempty"`
+}
+
+// PinThreadRequest is the body of POST /v1/threads/pin. PinOrder non-nil PINS or
+// repositions the thread at that manual-order key; nil UNPINS it (removes the
+// manual ordering). The caller supplies the absolute float — the daemon is a pure
+// setter (the fractional math is client-side, over the merged cross-machine view).
+// Refused loudly for a thread that has a parent (only top-level threads can be
+// pinned) and for un-pinning a divider (delete it instead).
+type PinThreadRequest struct {
+	ID       string   `json:"id"`
+	PinOrder *float64 `json:"pin_order,omitempty"`
 }
 
 // RealizeThreadRequest is the body of POST /v1/threads/realize: convert a

@@ -51,7 +51,7 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if virtualGate(w, thread, "thread send") {
+	if nonAgentGate(w, thread, "thread send") {
 		return
 	}
 	loc, found, err := d.tmux.FindPaneByThreadID(req.ID)
@@ -96,6 +96,11 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	// own validation (agent-shaped fields refused, cwd optional).
 	if req.Virtual {
 		d.newVirtualThread(w, req)
+		return
+	}
+	// A DIVIDER is a visual node with no agent — same, branched before parsing.
+	if req.Divider {
+		d.newDividerThread(w, req)
 		return
 	}
 	kind, err := agents.ParseKind(req.Agent)
@@ -448,7 +453,7 @@ func (d *Daemon) handleThreadCapture(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if virtualGate(w, thread, "thread capture") {
+	if nonAgentGate(w, thread, "thread capture") {
 		return
 	}
 	loc, found, err := d.tmux.FindPaneByThreadID(id)

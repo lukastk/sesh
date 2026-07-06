@@ -323,6 +323,16 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.pin",
+		Description: "manual ordering: `thread pin` gives a top-level thread a fractional pin_order key so it renders ABOVE the auto-sorted block (--top/--bottom/--before/--after/--order); `thread unpin` clears it; pinning a child is refused; the key is cleared on archive AND reparent-under-another; routed to the owner",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.divider",
+		Description: "dividers: `thread new --divider` records a visual node (agent_kind divider — no agent/pane/transcript, always pinned) rendered as a horizontal rule; agent verbs refuse loudly; it can't be archived or un-pinned (delete it); agent-shaped creation flags refused",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.session-name",
 		Description: "configurable session naming: [[session_name]] cwd-regex rules in <SESH_HOME>/config.toml template the REAL tmux session name (named groups + {tid8}/{name}/{cwd}); applies to headed spawn AND revival minting; no match = default sesh_<name>; a broken config refuses the daemon loudly",
 		Localities:  []Locality{Local},

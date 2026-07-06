@@ -165,7 +165,20 @@ package api
 // daemon needs 38 (virtual threads can only be created there); a pre-38 viewer renders
 // the kind string and its routed agent verbs hit the upgraded owner's loud refusal; a
 // pre-38 daemon 404s the realize route loudly.
-const SchemaVersion = 38
+//
+// 39: MANUAL THREAD ORDERING + DIVIDERS. Thread gains `pin_order` (*float64, nil =
+// unpinned): a pinned top-level thread renders ABOVE the auto-sorted block ordered by
+// this fractional key. A DIVIDER is a thread record with agent_kind "divider" (a visual
+// rule; no agent/pane/transcript/children, always pinned) — NewThreadRequest gains
+// `divider`+`pin_order`. POST /v1/threads/pin (PinThreadRequest) sets/clears a thread's
+// pin_order; the daemon is a pure setter (the fractional math is client-side over the
+// merged view). Pinning is cleared on archive/reparent-to-child; only top-level threads
+// may be pinned; a divider can't be un-pinned. Additive/omitempty on the Thread record
+// (flows through ThreadRow/ThreadSnapshot automatically) ⇒ mixed-mesh safe: only the
+// OWNING daemon needs 39 (a pin/divider can only be created there); a pre-39 viewer omits
+// pin_order (renders the thread unpinned) and its routed pin hits the upgraded owner's
+// endpoint; a pre-39 daemon 404s the pin route loudly.
+const SchemaVersion = 39
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

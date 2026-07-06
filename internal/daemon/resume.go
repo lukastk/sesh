@@ -70,7 +70,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if virtualGate(w, thread, "revive") {
+	if nonAgentGate(w, thread, "revive") {
 		return
 	}
 

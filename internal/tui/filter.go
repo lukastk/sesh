@@ -159,6 +159,29 @@ func (m *Model) visibleMatches() []treeRow {
 		}
 		roots = append(roots, id)
 	}
+	// Manual ordering: PINNED roots render first, ordered by their fractional key
+	// (then machine, id), as a block ABOVE the auto-sorted roots. Unpinned roots keep
+	// their existing (machine, name, id) order — a stable sort preserves it. Only
+	// top-level nodes are pinned, so this reorders the tree's ROOTS only; each pinned
+	// root still carries its subtree. (Children are never pinned — pin_order is cleared
+	// on reparent-to-child — so sibling order within a subtree is untouched.)
+	sort.SliceStable(roots, func(i, j int) bool {
+		ri, rj := inSet[roots[i]].row, inSet[roots[j]].row
+		pi, pj := ri.PinOrder != nil, rj.PinOrder != nil
+		if pi != pj {
+			return pi // pinned before unpinned
+		}
+		if pi && pj {
+			if *ri.PinOrder != *rj.PinOrder {
+				return *ri.PinOrder < *rj.PinOrder
+			}
+			if ri.Machine != rj.Machine {
+				return ri.Machine < rj.Machine
+			}
+			return ri.ID < rj.ID
+		}
+		return false // both unpinned: keep the stable (fetch) order
+	})
 	var out []treeRow
 	var walk func(id, indent string, isLast, isRoot bool)
 	walk = func(id, indent string, isLast, isRoot bool) {

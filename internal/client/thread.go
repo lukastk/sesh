@@ -49,6 +49,13 @@ func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)
 }
 
+// ThreadPin posts POST /v1/threads/pin: pin/reposition the thread at order (a
+// non-nil absolute fractional key) or, with a nil order, un-pin it. The caller
+// computes the float from the merged cross-machine view.
+func (c *Client) ThreadPin(ctx context.Context, id string, order *float64) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/pin", api.PinThreadRequest{ID: id, PinOrder: order}, nil)
+}
+
 // ThreadRename posts POST /v1/threads/rename.
 func (c *Client) ThreadRename(ctx context.Context, id, name string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/rename", api.RenameThreadRequest{ID: id, Name: name}, nil)

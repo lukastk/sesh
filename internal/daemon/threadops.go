@@ -133,6 +133,15 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "archive: id is required")
 		return
 	}
+	// A divider can't be archived (archive clears pin_order, which a divider must
+	// keep — a divider only exists in the pinned block). Delete it instead.
+	if req.Archived {
+		if th, err := d.store.GetThread(req.ID); err == nil && th.AgentKind == api.DividerAgentKind {
+			writeError(w, http.StatusConflict,
+				"archive: "+req.ID+" is a divider — delete it instead (sesh thread delete --id "+req.ID+")")
+			return
+		}
+	}
 	if err := d.store.SetThreadArchived(req.ID, req.Archived, time.Now().Unix()); err != nil {
 		d.threadOpErr(w, err)
 		return
@@ -306,7 +315,7 @@ func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if virtualGate(w, th, "transcript") {
+	if nonAgentGate(w, th, "transcript") {
 		return
 	}
 	tail := -1

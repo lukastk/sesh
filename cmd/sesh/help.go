@@ -115,8 +115,8 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread new": {
 		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec). --virtual creates a VIRTUAL thread instead: a pure grouping node with NO agent (parent other threads under it; renders ◇ in the TUI) — takes no agent-shaped flag, cwd is optional (kept as the default for a later `thread realize`), and agent verbs on it refuse loudly until realized.",
-		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
-		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec", "sesh thread new --virtual --name 'project X'"},
+		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--divider] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec", "sesh thread new --virtual --name 'project X'", "sesh thread new --divider --name 'today'"},
 	},
 	"thread list": {
 		summary:  "list threads (id, agent, name, session, cwd); optionally archived and/or fanned out across the mesh",
@@ -192,6 +192,16 @@ var helpRegistry = map[string]cmdHelp{
 		summary:  "re-parent a thread to a new parent, or make it a root (--root)",
 		usage:    "sesh thread reparent (--parent <id>|--root) [--id <id>] [--machine <m>]",
 		examples: []string{"sesh thread reparent --id 1a2b3c4d --parent 9f8e7d6c", "sesh thread reparent --id 1a2b3c4d --root"},
+	},
+	"thread pin": {
+		summary:  "pin a top-level thread (or divider) into the MANUAL ORDER — pinned threads render as a block ABOVE the auto-sorted list, ordered by a fractional key. Placement is at most one of --top (default) / --bottom / --before <id> / --after <id> / --order <f>; the fractional key is computed client-side from the merged cross-machine block. Only a parentless thread can be pinned; the same command REPOSITIONS an already-pinned thread or divider. Pinning is cleared when a thread is archived or reparented under another thread.",
+		usage:    "sesh thread pin [--id <id>] [--top|--bottom|--before <id>|--after <id>|--order <f>] [--machine <m>]",
+		examples: []string{"sesh thread pin --id 1a2b3c4d", "sesh thread pin --id 1a2b3c4d --after 9f8e7d6c", "sesh thread pin --id 1a2b3c4d --bottom"},
+	},
+	"thread unpin": {
+		summary:  "remove a thread's manual ordering — it rejoins the auto-sorted block. (A divider can't be un-pinned; delete it instead.)",
+		usage:    "sesh thread unpin [--id <id>] [--machine <m>]",
+		examples: []string{"sesh thread unpin --id 1a2b3c4d"},
 	},
 	"thread tag": {
 		summary:  "add and/or remove tags on a thread (repeatable --add/--remove)",

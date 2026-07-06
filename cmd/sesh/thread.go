@@ -76,6 +76,10 @@ func runThread(args []string) error {
 		return threadNotify(cfg, rest)
 	case "hold":
 		return threadHold(cfg, rest)
+	case "pin":
+		return threadPin(cfg, rest)
+	case "unpin":
+		return threadUnpin(cfg, rest)
 	case "reparent":
 		return threadReparent(cfg, rest)
 	case "tag":
@@ -491,9 +495,26 @@ func threadNew(cfg config.Config, args []string) error {
 	intoPane := fs.String("into-pane", "", "bind the thread to an EXISTING shell pane and run the agent in place (register-then-exec; with --exec)")
 	doExec := fs.Bool("exec", false, "with --into-pane: replace THIS process with the agent (run it in the calling pane)")
 	virtual := fs.Bool("virtual", false, "create a VIRTUAL thread — a pure grouping node with no agent (parent other threads under it; convert later with `thread realize`)")
+	divider := fs.Bool("divider", false, "create a DIVIDER — a visual horizontal rule in the pinned block (--name is its optional label; placed at the top, reposition with `thread pin`)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *virtual && *divider {
+		return errors.New("thread new: --virtual and --divider are mutually exclusive")
+	}
+	// A DIVIDER is a visual node with no agent — refuse every agent-shaped field
+	// loudly (the daemon refuses too; catch them here before the request is built),
+	// then create it at the top of the pinned block. --name is its optional label.
+	if *divider {
+		if *agent != "" {
+			return errors.New("thread new: --divider takes no --agent (a divider has none)")
+		}
+		if *headless || *forkFrom != "" || *intoSession != "" || *intoWindow != "" ||
+			*intoPane != "" || *msg != "" || *model != "" || *parent != "" {
+			return errors.New("thread new: --divider takes no agent-shaped flags (it is a visual node — no agent, cwd, placement, or parent)")
+		}
+		return createDivider(cfg, *name, *asJSON)
 	}
 	if *virtual && *agent != "" {
 		return errors.New("thread new: --virtual takes no --agent (a virtual thread has none; realize it later)")

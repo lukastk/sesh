@@ -73,7 +73,7 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if virtualGate(w, thread, "send-headless") {
+	if nonAgentGate(w, thread, "send-headless") {
 		return
 	}
 	// Unified model: a headless turn is valid on any IDLE thread — including one

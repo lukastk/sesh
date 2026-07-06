@@ -145,6 +145,14 @@ var migrations = []string{
 	// dangling ones to root ('' — the grandparent is unrecoverable for these).
 	// APPENDED last.
 	`UPDATE threads SET parent = '' WHERE parent != '' AND parent NOT IN (SELECT id FROM threads);`,
+	// 20: threads.pin_order — the manual-ordering sort key (NULLABLE REAL; NULL = not
+	// pinned, i.e. the thread sits in the auto-sorted block). A pinned top-level thread
+	// renders above the auto block ordered by this fractional key; a divider always
+	// carries one. The value is computed client-side from the merged cross-machine view
+	// (the daemon only persists it). Cleared to NULL on archive (SetThreadArchived) and
+	// on reparent-to-child (SetThreadParent). NULLABLE so 0/negative keys are valid keys,
+	// distinct from "unpinned". APPENDED last.
+	`ALTER TABLE threads ADD COLUMN pin_order REAL;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

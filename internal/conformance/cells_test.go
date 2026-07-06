@@ -83,6 +83,8 @@ var skipReasons = map[string]string{
 	"thread.await":              "blocks until a real turn finishes (reply available on return); remote = NO routing, the mesh carries it; timeout/unknown loud",
 	"thread.notify":             "per-thread gate: creation default from config, toggle round-trip, SESH_NOTIFY in real hook env both values",
 	"thread.hold":               "park a thread until a future instant; owner derives on_hold both directions (future on, lapsed off = auto-expiry), --clear zeroes it; routed on a peer",
+	"thread.pin":                "manual ordering: pin sets a fractional key ordering the thread above the auto block, --before/--after reposition, unpin clears, child-pin refused, archive+reparent clear it; routed on a peer",
+	"thread.divider":            "divider = a pinned visual node (agent_kind divider, no session); agent verbs + archive + unpin refuse loudly; agent-shaped creation flags refused; delete removes it; routed on a peer",
 	"thread.import":             "v1 records imported (uuid as id+session-id, tags/parent/archived mapped, per-machine scope, idempotent re-import, dry-run, missing store loud)",
 	"daemon.doctor":             "agent-on-daemon-$SHELL-PATH check is real (deploy-env class), config-parse status, broken config = FAIL + non-zero exit",
 	"daemon.hooks":              "[[hooks]] fire on real observed edges; remote = observer-bound (a LOCAL hook fires for a PEER's edge via the mesh cache)",

@@ -5,7 +5,7 @@ package daemon
 // something that is not (yet) a real thread. All record machinery (tree,
 // reparent, hold inheritance, tags, archive, mesh sync) applies unchanged; the
 // maintainer resolves it headless·idle for free (no pane to probe). Agent-shaped
-// verbs refuse loudly via virtualGate. `thread realize` converts a virtual
+// verbs refuse loudly via nonAgentGate. `thread realize` converts a virtual
 // thread IN PLACE into a real one: the result is exactly a fresh never-started
 // headless thread (see newHeadlessThread) — id, children, tags, holds and ticket
 // bindings all survive because nothing but the record changes.
@@ -27,19 +27,24 @@ func (d *Daemon) routesRealize(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/realize", d.handleThreadRealize)
 }
 
-// virtualGate refuses an agent-shaped operation on a VIRTUAL thread with a loud,
-// actionable 409 (naming the realize verb) and reports whether it fired. Callers
-// place it right after loading the thread, before any agent-specific work.
-func virtualGate(w http.ResponseWriter, thread api.Thread, verb string) bool {
-	if thread.AgentKind != api.VirtualAgentKind {
+// nonAgentGate refuses an agent-shaped operation on a NON-AGENT node — a VIRTUAL
+// grouping thread or a DIVIDER — with a loud, actionable 409, and reports whether
+// it fired. Callers place it right after loading the thread, before any
+// agent-specific work. The remedy differs by kind (realize a virtual thread;
+// delete a divider), so the message is tailored.
+func nonAgentGate(w http.ResponseWriter, thread api.Thread, verb string) bool {
+	if !api.NonAgentKind(thread.AgentKind) {
 		return false
 	}
 	name := thread.Name
 	if name == "" {
 		name = thread.ID
 	}
-	writeError(w, http.StatusConflict,
-		verb+": "+name+" is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id "+thread.ID+" --agent claude|codex|pi")
+	msg := verb + ": " + name + " is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id " + thread.ID + " --agent claude|codex|pi"
+	if thread.AgentKind == api.DividerAgentKind {
+		msg = verb + ": " + name + " is a divider (a visual separator — no conversation); delete it with sesh thread delete --id " + thread.ID
+	}
+	writeError(w, http.StatusConflict, msg)
 	return true
 }
 

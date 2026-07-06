@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, archived_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.ArchivedAtUnix,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, archived_at, pin_order)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.ArchivedAtUnix, t.PinOrder,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -175,12 +175,15 @@ func (s *Store) SetThreadTags(id string, tags []string) error {
 // daemon owns the clock, mirroring closed_at on tickets.
 func (s *Store) SetThreadArchived(id string, archived bool, now int64) error {
 	v := boolInt(archived)
+	// Archiving also clears any manual ordering (pin_order → NULL): a thread loses its
+	// pinned position when parked. Un-archiving leaves it cleared (not restored).
 	res, err := s.db.Exec(
 		`UPDATE threads SET archived = ?, archived_at = CASE
 			WHEN ? = 1 THEN (CASE WHEN archived_at = 0 THEN ? ELSE archived_at END)
-			ELSE 0 END
+			ELSE 0 END,
+		 pin_order = CASE WHEN ? = 1 THEN NULL ELSE pin_order END
 		 WHERE id = ?`,
-		v, v, now, id)
+		v, v, now, v, id)
 	if err != nil {
 		return fmt.Errorf("store: set thread archived: %w", err)
 	}
@@ -233,10 +236,15 @@ func scanThread(r scanner) (api.Thread, error) {
 	var tags string
 	var headless, started, archived, notify int
 	var meta string
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.ArchivedAtUnix); err != nil {
+	var pinOrder sql.NullFloat64
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.ArchivedAtUnix, &pinOrder); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
+	if pinOrder.Valid {
+		v := pinOrder.Float64
+		t.PinOrder = &v
+	}
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
 		return t, fmt.Errorf("store: decode thread tags: %w", err)
 	}
@@ -252,11 +260,29 @@ func scanThread(r scanner) (api.Thread, error) {
 }
 
 // SetThreadParent re-parents a thread (” = make it a root). Existence and
-// cycle guards live at the daemon layer.
+// cycle guards live at the daemon layer. Reparenting UNDER another thread (a
+// non-empty parent) also clears any manual ordering (pin_order → NULL): only
+// top-level threads can be pinned, so a thread that becomes a child loses its
+// pinned position. Reparent-to-root leaves pin_order untouched (already NULL).
 func (s *Store) SetThreadParent(id, parent string) error {
-	res, err := s.db.Exec(`UPDATE threads SET parent = ? WHERE id = ?`, parent, id)
+	res, err := s.db.Exec(
+		`UPDATE threads SET parent = ?, pin_order = CASE WHEN ? != '' THEN NULL ELSE pin_order END WHERE id = ?`,
+		parent, parent, id)
 	if err != nil {
 		return fmt.Errorf("store: set parent: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+// SetThreadPin sets (order non-nil) or clears (order nil) a thread's manual-ordering
+// key. The daemon supplies the absolute float; the fractional math is client-side.
+func (s *Store) SetThreadPin(id string, order *float64) error {
+	res, err := s.db.Exec(`UPDATE threads SET pin_order = ? WHERE id = ?`, order, id)
+	if err != nil {
+		return fmt.Errorf("store: set pin: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrThreadNotFound

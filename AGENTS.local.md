@@ -1,11 +1,49 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H40 — DEFAULT VIEW keeps ARCHIVED-but-HEADFUL threads + `⊘` archived gutter glyph (2026-07-06, sesh e8eaae6; NO schema change; deployed 4/5 — macstudio OFFLINE, pending; ticket f23b8ea9)
+Ticket f23b8ea9 "default view = all non-archived + archived-but-live, not on hold" = `(non-archived OR
+(archived AND live)) AND not on hold`. Lukas CLARIFIED (AskUserQuestion) that "live"/"attached" means
+**HEADFUL** (a live pane, `Head==Headful`), not tmux-attached — and wanted a **symbol** for archived
+(chose a gutter glyph). PURE TUI-CLIENT change: the maintainer already publishes archived threads in its
+snapshot (`ListThreads(true)`); the TUI merely filtered them client-side in `builtinViewAdmits`. NO
+daemon/api/schema change ⇒ deploy = binary only, no restart, mixed-mesh trivially safe.
+- internal/tui/model.go `builtinViewAdmits` ViewActive: `!Archived && !OnHold` → `(!Archived ||
+  Head==Headful) && !OnHold`. So an archived thread stays shown while its agent runs and drops out once
+  it goes headless. The optimistic-archive hide (`archiveRow`→`leavesViewWith`→`builtinViewAdmits`) does
+  the right thing FOR FREE: archiving a HEADFUL thread no longer hides it (stays); a HEADLESS one still
+  hides instantly. Other views unchanged (`on hold`/`archived`/`all`).
+- ARCHIVED GLYPH: new `ArchivedGlyph` → `⊘` in the state gutter for any archived row (dedicated cell after
+  the attachment `*`), complementing the existing opt-in ARCHIVED date column.
+- GUTTER FIX (found along the way): H38's manual-order `mark` cell had widened the per-row gutter WITHOUT
+  updating `gutterWidth` (7) or the `"  HBD  "` header → a latent 1-col header/row MISALIGNMENT + a 1-col
+  horizontal-pan budget error. Now `gutterWidth=9` (2 prefix + mark+head+busy+desc+att+archived+sep) + a
+  named `gutterHeader="   HBD   "` (HBD sits exactly over head/busy/desc), guarded by TestGutterHeaderWidth.
+- TESTS: internal/tui/view_active_test.go (predicate truth table: archived+headful shown / archived+headless
+  hidden / on-hold excluded regardless of head; ArchivedGlyph; rendered glyph+HBD; gutter-width drift guard);
+  pending_hide_test `TestLeavesCurrentView` now parametrised by head (archiving a HEADFUL thread in active =
+  STAYS, headless = leaves); conformance claim **view-active-archived-live** (registered AND declared — the
+  H25 gotcha) drives a REAL headed pi (headful) + a real headless record, both archived on the daemon, and
+  asserts the default view renders the archived-headful row WITH `⊘` and HIDES the archived-headless one.
+  KEY: wait on the `⊘` (not just the row) — a headful thread renders in the active view even BEFORE the
+  archive propagates to the maintainer snapshot, so requiring the glyph proves "archived AND headful" together
+  (this bit me — first pass settled on row presence and read the pre-archive render). Live visual smoke
+  (ANSI-stripped `View()`): HBD aligns over `●·`, the archived-live row shows `●· *⊘`, columns line up.
+- help.go tui long + sesh-cli SKILL (glyph list, tab-view description, archived paragraph) updated.
+DEPLOY (binary-only, NO daemon restart — each `sesh tui` runs fresh from the binary): mymain (native build
+.new+mv), macbook (lukas@, git pull + /opt/homebrew/bin/go), ideapad (lukastk@ ssh-target, native go),
+termux (lukas@android-main:8022, git pull + PLAIN go build = CGO=1/android per H22, .new+mv) — all four on
+e8eaae6. **macstudio (cij@macstudio) OFFLINE (ssh :22 timed out — down since before H37; the `| tail` in my
+deploy line masked the ssh failure as exit 0, the H30 pipe-exit lesson) → PENDING, harmless (binary-only +
+mixed-mesh safe); when back: git pull + /opt/homebrew/bin/go build .new+mv (no restart).** This deploy ALSO
+carried **H39** (bbe0764, binary-only) to those 4 machines — its `[DEPLOY PENDING]` is cleared for them.
+Ticket f23b8ea9 marked done (closed by e8eaae6).
+
 ## H39 — TUI column MAX-WIDTH cap (default on, `w` toggles, config) + `I` thread-DETAILS popup (2026-07-06, sesh bbe0764; NO schema change; ticket 6c99ee39)
 Ticket "Max column length": cap each TUI column by default so a long name/cwd can't blow out the grid; a key to toggle the cap off (read clipped text in full); a key to popup ALL of a thread's fields. Pure TUI-client + config — NO daemon/schema change (deploy = binary only, no restart, mixed-mesh trivially safe). (Numbered H39 — H38 was taken by the concurrent manual-ordering feature below, which landed on main first; this landed via a merge commit.)
 - WIDTH CAP (internal/tui/columns.go): colSpec.maxW for full-width cols (NAME/CWD/TKT-NAME default 40/40/30; fixed cols cap at their fixedW). Model.maxColWidth (default true via New(); a struct-literal Model defaults FALSE — unit tests set it explicitly) + colMax overrides. colWidths: cap ON → fixed cols reserve fixedW (UNCHANGED from before), full-width cols size-to-content-then-clamp-to-max; cap OFF → EVERY col sizes to content (the "see full text" behavior, incl. fixed cols). `w` key toggles + re-clamps hOffset. Config: `[tui] max_column_widths` (*bool, unset=on) + `[[tui.column_width]]` name/max (ResolveColumnWidths: loud on unknown col / max<1).
 - DETAILS `I` (internal/tui/model.go): detailsPopup full-screen takeover (like ticketView — early-return in View(), handleDetailsKey) listing every ThreadRow field aligned (id/agent/model/state axes/session/cwd/parent/tags/created/hold/tickets/agent-session/meta); esc/q/enter close. Read-only, NOT in requiresReachableOwner.
 - Tests: unit (cap/toggle/override/details/config parse) + 2 conformance claims column-max-width + thread-details (real daemon render; note the default cap applies even with width unset since colWidths caps independent of horizontalView). FIXED a pre-existing-RED claim found along the way: scroll-horizontal drove plain l/h to pan, but H25 rebound pan to ^l/^h — updated to ctrl keys (+ the stale scroll.go "h/l pan" comment). Also shortened claimColumnsConfig's 41-char longName (now truncated by the 40 cap) + gave cwd-label-column's raw-path assertion WithMaxColumnWidths(false). Full TUI-claims suite GREEN, -race clean. Live-smoked isolated tmux: 51-char name truncates at 40 with …, `w` shows full + tightens cols, `I` aligned details, esc back. NB the `w`/`I` keys do NOT collide with H38's p/u/m/D.
-- help.go tui keymap (^h/^l fix + I/w + cap prose) + sesh-cli SKILL keymap/columns-config updated. DEPLOY: binary-only, all machines whenever (no restart). [DEPLOY PENDING]
+- help.go tui keymap (^h/^l fix + I/w + cap prose) + sesh-cli SKILL keymap/columns-config updated. DEPLOY: binary-only, no restart. Deployed 4/5 (mymain/macbook/ideapad/termux) — rode along with the H40 e8eaae6 binary deploy (bbe0764 is an ancestor); macstudio OFFLINE, pending with H40.
 
 ## H38 — MANUAL THREAD ORDERING: pin top-level threads above the auto block + dividers (2026-07-06, sesh 9897aa0 api 38→39 store 20→21; deployed 4/5 — macstudio OFFLINE ~3.7d, pending; ticket aefa7f64)
 Ticket aefa7f64 "Manually ordering threads". Lukas's ask (paraphrased): select a thread → enter an

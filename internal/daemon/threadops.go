@@ -73,8 +73,10 @@ func (d *Daemon) handleThreadRename(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.ID == "" || req.Name == "" {
-		writeError(w, http.StatusBadRequest, "rename: id and name are required")
+	// An empty name is allowed — it makes the thread NAMELESS (and clears a divider's
+	// label to a bare rule), symmetric with `thread new --name ""`. Only the id is required.
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "rename: id is required")
 		return
 	}
 	if err := d.store.RenameThread(req.ID, req.Name); err != nil {

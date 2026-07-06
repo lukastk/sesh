@@ -159,9 +159,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread headless-reply --id 1a2b3c4d --json"},
 	},
 	"thread rename": {
-		summary:  "rename a thread",
+		summary:  "rename a thread (pass --name '' to clear the name — a nameless thread, or a bare-rule divider)",
 		usage:    "sesh thread rename --id <id> --name <name> [--machine <m>]",
-		examples: []string{"sesh thread rename --id 1a2b3c4d --name better-name"},
+		examples: []string{"sesh thread rename --id 1a2b3c4d --name better-name", "sesh thread rename --id 1a2b3c4d --name ''"},
 	},
 	"thread info": {
 		summary:  "describe one thread: record, both state axes, attachment, tmux locator, and tickets (alias of `sesh info`)",

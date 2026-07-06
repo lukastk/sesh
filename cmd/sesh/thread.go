@@ -106,12 +106,20 @@ func runThread(args []string) error {
 func threadRename(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("rename", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
-	name := fs.String("name", "", "new name (required)")
+	name := fs.String("name", "", "new name (required; pass --name '' to clear the name / a divider's label)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *name == "" {
-		return errors.New("thread rename: --name is required")
+	// --name must be PROVIDED, but an explicit empty value is allowed (rename to
+	// nameless / clear a divider's label) — so check presence, not emptiness.
+	provided := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "name" {
+			provided = true
+		}
+	})
+	if !provided {
+		return errors.New("thread rename: --name is required (pass --name '' to clear the name)")
 	}
 	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {

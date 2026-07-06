@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lukastk/sesh/internal/api"
 )
 
 // TestPromptInPlaceEditing drives the line-prompt with ←/→ + Home/End + insert +
@@ -54,5 +56,28 @@ func TestPromptInPlaceEditing(t *testing.T) {
 	}
 	if got := renderPromptInput([]rune("ab"), 2); got != "ab█" {
 		t.Errorf("renderPromptInput end = %q, want ab█", got)
+	}
+}
+
+// TestRenameToEmptyIsNotCancel: submitting the rename prompt EMPTY renames to empty
+// (a nameless thread / a bare-rule divider) — it must run a rename command, not no-op
+// like a cancel. (Esc is the cancel; regression: empty used to silently no-op, so you
+// couldn't clear a divider's label.)
+func TestRenameToEmptyIsNotCancel(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "d1", Name: "today", Machine: "mymain", AgentKind: api.DividerAgentKind, PinOrder: fptr(1)}}
+	m := Model{
+		machine:  "mymain",
+		rows:     []api.ThreadRow{row},
+		machines: selfMachines(),
+		// As `r` sets it up, then cleared: prompting a rename with an EMPTY value.
+		prompting: promptRename, promptRow: row, promptInput: nil, promptCursor: 0,
+	}
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if got.prompting != promptNone {
+		t.Fatalf("submit did not close the prompt")
+	}
+	if cmd == nil {
+		t.Fatalf("empty rename submit must run a rename command (clear the name), not no-op like a cancel")
 	}
 }

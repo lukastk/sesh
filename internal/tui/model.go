@@ -1496,9 +1496,9 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompting, m.promptInput, m.promptCursor = promptNone, nil, 0
 		switch kind {
 		case promptRename:
-			if input == "" {
-				return m, nil
-			}
+			// An empty submit renames to EMPTY (a nameless thread; a bare-rule divider)
+			// — not a cancel. Esc cancels; the prompt is prefilled with the current name,
+			// so clearing it and submitting is a deliberate "clear the name".
 			return m, m.renameRow(row, input)
 		case promptTag:
 			if input == "" {

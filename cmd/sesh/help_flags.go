@@ -266,7 +266,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread rename": {
 		{"--id", "thread id or unique prefix (required)"},
-		{"--name", "the new thread name (required)"},
+		{"--name", "the new thread name (must be provided; pass '' to clear the name / a divider's label)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread reparent": {

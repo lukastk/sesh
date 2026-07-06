@@ -245,6 +245,15 @@ func testDivider(t *testing.T, loc matrix.Locality) {
 		t.Errorf("unlabeled divider wrong: kind=%s name=%q", d2.AgentKind, d2.Name)
 	}
 
+	// Relabel a divider to '' clears its label to a bare rule (rename accepts an
+	// explicit empty name — a nameless thread / unlabeled divider).
+	if _, stderr, err := sb.Runner.Run(t, "thread", "rename", "--id", d.ID, "--name", ""); err != nil {
+		t.Fatalf("relabel divider to empty: %v\n%s", err, stderr)
+	}
+	if got := sb.threadFromList(t, d.ID).Name; got != "" {
+		t.Errorf("rename divider to '' did not clear the label: %q", got)
+	}
+
 	// Delete removes it (no teardown — a divider has no runtime).
 	if _, stderr, err := sb.Runner.Run(t, "thread", "delete", "--id", d.ID); err != nil {
 		t.Fatalf("delete divider: %v\n%s", err, stderr)

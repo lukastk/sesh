@@ -212,8 +212,14 @@ func TestDivider(t *testing.T) {
 		machines: selfMachines(),
 	}
 	nm, _ := m.Update(keyMsg("D"))
-	if nm.(Model).prompting != promptNewDivider {
-		t.Fatalf("D should open the divider prompt, got %v", nm.(Model).prompting)
+	dm2 := nm.(Model)
+	if dm2.prompting != promptNewDivider {
+		t.Fatalf("D should open the divider prompt, got %v", dm2.prompting)
+	}
+	// The prompt HEADER must name the DIVIDER action (regression: it fell through to
+	// the default "rename" label). Assert the specific header text is rendered.
+	if view := dm2.View(); !strings.Contains(view, "new divider label") {
+		t.Errorf("D prompt header should read 'new divider label ...', not the default rename; view:\n%s", view)
 	}
 
 	div := api.ThreadRow{Thread: api.Thread{ID: "d1", Name: "today", Machine: "mymain", AgentKind: api.DividerAgentKind, PinOrder: fptr(1)}}

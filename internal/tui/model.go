@@ -2498,6 +2498,17 @@ func (m Model) View() string {
 			if target == "" {
 				target = "local"
 			}
+		case promptNewDivider:
+			// The row is only a machine carrier here (the divider is created on the
+			// selected row's machine) — show WHERE, not the selected thread's name.
+			label = "new divider label (empty=unlabeled)"
+			target = m.promptRow.Machine
+			if target == "" {
+				target = m.machine
+			}
+			if target == "" {
+				target = "local"
+			}
 		}
 		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, target, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
 	}

@@ -46,6 +46,7 @@ func init() {
 	registerTUIClaim("master-cursor", claimMasterCursor)
 	registerTUIClaim("action-hold", claimActionHold)
 	registerTUIClaim("view-hold", claimViewHold)
+	registerTUIClaim("view-active-archived-live", claimViewActiveArchivedLive)
 	registerTUIClaim("view-archived-order", claimViewArchivedOrder)
 	registerTUIClaim("column-max-width", claimColumnMaxWidth)
 	registerTUIClaim("thread-details", claimThreadDetails)
@@ -478,6 +479,61 @@ func claimViewArchivedOrder(t *testing.T) {
 	if !(ic < ib && ib < ia) {
 		t.Errorf("archived view not ordered most-recently-archived first:\n  charlie@%d bravo@%d alpha@%d\n%s", ic, ib, ia, view)
 	}
+}
+
+// claimViewActiveArchivedLive: the DEFAULT (active) view keeps an ARCHIVED thread
+// visible WHILE IT IS STILL HEADFUL (a live pane), and hides an archived thread once
+// it is headless — i.e. (not archived OR headful) AND not on hold. The shown archived
+// row carries the ⊘ gutter glyph so it is recognisable. This is the whole feature, and
+// it is proven against REAL runtime state: a real headed agent (headful) vs a real
+// headless record, both archived on the daemon.
+func claimViewActiveArchivedLive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+
+	// A real headed agent → headful (a live pane); archive it while it keeps running.
+	live := sb.newThread(t, "pi", "livearch", "/tmp")
+	sb.waitThreadReady(t, live.ID, "pi")
+	// A headless record → not headful; archive it too (it must drop out of the view).
+	parked := sb.newHeadlessThread(t, "pi", "parkedarch")
+	for _, th := range []api.Thread{live, parked} {
+		if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+			t.Fatalf("archive %s: %v\n%s", th.Name, err, stderr)
+		}
+	}
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	// Settle on the archived-but-headful thread appearing in the DEFAULT view WITH the ⊘
+	// glyph. Requiring the glyph (not just the row) is the honest wait: `livearch` is
+	// headful so it would render in the active view even before the archive propagates to
+	// the maintainer's snapshot — the ⊘ only shows once the row really reads archived, so
+	// this proves "archived AND headful AND kept in the default view" together.
+	var view string
+	if !waitUntil(25*time.Second, func() bool {
+		m, view = render(t, m)
+		line := lineWith(view, "livearch")
+		return strings.Contains(view, "[active]") && strings.Contains(line, "⊘")
+	}) {
+		t.Fatalf("default view never showed the archived-but-headful thread with the ⊘ glyph:\n%s", view)
+	}
+	// The archived-but-HEADLESS thread must NOT appear in the default view (by the time
+	// livearch reads archived, parkedarch was archived in the same tick and is hidden).
+	if strings.Contains(view, "parkedarch") {
+		t.Errorf("default view must HIDE an archived HEADLESS thread:\n%s", view)
+	}
+}
+
+// lineWith returns the first rendered line containing sub ("" if absent).
+func lineWith(view, sub string) string {
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, sub) {
+			return l
+		}
+	}
+	return ""
 }
 
 // lineIndexOf returns the index of the first rendered line containing sub (-1 if

@@ -76,8 +76,10 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
-  … — is running a turn; blank = none), and a fourth shows attachment (`*` = a tmux
-  client is attached). The TUI's gutter header for these is `HBD` (head, busy, descendant).
+  … — is running a turn; blank = none), a fourth shows attachment (`*` = a tmux
+  client is attached), and a fifth shows **archived** (`⊘` = the thread is archived —
+  it appears in the default view only while still headful). The TUI's gutter header for
+  the core three is `HBD` (head, busy, descendant).
 - **Machine = origin + owner.** A thread lives on the machine that spawned it; mutations
   route to that owner (`--machine`, or auto for tickets). Cross-machine reads come from
   the mesh.
@@ -237,10 +239,14 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
-tab          cycle views (active / on hold / archived / all / custom [[tui.views]])
-             (`tui --cursor` / the cockpit prefix+a preselect the current thread; if it
-             is hidden by the default `active` view — e.g. archived or on hold — the TUI
-             opens on `all` so the cursor still lands on it)
+tab          cycle views (active / on hold / archived / all / custom [[tui.views]]).
+             The default `active` view shows every non-archived thread PLUS archived
+             threads that are still headful (a live pane, glyph `⊘`), and hides on-hold
+             threads — i.e. `(not archived OR headful) AND not on hold`. So an archived
+             thread stays visible while its agent is running and drops out once it goes
+             headless. (`tui --cursor` / the cockpit prefix+a preselect the current
+             thread; if it is hidden by the default view — e.g. a headless archived
+             thread, or one on hold — the TUI opens on `all` so the cursor still lands on it)
 h            hold: park the thread until the start of tomorrow (it drops out of the
              default view and returns automatically tomorrow); on an already-held thread
              `h` releases it
@@ -326,7 +332,9 @@ can lag a real disconnect by a sync tick or two.
 
 The **`archived`** view (in the `tab` cycle) orders by **most recently archived first**
 (the daemon stamps `archived_at` on each archive; un-archiving clears it, so re-archiving
-re-stamps a fresh time). An opt-in **`archived`** column shows that timestamp.
+re-stamps a fresh time). An opt-in **`archived`** column shows that timestamp, and the
+gutter marks any archived row with `⊘` (so archived-but-headful threads are recognisable
+in the default view too).
 
 **Tickets view (`K`)** is a full-screen takeover listing the selected thread's tickets. It
 defaults to showing **active** tickets; **`tab`** opens a status picker (triage/ready/active/

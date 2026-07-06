@@ -60,6 +60,7 @@ var declaredTUIClaims = []string{
 	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
 	"action-hold",               // h parks the thread on the daemon (future on_hold_until) + leaves the active view; h again releases it; H opens the explicit-date prompt
 	"view-hold",                 // the default active view HIDES on-hold threads; the `on hold` view is the complement
+	"view-active-archived-live", // the default view KEEPS an archived thread while it is still headful (real live pane) + hides an archived headless one; the shown row carries the ⊘ glyph
 	"view-archived-order",       // the archived view orders by most-recently-archived first (archived_at DESC), against REAL archive timestamps
 	"tree-render-fold",          // children collapse under their parent by default; →/← fold with ▾/▸ + rails over real threads
 	"tree-config-expand",        // [tui] expand_children / --expand starts nodes expanded

@@ -9,9 +9,15 @@ package tui
 // the columns so a clipped column can be brought into view. Fold/unfold is on the
 // arrow keys.
 
-// gutterWidth is the fixed leading state gutter:
-// "> "/"  " + head + busy + descendant + att + " ".
-const gutterWidth = 7
+// gutterWidth is the fixed leading state gutter, in terminal columns:
+// "> "/"  " (2) + mark (pin/reorder) + head + busy + descendant + att + archived + " ".
+const gutterWidth = 9
+
+// gutterHeader is the header text over that gutter — "HBD" (head/busy/descendant) sits
+// exactly above those three glyph cells; the mark/att/archived/separator cells are blank.
+// Its rune width MUST equal gutterWidth so the column headers line up with the data rows
+// (TestGutterHeaderWidth guards this).
+const gutterHeader = "   HBD   "
 
 // wheelTick applies one wheel notch in direction dir (-1/+1) to the accumulator acc,
 // returning the net step (-1/0/+1) once `div` notches accumulate in one direction. A

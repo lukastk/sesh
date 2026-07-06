@@ -45,7 +45,7 @@ const postActionReconcileDelay = 500 * time.Millisecond
 type View int
 
 const (
-	ViewActive   View = iota // non-archived AND not on hold (the default)
+	ViewActive   View = iota // (non-archived OR archived-but-headful) AND not on hold (the default)
 	ViewHold                 // non-archived AND on hold (parked threads)
 	ViewArchived             // archived only
 	ViewAll                  // everything (archived + on-hold included)
@@ -78,12 +78,14 @@ func (m Model) viewName() string {
 func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
 
 // builtinViewAdmits reports whether a row belongs in one of the built-in views.
-// (Custom [[tui.views]] use their own predicate instead.) The default `active`
-// view hides BOTH archived and on-hold threads; `on hold` shows the parked ones.
+// (Custom [[tui.views]] use their own predicate instead.) The default `active` view
+// hides on-hold threads and hides archived threads UNLESS they are still headful (a
+// live pane) — so an archived thread stays visible while its agent is running and
+// drops out only once it goes headless. `on hold` shows the parked ones.
 func builtinViewAdmits(view View, row api.ThreadRow) bool {
 	switch view {
 	case ViewActive:
-		return !row.Archived && !row.OnHold
+		return (!row.Archived || row.Head == api.Headful) && !row.OnHold
 	case ViewHold:
 		return !row.Archived && row.OnHold
 	case ViewArchived:
@@ -2381,6 +2383,19 @@ func BusyGlyph(row api.ThreadRow) string {
 	}
 }
 
+// ArchivedGlyph renders the archived slot: a marker on an ARCHIVED thread, blank
+// otherwise. Archived threads now surface in the default view while still headful
+// (see builtinViewAdmits), so this distinguishes them at a glance without opening the
+// opt-in ARCHIVED (date) column.
+//
+//	⊘ archived   (blank) not archived
+func ArchivedGlyph(row api.ThreadRow) string {
+	if row.Archived {
+		return "⊘"
+	}
+	return " "
+}
+
 // pinMark renders the 1-cell manual-ordering marker at the very left of a row: ↕
 // while the row is being MOVED (move mode), • when it's PINNED (in the block above
 // the auto-sorted list), a space otherwise (so columns stay aligned across all rows).
@@ -2576,7 +2591,8 @@ func (m Model) View() string {
 	vcols := cols[hStart:hEnd]
 	// descRun marks threads with a running descendant — the third HB glyph (↓).
 	descRun := descendantsRunning(m.rows)
-	hdr := "  HBD  " + m.renderHeader(vcols, vwidths)
+	// Gutter header, aligned under the per-row state gutter (see gutterHeader/gutterWidth).
+	hdr := gutterHeader + m.renderHeader(vcols, vwidths)
 	if hStart > 0 {
 		hdr = "‹" + hdr[1:] // a column is clipped to the left
 	}
@@ -2621,13 +2637,14 @@ func (m Model) View() string {
 		// pinned (in the block above the auto list), a space otherwise (keeps columns aligned).
 		mark := pinMark(row, m.reordering && row.ID == m.reorderID)
 		desc := DescendantGlyph(descRun[row.ID])
+		arch := ArchivedGlyph(row)
 		if selected {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, nil, false)
+			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
+			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

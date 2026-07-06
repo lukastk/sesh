@@ -223,27 +223,31 @@ func TestHoldClearPatchInheritedHoldNotOptimistic(t *testing.T) {
 	}
 }
 
-// leavesCurrentView decides when an archive/unarchive should hide the row.
+// leavesCurrentView decides when an archive/unarchive should hide the row. A HEADLESS
+// row leaves the active view when archived; a HEADFUL row does NOT (the default view
+// keeps archived-but-headful threads — see builtinViewAdmits), so archiving it in place
+// must not optimistically hide it.
 func TestLeavesCurrentView(t *testing.T) {
-	row := api.ThreadRow{Thread: api.Thread{ID: "x"}}
 	cases := []struct {
 		view        View
+		head        api.Head
 		newArchived bool
 		want        bool
 	}{
-		{ViewActive, true, true},    // archiving in active -> leaves
-		{ViewActive, false, false},  // unarchiving in active -> stays (it's active)
-		{ViewArchived, false, true}, // unarchiving in archived -> leaves
-		{ViewArchived, true, false}, // archiving in archived -> stays
-		{ViewAll, true, false},      // all shows both
-		{ViewAll, false, false},
+		{ViewActive, api.Headless, true, true},   // archiving a headless thread in active -> leaves
+		{ViewActive, api.Headful, true, false},   // archiving a HEADFUL thread in active -> STAYS (still shown)
+		{ViewActive, api.Headless, false, false}, // unarchiving in active -> stays (it's active)
+		{ViewArchived, api.Headful, false, true}, // unarchiving in archived -> leaves
+		{ViewArchived, api.Headful, true, false}, // archiving in archived -> stays
+		{ViewAll, api.Headful, true, false},      // all shows both
+		{ViewAll, api.Headless, false, false},
 	}
 	for _, c := range cases {
 		m := Model{view: c.view}
-		next := row
+		next := api.ThreadRow{Thread: api.Thread{ID: "x"}, Head: c.head}
 		next.Archived = c.newArchived
 		if got := m.leavesViewWith(next); got != c.want {
-			t.Errorf("view=%d newArchived=%v: leavesViewWith=%v, want %v", c.view, c.newArchived, got, c.want)
+			t.Errorf("view=%d head=%s newArchived=%v: leavesViewWith=%v, want %v", c.view, c.head, c.newArchived, got, c.want)
 		}
 	}
 }
@@ -258,11 +262,11 @@ func TestLeavesViewWithHold(t *testing.T) {
 		onHold bool
 		want   bool
 	}{
-		{ViewActive, true, true},    // holding in active -> leaves
-		{ViewActive, false, false},  // not held, still in active -> stays
-		{ViewHold, false, true},     // releasing in on-hold -> leaves
-		{ViewHold, true, false},     // held, stays in on-hold
-		{ViewAll, true, false},      // all shows both
+		{ViewActive, true, true},   // holding in active -> leaves
+		{ViewActive, false, false}, // not held, still in active -> stays
+		{ViewHold, false, true},    // releasing in on-hold -> leaves
+		{ViewHold, true, false},    // held, stays in on-hold
+		{ViewAll, true, false},     // all shows both
 		{ViewAll, false, false},
 	}
 	for _, c := range cases {

@@ -47,7 +47,7 @@ var declaredTUIClaims = []string{
 	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
 	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
-	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME never truncates
+	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME grows to content (untruncated within the cap; see column-max-width)
 	"cwd-label-column",          // the CWD column renders a real thread's real cwd through the [[cwd_label]] rules; unconfigured = ~-relative
 	"columns-reorder",           // [[tui.column]] position/after/before reposition columns over the default set (config→render)
 	"column-colors",             // [[tui.column_color]] (+ NAME/CWD defaults) tint cells; colour is emitted and does NOT shift column widths/content
@@ -78,6 +78,8 @@ var declaredTUIClaims = []string{
 	"action-pin",                // p pins the selected top-level thread on the daemon (• marker renders); u un-pins it
 	"action-reorder",            // m enters move mode; ↑ repositions the pinned row above another on the daemon
 	"action-new-divider",        // D opens a label prompt and creates a real pinned divider on the daemon
+	"column-max-width",          // full-width columns are capped by default (a long NAME truncates); `w` toggles the cap off to show full text; a [[tui.column_width]] override raises the cap (config→render)
+	"thread-details",            // I opens a read-only takeover showing a thread's REAL fields (full uuid, machine, agent, cwd, live axis); esc closes back to the grid
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

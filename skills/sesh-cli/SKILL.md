@@ -261,6 +261,11 @@ m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it w
 D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal line
              in the pinned block, on the SELECTED row's machine; reposition it with `m`
 n            toggle notify          i          toggle the ID column
+w            toggle the column-width cap (off = every column grows to its content,
+             so clipped text — a long name/cwd — becomes fully visible)
+I            thread details: a read-only popup of ALL of the selected thread's
+             fields (id, agent, model, state axes, cwd, parent, tags, hold,
+             tickets, session id, meta…); esc/q closes
 o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
@@ -338,7 +343,23 @@ ticket's name, `+N` if more) and **`ticket_input`** (a `!` when an active ticket
 headful·idle thread — i.e. it needs your input).
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
-green by default (tunable via `[[tui.column_color]]`). Wide grids clip and scroll
+green by default (tunable via `[[tui.column_color]]`).
+
+Each column is **capped at a max width by default** (full-width NAME/CWD/TKT-NAME at
+40/40/30, fixed columns at their built-in width) so one long name/cwd can't blow out
+the layout — a clipped cell ends in `…`. Press **`w`** to toggle the cap off and let
+every column grow to its content (so you can read a clipped row in full). Configure it:
+
+```toml
+[tui]
+max_column_widths = false   # disable the cap entirely (columns always grow to content)
+
+[[tui.column_width]]        # raise/lower one column's cap (applied while the cap is on)
+name = "name"
+max  = 60
+```
+
+Wide grids clip and scroll
 horizontally (`^h`/`^l`, **Shift+wheel**, or a native wheel-left/right); long grids scroll
 vertically (`^j`/`^k` move the viewport a half-page; the mouse wheel moves the SELECTION,
 viewport following, with `▲/▼` markers). Wheel **sensitivity** is configurable — how many

@@ -138,7 +138,9 @@ func TestLegendOverflowsNotClips(t *testing.T) {
 }
 
 func TestFixedColumnsTruncate(t *testing.T) {
-	m := Model{columns: []string{ColMachine}, rows: []api.ThreadRow{
+	// The cap must be on for a fixed column to reserve its fixed width and truncate;
+	// with the cap off (the `w` toggle) it grows to its content instead.
+	m := Model{columns: []string{ColMachine}, maxColWidth: true, rows: []api.ThreadRow{
 		{Thread: api.Thread{Machine: "an-extremely-long-machine-name"}},
 	}}
 	cols := m.activeColumns()
@@ -150,6 +152,116 @@ func TestFixedColumnsTruncate(t *testing.T) {
 	}
 	if !strings.Contains(line, "…") {
 		t.Errorf("truncation marker missing: %q", line)
+	}
+}
+
+// TestColumnMaxWidthCap: with the width cap ON (the runtime default), a full-width
+// column is clamped to its max and truncates a longer cell; with the cap OFF it grows
+// to the full content so nothing is hidden.
+func TestColumnMaxWidthCap(t *testing.T) {
+	long := strings.Repeat("x", 60)
+	mk := func(cap bool) Model {
+		return Model{columns: []string{ColName}, maxColWidth: cap, rows: []api.ThreadRow{
+			{Thread: api.Thread{Name: long}},
+		}}
+	}
+	// Cap ON: NAME width clamps to the built-in default and the cell truncates.
+	m := mk(true)
+	cols := m.activeColumns()
+	vis := m.visibleMatches()
+	widths := m.colWidths(cols, vis)
+	if widths[0] != defaultNameMaxW {
+		t.Errorf("capped NAME width = %d, want %d", widths[0], defaultNameMaxW)
+	}
+	line := m.renderCells(cols, widths, vis[0], nil, false)
+	if !strings.Contains(line, "…") {
+		t.Errorf("capped NAME should truncate with an ellipsis: %q", line)
+	}
+	if strings.Contains(line, long) {
+		t.Errorf("capped NAME must not show the full 60-char name: %q", line)
+	}
+	// Cap OFF: NAME grows to fit; the full name is visible.
+	m2 := mk(false)
+	w2 := m2.colWidths(cols, m2.visibleMatches())
+	if w2[0] < 60 {
+		t.Errorf("uncapped NAME width = %d, want >= 60", w2[0])
+	}
+	line2 := m2.renderCells(cols, w2, m2.visibleMatches()[0], nil, false)
+	if !strings.Contains(line2, long) {
+		t.Errorf("uncapped NAME should show the full name: %q", line2)
+	}
+}
+
+// TestColumnWidthOverride: a per-column [[tui.column_width]] override replaces the
+// built-in cap for that column.
+func TestColumnWidthOverride(t *testing.T) {
+	long := strings.Repeat("y", 60)
+	m := Model{columns: []string{ColName}, maxColWidth: true, colMax: map[string]int{ColName: 20},
+		rows: []api.ThreadRow{{Thread: api.Thread{Name: long}}}}
+	cols := m.activeColumns()
+	widths := m.colWidths(cols, m.visibleMatches())
+	if widths[0] != 20 {
+		t.Errorf("override NAME width = %d, want 20", widths[0])
+	}
+}
+
+// TestColumnWidthToggleKey: `w` flips the width cap per session.
+func TestColumnWidthToggleKey(t *testing.T) {
+	m := Model{maxColWidth: true}
+	mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	if mm.(Model).maxColWidth {
+		t.Errorf("`w` should toggle the width cap off")
+	}
+	mm2, _ := mm.(Model).handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	if !mm2.(Model).maxColWidth {
+		t.Errorf("`w` should toggle the width cap back on")
+	}
+}
+
+func TestResolveColumnWidths(t *testing.T) {
+	got, err := ResolveColumnWidths([]ColumnWidthSpec{{Name: "name", Max: 50}, {Name: "CWD", Max: 24}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["name"] != 50 || got["cwd"] != 24 {
+		t.Errorf("resolved widths = %v, want name:50 cwd:24", got)
+	}
+	if _, err := ResolveColumnWidths([]ColumnWidthSpec{{Name: "bogus", Max: 10}}); err == nil {
+		t.Errorf("unknown column must be a loud error")
+	}
+	if _, err := ResolveColumnWidths([]ColumnWidthSpec{{Name: "name", Max: 0}}); err == nil {
+		t.Errorf("non-positive max must be a loud error")
+	}
+	if m, _ := ResolveColumnWidths(nil); m != nil {
+		t.Errorf("empty specs should resolve to a nil map, got %v", m)
+	}
+}
+
+// TestDetailsPopup: `I` opens the read-only details takeover on the selected row and
+// shows its real fields; esc closes it.
+func TestDetailsPopup(t *testing.T) {
+	row := api.ThreadRow{
+		Thread: api.Thread{ID: "abcdef12-3456-7890", Name: "deets", Machine: "mymain",
+			AgentKind: "pi", Cwd: "/home/x/proj", Tags: []string{"a", "b"}},
+		Head: api.Headless, Busy: api.BusyIdle,
+	}
+	m := Model{rows: []api.ThreadRow{row}, machine: "mymain",
+		machines: []api.MachineView{{Machine: "mymain", Self: true, Reachable: true}}}
+	mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("I")})
+	got := mm.(Model)
+	if !got.DetailsOpen() {
+		t.Fatalf("`I` did not open the details popup")
+	}
+	view := got.View()
+	for _, want := range []string{"abcdef12-3456-7890", "deets", "mymain", "pi", "/home/x/proj", "a, b", "headless"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details view missing %q:\n%s", want, view)
+		}
+	}
+	// esc closes it (back to the grid).
+	mm2, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if mm2.(Model).DetailsOpen() {
+		t.Errorf("esc should close the details popup")
 	}
 }
 

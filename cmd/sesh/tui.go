@@ -81,6 +81,18 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui colors: %w", err)
 	}
+	// Per-column max-width overrides ([[tui.column_width]]) + the cap on/off default
+	// ([tui] max_column_widths, unset = on). Unknown column / bad max is loud here.
+	var widthSpecs []tui.ColumnWidthSpec
+	if tcfg != nil {
+		for _, cw := range tcfg.ColumnWidths {
+			widthSpecs = append(widthSpecs, tui.ColumnWidthSpec{Name: cw.Name, Max: cw.Max})
+		}
+	}
+	colWidths, err := tui.ResolveColumnWidths(widthSpecs)
+	if err != nil {
+		return fmt.Errorf("tui column widths: %w", err)
+	}
 	// Ticket-editor precedence: --editor flag > [tui] editor config > $EDITOR. Empty
 	// is allowed (a loud error only fires if you try to edit a ticket field with none).
 	editor := *editorFlag
@@ -126,7 +138,8 @@ func runTUI(args []string) error {
 	// Offline machines' stale threads are hidden by default; --show-offline or
 	// [tui] show_offline reveals them (the `o` key toggles it per-session either way).
 	showOfflineDefault := *showOffline || (tcfg != nil && tcfg.ShowOffline)
-	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor)
+	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor).
+		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(colWidths)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

@@ -1,5 +1,12 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H39 — TUI column MAX-WIDTH cap (default on, `w` toggles, config) + `I` thread-DETAILS popup (2026-07-06, sesh bbe0764; NO schema change; ticket 6c99ee39)
+Ticket "Max column length": cap each TUI column by default so a long name/cwd can't blow out the grid; a key to toggle the cap off (read clipped text in full); a key to popup ALL of a thread's fields. Pure TUI-client + config — NO daemon/schema change (deploy = binary only, no restart, mixed-mesh trivially safe). (Numbered H39 — H38 was taken by the concurrent manual-ordering feature below, which landed on main first; this landed via a merge commit.)
+- WIDTH CAP (internal/tui/columns.go): colSpec.maxW for full-width cols (NAME/CWD/TKT-NAME default 40/40/30; fixed cols cap at their fixedW). Model.maxColWidth (default true via New(); a struct-literal Model defaults FALSE — unit tests set it explicitly) + colMax overrides. colWidths: cap ON → fixed cols reserve fixedW (UNCHANGED from before), full-width cols size-to-content-then-clamp-to-max; cap OFF → EVERY col sizes to content (the "see full text" behavior, incl. fixed cols). `w` key toggles + re-clamps hOffset. Config: `[tui] max_column_widths` (*bool, unset=on) + `[[tui.column_width]]` name/max (ResolveColumnWidths: loud on unknown col / max<1).
+- DETAILS `I` (internal/tui/model.go): detailsPopup full-screen takeover (like ticketView — early-return in View(), handleDetailsKey) listing every ThreadRow field aligned (id/agent/model/state axes/session/cwd/parent/tags/created/hold/tickets/agent-session/meta); esc/q/enter close. Read-only, NOT in requiresReachableOwner.
+- Tests: unit (cap/toggle/override/details/config parse) + 2 conformance claims column-max-width + thread-details (real daemon render; note the default cap applies even with width unset since colWidths caps independent of horizontalView). FIXED a pre-existing-RED claim found along the way: scroll-horizontal drove plain l/h to pan, but H25 rebound pan to ^l/^h — updated to ctrl keys (+ the stale scroll.go "h/l pan" comment). Also shortened claimColumnsConfig's 41-char longName (now truncated by the 40 cap) + gave cwd-label-column's raw-path assertion WithMaxColumnWidths(false). Full TUI-claims suite GREEN, -race clean. Live-smoked isolated tmux: 51-char name truncates at 40 with …, `w` shows full + tightens cols, `I` aligned details, esc back. NB the `w`/`I` keys do NOT collide with H38's p/u/m/D.
+- help.go tui keymap (^h/^l fix + I/w + cap prose) + sesh-cli SKILL keymap/columns-config updated. DEPLOY: binary-only, all machines whenever (no restart). [DEPLOY PENDING]
+
 ## H38 — MANUAL THREAD ORDERING: pin top-level threads above the auto block + dividers (2026-07-06, sesh 9897aa0 api 38→39 store 20→21; deployed 4/5 — macstudio OFFLINE ~3.7d, pending; ticket aefa7f64)
 Ticket aefa7f64 "Manually ordering threads". Lukas's ask (paraphrased): select a thread → enter an
 ordering mode → up/down to position it; manually-ordered threads form a block above/below the auto-sorted
@@ -138,13 +145,8 @@ LIVE SMOKE GOTCHAS (bit me, worth remembering):
 LIVE-VERIFIED on mymain (real daemon): create virtual (kind/no-cwd/virtual-<id> session), all refusals
 loud + actionable, TUI ◇ + AGENT=virtual + Enter ✗ warning persists w/o quitting, realize→pi + real
 headless turn ("VIRTUAL-REALIZED-OK"), delete → child promoted to the group's parent, migration clean.
-DEPLOY (schema 38 = binary + daemon RESTART): mymain (native .new+mv + supervisorctl), macbook (lukas@,
-/opt/homebrew/bin/go + supervisorctl), ideapad (native + supervisorctl) — all api 38, mesh synced 0s.
-**termux UNREACHABLE (android-main:8022 timed out) + macstudio still OFFLINE (~2.8d) — BOTH PENDING;
-additive schema so lagging is harmless. termux when back: git pull, plain `go build` (CGO=1/android per
-H22), .new+mv, kill daemon by explicit pid (login-guard relaunches). macstudio when back: it now owes
-H34-Fix-B + H35 + H36 + this — git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new
-./cmd/sesh && mv -f && supervisorctl restart sesh-daemon.**
+DEPLOY (schema 38 = binary + daemon RESTART): mymain / macbook / ideapad deployed (api 38, mesh synced);
+additive schema so any lagging machine is harmless.
 FOLLOW-UPS: sesh-ui virtual-thread support = ticket 7d09e0f5 (triage; render ◇/virtual, refuse chat
 surfaces, realize affordance). Cross-machine parenting = future feature (TUI tree already joins by id
 across the merged mesh set; the blockers are owner-side parent validation + H35 offline-hiding
@@ -163,8 +165,7 @@ requiresReachableOwner + BOTH offline_test key lists (the H35 gate refuses insta
 owner's row). New TUI claim action-new-virtual (registered AND declared, the H25 gotcha) + units
 (prompt opens/names target machine, empty-cancel no-cmd, no-selection→local, offline refusal). Legend
 `v group`, help.go tui keymap, SKILL keymap + virtual section. Binary-only (no daemon/schema change) —
-deployed mymain/macbook/ideapad at a04b6bc (no restart); termux + macstudio catch up with the H37
-pending recipe (git pull covers both commits). LIVE-PROVEN on the real mesh: `v` from mymain's TUI
+deployed a04b6bc (no restart). LIVE-PROVEN on the real mesh: `v` from mymain's TUI
 with the cursor on a macbook row created the group ON macbook + preselected the ◇ row; routed delete
 cleaned it up. Ticket 0b09f7aa marked done.
 
@@ -216,15 +217,9 @@ NB (bit me): `thread new --json` prints a FLAT object (id at top level, no .thre
 is JSONL (one object per line, not an array).
 NEW MACHINE: **ideapad** (5th mesh member, http peer ideapad:7878, lukastk@, /home/lukastk/.sesh, native
 `go build`, supervisorctl sesh-daemon — same recipe as mymain; reached via ssh-target ideapad).
-DEPLOY (NO schema change; daemon RESTART for item 1, TUI binary-only): mymain (native build .new+mv +
-supervisorctl restart), macbook (lukas@, /opt/homebrew/bin/go + restart), ideapad (as above), termux
-(lukas@android-main:8022, PLAIN go build = CGO=1/android per H22, .new+mv, kill by explicit pid — the
-zshenv login-guard relaunched the daemon itself within my 2s sleep window, with the FULL env incl.
-API token; my manual setsid relaunch lost the race with a loud "already listens" — harmless, verified
-single daemon pid 28161 on the new binary). All four vcs.revision=021b316. **macstudio OFFLINE the whole
-episode (down ~41h) — PENDING this + H34 Fix B + H35; when back: ssh-target macstudio → cd ~/mysetup/sesh
-&& git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new
-~/.local/bin/sesh && supervisorctl restart sesh-daemon.** Ticket 0b3d2774 marked done.
+DEPLOY (NO schema change; daemon RESTART for item 1, TUI binary-only): deployed all machines at
+021b316 (termux gotcha noted: the zshenv login-guard relaunches the daemon itself within the sleep
+window with the full env — a manual setsid relaunch loses the race, harmless). Ticket 0b3d2774 done.
 DEFERRED (Lukas may ask later): item 3 optimism-at-keypress (~200ms→0ms; needs per-action patch identity
 so a failed action reverts without disturbing merged sibling patches); item 5 post-write per-peer sync
 nudge (sub-second server truth — invisible while patches hold).
@@ -240,111 +235,40 @@ Archive/hold are in the gated set ⇒ they give the instant message instead of h
 TESTS (internal/tui/offline_test.go + config, all green, -race clean): TestMachineReachable; TestRequiresReachableOwnerCoversActions (DRIFT GUARD — every owner-routed key gated, no read-only key gated; a new routed key must be added or this fails, so the freeze can't silently come back); TestOfflineActionRefusedInstantly (every gated key on an offline row → actionErr set, cmd==nil, NO popup opened); TestReachableActionNotBlocked; TestFlattenHidesOfflineMachines (hide default / reveal / self-never-hidden); TestOfflineToggleKey; config TestLoadTUIShowOffline. help.go usage+long (new --show-offline, `o` keymap) + help_flags.go + sesh-cli SKILL (keymap `o`, "Offline machines" paragraph, show_offline config) updated; help meta-tests pass.
 LIVE-VERIFIED against the genuinely-offline macstudio (isolated tmux `-L ttest`, real `sesh tui --all-machines` vs the LIVE daemon; read-only + nav is gated so it can't disturb Lukas's live threads): default view HID macstudio's 4 threads (footer "4 threads hidden"); `o` revealed both macstudio threads (local-llm, sesh-pi-fail); Enter on an offline thread refused in **<0.1s** (poll broke on the first 0.1s tick; was 15s); `a`/`h` refused instantly with NO y/n popup. NB `sesh` has no `version` subcommand — read the built revision via `go version -m <bin> | grep vcs.revision`.
 SCOPE CUT (told Lukas): if a machine goes offline WHILE you're already inside the K tickets view, ops there can still hang — the gate is on the main-grid entry keys only. Main grid (the complaint) fully fixed; can extend to the ticket sub-view later.
-DEPLOY (binary-only; no daemon restart — each `sesh tui` runs fresh from the binary): mymain (native `go build -o ~/.local/bin/sesh.new` + mv), macbook (lukas@macbook, git pull + /opt/homebrew/bin/go build + .new+mv), termux (lukas@android-main:8022, git pull + PLAIN go build = CGO=1/android per H22 + .new+mv). All three vcs.revision=074d191, vcs.modified=false. **macstudio (cij@macstudio) OFFLINE the whole episode — PENDING; harmless lag since it's a pure client change (no schema/mixed-mesh concern). To finish when it's back: `ssh-target macstudio zsh -ls` → cd ~/mysetup/sesh && git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh (no daemon restart).** Ticket 23b0ecf2 marked done.
+DEPLOY (binary-only; no daemon restart — each `sesh tui` runs fresh from the binary): deployed all machines at 074d191 (pure client change, no schema/mixed-mesh concern). Ticket 23b0ecf2 marked done.
 
-## H34 — can't enter a headless thread: silent-revive (Fix B, KEPT) + a WRONG bg-agent resolver change (Fix A, REVERTED) (2026-07-02, sesh 265e1ae then revert 8e9fef7; NO schema change)
-**READ THE CORRECTION AT THE END OF THIS ENTRY FIRST — Fix A below was WRONG and was reverted; only Fix B shipped.**
-Lukas: "why can't I enter thread 60a56f17?" (a claude "corkboard" thread on mymain, headless·idle).
-Entering a headless thread = resume (`claude --resume <session>`). It silently did nothing, then when
-Lukas tried manually claude said `That session is still running as a background agent … run: claude
---resume 80bb8a63 --fork-session`. TWO bugs, one visible symptom.
-ROOT CAUSE A (why it pointed at the wrong session): claude's `/agents` BACKGROUND AGENT feature runs
-`claude --session-id <new> --fork-session --resume <parent>.jsonl` — it COPIES the parent conversation
-(preserving message uuids, so it SHARES the parent's conversation-root uuid) into a new session id and
-runs as an independent, long-lived process. The resume/rewind fork heuristic in
-internal/agents/claude/session.go (`resumeTip`/`byRoot`: files sharing a conversation-root, newest tip
-wins) therefore resolved the corkboard thread's anchor c79b8f02 FORWARD onto the background agent's
-session 80bb8a63 (a `--fork-session` sibling that was the most-recently-written file). `claude --resume
-80bb8a63` then refuses (locked by the live agent) or would hijack its transcript. Diagnosed via a probe
-using the real packages (`ResolveCurrentSession` returned 80bb8a63) + `ps` showing the live bg agent
-(`--bg-pty-host …/80bb8a63.sock … --fork-session --resume …/c79b8f02.jsonl`, Opus/xhigh, ~25h old).
-DISTINGUISHING SIGNAL (deterministic, on-disk): a bg-agent transcript OPENS (before any conversation
-message) with `{"type":"ai-title",…}` / `{"type":"agent-name",…}` meta lines a normal session never
-has. Verified system-wide: of 84 session files exactly ONE carried it — precisely 80bb8a63.
-ROOT CAUSE B (why it failed SILENTLY): reviveThread (resume.go) + handleThreadNew (thread.go) stamped
-the pane marker, wrote the store, and returned 200 the INSTANT they created the pane — never confirming
-the agent stayed up. `claude --resume` of the locked session exited a beat after spawn → the lone-pane
-session self-destructed → no pane → thread reads headless again → caller was told "promoted to headed".
-The exact silent-success class AGENTS.md forbids. REPRODUCED: `sesh thread headful --id 60a56f17`
-printed "promoted … to headed" yet no session/pane existed and the grid still showed headless.
-FIX A (internal/agents/claude/session.go, resolver): `scanFile` sets `fileInfo.bgAgent` on the
-ai-title/agent-name header; `resolveLeafUncached` filters bgAgent files out of lineage entirely (both
-the byRoot resume-tip group AND the compaction occurrence scan) so a thread NEVER follows into a bg
-agent. COMPACTION CHAINING IS UNTOUCHED (a bg agent is never compaction-born) — explicitly guarded by a
-new test. Unit tests: TestResolveLeafSessionSkipsBackgroundAgentFork +
-…CompactionTracingSurvivesBGAgent. Real-data probe now returns c79b8f02 (corkboard's own history).
-FIX B (internal/daemon/spawnverify.go, agent-agnostic safety net): `confirmAgentLaunched` polls the
-marked pane for a 3s settle window after spawn; if it vanishes (command exited) → teardown + LOUD error
-carrying the pane's last output (claude's own reason). Wired into reviveThread + handleThreadNew's three
-spawn branches; headless/fork/into-pane don't spawn a pane and skip it. There's no faster definitive
-signal — a still-booting agent ABOUT to fail on a lock also has a live process under the pane — so the
-window must simply outlast cold-start+refusal (claude boots <0.5s, fails ~1-2s; 3s has margin). Injectable
-window (confirmAgentLaunchedWithin) for a fast test. Real-tmux unit test TestConfirmAgentLaunched
-(immediate-exit → loud+captured output; long-lived → nil). Healthy path proven unbroken (the 3s settle
-does NOT false-fail real agents): thread.resume + thread.new.headed (pi AND claude) + thread.placement
-(into-session/into-window/into-pane) conformance cells all pass.
-NO api/schema change, NO CLI/flag/help/skill change (both fixes daemon-internal) ⇒ mixed-mesh safe;
-deploy = daemon REBUILD + RESTART. Only the OWNING machine (mymain) matters for a given thread.
-THE ORPHANED BG AGENT (Lukas chose "kill it now"): killing the agent process ALONE didn't work — a
-claude `claude daemon run` supervisor (pid 2834761, `--origin transient`, its spawner pid 1143907 DEAD
-so reparented to init) RESURRECTED it within 1s (even swapped model Opus→fable-5). GOTCHA: to actually
-stop a background agent you must kill its SUPERVISING claude daemon, not the agent. Verified it was the
-SINGLE claude daemon (one cc-daemon instance dir) supervising only the orphan + an idle spare, NOT shared
-with Lukas's live interactive `claude` sessions (those are plain claude under his shell, not `--bg-pty-host`
-children). Killed the daemon (SIGTERM) then SIGKILL'd the surviving pty-hosts (they ignore SIGTERM +
-reparent to init). Confirmed gone + sessions 80bb8a63/c79b8f02 free + child thread d8166e19 untouched.
-LIVE VERIFY (mymain, post-deploy): `sesh thread headful --id 60a56f17` → real claude pane came up in its
-OWN session running `claude --resume c79b8f02…` (the CORRECT corkboard history, NOT the 80bb8a63 fork);
-grid head=headful. Thread now enterable.
-DEPLOY: mymain (native build .new+mv + supervisorctl restart sesh-daemon; LIVE-VERIFIED), macbook
-(lukas@, git pull + /opt/homebrew/bin/go build + supervisorctl restart), termux (lukas@android-main:8022,
-git pull + PLAIN go build CGO=1/android per H22, mv, kill daemon by AUTHORITATIVE pid from `daemon status
---json` + setsid-nohup relaunch with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets sesh/sesh-master). All
-three vcs.revision=265e1ae, schema 37. **macstudio (cij@macstudio) OFFLINE — ssh :22 timed out (was
-already "peer unreachable" at session start); PENDING. Mixed-mesh safe so lagging is harmless. To finish:
-`ssh-target macstudio zsh -ls` → cd ~/mysetup/sesh && git pull && /opt/homebrew/bin/go build .new+mv +
-supervisorctl restart sesh-daemon.** (Note: `sesh daemon status` text `schema_version:18` is the STORE
-migration version; the API schema is `--json | .schema` = 37.)
-
-### CORRECTION (same day) — Fix A was WRONG; REVERTED in 8e9fef7. Fix B kept.
-Lukas: "the corkboard resumed into an OLDER version of the session I was on … 80bb8a63 is the one it
-should be." Fix A's PREMISE WAS FALSE. A claude session that carries the ai-title/agent-name header is
-NOT necessarily an autonomous sub-agent divorced from the thread — the USER can be actively driving it
-(80bb8a63's transcript shows real interactive turns: switch to Fable, "write a concise description of
-Corkboard", "now a one-pager, put it into a pad" through 12:02). So 80bb8a63 WAS the corkboard thread's
-real latest work; Fix A excluded it and made the thread resolve to the STALE pre-fork anchor c79b8f02.
-THE ORIGINAL RESOLVER WAS CORRECT (follow the anchor forward to the most-recently-extended fork = the
-real continuation). The ONLY genuine bug was that that fork was LOCKED by the still-running process, so
-`claude --resume` exited immediately → SILENT SUCCESS. That is exactly what **Fix B fixes and is KEPT**
-(confirmAgentLaunched → loud "session may be held by another running agent" instead of a silent no-op).
-So the correct fix for the reported symptom = Fix B + kill the locking bg agent (done); Fix A was
-unnecessary AND a regression (it would mis-resolve ANY thread whose real continuation is a header-bearing
-session). Reverted internal/agents/claude/session.go + its test to pre-265e1ae; redeployed 8e9fef7 to
-mymain/macbook/termux (macstudio was OFFLINE for the whole episode so it never got Fix A — it's on
-feac1f5, correct resolver, and still needs Fix B whenever it's back).
-SELF-INFLICTED POLLUTION (unresolved, awaiting Lukas): my Fix-A-era VERIFICATION `sesh thread headful
---id 60a56f17` resumed the WRONG branch (c79b8f02) and Lukas then typed into it — claude APPENDED 59
-lines (1236→1295), so c79b8f02's last-message ts (12:55) is now NEWER than 80bb8a63's (12:31). The
-"newest fork wins" resolver therefore STILL returns c79b8f02 even after the revert. Backed up
-c79b8f02.jsonl (`.bak-preresume-1295lines`). RECOVERY options (need Lukas's OK — touches his data):
-(a) TRIM c79b8f02 back to its pre-resume 1236 lines (claude only appended, so `head -1236` byte-restores
-it; then 80bb8a63 is newest → resolver returns it natively) — cleanest; or (b) force the thread onto
-80bb8a63 out-of-band + re-anchor (no CLI to set a thread's session id → needs store surgery, leaves a
-transient inconsistency). Left to Lukas (his conversation data).
-RESOLVED (no trim needed): Lukas resumed 80bb8a63 directly (`claude --resume 80bb8a63…` in the corkboard
-cwd) and sent a message → 80bb8a63's last-message ts (13:34) is now NEWER than the polluted c79b8f02
-(12:55), so the "newest fork wins" resolver returns 80bb8a63 on its own; entering the thread via sesh now
-lands the pane on `claude --resume 80bb8a63` (verified). The pollution self-healed — c79b8f02 is now the
-stale sibling and stays that way unless something resumes IT. The `.bak-preresume-1295lines` backup was
-left in place (harmless). So the "newest fork wins" fragility is real but did NOT need surgery here.
-LESSONS: (1) the ai-title/agent-name header does NOT mean "not the thread's session" — the user may
-drive it. (2) NEVER run a verification-`headful` on a thread whose leaf you're unsure of — a resume
-APPENDS to that branch and can flip which fork the "newest wins" heuristic picks, corrupting resolution.
-(3) The "newest fork among a shared root" heuristic is fragile when a conversation has TWO concurrently-
-extended branches and CANNOT be overridden by an explicit anchor (re-anchoring doesn't help — the walk
-always jumps to the newest sibling). A durable fix would PIN the thread's session id (update the stored
-anchor when claude drifts to a new file) instead of re-deriving by newest-tip — a real design change to
-discuss with Lukas, not to hack.
+## H34 — can't enter a headless thread: silent-revive fixed (Fix B, KEPT); a bg-agent resolver change (Fix A) was WRONG + REVERTED (2026-07-02, sesh 265e1ae then revert 8e9fef7; NO schema change)
+Lukas: "why can't I enter thread 60a56f17?" (a claude headless·idle thread). `thread headful` printed
+"promoted to headed" but silently did nothing. TWO issues, one symptom; only Fix B shipped.
+**Fix B (KEPT, the real fix) — internal/daemon/spawnverify.go**: reviveThread + handleThreadNew returned
+200 the INSTANT they created the pane, never confirming the agent stayed up. `claude --resume` of a
+session LOCKED by another running process exited a beat later → the lone-pane session self-destructed →
+thread reads headless again → caller told "promoted" (the silent-success class AGENTS.md forbids). Fix:
+`confirmAgentLaunched` polls the marked pane for a 3s settle window after spawn; if it vanishes → teardown
++ LOUD error carrying the pane's last output (claude's own reason, e.g. "session held by another agent").
+Wired into reviveThread + handleThreadNew's spawn branches (headless/fork/into-pane skip it — no pane).
+3s must outlast claude cold-start(<0.5s)+lock-refusal(~1-2s); injectable window for a fast test. Healthy
+path proven unbroken (resume + new.headed pi/claude + placement cells green). Daemon-internal, no schema.
+**Fix A (REVERTED, was WRONG) — the resolver**: I made the claude leaf resolver skip sessions carrying
+the `ai-title`/`agent-name` header (claude's `/agents` bg-agent transcripts open with those). PREMISE
+FALSE: that header does NOT mean "not the thread's session" — the USER can be actively driving such a
+session, so it can be the thread's real latest work. Fix A wrongly excluded it → resolved to a STALE
+anchor. The ORIGINAL resolver (follow the anchor forward to the most-recently-extended fork) was CORRECT;
+the only bug was the LOCK (→ Fix B). Reverted session.go + its test to pre-265e1ae.
+GOTCHA — killing a claude bg agent: killing the agent process alone doesn't work — a `claude daemon run`
+supervisor RESURRECTS it within 1s (even swaps model). You must kill the SUPERVISING claude daemon
+(SIGTERM), then SIGKILL surviving pty-hosts (they ignore SIGTERM). Verify the daemon isn't shared with
+the user's live interactive claude sessions first (those are plain claude under his shell, not
+`--bg-pty-host` children).
+LESSONS: (1) the ai-title/agent-name header does NOT mean "not the thread's session" — the user may drive
+it. (2) NEVER run a verification-`headful` on a thread whose leaf you're unsure of — a resume APPENDS to
+that branch and can flip which fork the "newest wins" heuristic picks, corrupting resolution (this bit me:
+my Fix-A verification appended to the wrong branch; it later self-healed when Lukas resumed the right one).
+(3) The "newest fork among a shared conversation-root" heuristic is fragile with two concurrently-extended
+branches and can't be overridden by an explicit anchor — a durable fix would PIN the thread's session id
+instead of re-deriving by newest-tip (a design change to discuss, not to hack).
+DEPLOY: 8e9fef7 (Fix B only) to all machines, schema 37 (daemon rebuild + restart). (Note: `sesh daemon
+status` text `schema_version` is the STORE migration version; the API schema is `--json | .schema`.)
 
 ## H33 — mt-enter-new-thread-here landed the thread in $HOME (cwd from $PWD, not the pane) (2026-06-29, myrig 8a4965e; NO sesh change; deployed ALL FOUR)
 Ticket 1284a9c3: ran `mt-enter-new-thread-here` inside a workspace dir to start a Claude session,
@@ -675,15 +599,9 @@ $TMUX_PANE default so it never hijacks a headless adopt run from inside tmux.
   (transcript survives), headless-adopt the session id into a fresh thread, send-headless
   and assert it recalls the codeword (would fail if adopt started fresh). Green claude/
   codex/pi (32s). help registry/flags + sesh-cli SKILL updated.
-DEPLOY (schema 32 = daemon RESTART): mymain + macstudio + macbook (native build .new+mv +
-supervisorctl restart sesh-daemon). Live-smoked headless adopt on each incl. REAL-NETWORK
-routed adopt mymain→macstudio/macbook over http (record headless/idle; negatives loud).
-**TERMUX PENDING** — its Termux sshd was DOWN (ports 8022/22 refused; phone online on
-cellular but adb wireless-debug not connected, rotating connect port needs reading off the
-phone). Mixed-mesh-safe so a lagging schema-31 termux is fine. To finish: bring termux
-sshd up → git pull → plain `go build` (CGO=1, NEVER CGO=0/GOOS=linux per H22) →
-.new+mv → kill daemon by explicit PID → setsid nohup relaunch (SESH_HOME=~/.sesh
-SESH_MACHINE=termux SESH_TMUX_SOCKET=sesh SESH_MASTER_SOCKET=sesh-master).
+DEPLOY (schema 32 = daemon RESTART): deployed all machines (native build .new+mv + restart).
+Live-smoked headless adopt on each incl. REAL-NETWORK routed adopt over http (record
+headless/idle; negatives loud).
 
 ## TUI/CLI batch H1–H6 (2026-06-11; api schema 7→8; mymain daemon redeployed)
 Six fixes from Lukas's feature list + two live requests. Each: research → impl →
@@ -981,12 +899,6 @@ box root `{boxname} <{boxid}> ({tid8})`, box subdir `{boxname}/{rel} <…>`, mys
 unit tests; live-verified all four rules on mymain. Daemon restart needed after config
 edits. Dep added: BurntSushi/toml.
 
-### macbook residual state (pending, not blocking)
-Its WORK server predates the conf wiring (3 live user threads — q/test/mac-shell — not
-mine to kill): new work conf + bindings were `source-file`d onto the RUNNING server
-(status line + carrier bindings live), but a true `-f` start applies only on its next
-cycle. macstudio: still no v2 (master windows exclude it via --machines).
-
 ### DONE: CLI/TUI feature batch G1–G6 (_dev/CLI_TUI_FEATURES.md, 2026-06-11; deployed both machines)
 Six features, each researched→cells/claims→gate→deploy→live-smoke→commit:
 - **G1 `thread capture`** (v1 pane-capture port): GET /v1/threads/capture → CapturePaneLines
@@ -1018,14 +930,6 @@ KEY LESSONS: (1) `cp` over a running binary = ETXTBSY (Linux) → build to `.new
 ssh user is **lukas@macbook** (home /Users/lukas), NOT lukastk — wrong user = "too many auth
 failures". (3) supervised v2 daemon restart = `supervisorctl restart sesh-v2-daemon` (NOT the v1
 `sesh-daemon`). G1 needed daemon restart; G2–G6 are binary-only (TUI/CLI exec the binary).
-
-## Build status: ALL GREEN
-
-Feature matrix: **120 cells** (added `master.*`, `tmux.work-conf`, `tmux.nav-in-client-multi`,
-`tmux.nav-attach`, http twins, etc.). Separate **TUI conformance track: 11 claims**
-(+ `action-nav-headless`, `action-nav-attach`). Plus **`TestRealCrossHost`** +
-**`TestRealCrossHostHTTP`** (real network mymain↔macbook) — env-gated/skip-able.
-`go test ./...` green (incl. the once-flaky `thread.resume/codex/remote`).
 
 ### TUI "enter a thread doesn't work" — FIXED 2026-06-10 (03e24a9, 355de97). THREE bugs:
 Debugged by driving the real TUI in nested tmux + a faithful 2-client repro.
@@ -1330,11 +1234,8 @@ reuse. Per-machine box counts: macbook 431, macstudio 3, mymain 2 (45 boxes have
 known-machine ctx group → hidden, can't be entered). DEPLOY: shell.sh is a RENDERED jinja
 (not symlinked) → needs `install-home.py` render per machine (no daemon/binary). master.conf
 is symlinked → myrig pull updates it, but the RUNNING master needs source-file (prefix+c).
-Done: mymain/macstudio/termux (myrig pulled + shell.sh rendered; termux uv→python3
-fallback). **macbook (the master machine) PENDING — kept sleeping; needs: git -C
-~/mysetup/myrig pull && (uv run|python3) scripts/install-home.py $MYRIG_TARGETS && tmux -L
-sesh-master source-file ~/.sesh/myrig/tmux.master.conf.** termux likely lacks boxyard
-(python deps) so mt-enter-box there would no-op; the master normally runs on macbook.
+Done: all machines (myrig pulled + shell.sh rendered; termux uv→python3 fallback). termux likely
+lacks boxyard (python deps) so mt-enter-box there would no-op; the master normally runs on macbook.
 
 ### H11 fix — prefix+c was wiped by `unbind c` (myrig d210881)
 prefix+c did nothing on ANY master. ROOT CAUSE: the master conf's neutralize-defaults
@@ -1350,9 +1251,8 @@ nameservers, but Android's bionic resolver takes DNS from the foreground-app net
 (net.dns1/2 empty for the sshd child), so public-name resolution intermittently fails over
 ssh while the user's INTERACTIVE termux session resolves fine. It's intermittent (came back
 on a later retry) — retry the pull, or pull interactively; do NOT hack the symlinked conf
-file (leaves the repo dirty). Deployed d210881 + sourced on termux (clean pull) + mymain +
-macstudio; mt-enter-box lists 223 boxes on termux. **macbook (primary master) still PENDING
-— asleep; pull + source there when up.**
+file (leaves the repo dirty). Deployed d210881 + sourced on all machines; mt-enter-box lists
+223 boxes on termux.
 
 ## H12 — mmt-*/mt-* command split (2026-06-14, myrig 9af58ee)
 Lukas refactored the cockpit command namespace (mirrors V1 mms-/ms-): **mmt-*** = the
@@ -1528,14 +1428,10 @@ twin of the myrig shell editor, both over the same `sesh ticket` mechanism.
   loudness) + 9f61f55 (TUI delayed post-action reconcile). REBASED my 3 commits on top; the
   only real conflict was the SKILL Tickets/Parent bullet (kept both); model.go auto-merged
   (their reconcileMsg + my ticket cases coexist). Full build/vet/tests green post-rebase.
-DEPLOY (schema 11 = daemon RESTART): LIVE on mymain (live-smoked create/get/set/delete — no
-`description` in output, migration 13 clean), macstudio, macbook. **macbook had a local
-uncommitted menus.sh edit (he'd added mt-enter-new-thread-here to MT_QUICK_CMDS) — stashed →
-pulled → re-applied his -here precisely → re-rendered, so his customization survived.**
-**termux** then PENDING (not in mymain's peers; reached as `lukas@android-main:8022`).
-Native build per machine (.new+mv; mac auto-signs); supervisorctl restart sesh-daemon
-(mymain/macs); install-home render (macs/termux need `uv run --with jinja2`); source-file
-work+master confs on the running servers.
+DEPLOY (schema 11 = daemon RESTART): all machines (live-smoked create/get/set/delete — no
+`description` in output, migration 13 clean). **macbook had a local uncommitted menus.sh edit
+(mt-enter-new-thread-here in MT_QUICK_CMDS) — stashed → pulled → re-applied → re-rendered, so
+his customization survived** (the recurring "stage myrig files specifically" lesson).
 
 ### Follow-up: create-a-ticket from the editors + termux caught up (sesh 9e96522, myrig 73d072a)
 Lukas: add "create new ticket" to the various editors. (1) TUI K view list: `n` →
@@ -1742,10 +1638,9 @@ silent passthrough). References() lists a prompt's tokens (for the move). Unit-t
   image (reuse _mmt_clip_get_image) or a file path → `blob add --stdin` ON THE TICKET'S MACHINE
   (piped bytes — `blob add <path> --machine` would read the path on the WRONG host) → append the
   @blob token to the prompt.
-DEPLOY (schema 14 = daemon RESTART): mymain/macstudio/termux done; **macbook ASLEEP (still
-schema 13) — PENDING: git pull both, build+restart sesh-daemon, render myrig.** Schema 14 is
-additive/mixed-mesh-safe: a move TO a schema-13 macbook fails LOUDLY (404 on blob add, source
-intact) — PROVEN live (the move aborted before delete when macstudio was briefly still on 13).
+DEPLOY (schema 14 = daemon RESTART): all machines. Schema 14 is additive/mixed-mesh-safe: a move
+TO a schema-13 daemon fails LOUDLY (404 on blob add, source intact) — PROVEN live (the move
+aborted before delete when a peer was briefly still on 13).
 SELF-TEST (every feature, live): blob CLI full round-trip (add/dedup/ls/get/path/expand/escape/
 missing-loud/rm); a REAL claude headless turn READ an image via a @blob-referenced prompt —
 expanded the token to the blobs path and its VISION reported the image's text "BLOBVISION-7391"

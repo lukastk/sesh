@@ -41,14 +41,32 @@ const (
 	ColArchived    = "archived"
 )
 
+// Built-in default max widths for the full-width columns (the cap the `w` toggle
+// turns on by default). Chosen so typical long names/paths stay readable without a
+// single outlier column blowing out the layout; a [[tui.column_width]] override or
+// the cap-off state (`w`) lets you go wider / see the full text.
+const (
+	defaultNameMaxW       = 40
+	defaultCwdMaxW        = 40
+	defaultTicketNameMaxW = 30
+)
+
 // colSpec is a column's static metadata. fullWidth columns size to the longest
-// visible cell; fixed columns truncate at fixedW (header always fits).
+// visible cell (capped at maxW when the width cap is on — see colWidths); fixed
+// columns truncate at fixedW (header always fits).
 type colSpec struct {
 	name      string
 	header    string
 	fixedW    int
 	fullWidth bool
-	cell      func(m *Model, row api.ThreadRow) string
+	// maxW is a full-width column's DEFAULT maximum render width: when the width
+	// cap is on (the default; `w` toggles it), the column sizes to its longest
+	// visible cell but no wider than this, so a pathologically long name/cwd can't
+	// blow out the layout. A per-column [[tui.column_width]] override replaces it;
+	// the cap-off state ignores it (every column grows to its content). 0 = the
+	// column has no built-in cap (fixed columns use fixedW instead).
+	maxW int
+	cell func(m *Model, row api.ThreadRow) string
 }
 
 // colOrder is the fixed left-to-right render order; the visible set is the
@@ -56,9 +74,9 @@ type colSpec struct {
 var colOrder = []colSpec{
 	{name: ColID, header: "ID", fixedW: 8,
 		cell: func(_ *Model, r api.ThreadRow) string { return tid8(r.ID) }},
-	{name: ColName, header: "NAME", fullWidth: true,
+	{name: ColName, header: "NAME", fullWidth: true, maxW: defaultNameMaxW,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.Name }},
-	{name: ColCwd, header: "CWD", fullWidth: true,
+	{name: ColCwd, header: "CWD", fullWidth: true, maxW: defaultCwdMaxW,
 		cell: func(m *Model, r api.ThreadRow) string { return m.cwdDisplay(r) }},
 	{name: ColAgent, header: "AGENT", fixedW: 7,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.AgentKind }},
@@ -75,7 +93,7 @@ var colOrder = []colSpec{
 			}
 			return strconv.Itoa(r.TicketsOpen)
 		}},
-	{name: ColTicketName, header: "TKT-NAME", fullWidth: true,
+	{name: ColTicketName, header: "TKT-NAME", fullWidth: true, maxW: defaultTicketNameMaxW,
 		cell: func(_ *Model, r api.ThreadRow) string {
 			// Newest open ticket's name; +N when the thread has more open tickets.
 			if r.TicketName == "" {
@@ -261,6 +279,53 @@ func (m Model) WithColumns(names []string) Model {
 	return m
 }
 
+// WithMaxColumnWidths sets whether columns are capped at their maximum width (the
+// default is on — set from [tui] max_column_widths). The `w` key toggles it per
+// session. Off = every column grows to its content so clipped text is fully visible.
+func (m Model) WithMaxColumnWidths(on bool) Model {
+	m.maxColWidth = on
+	return m
+}
+
+// WithColumnWidths installs per-column max-width overrides (validated names/values;
+// see ResolveColumnWidths). They replace the built-in cap for those columns when the
+// width cap is on.
+func (m Model) WithColumnWidths(max map[string]int) Model {
+	m.colMax = max
+	return m
+}
+
+// ColumnWidthSpec is one per-column max-width override as the caller hands it over.
+type ColumnWidthSpec struct {
+	Name string
+	Max  int
+}
+
+// ResolveColumnWidths validates [[tui.column_width]] overrides into a name→max map.
+// An unknown column name or a non-positive max is a LOUD error (a misconfiguration
+// must never silently do nothing). Empty input returns a nil map (built-in caps).
+func ResolveColumnWidths(specs []ColumnWidthSpec) (map[string]int, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	known := map[string]bool{}
+	for _, c := range colOrder {
+		known[c.name] = true
+	}
+	out := map[string]int{}
+	for _, sp := range specs {
+		n := strings.ToLower(strings.TrimSpace(sp.Name))
+		if !known[n] {
+			return nil, fmt.Errorf("[tui.column_width] %q: unknown column (valid: %s)", sp.Name, strings.Join(ValidColumnNames(), ", "))
+		}
+		if sp.Max < 1 {
+			return nil, fmt.Errorf("[tui.column_width] %q: max must be >= 1, got %d", sp.Name, sp.Max)
+		}
+		out[n] = sp.Max
+	}
+	return out, nil
+}
+
 // activeColumns returns the specs to render: the configured set in colOrder
 // order, with the ID column joining when toggled on (`i`) even if not configured.
 func (m *Model) activeColumns() []colSpec {
@@ -293,19 +358,39 @@ func (m *Model) columnsHasID() bool {
 	return false
 }
 
-// colWidths computes each active column's render width: fixed columns use
-// fixedW; full-width columns size to their longest visible cell (min the
-// header). Headers always fit.
+// maxWidthFor returns column c's effective maximum render width when the width cap
+// is on: a per-column [[tui.column_width]] override if set, else the built-in cap
+// (fixedW for a fixed column, maxW for a full-width one). 0 means "no built-in cap".
+func (m *Model) maxWidthFor(c colSpec) int {
+	if ov, ok := m.colMax[c.name]; ok && ov > 0 {
+		return ov
+	}
+	if c.fullWidth {
+		return c.maxW
+	}
+	return c.fixedW
+}
+
+// colWidths computes each active column's render width. With the width cap ON (the
+// default; `w` toggles it): a fixed column reserves its fixedW (stable layout), and
+// a full-width column sizes to its longest visible cell but is clamped to its max
+// (maxW / a [[tui.column_width]] override) so one long name/cwd can't blow out the
+// grid. With the cap OFF: EVERY column sizes to its longest visible cell (no clamp),
+// so the full text of a clipped row becomes visible. Headers always fit.
 func (m *Model) colWidths(cols []colSpec, vis []treeRow) []int {
 	w := make([]int, len(cols))
 	for i, c := range cols {
-		w[i] = len([]rune(c.header))
-		if !c.fullWidth {
-			if c.fixedW > w[i] {
-				w[i] = c.fixedW
+		header := len([]rune(c.header))
+		// Fixed column with the cap on: reserve its (possibly overridden) width.
+		if m.maxColWidth && !c.fullWidth {
+			w[i] = header
+			if cap := m.maxWidthFor(c); cap > w[i] {
+				w[i] = cap
 			}
 			continue
 		}
+		// Full-width column, or any column with the cap off: size to the longest cell.
+		w[i] = header
 		for _, tr := range vis {
 			cell := c.cell(m, tr.row)
 			if c.name == ColName {
@@ -313,6 +398,15 @@ func (m *Model) colWidths(cols []colSpec, vis []treeRow) []int {
 			}
 			if n := len([]rune(cell)); n > w[i] {
 				w[i] = n
+			}
+		}
+		// Then clamp a full-width column to its max when the cap is on.
+		if m.maxColWidth && c.fullWidth {
+			if cap := m.maxWidthFor(c); cap > 0 && w[i] > cap {
+				w[i] = cap
+				if w[i] < header {
+					w[i] = header // the header must still fit
+				}
 			}
 		}
 	}
@@ -347,9 +441,10 @@ func (m *Model) renderCells(cols []colSpec, widths []int, tr treeRow, hl map[str
 			cell = tr.prefix + cell // tree rails (highlight positions shift past them)
 			shift = len([]rune(tr.prefix))
 		}
-		// Truncate to the render width. Full-width columns are normally sized to
-		// their longest cell (so this is a no-op), but a CLIPPED trailing column
-		// (horizontalView's partial NAME) carries a reduced width and must truncate.
+		// Truncate to the render width. A full-width column is normally sized to fit
+		// its cell, so this is a no-op — UNLESS the width cap clamped it below the
+		// content (a long name/cwd) or it's a CLIPPED trailing column
+		// (horizontalView's partial NAME), in which case it truncates with an ellipsis.
 		cell = trunc(cell, widths[i])
 		cell = pad(cell, widths[i])
 		if pos := hl[c.name]; len(pos) > 0 {

@@ -47,13 +47,14 @@ ID column; `y` shows the full UUID, `c` copies it).
 
 **Read-only** (safe to run freely): `list`, `grid`, `info`, `status`, `pane`, `capture`,
 `mesh`, `tail`, `transcript`, `subscriptions`, `peer list`, `daemon status`, `master
-watchers`, `matrix`, `doctor`, `tmux current|info`, `cwd-label`, `meta get|list`.
+watchers`, `matrix`, `doctor`, `tmux current|info`, `cwd-label`, `meta get|list`, `hooks list`.
 
 **Mutating** (think first): `new`, `stop`, `delete`, `resume`, `headful`, `send`,
 `send-headless`, `rename`, `tag`, `reparent`, `archive`, `notify`, `meta set|unset`,
 `adopt`, `subscribe`/`unsubscribe`, `delegate`, `backup`/`restore`/`copy`, `import`,
 `ticket *`, `blob add|rm`, `tmux nav|send-text|stage-file|create-*|kill-session`,
-`master up|down|ensure`, `peer add|remove`, `daemon start|stop|restart`.
+`master up|down|ensure`, `peer add|remove`, `daemon start|stop|restart`,
+`hooks enable|disable|test`.
 
 `sesh tmux kill-session --target <name> [--machine <m>]` kills one work-server session by
 exact name (routes cross-machine; a non-existent session is a loud error) — the mechanism
@@ -107,7 +108,7 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 
   ```bash
   sesh ticket create --name <name> [--prompt <text>]      # starts in triage
-  sesh ticket list [--thread <id>] [--current]            # --current = the calling pane's thread
+  sesh ticket list [--thread <id>] [--current] [--all-machines] [--local]   # --current = calling pane's thread; --all-machines fans out across the mesh (emits machine + thread name per ticket)
   sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed|notes (raw)
   sesh ticket find --id <id> [--json]                     # MESH-WIDE lookup: fans out across peers; returns the
                                                           #   ticket + its owning machine + bound-thread context

@@ -1,5 +1,81 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H38 — MANUAL THREAD ORDERING: pin top-level threads above the auto block + dividers (2026-07-06, sesh 9897aa0 api 38→39 store 20→21; deployed 4/5 — macstudio OFFLINE ~3.7d, pending; ticket aefa7f64)
+Ticket aefa7f64 "Manually ordering threads". Lukas's ask (paraphrased): select a thread → enter an
+ordering mode → up/down to position it; manually-ordered threads form a block above/below the auto-sorted
+ones; spawnable DIVIDERS (horizontal lines); a command to remove ordering; CLI too; ordering lost on
+archive. He asked FIRST "is this a good idea / better version?" — so I conferred before coding.
+CONFERRED (Lukas locked 5 decisions): (1) DROP the two-zone model + the teleport-past-block — ONE pinned
+zone at the TOP only; (2) ordering applies to PARENTLESS (top-level) threads only; (3) dividers = option
+(b): `agent_kind="divider"` NODES (the H37 non-agent-node pattern), NOT free-floating lines and NOT
+leaning on virtual-parent groups; (4) SYNC everywhere (owner-side thread metadata, like everything else —
+NOT cockpit-local); (5) NO bottom zone (hold already parks threads). Also kept: `pin` semantics; pin-to-top
+gesture; a `•` glyph marker (no config). KEY UX critique that drove the redesign: the original spec's
+"teleport a row across the whole 80-thread block on one arrow-press" is disorienting and exists only to
+keep the auto block contiguous; and it was written flat but the TUI is a TREE + already has virtual-parent
+groups (H37) — so manual order must reorder ROOTS (each carrying its subtree), not arbitrary flat rows.
+DESIGN: pinned top-level threads render as a block ABOVE the auto-sorted roots, ordered by a FRACTIONAL
+float `pin_order` computed CLIENT-SIDE from the merged cross-machine view; the daemon is a PURE SETTER
+(like hold). Fractional keys ⇒ every pin/reorder is a SINGLE write to ONE owner, never renumbering siblings
+(which may be on OFFLINE machines — the load-bearing reason vs integer positions). Dividers are inert
+childless always-pinned nodes rendered as a full-width rule.
+IMPLEMENTATION:
+- DATA (api 38→39, store 20→21, additive/mixed-mesh-safe): api.Thread.PinOrder *float64 (nil=unpinned;
+  rides ThreadRow+ThreadSnapshot), api.DividerAgentKind="divider" + api.NonAgentKind(kind),
+  NewThreadRequest.Divider+PinOrder, PinThreadRequest{ID,PinOrder}. Store migration 20 (VERSION 21):
+  `ALTER TABLE threads ADD COLUMN pin_order REAL` — NULLABLE (NULL=unpinned so 0/negative are valid keys,
+  distinct from unpinned; scan via sql.NullFloat64→*float64). SetThreadPin; SetThreadArchived clears pin
+  on the archive transition; SetThreadParent clears pin on reparent-to-NON-root (both in-SQL, atomic).
+- DAEMON: POST /v1/threads/pin (pure setter; refuses pinning a CHILD [409 "top-level"] + un-pinning a
+  DIVIDER [409 "delete it"]). handleThreadNew divider branch (mirrors --virtual). GENERALIZED virtualGate
+  → nonAgentGate covering virtual AND divider (send/capture/fork/revive/send-headless/transcript, tailored
+  message per kind); ~6 call sites renamed. Refuse archiving a divider. agents.ParseKind still rejects
+  "divider" so any unguarded agent path fails closed. client.ThreadPin.
+- CLI: `thread pin --id [--top|--bottom|--before|--after|--order]` (client-side fractional math via
+  `thread grid --all-machines`: blockEnd/neighborMidpoint/findPinnedNode in cmd/sesh/pin.go), `thread
+  unpin`, `thread new --divider [--name]` (placed at top; refuses agent-shaped flags LOUDLY — the CLI
+  branch guards them, not just the daemon). help.go/help_flags.go/help_test.go (pin/unpin added to
+  subcommandSets; --divider flagDoc).
+- TUI (internal/tui): filter.go visibleMatches sort.SliceStable partitions ROOTS pinned-first (by
+  pin_order, then machine, id) as a block above the auto roots (each pinned root keeps its subtree; the
+  filter-mode score list is untouched). Keys: p=pin-to-top, u=unpin, m=MOVE MODE (new reordering/reorderID
+  state; ↑/↓ reposition via reorderTarget midpoint, enter/esc exit, auto-pins an unpinned top-level row
+  first), D=new-divider prompt (empty label = bare rule, Esc cancels — unlike v's empty=cancel). rowPatch
+  gained pinSet/pinOrder overlay (optimism re-sorts instantly); pinDoneMsg drops the optimism + refetches
+  on a FAILED write. All four keys → requiresReachableOwner + BOTH offline_test lists (H35 gate). `•`
+  marks pinned rows, `↕` the row being moved; renderDividerLine draws the rule; HeadGlyph divider fallback
+  "─"; Enter on a divider refuses loudly; move-mode legend. move mode dispatched BEFORE the offline gate
+  (entry key `m` is already gated).
+- TESTS: store TestThreadPin (set/clear/archive-clears/reparent-clears, incl. a 0-key reading back pinned).
+  TUI pin_test.go (root ordering, reorderTarget bounds+leapfrog, pinTopOrder, p/u/m/D handlers,
+  child-refusal, divider render, pinMark, samePinOrder). Conformance features thread.pin + thread.divider
+  (AgentAgnostic × local+remote, real ssh routing; pin sets/repositions/before/after, child-pin refused,
+  archive+reparent clear it; divider record+no-session+nonAgentGate refusals+archive/unpin refused+agent-
+  flag refusals+delete) + TUI claims action-pin/action-reorder/action-new-divider (+declaredTUIClaims, the
+  H25 gotcha). FIXED the store migration test (TestMigrationClearsDanglingParents): it rolled version back
+  to len(migrations)-1 assuming the dangling-parent sweep was the LAST (idempotent) migration — my ADD
+  COLUMN broke that (duplicate column on re-run); now it locates + re-execs the sweep SQL directly.
+- SKILL: skills/sesh-cli/SKILL.md keymap (p/u/m/D) + "Manual ordering" paragraph + CLI verbs.
+GOTCHAS (bit me): (a) termux /tmp is UNWRITABLE — my relaunch redirect `>/tmp/seshd.log` failed AFTER I'd
+killed the old daemon, briefly leaving termux daemon-less; relaunch with `>/dev/null`. (b) /proc/<pid>/
+environ WAS readable on termux this time (H21 said unreadable — situational); read the daemon's exact env
+(SESH_HOME=~/.sesh SESH_MACHINE=termux SESH_TMUX_SOCKET=sesh SESH_MASTER_SOCKET=sesh-master +
+SESH_API_TOKEN ambient) from it. termux is an OUTBOUND leaf (not in mymain's peer set) — verify its schema
+on the box itself, not via mymain's mesh.
+DEPLOY (api 39 = daemon REBUILD + RESTART): mymain (native build .new+mv + supervisorctl restart;
+LIVE-SMOKED: pin order 0, divider order -1 above it, unpin-divider + archive-divider both loud 409, archive
+clears pin_order→None, scratch threads deleted clean), macbook (lukas@, git pull + /opt/homebrew/bin/go +
+supervisorctl restart), ideapad (lukastk@ via ssh-target, native go + supervisorctl restart), termux
+(lukas@android-main:8022, git pull + PLAIN go build = CGO=1/android per H22, .new+mv, kill daemon by
+EXPLICIT pid 7861 [NOT pkill -f], setsid-nohup relaunch → pid 24302). All four api schema 39, mesh synced
+0-1s. **macstudio (cij@macstudio) OFFLINE ~3.7d (ssh :22 timed out — down since before H37) → PENDING; it
+now owes H35+H36+H37+H38, additive so harmless. When back: ssh-target macstudio → cd ~/mysetup/sesh &&
+git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f && supervisorctl
+restart sesh-daemon.** Ticket aefa7f64 marked done (closed by 9897aa0).
+FOLLOW-UP: sesh-ui manual-ordering support = ticket ed5c0e0c (triage; render pinned-above-auto + dividers,
+refuse divider chat surfaces, emit pin/unpin/reorder/new-divider verbs — the fractional math is client-side,
+reference cmd/sesh/pin.go + internal/tui/model.go). Analogous to H37's sesh-ui ticket 7d09e0f5.
+
 ## H37 — VIRTUAL parent threads + realize; delete promotes children; codex lost-since-wipe restored (2026-07-05, sesh 7e806ee api 37→38 store 20, myrig 1d44d2f; deployed 3/5 — termux + macstudio unreachable, pending)
 Ticket 181d3ca6 "Virtual parents" (explore) → ticket 149339a1 (implement). Lukas's ask: parent threads
 under something that isn't a thread; later convert the parent into a real thread. DESIGN (explored first,

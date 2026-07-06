@@ -421,7 +421,7 @@ func ticketUnbind(cfg config.Config, args []string) error {
 // both ends. --from defaults to this machine.
 func ticketMove(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("move", flag.ContinueOnError)
-	id := fs.String("id", "", "ticket id/prefix to move (required)")
+	id := fs.String("id", "", "ticket id to move (required; exact match, no prefix)")
 	to := fs.String("to", "", "destination machine (required)")
 	from := fs.String("from", "", "source machine (default: this machine)")
 	if err := fs.Parse(args); err != nil {

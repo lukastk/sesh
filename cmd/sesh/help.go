@@ -310,7 +310,7 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --all-machines --json"},
 	},
 	"ticket get": {
-		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created|closed) for clipboard/agent capture",
+		summary:  "fetch one ticket; --field prints a single field raw (id|name|prompt|status|thread|created|closed|notes) for clipboard/agent capture",
 		usage:    "sesh ticket get --id <id> [--field <name>] [--machine <m>] [--json]",
 		examples: []string{"sesh ticket get --id t1 --json", "sesh ticket get --id t1 --field prompt"},
 	},

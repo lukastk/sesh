@@ -381,7 +381,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"ticket move": {
-		{"--id", "ticket id/prefix to move (required)"},
+		{"--id", "ticket id to move (required; exact match, no prefix)"},
 		{"--to", "destination machine the ticket relocates to (required)"},
 		{"--from", "source machine the ticket currently lives on (default: this machine)"},
 	},

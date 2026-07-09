@@ -1,5 +1,58 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H41 — TUI MOUSE clicks: click=select, double-click=enter, click ▸/▾=fold (2026-07-09, sesh 646eb46; NO schema change; deployed ALL FIVE — macstudio BACK online; ticket 68f53afb)
+Ticket 68f53afb "Mouse support in sesh tui": click a row to SELECT it, double-click to ENTER
+it, click the ▸/▾ marker to collapse/expand. Builds on H9 (mouse WHEEL already enabled via
+`tea.WithMouseCellMotion()`; H9 added no cell — "wheel is just another driver of existing
+offsets"). This adds the LEFT-CLICK path. PURE TUI-CLIENT change — NO daemon/api/schema ⇒
+deploy = binary only, NO restart, mixed-mesh trivially safe.
+- internal/tui/model.go: new `tea.MouseButtonLeft` case in Update's MouseMsg switch, acting
+  ONLY on `Action==Press` (release/motion ignored so a drag fires nothing — bubbletea v1.3.10
+  SGR release keeps Button==Left but Action==Release, so the press-check is the correct gate).
+  New Model fields lastClickID/lastClickAt (double-click tracking) + nowFn (test clock; nil=time.Now).
+- internal/tui/mouse.go (NEW): handleLeftClick maps a press → select / double-click-enter /
+  fold-toggle. Guards modal states (ticket/details/confirm/prompt/tag/uuid popups + reorder).
+  rowAtY maps terminal Y → visible-row index by MIRRORING View's top chrome (rowsTop: title +
+  lastErr/actionErr/note + column header + `▲ N more`) and the viewport window (viewportRange).
+  clickOnFoldMarker finds the ▸/▾ glyph's terminal column from activeColumns + horizontalView
+  (so it works with the CONFIGURED column order — NAME is NOT column 0 by default, it's 3rd:
+  machine,agent,NAME,cwd,tags,notify — AND with horizontal panning), accepting the 2-cell "▾ "
+  region. doubleClickWindow=500ms. Double-click enter reuses navSelected + the offline-owner gate
+  (machineReachable) so entering an OFFLINE machine's thread refuses INSTANTLY (loud actionErr,
+  no shell-out) instead of hanging on the routing timeout — same as the `enter` key. Fold-marker
+  click resets the double-click timer so a 2nd fold-click never reads as an enter.
+- KEY LAYOUT FACT: the row gutter is exactly gutterWidth=9 cols (`"> "`/`"  "` 2 + mark+head+busy
+  +desc+att+arch+" " 7); renderCells (columns) begins at X=9. The fold marker is the penultimate
+  rune of the tree prefix ("▾ "/"▸ " → glyph then space) at the START of the NAME cell. All gutter/
+  tree glyphs are 1-cell so a rune index into an ANSI-stripped render line == its terminal column
+  (load-bearing for both the click math and the live-smoke marker lookup).
+- TESTS: internal/tui/mouse_test.go — select / outside-rows-ignored / double-click-enters(within
+  window) vs re-selects(outside) / different-rows-never-enter / offline-refused / fold-toggle both
+  directions / release+motion ignored / modal ignored, PLUS TestRowAtYMatchesRender: a RENDER-DRIFT
+  GUARD (the H40 gutter-misalign bug class) that finds each rendered row's REAL screen Y (clean /
+  actionErr / scrolled-viewport cases) and round-trips rowAtY — so any change to View's top chrome
+  not mirrored in rowsTop fails loudly. Conformance TUI claim **mouse-click** (registered AND in
+  declaredTUIClaims — the H25 gotcha) drives a REAL daemon + a real parent/child tree (P-reparent,
+  poll until nested like claimActionReparent): a left click selects the pointed row + a marker click
+  collapses/expands the subtree, asserted on the LIVE render (double-click ENTER is left to the unit
+  test + the existing action-nav claim — invoking nav in the claim would revive a real thread).
+- LIVE SMOKE (the H9 gold standard): injected REAL SGR mouse bytes (`ESC[<0;C;RM`/`m` via `tmux
+  send-keys -l $'\033[<0;C;RM'`) into `sesh tui` in a FULLY ISOLATED tmux (own daemon/home/short
+  socket path [unix-sockaddr 108-char limit — scratchpad path was too long, used mktemp /tmp/sk.XXX],
+  sockets smoke-work/smoke-ui, SESH_* stripped — never touched the live mesh): single click moved the
+  `>` cursor to the clicked row; click on ▸ expanded (child `└` appeared) + again collapsed it;
+  double-click on a headless thread promoted it `◌·`→`●·` (it entered/revived). NB display-popups
+  can't be driven by send-keys but a plain pane CAN — the smoke ran the TUI in a plain session.
+- help.go tui long + sesh-cli SKILL (keymap `mouse click` line + a click/double-click/fold prose
+  paragraph) updated. sesh-ui needs NO change — it's a GUI with native mouse; this is terminal-TUI-only.
+DEPLOY (binary-only, NO daemon restart — each `sesh tui` runs fresh from the binary): pushed
+origin/main, then rebuilt on ALL FIVE at 646eb46 — mymain (native go1.25), macbook + macstudio
+(/opt/homebrew/bin/go), ideapad (native), termux (PLAIN go build = CGO_ENABLED=1/arm64 per H22).
+**macstudio is BACK online** (was ssh-unreachable through much of H36–H40) — so ALL FIVE are current
+on 646eb46. VERIFIED macstudio's daemon is already api schema 39 / store 21 (same as mymain), i.e. it
+had ALSO caught up to the H38 daemon at some point — NOT stale, no restart owed. So this binary-only
+mouse deploy needed no daemon action anywhere. Ticket 68f53afb marked done (closed by 646eb46).
+
 ## H40 — DEFAULT VIEW keeps ARCHIVED-but-HEADFUL threads + `⊘` archived gutter glyph (2026-07-06, sesh e8eaae6; NO schema change; deployed 4/5 — macstudio OFFLINE, pending; ticket f23b8ea9)
 Ticket f23b8ea9 "default view = all non-archived + archived-but-live, not on hold" = `(non-archived OR
 (archived AND live)) AND not on hold`. Lukas CLARIFIED (AskUserQuestion) that "live"/"attached" means

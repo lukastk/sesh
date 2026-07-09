@@ -235,6 +235,8 @@ Keymap (normal mode):
 ↑/↓ or j/k   move cursor          ^j / ^k    scroll viewport a half-page
 ←/→          fold / unfold tree    ^h / ^l    pan columns left/right (when clipped)
 mouse wheel  move selection up/down; Shift+wheel (or wheel left/right) pans columns
+mouse click  select the clicked row; DOUBLE-click enters it (= enter); click the ▸/▾
+             fold marker to collapse/expand that thread's subtree
 enter        nav: switch your tmux client to the thread (or attach from a plain shell;
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
@@ -379,11 +381,16 @@ mouse_scroll_v = 3   # vertical: 3 notches per row (dampens fast trackpad scroll
 mouse_scroll_h = 2   # horizontal: 2 notches per column
 ```
 
-The mouse wheel works in any terminal that forwards wheel events (incl. the `prefix+s`
+The mouse also **clicks**: a single left-click selects the row under the pointer, a
+**double-click** enters it (the same as `enter` — a headless thread is promoted, a dead
+one resumed; an offline machine's thread is refused loudly rather than hung on), and a
+click on the `▸`/`▾` fold marker collapses/expands that thread's subtree.
+
+The mouse works in any terminal that forwards mouse events (incl. the `prefix+s`
 tmux popup); while the TUI is up it captures the mouse, so terminal-native drag-select
 needs Shift. Horizontal-wheel events aren't emitted by every terminal — **Shift+wheel** is
 the reliable cross-terminal pan. (On Termux, two-finger touch-scroll is captured by the
-terminal app for its own scrollback — use a hardware mouse for wheel events there.)
+terminal app for its own scrollback — use a hardware mouse for wheel/click events there.)
 
 ## Entering, listing, inspecting
 

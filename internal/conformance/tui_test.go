@@ -81,6 +81,7 @@ var declaredTUIClaims = []string{
 	"action-new-divider",        // D opens a label prompt and creates a real pinned divider on the daemon
 	"column-max-width",          // full-width columns are capped by default (a long NAME truncates); `w` toggles the cap off to show full text; a [[tui.column_width]] override raises the cap (config→render)
 	"thread-details",            // I opens a read-only takeover showing a thread's REAL fields (full uuid, machine, agent, cwd, live axis); esc closes back to the grid
+	"mouse-click",               // a left CLICK selects the row under the pointer; a click on the ▸/▾ fold marker collapses/expands that thread's subtree — over a REAL parent/child tree + render
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}

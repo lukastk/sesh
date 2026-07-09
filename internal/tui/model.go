@@ -308,6 +308,12 @@ type Model struct {
 	// steps so a higher divisor dampens fast trackpad scrolling.
 	scrollDivV, scrollDivH int
 	wheelAccV, wheelAccH   int
+	// Left-click row interaction: a press SELECTS the row; a second press on the SAME
+	// row within doubleClickWindow ENTERS it (like the `enter` key). nowFn overrides the
+	// clock in tests; nil = time.Now. See mouse.go.
+	lastClickID string
+	lastClickAt time.Time
+	nowFn       func() time.Time
 
 	// attachTarget, when set, means the TUI quit in order to ATTACH the terminal to a
 	// thread (Enter from a plain shell, outside tmux). The caller reads PendingAttach
@@ -597,6 +603,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wheelPanH(-1)
 		case tea.MouseButtonWheelRight:
 			m.wheelPanH(1)
+		case tea.MouseButtonLeft:
+			// A left PRESS selects/enters a row or toggles a fold marker (see mouse.go).
+			// Release/motion events are ignored so a drag doesn't fire actions.
+			if msg.Action == tea.MouseActionPress {
+				return m.handleLeftClick(msg)
+			}
 		}
 		return m, nil
 	case meshMsg:

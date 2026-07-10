@@ -1,5 +1,54 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H42 — TUI selection ANCHORED to the thread, not the row index (2026-07-10, sesh 4e5c76d; NO schema change; deployed 4/5 — macbook OFFLINE, pending; ticket f262e0a8)
+Ticket f262e0a8 "Ensure that the selected row does not change if the state of the view changes in
+sesh tui": with a row selected, a NEW row appearing above/below shifted the selection onto a
+DIFFERENT thread → the archive/delete-the-WRONG-row footgun. ROOT CAUSE: `m.cursor` is a POSITIONAL
+index into `visibleMatches()`; the `meshMsg` poll handler (every ~3s + after actions) only CLAMPED
+cursor to range — it never re-anchored to the selected THREAD. So a row sorting in above the cursor
+slid a different thread under it silently. PURE TUI-CLIENT change — NO daemon/api/schema ⇒ deploy =
+binary only, NO restart, mixed-mesh trivially safe.
+- internal/tui/model.go: new `selectedID()` + `reanchorCursor(anchorID)`. The meshMsg handler
+  captures `anchorID := m.selectedID()` BEFORE `m.rows = msg.rows`, then reanchorCursor moves the
+  cursor back onto that id in the NEW row set (found → its new index; NOT found / "" → hold the
+  positional slot, clamped into range = the neighbour). The preselect chain became an else-if so an
+  EXPLICIT jump (--cursor / master-cursor / moved-node follow) still WINS over anchoring; a
+  still-PENDING preselect (not yet published) also anchors to the current selection while it waits.
+  Replaced the old two clamp sites (meshMsg + the actionMsg optimistic-patch block) with
+  reanchorCursor — actionMsg anchors to `msg.id` (the acted-on thread): a non-hiding reorder (rename
+  re-sorts by name) keeps the cursor on it; a HIDING change (archive/delete/hold leaves the view →
+  id not found) falls back to the neighbour = the ticket's stated EXCEPTION (an action that removes
+  the selected thread should not follow it).
+- KEY MECHANICS FACT (load-bearing): `visibleMatches()` for the no-filter tree keeps SIBLING/ROOT
+  order = `m.rows` order (only pins float roots to the top via a stable sort) — it does NOT re-sort
+  by name. The name/(machine,name,id) sort happens in `flattenMeshRows` on the FETCH path, so
+  msg.rows arrive PRE-SORTED. ⇒ a rename doesn't reorder IN-PLACE within actionMsg (applyPending
+  only changes the name field); the reorder shows on the NEXT poll's sorted msg.rows, where the
+  meshMsg anchor follows the renamed thread to its new slot. So the meshMsg change is the real fix;
+  the actionMsg reanchor is a safe, more-explicit equivalent (identical behaviour for hide + no
+  in-place reorder). Pin `p`/`u` go through pinDoneMsg (not actionMsg) and apply the patch at
+  keypress with no cursor touch → unaffected; move-mode `m` tracks reorderID separately → unaffected.
+- TESTS: internal/tui/anchor_test.go — row-appears-above keeps the thread; appears-below / removed-
+  above keep it; the EXCEPTION (selected row leaves the view → neighbour); rename re-sorts across a
+  poll → cursor FOLLOWS the renamed thread; preselect still wins; reanchorCursor unit truth table.
+  Conformance TUI claim **selection-anchored** (registered AND in declaredTUIClaims — the H25 gotcha)
+  drives a REAL daemon: cursor on `delta`, a new top-sorting `alpha` appears on the next real poll,
+  selection MUST stay on delta (a positional cursor lands on beta). ANTI-GAMING: temporarily neutered
+  the anchor → both the unit tests AND the live claim FAIL with the cursor on the wrong thread (proven
+  discriminating), then restored. LIVE SMOKE (isolated tmux `sesh tui`, own daemon/home/short sockets
+  /tmp/sk.XXX per the 108-char unix-sockaddr limit, SESH_* stripped — never touched the live mesh):
+  cursor on delta, spawned `aaa-top` via CLI → it appeared at the top and the `>` stayed on delta;
+  then archived delta → `>` fell to the neighbour beta (didn't chase the vanished row).
+- skills/sesh-cli/SKILL.md: paragraph documenting the anchoring semantics + the action exception. NO
+  new key/column/flag/env var (behaviour-only), so no keymap/help.go change. sesh-ui needs NO change —
+  it's a GUI with its own selection model; this is terminal-TUI-only.
+DEPLOY (binary-only, NO daemon restart — each `sesh tui` runs fresh from the binary): pushed
+origin/main, rebuilt at 4e5c76d on mymain (native go), macstudio (/opt/homebrew/bin/go), ideapad
+(native go), termux (PLAIN go build = CGO=1/arm64 per H22). **macbook OFFLINE (ssh :22 timed out) →
+PENDING, harmless (binary-only + mixed-mesh safe); when back: cd ~/mysetup/sesh && git pull &&
+/opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f (no restart).** Ticket
+f262e0a8 marked done (closed by 4e5c76d).
+
 ## H41 — TUI MOUSE clicks: click=select, double-click=enter, click ▸/▾=fold (2026-07-09, sesh 646eb46; NO schema change; deployed ALL FIVE — macstudio BACK online; ticket 68f53afb)
 Ticket 68f53afb "Mouse support in sesh tui": click a row to SELECT it, double-click to ENTER
 it, click the ▸/▾ marker to collapse/expand. Builds on H9 (mouse WHEEL already enabled via

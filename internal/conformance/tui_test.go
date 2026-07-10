@@ -26,6 +26,7 @@ var declaredTUIClaims = []string{
 	"descendant-running-glyph",  // a parent's HB ↓ glyph tracks whether a REAL descendant is running a turn, both directions
 	"grid-fanout-cross-machine", // the grid shows a peer's thread via the mesh
 	"navigation-cursor",         // key nav moves the selection over real rows
+	"selection-anchored",        // the cursor stays on the SAME thread when a new row appears above it on a poll (never shifts onto a neighbour — the archive-the-wrong-row footgun)
 	"mesh-render-offline",       // a downed peer renders OFFLINE, threads hidden by default (H35), `o` reveals the last-known rows
 	"action-stop",               // the stop key really ends the runtime, keeps the record
 	"action-delete",             // the delete key really drops the record
@@ -118,6 +119,7 @@ func init() {
 	registerTUIClaim("descendant-running-glyph", claimDescendantRunningGlyph)
 	registerTUIClaim("grid-fanout-cross-machine", claimGridFanout)
 	registerTUIClaim("navigation-cursor", claimNavigationCursor)
+	registerTUIClaim("selection-anchored", claimSelectionAnchored)
 	registerTUIClaim("mesh-render-offline", claimMeshRenderOffline)
 	registerTUIClaim("action-stop", claimActionStop)
 	registerTUIClaim("action-delete", claimActionDelete)
@@ -1143,5 +1145,44 @@ func claimNavigationCursor(t *testing.T) {
 	ids := map[string]bool{a.ID: true, b.ID: true}
 	if !ids[first.ID] || !ids[second.ID] {
 		t.Errorf("selected rows are not the real threads: %s, %s", first.ID, second.ID)
+	}
+}
+
+// claimSelectionAnchored: the selection is anchored to a SPECIFIC thread, not a row
+// index. With the cursor on "delta" (below "beta"), a NEW thread "alpha" that sorts to
+// the TOP appears on the next poll — pushing every row down one. A positional cursor
+// would now point at "beta" (the archive/delete-the-wrong-row footgun); the anchored
+// cursor tracks "delta" to its new index. Driven against a REAL daemon: each render()
+// is a real fetch, so the anchoring runs on the exact poll that first includes alpha.
+func claimSelectionAnchored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "beta")
+	delta := sb.newHeadlessThread(t, "pi", "delta")
+
+	m := tui.New(sb.Home+"/daemon.sock", false)
+	m = renderUntilCount(t, m, 2)
+
+	// Put the cursor on delta (sorts after beta → index 1).
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(tui.Model)
+	if sel, ok := m.Selected(); !ok || sel.ID != delta.ID {
+		t.Fatalf("cursor should be on delta before the new row; got %+v ok=%v", sel, ok)
+	}
+
+	// A new thread that sorts ABOVE both existing rows appears on the next poll.
+	sb.newHeadlessThread(t, "pi", "alpha")
+	m, _ = renderUntilRow(t, m, "alpha")
+
+	// The selection must still be delta — NOT whatever slid into its old slot.
+	sel, ok := m.Selected()
+	if !ok || sel.ID != delta.ID {
+		t.Fatalf("selection must stay anchored to delta after alpha appeared above it; got %+v ok=%v cursor=%d", sel, ok, m.Cursor())
+	}
+	if sel.Name == "alpha" || sel.Name == "beta" {
+		t.Fatalf("selection shifted onto a neighbour (%q) — anchoring failed", sel.Name)
 	}
 }

@@ -289,6 +289,13 @@ On a **virtual** row (`◇` — a grouping node with no agent), Enter and `f` sh
 warning instead of acting; convert it first with `sesh thread realize`. Grouping keys
 (`h`/`H`, `t`/`T`, `r`, `P`, `a`, `d`) work normally on it.
 
+The selection is **anchored to the thread**, not the row position: when a background
+refresh (the ~3s poll / mesh sync) makes a row appear or disappear above the cursor, the
+cursor stays on the *same* thread rather than shifting onto whatever slid into its slot —
+so `a`/`d`/`x` never hit the wrong thread. The exception is when your own action removes
+the selected thread from the view (archive it, hold it, reparent it away): the cursor
+then falls to the neighbour rather than chasing the vanished row.
+
 **Hold** parks a thread you're not working on today. It sets the thread's
 `on_hold_until` to an absolute instant and the owning daemon derives a live "on hold"
 flag against its clock, so a hold **auto-expires** — `h` defaults to the start of

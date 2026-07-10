@@ -615,6 +615,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastErr = msg.err
 		} else {
+			// Anchor the selection to a SPECIFIC thread, not a row index: capture the
+			// selected thread's id BEFORE swapping in the new rows, then move the cursor
+			// back onto it below (reanchorCursor). Otherwise a row appearing/disappearing
+			// above the cursor — a routine poll / mesh-sync change nobody asked for —
+			// would silently shift the selection onto a DIFFERENT thread, the
+			// archive/delete-the-wrong-row footgun.
+			anchorID := m.selectedID()
 			m.lastErr = nil
 			m.rows = msg.rows
 			m.machines = msg.machines
@@ -622,20 +629,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyPending(true) // reconcile: re-apply optimistic patches, GC satisfied/expired ones
 			if m.preselectID != "" && m.positionCursorOn(m.preselectID) {
 				m.preselectID = "" // landed — release it so the user can move freely
-			}
-			// Preselect couldn't land but the thread DOES exist in the mesh — it's just
-			// hidden by the current view (e.g. an archived thread while the default view
-			// is `active`). Escalate to ViewAll (a superset of every view) and refetch so
-			// the cursor can land. Guarded on preselectSeen so a not-yet-published thread
-			// doesn't trip it, and on view!=ViewAll so we escalate at most once.
-			if m.preselectID != "" && msg.preselectSeen && m.view != ViewAll {
+			} else if m.preselectID != "" && msg.preselectSeen && m.view != ViewAll {
+				// Preselect couldn't land but the thread DOES exist in the mesh — it's just
+				// hidden by the current view (e.g. an archived thread while the default view
+				// is `active`). Escalate to ViewAll (a superset of every view) and refetch so
+				// the cursor can land. Guarded on preselectSeen so a not-yet-published thread
+				// doesn't trip it, and on view!=ViewAll so we escalate at most once.
 				m.view = ViewAll
 				return m, m.fetch()
+			} else {
+				// No explicit preselect jump is in flight — keep the cursor pinned to the
+				// thread it was already on so a changed row set doesn't move the selection
+				// out from under the user.
+				m.reanchorCursor(anchorID)
 			}
-			if vis := len(m.visibleMatches()); m.cursor >= vis {
-				m.cursor = max(0, vis-1)
-			}
-			m.ensureCursorVisible() // the row set changed: keep the viewport over the cursor
+			m.ensureCursorVisible() // keep the viewport over the (re-anchored) cursor
 		}
 		// Bootstrap the SINGLE poll timer exactly once (on the first successful
 		// fetch). Subsequent meshMsgs — including those from action/reconcile
@@ -691,10 +699,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.pending[msg.id] = msg.patch
 				}
 				m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
-				// An optimistic hide can drop the row under/below the cursor — keep it in range.
-				if vis := len(m.visibleMatches()); m.cursor >= vis {
-					m.cursor = max(0, vis-1)
-				}
+				// Keep the selection on the acted-on thread. A non-hiding change that
+				// reorders the list (rename re-sorts by name) must not shift the cursor onto
+				// a neighbour; reanchorCursor follows the row to its new slot. If the change
+				// HID the row (archive/delete/hold leaves the view), the id isn't found and
+				// it falls back to the positional slot — landing on the neighbour, which is
+				// the wanted behaviour when the selected row itself disappears.
+				m.reanchorCursor(msg.id)
 				m.ensureCursorVisible()
 			}
 		}
@@ -854,6 +865,41 @@ func (m *Model) expandAncestors(id string) {
 		seen[cur.Parent] = true
 		m.expanded[cur.Parent] = true
 		cur, ok = byID[cur.Parent]
+	}
+}
+
+// selectedID returns the id of the thread currently under the cursor, or "" when
+// nothing is selected (empty rows / cursor out of range).
+func (m *Model) selectedID() string {
+	if tr, ok := m.selectedTree(); ok {
+		return tr.row.ID
+	}
+	return ""
+}
+
+// reanchorCursor pins the selection to a SPECIFIC thread across a change in the row
+// set or sort order. If anchorID is still visible, the cursor moves to its (possibly
+// new) index — so a row appearing/disappearing above it, or the selected row itself
+// being renamed/reordered, never silently shifts the selection onto a DIFFERENT thread
+// (the archive/delete-the-wrong-row footgun). If anchorID is gone from the view
+// (archived/held/reparented away, or "" because nothing was selected), the cursor
+// instead HOLDS its positional slot, clamped into range — landing on the neighbour
+// rather than chasing the vanished row.
+func (m *Model) reanchorCursor(anchorID string) {
+	vis := m.visibleMatches()
+	if anchorID != "" {
+		for i, tr := range vis {
+			if tr.row.ID == anchorID {
+				m.cursor = i
+				return
+			}
+		}
+	}
+	if m.cursor >= len(vis) {
+		m.cursor = max(0, len(vis)-1)
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
 	}
 }
 

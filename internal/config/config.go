@@ -58,15 +58,13 @@ type Config struct {
 	RemoteToken string
 }
 
-// Load resolves config from the environment:
-//
-//	SESH_HOME     base dir (default ~/.sesh)
-//	SESH_MACHINE  machine identity (default hostname)
-//
-// It panics only on a truly broken environment (no home dir AND no SESH_HOME,
-// or no hostname) — there is no sane fallback for "who am I / where do I live",
-// and guessing would scatter state silently.
-func Load() Config {
+// ResolveHome returns the sesh base dir: $SESH_HOME, else ~/.sesh. It is the
+// single source of truth for "where sesh lives" — used by Load and by
+// peers.SSHMultiplexArgs (the ssh ControlMaster socket dir), so the daemon and
+// the CLI always resolve the SAME paths and share state. Panics only if
+// SESH_HOME is unset AND the user home dir cannot be resolved (a truly broken
+// environment — guessing would scatter state silently).
+func ResolveHome() string {
 	home := os.Getenv("SESH_HOME")
 	if home == "" {
 		uh, err := os.UserHomeDir()
@@ -78,6 +76,19 @@ func Load() Config {
 		// clobbering the live v1 install; v1 is gone, so sesh owns ~/.sesh.)
 		home = filepath.Join(uh, ".sesh")
 	}
+	return home
+}
+
+// Load resolves config from the environment:
+//
+//	SESH_HOME     base dir (default ~/.sesh)
+//	SESH_MACHINE  machine identity (default hostname)
+//
+// It panics only on a truly broken environment (no home dir AND no SESH_HOME,
+// or no hostname) — there is no sane fallback for "who am I / where do I live",
+// and guessing would scatter state silently.
+func Load() Config {
+	home := ResolveHome()
 
 	machine := os.Getenv("SESH_MACHINE")
 	machineExplicit := machine != ""

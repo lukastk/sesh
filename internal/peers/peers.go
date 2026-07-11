@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/lukastk/sesh/internal/config"
 )
 
 // SSHMultiplexArgs returns ssh options that reuse ONE persistent connection per
@@ -20,10 +22,19 @@ import (
 // daemon's mesh-sync keeps this connection warm (re-touched every ~1s), so an
 // interactive `tmux nav` over ssh rides it and switches near-instantly. The
 // ControlPath uses %C (a fixed-length hash of the connection target) so the
-// daemon and the CLI compute the SAME socket and share it, and so the path stays
-// within the unix-socket length limit regardless of how long $SESH_HOME is.
+// daemon and the CLI compute the SAME socket and share it.
+//
+// The socket dir is rooted in SESH_HOME (config.ResolveHome), NOT os.TempDir():
+// on macOS TempDir is the ~49-char /var/folders/<...>/T path, and with the 40-char
+// %C hash plus the ".<16 random>" suffix ssh appends while CREATING the master
+// socket, the path overran the 104-byte macOS unix-socket limit — so opening the
+// master failed with "path ... too long for Unix domain socket" (connecting to an
+// existing one, which skips the suffix, still worked). SESH_HOME is short (~/.sesh),
+// per-user, and is already the dir the daemon and CLI agree on (daemon.sock lives
+// there too, so SESH_HOME is already length-constrained), so they still share ONE
+// socket.
 func SSHMultiplexArgs() []string {
-	dir := filepath.Join(os.TempDir(), "sesh-ssh-cm")
+	dir := filepath.Join(config.ResolveHome(), "ssh-cm")
 	os.MkdirAll(dir, 0o700) //nolint:errcheck — best-effort; ssh falls back to no mux
 	return []string{
 		"-o", "BatchMode=yes",

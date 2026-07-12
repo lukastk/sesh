@@ -1,5 +1,41 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H43 — mmt-copy-clipboard-to-master: push the BASE machine's clipboard into the master's clipboard (2026-07-12, myrig efc8cad; NO sesh change; deployed 4/5 — termux OFFLINE, pending; ticket 1d978651)
+Ticket 1d978651 "mmt command similar to mmt-copy-to-master but instead transfers the current
+clipboard content of the base to the master". MYRIG-ONLY (shell.sh.jinja): new zsh function
+`mmt-copy-clipboard-to-master [--to <machine>]` right after mmt-copy-to-master — reads THIS
+(base) machine's clipboard with the EXISTING helpers, image preferred over text exactly like
+mmt-send-clipboard (_mmt_clip_get_image → clip_<ts>.png else _mmt_clip_get_text → .txt in a
+mktemp -d cleaned in an always block; neither → loud "Clipboard is empty or has no supported
+content." rc=1), then DELEGATES the tempfile to mmt-copy-to-master, which owns target
+detection (`sesh master watchers` → 1=direct, several/none=fzf), machine validation, the
+self short-circuit, and the ssh-target transport — zero duplication. Only flags: --to X /
+--to=X passthrough (bare --to loud), -h/--help; any other arg loud, pointing at
+mmt-copy-to-master for the file form. `my_alias -g mmt` next to its siblings; added to
+MT_QUICK_CMDS (the WORK prefix+m popup runs ON the base = the right context to read the
+base's clipboard) and deliberately NOT to MMT_QUICK_CMDS (the master popup runs on the
+master host and would read the master's OWN clipboard — wrong direction). Docs: myrig
+AGENTS.md + skills/mysetup-navigator/SKILL.md clipboard-relay lists.
+KEY MECHANICS FACT: the extensionless remote tempfile is fine for images — sesh-set-clipboard
+dispatches by `file --mime-type` (CONTENT-sniffed), so piped PNG bytes land as an image
+(mac: osascript «class PNGf»; termux target refuses images loudly, Android clipboard is
+text-only). mymain has a REAL X display for clipboard work: DISPLAY=:0 (Xorg on the dummy
+config) — xclip works from any shell with it set.
+LIVE-PROVEN (real network, clipboards SAVED + RESTORED around the test): text sentinel
+mymain-clipboard → macstudio-clipboard byte-exact; a 1x1 PNG in mymain's clipboard PREFERRED
+over text and read back from macstudio as «class PNGf» via `osascript -e 'clipboard info'`;
+DISPLAY-less run fails loud rc=1; --to=/bare---to/unknown-arg/help all correct; zsh -n clean.
+DEPLOY (render-only — shell.sh is rendered jinja via install-home; menus.sh/confs are
+symlinks so pull suffices; NO daemon restart, NO conf re-source — no binding changed):
+mymain (local python3 install-home), macbook + macstudio + ideapad (git pull + python3
+install-home — all three had jinja2 in system python3, no uv needed). **termux OFFLINE
+(android-main:8022 timed out) → PENDING, harmless; when back: cd ~/mysetup/myrig && git pull
+&& python3 scripts/install-home.py "$MYRIG_TARGETS" (its python3 HAS jinja2 per H30 — never
+pipe install-home to tail).** Also OBSERVED: macbook's PENDING H42 sesh-binary deploy is
+ALREADY CLEARED (its ~/.local/bin/sesh reads vcs.revision=4716d2d = HEAD — a later session
+deployed it); all five machines owe nothing on the sesh side from H42. Ticket 1d978651
+marked done (closed by myrig efc8cad).
+
 ## H42 — TUI selection ANCHORED to the thread, not the row index (2026-07-10, sesh 4e5c76d; NO schema change; deployed 4/5 — macbook OFFLINE, pending; ticket f262e0a8)
 Ticket f262e0a8 "Ensure that the selected row does not change if the state of the view changes in
 sesh tui": with a row selected, a NEW row appearing above/below shifted the selection onto a

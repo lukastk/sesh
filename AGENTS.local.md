@@ -36,6 +36,34 @@ ALREADY CLEARED (its ~/.local/bin/sesh reads vcs.revision=4716d2d = HEAD — a l
 deployed it); all five machines owe nothing on the sesh side from H42. Ticket 1d978651
 marked done (closed by myrig efc8cad).
 
+### H43 follow-up — DISPLAY inference + loud clipboard errors + xclip-over-ssh unhang (2026-07-17, myrig b05baaa; deployed ALL FIVE — termux back online, caught up on efc8cad too)
+Lukas: "having to write DISPLAY=:0 seems a bit unergonomic" (his DISPLAY-less shell made the
+new command report the misleading "Clipboard is empty..."). Three fixes in shell.sh.jinja:
+(1) `_mmt_x_display` — $DISPLAY when set, else iff EXACTLY ONE /tmp/.X11-unix/XN socket
+exists → ":N" (mymain: Xorg pinned :0 by xorg-dummy; login/ssh/popup shells never export
+DISPLAY). Wired as `local -x DISPLAY="$(_mmt_x_display)"` into the linux branches of
+_mmt_clip_get_image/_mmt_clip_get_text/sesh-set-clipboard (function-scoped, no env leak,
+explicit DISPLAY wins). The prefix+m popup path on mymain works now too. (2)
+`_mmt_clip_read_err` replaces the generic message in mmt-send-clipboard +
+mmt-copy-clipboard-to-master: names the real cause (tool missing / DISPLAY unset+not
+inferrable / DISPLAY's socket absent "is X running?") before falling back to genuinely-empty.
+(3) THE TRAP the inference EXPOSED: `xclip -i` FORKS a child that keeps serving the X
+selection and inherits stdio — over ssh (mmt-copy-to-master's inbound hop into a Linux
+target) the held-open pipes stop the session from EVER closing (measured: hang killed at
+2min; the transfer itself had SUCCEEDED — only session-close hung). Latent before: the
+DISPLAY-less remote xclip used to fail fast, so the hang was unreachable. Fix: run xclip -i
+with stdin/stdout detached + stderr to a TEMPFILE (a pipe/`$()` capture hangs identically —
+the forked child holds fd 2); non-zero rc prints the tempfile loudly ("xclip failed (Error:
+Can't open display: :9)") + propagates. The lingering xclip process after a set is NORMAL
+(it's the selection owner; exits when the selection is taken). Other repo xclip sites
+(copy-last, repo pickers, remote_desktop pbcopy aliases) are interactive-only — untouched.
+LIVE-PROVEN: no-prefix round trip rc=0 on mymain; DISPLAY=:9 loud on both read+write sides;
+macstudio→mymain mmt-copy-to-master (the previously-infinite hang) completes instantly with
+the content landing; clipboards restored after. DEPLOY render-only ALL FIVE at b05baaa
+(termux BACK online — also cleared its pending efc8cad; NB `whence` in the SAME login shell
+that pulled shows "none" — functions were sourced at startup from the pre-pull shell.sh,
+check with a FRESH shell).
+
 ## H42 — TUI selection ANCHORED to the thread, not the row index (2026-07-10, sesh 4e5c76d; NO schema change; deployed 4/5 — macbook OFFLINE, pending; ticket f262e0a8)
 Ticket f262e0a8 "Ensure that the selected row does not change if the state of the view changes in
 sesh tui": with a row selected, a NEW row appearing above/below shifted the selection onto a

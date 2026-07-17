@@ -62,7 +62,12 @@ macstudio→mymain mmt-copy-to-master (the previously-infinite hang) completes i
 the content landing; clipboards restored after. DEPLOY render-only ALL FIVE at b05baaa
 (termux BACK online — also cleared its pending efc8cad; NB `whence` in the SAME login shell
 that pulled shows "none" — functions were sourced at startup from the pre-pull shell.sh,
-check with a FRESH shell).
+check with a FRESH shell). SECOND FOLLOW-UP (myrig 0018a88): mymain's pbcopy/pbpaste
+(^remote_desktop^remote_desktop.sh, mymain-only symlink — deploy = pull on mymain, done)
+converted alias→function with the SAME two fixes (_mmt_x_display inference + pbcopy stdio
+detach for the ssh held-pipe trap); ideapad's Wayland twin (hyprland.sh wl-copy/wl-paste)
+untouched. Proven: DISPLAY-less round trip, DISPLAY=:9 loud both sides, bounded
+ssh-target-mymain pbcopy closes instantly.
 
 ## H42 — TUI selection ANCHORED to the thread, not the row index (2026-07-10, sesh 4e5c76d; NO schema change; deployed 4/5 — macbook OFFLINE, pending; ticket f262e0a8)
 Ticket f262e0a8 "Ensure that the selected row does not change if the state of the view changes in

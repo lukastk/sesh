@@ -74,6 +74,7 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 		TmuxSocket:    d.cfg.TmuxSocket,
 		MasterSocket:  d.cfg.MasterSocket,
 		Home:          d.cfg.Home,
+		MeshCadence:   d.mesh.cadence(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

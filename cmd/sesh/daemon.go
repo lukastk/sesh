@@ -158,6 +158,9 @@ func daemonStatus(cfg config.Config, args []string) error {
 	fmt.Printf("db:             %s\n", st.DBPath)
 	fmt.Printf("socket:         %s\n", st.SocketPath)
 	fmt.Printf("schema_version: %d\n", st.SchemaVersion)
+	if st.MeshCadence != "" {
+		fmt.Printf("mesh_cadence:   %s\n", st.MeshCadence)
+	}
 	return nil
 }
 

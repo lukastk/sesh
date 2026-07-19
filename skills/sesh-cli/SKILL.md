@@ -532,10 +532,24 @@ sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh \
   --api-addr 100.x.y.z:7070 --api-token-file ~/.sesh/api-token   # http peer (ssh otherwise)
 sesh master up --tmux-conf ~/.sesh/myrig/tmux.master.conf  # build the per-machine window cockpit
 sesh master attach        # attach to it      sesh master watchers   # who's watching this machine
-sesh daemon status        # machine, pid, version, uptime, db, socket, schema
+sesh daemon status        # machine, pid, version, uptime, db, socket, schema, mesh_cadence
 sesh daemon restart       # bounce the daemon (e.g. after a binary update)
 sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, daemon checks)
 ```
+
+**Mesh sync cadence (demand-driven).** The background peer sync runs at full pace (~1s)
+only while something is consuming the mesh view — a `sesh tui`/sesh-ui poll or an
+`--all-machines` read — or when `[[hooks]]` are configured (hooks observe remote threads
+through the cache, so they pin full pace). Otherwise it idles to `[mesh] idle_interval`
+(default 60s; `"0s"` = never idle) and snaps back instantly on the next read, so opening
+the TUI after an idle stretch is fresh within ~a round trip. `sesh peer list` showing
+"synced 45s ago" on a quiet daemon is therefore deliberate idling, not degraded sync —
+`sesh daemon status` reports the pace as `mesh_cadence` (active / idle / hooks-pinned /
+always). Unchanged snapshots transfer as bodyless 304s (ETag), and the peer-facing
+snapshot (`thread snapshot`) excludes archived threads with no live pane — so a remote
+machine's archived-dead threads don't appear in the cached mesh views; read them with
+`thread list --archived --machine <m>` or the live `--all-machines` fan-out, which is
+unaffected.
 
 ## Config (`~/.sesh/config.toml`)
 
@@ -561,6 +575,9 @@ filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/id
 
 [defaults]
 notifications = true
+
+[mesh]
+idle_interval = "60s"            # peer-sync pace while nothing reads the mesh view ("0s" = never idle)
 
 [spawn]                          # default launch policy (yolo bypasses permission prompts)
 mode = "yolo"

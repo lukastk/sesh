@@ -157,7 +157,7 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	peer, c := setupMeshPair(t, tr)
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
 
-	var peerView api.MachineView
+	var pview api.MachineView
 	var row api.ThreadSnapshot
 	if !waitUntil(15*time.Second, func() bool {
 		mesh, err := c.Mesh(context.Background())
@@ -170,7 +170,7 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 			}
 			for _, th := range mv.Threads {
 				if th.ID == there.ID {
-					peerView, row = mv, th
+					pview, row = mv, th
 					return true
 				}
 			}
@@ -181,10 +181,10 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	}
 
 	// The peer's data is attributed to the peer, fresh, and self=false.
-	if peerView.Self {
+	if pview.Self {
 		t.Errorf("peer view marked self=true")
 	}
-	if !peerView.Reachable {
+	if !pview.Reachable {
 		t.Errorf("freshly-synced peer marked unreachable")
 	}
 	if row.Machine != peer.Machine || row.Name != "onpeer" {
@@ -202,5 +202,40 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	}
 	if !haveSelf {
 		t.Errorf("merged mesh missing the local machine (self)")
+	}
+
+	// PEER-FACING SLIM (issue #1): archiving the (headless => no live pane) peer
+	// thread must drop it from the peer's served snapshot, and thus from the local
+	// cached mesh view — over THIS real transport (http: the slimmed /v1/snapshot;
+	// ssh: the slimmed `thread snapshot --json`). A second live thread proves the
+	// sync itself keeps flowing, so the absence is the filter, not a dead sync.
+	stays := peer.newHeadlessThread(t, "pi", "stays")
+	if !waitUntil(15*time.Second, func() bool {
+		mv, ok := peerView(t, c, peer.Machine)
+		return ok && hasThreadID(mv, stays.ID)
+	}) {
+		t.Fatalf("second peer thread never synced (presence first — never settle on absence alone)")
+	}
+	if _, stderr, err := peer.daemonRunner.Run(t, "thread", "archive", "--id", there.ID); err != nil {
+		t.Fatalf("archive peer thread: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		mv, ok := peerView(t, c, peer.Machine)
+		return ok && !hasThreadID(mv, there.ID) && hasThreadID(mv, stays.ID)
+	}) {
+		mv, _ := peerView(t, c, peer.Machine)
+		t.Fatalf("archived+dead peer thread still in the cached mesh view (archived=%v stays=%v) — the peer-facing snapshot must slim it",
+			hasThreadID(mv, there.ID), hasThreadID(mv, stays.ID))
+	}
+
+	// STEADY-STATE FRESHNESS: with the peer's state now byte-stable, the cache's
+	// synced_at must keep advancing (on http that is exactly the 304/touch path —
+	// the payload no longer transfers, but freshness must not go stale).
+	mv1, _ := peerView(t, c, peer.Machine)
+	if !waitUntil(10*time.Second, func() bool {
+		mv2, ok := peerView(t, c, peer.Machine)
+		return ok && mv2.SyncedAtUnix > mv1.SyncedAtUnix && mv2.Reachable
+	}) {
+		t.Fatalf("peer freshness stopped advancing once its snapshot went unchanged (the conditional-fetch path must still touch synced_at)")
 	}
 }

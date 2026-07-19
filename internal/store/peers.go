@@ -29,6 +29,26 @@ func (s *Store) UpsertPeerSnapshot(machine string, syncedAtUnix int64, payload s
 	return nil
 }
 
+// TouchPeerSnapshot refreshes an existing peer cache entry's synced_at +
+// reachable WITHOUT rewriting its payload — the 304 Not-Modified path of the
+// mesh sync (the peer answered; its threads are byte-unchanged). Returns
+// touched=false when the peer has no cache row (e.g. it was removed and
+// re-added while the syncer's in-memory ETag survived) so the caller knows a
+// full refetch is required — a silent no-op here would leave the peer
+// permanently payload-less while looking freshly synced.
+func (s *Store) TouchPeerSnapshot(machine string, syncedAtUnix int64) (bool, error) {
+	res, err := s.db.Exec(`UPDATE peer_snapshots SET synced_at_unix = ?, reachable = 1 WHERE machine = ?`,
+		syncedAtUnix, machine)
+	if err != nil {
+		return false, fmt.Errorf("store: touch peer snapshot %q: %w", machine, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: touch peer snapshot %q: rows affected: %w", machine, err)
+	}
+	return n > 0, nil
+}
+
 // MarkPeerUnreachable flags an existing peer's cache entry stale (reachable=0)
 // WITHOUT touching its payload or synced_at — so its last-known threads stay
 // listable for offline browsing. No-op if the peer was never synced.

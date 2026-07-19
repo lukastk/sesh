@@ -458,7 +458,7 @@ func testTicketOwnership(t *testing.T) {
 	owner.startDaemon(t)
 
 	bin := seshBin(t)
-	clientHome := t.TempDir()
+	clientHome := shortSandboxHome(t) // ssh routing opens a ControlMaster under it — see shortSandboxHome
 	client := &localRunner{bin: bin, env: map[string]string{
 		"SESH_HOME":         clientHome,
 		"SESH_MACHINE":      "client-nonowner",

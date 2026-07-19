@@ -77,13 +77,19 @@ type meshSync struct {
 	inflight map[string]bool
 	wg       sync.WaitGroup
 
-	// etags remembers, per peer, the ETag of the payload currently in the cache,
-	// so the next http fetch is conditional (an unchanged snapshot costs a
-	// bodyless 304, not the whole payload). In-memory only: a daemon restart just
-	// refetches full once. Invariant: a peer's remembered ETag always corresponds
-	// to its STORED payload (set only after a successful upsert).
-	emu   sync.Mutex
-	etags map[string]string
+	// Per-peer conditional-fetch state (all under emu; in-memory only — a daemon
+	// restart just refetches full once). Invariant: a peer's remembered state
+	// always corresponds to its STORED payload (updated only after a successful
+	// upsert), so a 304/empty-delta always means "the cache is current".
+	//   - cursors: the peer's delta-sync Generation (schema 41). While set, the
+	//     fetch asks for a DELTA and `working` holds the decoded thread set the
+	//     stored payload was built from, keyed by id, so a delta patches in place.
+	//   - etags: the full-payload ETag — the fallback conditional for peers whose
+	//     daemon predates delta sync (no Generation in its responses).
+	emu     sync.Mutex
+	etags   map[string]string
+	cursors map[string]string
+	working map[string]map[string]api.ThreadSnapshot
 
 	// Reused HTTP clients for peers on the http transport, keyed by addr+token, so
 	// the ~1s sync keeps connections alive across ticks (the whole point of HTTP
@@ -102,6 +108,8 @@ func newMeshSync(d *Daemon) *meshSync {
 		kickCh:       make(chan struct{}, 1),
 		inflight:     map[string]bool{},
 		etags:        map[string]string{},
+		cursors:      map[string]string{},
+		working:      map[string]map[string]api.ThreadSnapshot{},
 		clients:      map[string]*client.Client{},
 	}
 }
@@ -222,99 +230,196 @@ func (s *meshSync) tick() {
 
 // syncPeer fetches one peer's snapshot and records the outcome. The SQLite writes
 // serialize in the store (SetMaxOpenConns(1)), so concurrent completions are safe.
-// The http fetch is CONDITIONAL on the peer's remembered ETag: an unchanged
-// snapshot answers 304 and only the cache row's freshness is touched.
+// The http fetch is CONDITIONAL: with a delta-sync cursor only the peer's CHANGED
+// rows transfer (applied onto the cached set); without one, the remembered ETag
+// makes an unchanged snapshot a bodyless 304. Any degradation goes toward a FULL
+// refetch — never toward stale-but-fresh-looking data.
 func (s *meshSync) syncPeer(p peers.Peer) {
-	threads, etag, notModified, err := s.fetchPeerSnapshot(p, s.etagOf(p.Machine))
+	etag, cursor := s.condStateOf(p.Machine)
+	if cursor != "" {
+		etag = "" // one conditional mode at a time; the cursor wins while held
+	}
+	snap, newETag, notModified, err := s.fetchPeerSnapshot(p, etag, cursor)
 	if err != nil {
 		// A fetch aborted by shutdown says nothing about the peer — don't flip it
-		// stale on the way out.
+		// stale on the way out. Cursor/ETag survive an outage: they still match
+		// the retained payload, and a restarted peer daemon rejects the old
+		// cursor (new epoch) into a full resync anyway.
 		if s.ctx.Err() != nil {
 			return
 		}
 		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck — next tick retries
 		return
 	}
-	if notModified {
-		touched, terr := s.d.store.TouchPeerSnapshot(p.Machine, time.Now().Unix())
-		if terr != nil || touched {
-			return
+
+	now := time.Now().Unix()
+	switch {
+	case notModified:
+		// 304: the full payload is byte-unchanged — refresh freshness only.
+		if !s.touchOrInvalidate(p.Machine, now) {
+			s.syncPeerFull(p) // cache row vanished under us — full refetch
 		}
-		// 304 but no cache row to refresh: the peer's cache entry was removed
-		// (registry remove + re-add) while the in-memory ETag survived. A
-		// conditional fetch would leave this peer payload-less forever while
-		// looking freshly synced — drop the ETag and refetch unconditionally.
-		s.rememberETag(p.Machine, "")
-		threads, etag, _, err = s.fetchPeerSnapshot(p, "")
-		if err != nil {
-			if s.ctx.Err() != nil {
+	case snap.Delta:
+		if len(snap.Threads) == 0 && len(snap.Removed) == 0 {
+			// Empty delta: nothing changed since the cursor. Same cost class as a
+			// 304 (~100 B), same handling.
+			if !s.touchOrInvalidate(p.Machine, now) {
+				s.syncPeerFull(p)
 				return
 			}
-			s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
+			s.rememberCursor(p.Machine, snap.Generation)
 			return
 		}
+		if !s.applyDelta(p.Machine, snap, now) {
+			s.syncPeerFull(p) // no working base / write failed — full resync
+		}
+	default:
+		s.storeFull(p.Machine, snap, newETag, now)
 	}
-	payload, err := json.Marshal(threads)
+}
+
+// syncPeerFull drops the peer's conditional state and refetches the whole
+// snapshot in the same round — the recovery path whenever incremental state
+// can't be trusted (missing cache row, missing working base, failed write).
+func (s *meshSync) syncPeerFull(p peers.Peer) {
+	s.clearCondState(p.Machine)
+	snap, newETag, _, err := s.fetchPeerSnapshot(p, "", "")
 	if err != nil {
+		if s.ctx.Err() != nil {
+			return
+		}
 		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
 		return
 	}
-	if s.d.store.UpsertPeerSnapshot(p.Machine, time.Now().Unix(), string(payload)) == nil {
-		// Remember the ETag only once its payload is the stored one (coherence:
-		// a 304 must always mean "the CACHED payload is current").
-		s.rememberETag(p.Machine, etag)
+	s.storeFull(p.Machine, snap, newETag, time.Now().Unix())
+}
+
+// touchOrInvalidate refreshes an existing cache row's freshness; false means the
+// row is gone (or the touch failed) and the caller must full-refetch — a
+// conditional response with no cached payload behind it must never look synced.
+func (s *meshSync) touchOrInvalidate(machine string, now int64) bool {
+	touched, err := s.d.store.TouchPeerSnapshot(machine, now)
+	return err == nil && touched
+}
+
+// applyDelta patches the peer's cached thread set with a delta response:
+// removals first (a re-created id appears in both lists), then changed rows.
+// Returns false when there is no working base or the write fails — the caller
+// full-resyncs; the working set is dropped either way on failure so a partial
+// patch can never masquerade as current.
+func (s *meshSync) applyDelta(machine string, snap api.MachineSnapshot, now int64) bool {
+	s.emu.Lock()
+	w := s.working[machine]
+	s.emu.Unlock()
+	if w == nil {
+		return false // a cursor without its base is a bug-adjacent state: resync
 	}
+	for _, id := range snap.Removed {
+		delete(w, id)
+	}
+	for _, th := range snap.Threads {
+		w[th.ID] = th
+	}
+	threads := make([]api.ThreadSnapshot, 0, len(w))
+	for _, th := range w {
+		threads = append(threads, th)
+	}
+	payload, err := json.Marshal(sortedSnapshotThreads(threads))
+	if err == nil {
+		err = s.d.store.UpsertPeerSnapshot(machine, now, string(payload))
+	}
+	if err != nil {
+		s.clearCondState(machine)
+		return false
+	}
+	s.rememberCursor(machine, snap.Generation)
+	return true
 }
 
-func (s *meshSync) etagOf(machine string) string {
+// storeFull records a full snapshot response and (re)establishes the
+// conditional state: the cursor when the peer speaks delta sync (schema 41+),
+// else the ETag. State updates only after the payload is safely stored.
+func (s *meshSync) storeFull(machine string, snap api.MachineSnapshot, etag string, now int64) {
+	payload, err := json.Marshal(snap.Threads)
+	if err != nil {
+		s.d.store.MarkPeerUnreachable(machine) //nolint:errcheck
+		return
+	}
+	if s.d.store.UpsertPeerSnapshot(machine, now, string(payload)) != nil {
+		return // next round retries; old conditional state still matches the old payload
+	}
 	s.emu.Lock()
 	defer s.emu.Unlock()
-	return s.etags[machine]
-}
-
-func (s *meshSync) rememberETag(machine, etag string) {
-	s.emu.Lock()
-	defer s.emu.Unlock()
-	if etag == "" {
+	if snap.Generation != "" {
+		w := make(map[string]api.ThreadSnapshot, len(snap.Threads))
+		for _, th := range snap.Threads {
+			w[th.ID] = th
+		}
+		s.cursors[machine] = snap.Generation
+		s.working[machine] = w
 		delete(s.etags, machine)
 		return
 	}
-	s.etags[machine] = etag
+	delete(s.cursors, machine)
+	delete(s.working, machine)
+	if etag == "" {
+		delete(s.etags, machine)
+	} else {
+		s.etags[machine] = etag
+	}
+}
+
+func (s *meshSync) condStateOf(machine string) (etag, cursor string) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	return s.etags[machine], s.cursors[machine]
+}
+
+func (s *meshSync) rememberCursor(machine, cursor string) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	if cursor == "" {
+		delete(s.cursors, machine)
+		delete(s.working, machine)
+		return
+	}
+	s.cursors[machine] = cursor
+}
+
+func (s *meshSync) clearCondState(machine string) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	delete(s.etags, machine)
+	delete(s.cursors, machine)
+	delete(s.working, machine)
 }
 
 // fetchPeerSnapshot pulls a peer's maintained snapshot over the peer's CONFIGURED
 // transport (peers.Peer.Transport): http for a peer with a TCP API, ssh otherwise.
-// Either way the result is the peer's MachineSnapshot threads — an O(1) read of ITS
-// maintainer. Only http supports the conditional fetch (etag; a pre-40 peer
-// ignores it and serves the full 200); the ssh transport always returns the full
-// payload with etag "". A transport failure is returned LOUDLY (the caller marks
-// the peer unreachable); there is no silent ssh fallback for an http peer.
-func (s *meshSync) fetchPeerSnapshot(p peers.Peer, etag string) (threads []api.ThreadSnapshot, newETag string, notModified bool, err error) {
+// Either way the result is the peer's MachineSnapshot — an O(1) read of ITS
+// maintainer. Only http supports the conditional forms (delta cursor / etag; an
+// older peer ignores them and serves the full 200); the ssh transport always
+// returns the full payload. A transport failure is returned LOUDLY (the caller
+// marks the peer unreachable); there is no silent ssh fallback for an http peer.
+func (s *meshSync) fetchPeerSnapshot(p peers.Peer, etag, since string) (snap api.MachineSnapshot, newETag string, notModified bool, err error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.fetchTimeout)
 	defer cancel()
 	if p.Transport() == "http" {
-		return s.fetchPeerSnapshotHTTP(ctx, p, etag)
+		return s.fetchPeerSnapshotHTTP(ctx, p, etag, since)
 	}
-	threads, err = s.fetchPeerSnapshotSSH(ctx, p)
-	return threads, "", false, err
+	threads, err := s.fetchPeerSnapshotSSH(ctx, p)
+	return api.MachineSnapshot{Threads: threads}, "", false, err
 }
 
 // fetchPeerSnapshotHTTP talks directly to the peer daemon's TCP API (GET
 // /v1/snapshot with a bearer token) — no remote process spawn, hits the peer's
 // already-running maintainer from memory.
-func (s *meshSync) fetchPeerSnapshotHTTP(ctx context.Context, p peers.Peer, etag string) ([]api.ThreadSnapshot, string, bool, error) {
+func (s *meshSync) fetchPeerSnapshotHTTP(ctx context.Context, p peers.Peer, etag, since string) (api.MachineSnapshot, string, bool, error) {
 	token, err := p.ResolveAPIToken()
 	if err != nil {
-		return nil, "", false, err
+		return api.MachineSnapshot{}, "", false, err
 	}
-	snap, newETag, notModified, err := s.remoteClient(p.ApiAddr, token).SnapshotConditional(ctx, etag)
-	if err != nil {
-		return nil, "", false, err
-	}
-	if notModified {
-		return nil, etag, true, nil
-	}
-	return snap.Threads, newETag, false, nil
+	return s.remoteClient(p.ApiAddr, token).SnapshotConditional(ctx, etag, since)
 }
 
 // remoteClient returns a reused HTTP client for (addr, token), so keep-alive holds

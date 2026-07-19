@@ -545,9 +545,11 @@ through the cache, so they pin full pace). Otherwise it idles to `[mesh] idle_in
 the TUI after an idle stretch is fresh within ~a round trip. `sesh peer list` showing
 "synced 45s ago" on a quiet daemon is therefore deliberate idling, not degraded sync —
 `sesh daemon status` reports the pace as `mesh_cadence` (active / idle / hooks-pinned /
-always). Unchanged snapshots transfer as bodyless 304s (ETag). What the views SHOW is
-unchanged by any of this — every machine's full thread set, archived included, still
-replicates across the mesh.
+always). Between schema-41 daemons each sync round transfers only the rows that CHANGED
+since the last one (delta sync; an unchanged round is ~100 bytes), and against older
+daemons an unchanged snapshot is a bodyless 304 (ETag). What the views SHOW is unchanged
+by any of this — every machine's full thread set, archived included, still replicates
+across the mesh.
 
 ## Config (`~/.sesh/config.toml`)
 

@@ -190,8 +190,20 @@ package api
 // mesh_cadence is additive/omitempty. (An initial revision of 40 also slimmed
 // archived-dead threads out of the peer-facing snapshot; REVERTED same-day — it made
 // remote archived threads vanish from cached mesh views, and an optimization must
-// never change what sesh shows. The invisible replacement is delta sync — a ticket.)
-const SchemaVersion = 40
+// never change what sesh shows. The invisible replacement is 41's delta sync.)
+//
+// 41: MESH DELTA SYNC (issue #1 follow-up, ticket 953ac79d). GET /v1/snapshot gains an
+// optional `since=<cursor>` query param: with a valid cursor the response carries ONLY
+// the thread rows changed since it (`delta:true`, `removed` ids for deletions) plus the
+// next `generation` cursor — so a steady-state sync round costs ~a hundred bytes and a
+// busy tick costs one row, while archived/idle threads replicate once and then never
+// re-transfer. The cursor is OPAQUE ("<boot-epoch>:<counter>"); an unknown/stale cursor
+// or a daemon restart (epoch mismatch) degrades to the FULL payload — never to wrong
+// data. Purely additive and mixed-mesh safe: a pre-41 daemon ignores `since` and serves
+// the full 200 (no `generation` ⇒ the client stays on the ETag/304 flow); a pre-41
+// client never sends `since`. What the views SHOW is unchanged — this is transfer-layer
+// only (the no-UX-tradeoffs rule from the 40 revert).
+const SchemaVersion = 41
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

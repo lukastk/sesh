@@ -47,6 +47,7 @@ var skipReasons = map[string]string{
 	"thread.snapshot":           "GET /v1/snapshot reflects real live state from the background maintainer (O(1) read, tracks waiting<->working)",
 	"mesh.snapshot":             "GET /v1/mesh: L2 sync replicates a peer's snapshot into the local cache (ssh transport); merged view read locally",
 	"mesh.snapshot.http":        "L2 sync replicates a peer's snapshot over the peer's TCP API (http transport) — SSH↔HTTP parity twin",
+	"mesh.delta-sync.http":      "delta sync (schema 41): steady rounds transfer ~empty deltas, a change ~one row (wire-measured via counting proxy); the replicated set stays complete",
 	"mesh.offline-listing":      "offline browsing (ssh transport): a downed peer's threads stay listed (reachable=false), and recover when it returns",
 	"mesh.offline-listing.http": "offline browsing over the http transport — SSH↔HTTP parity twin",
 	"route.parity":              "--machine routing over ssh: thread/ticket/tmux ops land on the peer's daemon",

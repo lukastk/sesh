@@ -88,18 +88,27 @@ func (c *Client) ThreadDelete(ctx context.Context, id string, force bool) error 
 // Snapshot fetches GET /v1/snapshot — this machine's threads with their live state,
 // served from the daemon's background maintainer (an O(1) read, never a probe).
 func (c *Client) Snapshot(ctx context.Context) (api.MachineSnapshot, error) {
-	snap, _, _, err := c.SnapshotConditional(ctx, "")
+	snap, _, _, err := c.SnapshotConditional(ctx, "", "")
 	return snap, err
 }
 
-// SnapshotConditional fetches GET /v1/snapshot conditionally: when etag (from a
-// previous fetch's ETag) is non-empty it is sent as If-None-Match, and a daemon
-// whose snapshot is byte-unchanged answers 304 with no body (notModified=true,
-// zero snapshot) — the mesh sync's steady-state fetch costs headers, not the
-// whole payload (issue #1). A daemon without ETag support (pre-schema-40) ignores
-// the header and always serves the full 200 with newETag == "".
-func (c *Client) SnapshotConditional(ctx context.Context, etag string) (snap api.MachineSnapshot, newETag string, notModified bool, err error) {
-	req, err := c.req(ctx, http.MethodGet, "http://unix/v1/snapshot", nil)
+// SnapshotConditional fetches GET /v1/snapshot conditionally (issue #1):
+//   - since (a cursor from a previous response's Generation) asks a schema-41
+//     daemon for a DELTA — only the rows changed since that cursor (snap.Delta
+//     true, snap.Removed for deletions). An older daemon ignores it and serves
+//     the full payload (snap.Generation empty).
+//   - etag (from a previous fetch's ETag) is sent as If-None-Match; a daemon
+//     whose full payload is byte-unchanged answers 304 with no body
+//     (notModified=true, zero snapshot). Pre-schema-40 daemons ignore it.
+//
+// Callers use one mode at a time: the mesh sync sends `since` once it holds a
+// cursor, else `etag`.
+func (c *Client) SnapshotConditional(ctx context.Context, etag, since string) (snap api.MachineSnapshot, newETag string, notModified bool, err error) {
+	u := "http://unix/v1/snapshot"
+	if since != "" {
+		u += "?since=" + url.QueryEscape(since)
+	}
+	req, err := c.req(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return snap, "", false, err
 	}

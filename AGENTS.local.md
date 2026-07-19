@@ -76,6 +76,35 @@ resolves via NSS fine) — H22's class, bind-side. So mymain's mesh shows ideapa
 12d-stale and cross-machine views never list ideapad threads. Fix needs Lukas's call (myrig
 FQDN coords vs IP bind vs resolver knob) — do NOT silently "fix" it per-machine.
 
+### H44 follow-up — the archived-SLIM was REVERTED same day (sesh 0d12441; deployed ALL FIVE): optimizations must NEVER change what sesh shows
+Lukas hit the slim live within hours: the PHONE's archived TUI view showed ONE row — 9c1cc4a5
+= mymain's jf-seed-elevated-unlock, the sole archived-but-HEADFUL thread (H40 keep) — while
+mymain's 183 / macbook's 67 / macstudio's 9 archived-dead threads had stopped replicating
+(termux itself has ZERO local threads; the 2 stale ideapad archived rows were hidden by the
+H35 offline-hide since ideapad reads unreachable — see ticket aeaca0d0). macbook "looked
+fine" only because its 67 archived are LOCAL (self view unfiltered). His verdict (verbatim
+class): "I don't want hacks like these. We shouldn't deteriorate the usage experience of
+sesh because of this optimisation. Let me be extremely clear about that." ⇒ STANDING RULE
+(also saved to persistent memory no-ux-tradeoffs-for-optimization): a design-Q&A sign-off on
+an abstract trade is NOT consent to a degraded experience in practice — only
+TRANSFER-INVISIBLE levers are acceptable; never hide rows. REVERT 0d12441: handleSnapshot
+serves the FULL set again (peerFacingThreads → sortedSnapshotThreads — the by-id sort stays,
+the ETag needs a deterministic payload); ETag/304 + demand-driven cadence UNTOUCHED (those
+are the levers that took the phone 20.5 KB/s → ~300 B/s idle). The mesh.snapshot(+.http)
+cells now carry a FULL-REPLICATION GUARD (archive a headless peer thread → row STAYS in the
+cached mesh view with archived=true, both transports; unit
+TestSnapshotFullAndConditional) — re-introducing the filter turns both RED (verified by
+temporary neuter; reverse the edit, NEVER git-checkout a file with uncommitted work — that
+wiped my edits once this session). Deployed ALL FIVE at 0d12441 (mymain/macstudio/ideapad/
+macbook [sshd came back] supervisorctl; termux kill-by-pid + setsid relaunch → pid 17525);
+LIVE-PROVEN from the phone's cache: mymain threads=212 archived=183, macbook 73/67,
+macstudio 9/9 — the archived view is whole again. The UX-invisible replacement for the
+payload-size problem (whole 124 KB re-sends whenever ANY row changes) = DELTA SYNC
+(version-cursor, only changed rows transfer, archived rows cost one transfer ever) — ticket
+953ac79d, triage, design to confer first. ALSO: phone traffic monitoring — /proc/net/dev +
+sysfs are PERMISSION-DENIED in termux and it has no `ip`; measure from the OTHER END via
+`tailscale status` per-peer tx/rx counters on mymain.
+
 ## H43 — mmt-copy-clipboard-to-master: push the BASE machine's clipboard into the master's clipboard (2026-07-12, myrig efc8cad; NO sesh change; deployed 4/5 — termux OFFLINE, pending; ticket 1d978651)
 Ticket 1d978651 "mmt command similar to mmt-copy-to-master but instead transfers the current
 clipboard content of the base to the master". MYRIG-ONLY (shell.sh.jinja): new zsh function

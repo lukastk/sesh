@@ -178,7 +178,20 @@ package api
 // OWNING daemon needs 39 (a pin/divider can only be created there); a pre-39 viewer omits
 // pin_order (renders the thread unpinned) and its routed pin hits the upgraded owner's
 // endpoint; a pre-39 daemon 404s the pin route loudly.
-const SchemaVersion = 39
+//
+// 40: MESH-SYNC DATA RATIONING (GitHub issue #1 — the 1 Hz full-snapshot poll burned
+// ~450 MB/hr of mobile data on the termux leaf). GET /v1/snapshot serves an ETag over
+// its (sorted, peer-facing) threads payload and honors If-None-Match with a bodyless
+// 304; the mesh sync fetches conditionally and idles to [mesh] idle_interval when
+// nothing consumes the mesh view (no /v1/mesh read or all-machines fan-out in the
+// active window, no [[hooks]] configured). The peer-facing snapshot also EXCLUDES
+// archived threads with no live pane (archived-but-HEADFUL stays — the H40 default-view
+// contract). StatusResponse gains `mesh_cadence`. Mixed-mesh safe: ETag/304 are plain
+// HTTP conditionals (a pre-40 daemon ignores the header and serves the full 200; a
+// pre-40 syncer sends no If-None-Match and gets the full 200); mesh_cadence is
+// additive/omitempty; the slimmed snapshot only changes what a viewer's CACHED mesh
+// view lists (remote archived-dead threads), never a wire shape.
+const SchemaVersion = 40
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
@@ -241,6 +254,12 @@ type StatusResponse struct {
 	TmuxSocket   string `json:"tmux_socket,omitempty"`
 	MasterSocket string `json:"master_socket,omitempty"`
 	Home         string `json:"home,omitempty"`
+	// MeshCadence (schema 40) is the mesh sync's current pace, so a peer showing
+	// "synced 45s ago" is diagnosable as deliberate idling rather than degraded
+	// sync: "active" (recent mesh demand), "idle" (backed off to idle_interval),
+	// "hooks-pinned" ([[hooks]] configured — never idles), or "always" (idling
+	// disabled via idle_interval = "0s").
+	MeshCadence string `json:"mesh_cadence,omitempty"`
 }
 
 // ErrorResponse is the uniform error body.

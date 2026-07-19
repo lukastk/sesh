@@ -239,7 +239,7 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh thread grid --all-machines", "sesh thread grid --json"},
 	},
 	"thread snapshot": {
-		summary:  "emit this daemon's per-thread runtime snapshot rows (head, busy, attachment, agent, name, id)",
+		summary:  "emit this daemon's PEER-FACING per-thread runtime snapshot rows (head, busy, attachment, agent, name, id); archived threads with no live pane are excluded — use `thread list --archived` for those",
 		usage:    "sesh thread snapshot [--machine <m>] [--json]",
 		examples: []string{"sesh thread snapshot --json"},
 	},

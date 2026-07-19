@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -85,8 +88,40 @@ func (c *Client) ThreadDelete(ctx context.Context, id string, force bool) error 
 // Snapshot fetches GET /v1/snapshot — this machine's threads with their live state,
 // served from the daemon's background maintainer (an O(1) read, never a probe).
 func (c *Client) Snapshot(ctx context.Context) (api.MachineSnapshot, error) {
-	var out api.MachineSnapshot
-	return out, c.getJSON(ctx, "http://unix/v1/snapshot", &out)
+	snap, _, _, err := c.SnapshotConditional(ctx, "")
+	return snap, err
+}
+
+// SnapshotConditional fetches GET /v1/snapshot conditionally: when etag (from a
+// previous fetch's ETag) is non-empty it is sent as If-None-Match, and a daemon
+// whose snapshot is byte-unchanged answers 304 with no body (notModified=true,
+// zero snapshot) — the mesh sync's steady-state fetch costs headers, not the
+// whole payload (issue #1). A daemon without ETag support (pre-schema-40) ignores
+// the header and always serves the full 200 with newETag == "".
+func (c *Client) SnapshotConditional(ctx context.Context, etag string) (snap api.MachineSnapshot, newETag string, notModified bool, err error) {
+	req, err := c.req(ctx, http.MethodGet, "http://unix/v1/snapshot", nil)
+	if err != nil {
+		return snap, "", false, err
+	}
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return snap, "", false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return snap, etag, true, nil
+	case http.StatusOK:
+		if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+			return snap, "", false, err
+		}
+		return snap, resp.Header.Get("ETag"), false, nil
+	default:
+		return snap, "", false, fmt.Errorf("client: snapshot returned %d", resp.StatusCode)
+	}
 }
 
 // Mesh fetches GET /v1/mesh — the merged cross-machine view (this machine's live

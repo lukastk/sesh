@@ -114,6 +114,7 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 // transport. Peers the liveness cache already knows are down are skipped up front, so
 // one offline machine no longer costs the caller a full per-peer timeout.
 func (d *Daemon) fanOutGrid(includeArchived bool) ([]api.ThreadRow, []string) {
+	d.noteMeshDemand() // all-machines demand — see fanOutThreads
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return nil, nil

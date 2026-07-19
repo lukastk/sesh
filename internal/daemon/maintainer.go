@@ -1,8 +1,12 @@
 package daemon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -285,9 +289,58 @@ func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 }
 
 // handleSnapshot serves GET /v1/snapshot: a pure read of the maintained live state
-// (no on-demand probe). This is what the local TUI and the mesh sync consume.
+// (no on-demand probe). This is the PEER-FACING surface — what every peer's mesh
+// sync (http directly, ssh via `thread snapshot --json`) re-downloads on change —
+// so it is slimmed to peerFacingThreads and served with an ETag: a fetch whose
+// If-None-Match matches costs a bodyless 304 instead of the whole payload
+// (issue #1). Local merged reads (GET /v1/mesh's self entry, the eventer) use the
+// unfiltered maintainer state directly.
 func (d *Daemon) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, d.maint.snapshot())
+	snap := d.maint.snapshot()
+	snap.Threads = peerFacingThreads(snap.Threads)
+	etag := snapshotETag(snap.Threads)
+	if etag != "" {
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, snap)
+}
+
+// peerFacingThreads filters the snapshot served to peers: archived threads with
+// no live pane are dead weight that every machine on the mesh would otherwise
+// re-download on every change forever (issue #1: 200+ archived threads made one
+// machine's snapshot ~124 KB). Archived-but-HEADFUL threads stay — the default
+// view shows an archived thread while its agent still runs (the H40 contract).
+// The trade (signed off): a remote machine's archived-dead threads no longer
+// appear in a viewer's CACHED mesh views; they remain reachable via --machine
+// routing and the live all-machines fan-out, which lists archived as before.
+// The kept threads are returned sorted by ID so the wire payload — and thus the
+// ETag — is deterministic (the maintainer's map iteration is not).
+func peerFacingThreads(threads []api.ThreadSnapshot) []api.ThreadSnapshot {
+	out := make([]api.ThreadSnapshot, 0, len(threads))
+	for _, t := range threads {
+		if t.Archived && t.Head != api.Headful {
+			continue
+		}
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// snapshotETag is a strong validator over the exact peer-facing threads payload
+// (already sorted by peerFacingThreads). Empty on a marshal failure — the caller
+// then serves an unconditional 200, the safe direction (never a wrong 304).
+func snapshotETag(threads []api.ThreadSnapshot) string {
+	b, err := json.Marshal(threads)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
 // stateOf returns the maintained snapshot for one thread, if the maintainer has

@@ -17,9 +17,27 @@ import (
 // The mesh sync (L2 in _dev/MESH.md) keeps a LOCAL cache of every peer's snapshot
 // fresh in the background, so the cross-machine view (GET /v1/mesh) is a local read
 // — instant, offline-capable, and independent of per-query ssh latency.
+//
+// Cadence is DEMAND-DRIVEN (issue #1: a fixed 1 Hz full-snapshot poll burned
+// ~450 MB/hr of mobile data on the termux leaf): full 1 Hz while something is
+// consuming the mesh view — a GET /v1/mesh read or an all-machines fan-out within
+// meshActiveWindow — or when [[hooks]] are configured (the eventer diffs REMOTE
+// snapshots continuously; at a slow cadence a remote turn shorter than the
+// interval would produce NO busy edge and a notify hook would silently never
+// fire). Otherwise one round per idleInterval, snapping back instantly on the
+// next demand via kick() so the first mesh read after an idle stretch is fresh
+// within ~an RTT, not one interval later.
 const (
 	meshSyncTick     = 1 * time.Second
 	meshFetchTimeout = 8 * time.Second
+	// meshActiveWindow is how long after the last mesh-view demand the full
+	// cadence persists. Any live consumer (the TUI polls ~3s, sesh-ui similar)
+	// re-bumps demand well inside it.
+	meshActiveWindow = 60 * time.Second
+	// meshKickDebounce: a demand bump only kicks an immediate round when the
+	// previous demand is at least this old — an active consumer's steady polling
+	// rides the 1 Hz ticker instead of stacking extra rounds.
+	meshKickDebounce = 2 * time.Second
 )
 
 type meshSync struct {
@@ -36,6 +54,20 @@ type meshSync struct {
 
 	// fetchTimeout bounds one peer fetch (meshFetchTimeout; injectable in tests).
 	fetchTimeout time.Duration
+	// tickInterval is the loop's base tick (meshSyncTick; injectable in tests).
+	tickInterval time.Duration
+
+	// idleInterval is the cadence while nothing consumes the mesh view (from
+	// [mesh] idle_interval; daemon.New wires it). The zero value means NEVER idle
+	// — always full cadence — so a hand-built test daemon behaves exactly as
+	// before this knob existed.
+	idleInterval time.Duration
+	// hooksPinned pins full cadence: [[hooks]] are configured, so the eventer is
+	// a standing consumer of remote state (see the cadence comment above).
+	hooksPinned bool
+	// kickCh wakes the run loop for an immediate round when demand arrives while
+	// idling (buffered 1; kick() never blocks).
+	kickCh chan struct{}
 
 	// inflight tracks peers with a fetch currently running, so a tick launches at
 	// most one fetch per peer: a hanging peer's next fetch waits for its previous
@@ -44,6 +76,14 @@ type meshSync struct {
 	imu      sync.Mutex
 	inflight map[string]bool
 	wg       sync.WaitGroup
+
+	// etags remembers, per peer, the ETag of the payload currently in the cache,
+	// so the next http fetch is conditional (an unchanged snapshot costs a
+	// bodyless 304, not the whole payload). In-memory only: a daemon restart just
+	// refetches full once. Invariant: a peer's remembered ETag always corresponds
+	// to its STORED payload (set only after a successful upsert).
+	emu   sync.Mutex
+	etags map[string]string
 
 	// Reused HTTP clients for peers on the http transport, keyed by addr+token, so
 	// the ~1s sync keeps connections alive across ticks (the whole point of HTTP
@@ -58,7 +98,10 @@ func newMeshSync(d *Daemon) *meshSync {
 		d: d, stop: make(chan struct{}), done: make(chan struct{}),
 		ctx: ctx, cancel: cancel,
 		fetchTimeout: meshFetchTimeout,
+		tickInterval: meshSyncTick,
+		kickCh:       make(chan struct{}, 1),
 		inflight:     map[string]bool{},
+		etags:        map[string]string{},
 		clients:      map[string]*client.Client{},
 	}
 }
@@ -85,16 +128,61 @@ func (s *meshSync) stopAndWait() {
 
 func (s *meshSync) run() {
 	defer close(s.done)
-	t := time.NewTicker(meshSyncTick)
+	t := time.NewTicker(s.tickInterval)
 	defer t.Stop()
 	s.tick()
+	lastRound := time.Now()
 	for {
 		select {
 		case <-s.stop:
 			return
-		case <-t.C:
+		case <-s.kickCh:
+			// Demand arrived while idling: sync NOW so the read that woke us is
+			// stale for ~an RTT, not a whole idle interval.
 			s.tick()
+			lastRound = time.Now()
+		case <-t.C:
+			if s.shouldSync(time.Since(lastRound)) {
+				s.tick()
+				lastRound = time.Now()
+			}
 		}
+	}
+}
+
+// shouldSync decides whether this base tick performs a round: always at full
+// cadence when idling is off (idleInterval 0), when [[hooks]] pin it, or while
+// the mesh view is in demand; otherwise only once sinceLast reaches the idle
+// interval.
+func (s *meshSync) shouldSync(sinceLast time.Duration) bool {
+	if s.idleInterval == 0 || s.hooksPinned {
+		return true
+	}
+	if time.Since(s.d.lastMeshDemand()) <= meshActiveWindow {
+		return true
+	}
+	return sinceLast >= s.idleInterval
+}
+
+// kick wakes the run loop for an immediate round (never blocks; coalesces).
+func (s *meshSync) kick() {
+	select {
+	case s.kickCh <- struct{}{}:
+	default:
+	}
+}
+
+// cadence reports the current pace for observability (StatusResponse.MeshCadence).
+func (s *meshSync) cadence() string {
+	switch {
+	case s.idleInterval == 0:
+		return "always"
+	case s.hooksPinned:
+		return "hooks-pinned"
+	case time.Since(s.d.lastMeshDemand()) <= meshActiveWindow:
+		return "active"
+	default:
+		return "idle"
 	}
 }
 
@@ -134,8 +222,10 @@ func (s *meshSync) tick() {
 
 // syncPeer fetches one peer's snapshot and records the outcome. The SQLite writes
 // serialize in the store (SetMaxOpenConns(1)), so concurrent completions are safe.
+// The http fetch is CONDITIONAL on the peer's remembered ETag: an unchanged
+// snapshot answers 304 and only the cache row's freshness is touched.
 func (s *meshSync) syncPeer(p peers.Peer) {
-	threads, err := s.fetchPeerSnapshot(p)
+	threads, etag, notModified, err := s.fetchPeerSnapshot(p, s.etagOf(p.Machine))
 	if err != nil {
 		// A fetch aborted by shutdown says nothing about the peer — don't flip it
 		// stale on the way out.
@@ -145,41 +235,86 @@ func (s *meshSync) syncPeer(p peers.Peer) {
 		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck — next tick retries
 		return
 	}
+	if notModified {
+		touched, terr := s.d.store.TouchPeerSnapshot(p.Machine, time.Now().Unix())
+		if terr != nil || touched {
+			return
+		}
+		// 304 but no cache row to refresh: the peer's cache entry was removed
+		// (registry remove + re-add) while the in-memory ETag survived. A
+		// conditional fetch would leave this peer payload-less forever while
+		// looking freshly synced — drop the ETag and refetch unconditionally.
+		s.rememberETag(p.Machine, "")
+		threads, etag, _, err = s.fetchPeerSnapshot(p, "")
+		if err != nil {
+			if s.ctx.Err() != nil {
+				return
+			}
+			s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
+			return
+		}
+	}
 	payload, err := json.Marshal(threads)
 	if err != nil {
 		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
 		return
 	}
-	s.d.store.UpsertPeerSnapshot(p.Machine, time.Now().Unix(), string(payload)) //nolint:errcheck — next tick retries
+	if s.d.store.UpsertPeerSnapshot(p.Machine, time.Now().Unix(), string(payload)) == nil {
+		// Remember the ETag only once its payload is the stored one (coherence:
+		// a 304 must always mean "the CACHED payload is current").
+		s.rememberETag(p.Machine, etag)
+	}
+}
+
+func (s *meshSync) etagOf(machine string) string {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	return s.etags[machine]
+}
+
+func (s *meshSync) rememberETag(machine, etag string) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	if etag == "" {
+		delete(s.etags, machine)
+		return
+	}
+	s.etags[machine] = etag
 }
 
 // fetchPeerSnapshot pulls a peer's maintained snapshot over the peer's CONFIGURED
 // transport (peers.Peer.Transport): http for a peer with a TCP API, ssh otherwise.
 // Either way the result is the peer's MachineSnapshot threads — an O(1) read of ITS
-// maintainer. A transport failure is returned LOUDLY (the caller marks the peer
-// unreachable); there is no silent ssh fallback for an http peer.
-func (s *meshSync) fetchPeerSnapshot(p peers.Peer) ([]api.ThreadSnapshot, error) {
+// maintainer. Only http supports the conditional fetch (etag; a pre-40 peer
+// ignores it and serves the full 200); the ssh transport always returns the full
+// payload with etag "". A transport failure is returned LOUDLY (the caller marks
+// the peer unreachable); there is no silent ssh fallback for an http peer.
+func (s *meshSync) fetchPeerSnapshot(p peers.Peer, etag string) (threads []api.ThreadSnapshot, newETag string, notModified bool, err error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.fetchTimeout)
 	defer cancel()
 	if p.Transport() == "http" {
-		return s.fetchPeerSnapshotHTTP(ctx, p)
+		return s.fetchPeerSnapshotHTTP(ctx, p, etag)
 	}
-	return s.fetchPeerSnapshotSSH(ctx, p)
+	threads, err = s.fetchPeerSnapshotSSH(ctx, p)
+	return threads, "", false, err
 }
 
 // fetchPeerSnapshotHTTP talks directly to the peer daemon's TCP API (GET
 // /v1/snapshot with a bearer token) — no remote process spawn, hits the peer's
 // already-running maintainer from memory.
-func (s *meshSync) fetchPeerSnapshotHTTP(ctx context.Context, p peers.Peer) ([]api.ThreadSnapshot, error) {
+func (s *meshSync) fetchPeerSnapshotHTTP(ctx context.Context, p peers.Peer, etag string) ([]api.ThreadSnapshot, string, bool, error) {
 	token, err := p.ResolveAPIToken()
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
-	snap, err := s.remoteClient(p.ApiAddr, token).Snapshot(ctx)
+	snap, newETag, notModified, err := s.remoteClient(p.ApiAddr, token).SnapshotConditional(ctx, etag)
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
-	return snap.Threads, nil
+	if notModified {
+		return nil, etag, true, nil
+	}
+	return snap.Threads, newETag, false, nil
 }
 
 // remoteClient returns a reused HTTP client for (addr, token), so keep-alive holds
@@ -237,6 +372,7 @@ func sshMultiplexArgs() []string { return peers.SSHMultiplexArgs() }
 // live snapshot (always fresh) plus every cached peer (with staleness), read
 // locally. The TUI's data source.
 func (d *Daemon) handleMesh(w http.ResponseWriter, r *http.Request) {
+	d.noteMeshDemand() // a mesh read is what the demand-driven cadence keys on
 	resp := api.MeshSnapshot{Schema: api.SchemaVersion}
 
 	self := d.maint.snapshot()

@@ -54,7 +54,7 @@ func setupRoutedPeer(t *testing.T, tr meshTransport) *Sandbox {
 	peer.startDaemon(t)
 
 	clientEnv := map[string]string{
-		"SESH_HOME":          t.TempDir(),
+		"SESH_HOME":          shortSandboxHome(t), // ssh routing opens a ControlMaster under it — see shortSandboxHome
 		"SESH_MACHINE":       fmt.Sprintf("rclient-%d", stamp),
 		"SESH_MASTER_SOCKET": fmt.Sprintf("sesh-test-rcmaster-%d", stamp),
 	}

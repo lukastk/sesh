@@ -42,6 +42,11 @@ func (d *Daemon) knownOfflinePeers() map[string]bool {
 // so it is reported in Unreachable rather than failing the whole call. Peers the
 // liveness cache already knows are down are skipped up front (no wasted dial).
 func (d *Daemon) fanOutThreads(local []api.Thread, includeArchived bool) ([]api.Thread, []string) {
+	// An all-machines read is mesh demand: it doesn't read the snapshot cache
+	// itself (it fans out live), but it leans on the cache's reachability gate
+	// below — and it means someone is actively looking cross-machine, so the
+	// idling mesh sync should come back to full cadence.
+	d.noteMeshDemand()
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return local, nil

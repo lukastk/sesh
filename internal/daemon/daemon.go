@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lukastk/sesh/internal/agents"
@@ -50,6 +51,10 @@ type Daemon struct {
 	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
 	// the cross-machine view (GET /v1/mesh) is a local read.
 	mesh *meshSync
+	// meshDemand is the unix time of the last mesh-view consumption (a /v1/mesh
+	// read or an all-machines fan-out) — the signal the mesh sync's demand-driven
+	// cadence keys on (see meshsync.go).
+	meshDemand atomic.Int64
 	// naming is the user's [[session_name]] policy (nil = default sesh_<name>).
 	naming *config.Naming
 	// hooks + evt: the [[hooks]] runner and the mesh-wide observer loop that
@@ -149,6 +154,15 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 	d.hooks = newHookRunner(hooks, muted)
+	meshCfg, err := config.LoadMesh(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [mesh] refuses the daemon loudly
+	}
+	d.mesh.idleInterval = meshCfg.IdleInterval
+	// [[hooks]] pin full cadence: the eventer diffs REMOTE snapshots for them
+	// continuously, and a slow sample would silently MISS a remote busy edge
+	// shorter than the idle interval (a notify hook that never fires).
+	d.mesh.hooksPinned = len(hooks) > 0
 	d.evt = newEventer(d, d.hooks)
 	d.seedSubTracker()
 	if cfg.MasterSelfheal {
@@ -226,6 +240,27 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 		return srvErr
 	}
 	return storeErr
+}
+
+// noteMeshDemand records that something just consumed the mesh view (a /v1/mesh
+// read or an all-machines fan-out). When the previous demand had lapsed — the
+// sync may be idling — it kicks an immediate round so the consumer that woke us
+// sees fresh data within ~an RTT instead of one idle interval.
+func (d *Daemon) noteMeshDemand() {
+	now := time.Now().Unix()
+	prev := d.meshDemand.Swap(now)
+	if d.mesh != nil && now-prev >= int64(meshKickDebounce/time.Second) {
+		d.mesh.kick()
+	}
+}
+
+// lastMeshDemand returns when the mesh view was last consumed (zero time = never).
+func (d *Daemon) lastMeshDemand() time.Time {
+	u := d.meshDemand.Load()
+	if u == 0 {
+		return time.Time{}
+	}
+	return time.Unix(u, 0)
 }
 
 // socketAlive reports whether a daemon is actually answering on the socket (not

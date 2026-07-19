@@ -291,7 +291,8 @@ func testTmuxStageFile(t *testing.T, loc matrix.Locality) {
 		peer.startDaemon(t)
 		bin := seshBin(t)
 		client := &localRunner{bin: bin, env: map[string]string{
-			"SESH_HOME": t.TempDir(), "SESH_MACHINE": "stage-client",
+			// ssh routing opens a ControlMaster under SESH_HOME — see shortSandboxHome
+			"SESH_HOME": shortSandboxHome(t), "SESH_MACHINE": "stage-client",
 		}}
 		if _, stderr, err := client.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin); err != nil {
 			t.Fatalf("peer add: %v\n%s", err, stderr)

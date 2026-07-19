@@ -121,6 +121,31 @@ state (no probing). The local TUI and the mesh sync both consume this.
 Each daemon runs a background sync that, per peer (concurrently, with a per-peer timeout so
 one slow/hung peer never stalls the loop), fetches `GET /v1/snapshot` and stores it.
 
+### Data rationing (GitHub issue #1)
+
+The original fixed 1 Hz full-snapshot poll re-downloaded every peer's whole payload
+3,600×/hour forever — ~450 MB/hr of mobile data on the termux leaf. Three multiplying
+levers fixed it, all mixed-mesh safe:
+
+- **Conditional fetch (http).** `GET /v1/snapshot` serves an `ETag` over its (sorted)
+  threads payload and honors `If-None-Match` with a bodyless `304`; the syncer remembers
+  each peer's ETag (in memory; coherent with the STORED payload) and a 304 only touches
+  the cache row's `synced_at`/`reachable` (`TouchPeerSnapshot`). Steady-state fetches cost
+  headers, not payloads. The ssh transport stays unconditional.
+- **Demand-driven cadence.** Full 1 Hz only while the mesh view is consumed — a
+  `GET /v1/mesh` read or an all-machines fan-out within the 60s active window — or when
+  `[[hooks]]` are configured (the eventer diffs REMOTE snapshots continuously; a slow
+  sample would silently MISS a remote busy→idle shorter than the interval, i.e. a notify
+  toast that never fires). Otherwise one round per `[mesh] idle_interval` (default 60s;
+  `"0s"` = never idle). Demand arriving while idle KICKS an immediate round, so the first
+  TUI frame after an idle stretch is fresh within ~an RTT. `daemon status` reports the
+  current pace as `mesh_cadence` (active / idle / hooks-pinned / always).
+- **Peer-facing slim.** The served snapshot EXCLUDES archived threads with no live pane
+  (archived-but-HEADFUL stays — the H40 default-view contract). Trade: a remote machine's
+  archived-dead threads don't appear in cached mesh views; they remain reachable via
+  `--machine` routing and the live fan-out. Local reads (`/v1/mesh` self, the eventer)
+  use the unfiltered maintainer state.
+
 **Cache (SQLite-backed, survives restart → instant cold start):**
 
 ```

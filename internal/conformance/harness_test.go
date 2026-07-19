@@ -133,6 +133,25 @@ func withHome(dir string) sandboxOpt {
 	return func(c *sandboxConfig) { c.homeDir = dir }
 }
 
+// shortSandboxHome returns a SHORT temp dir for a sandbox's SESH_HOME —
+// deliberately NOT t.TempDir(), whose path embeds the full test name. SESH_HOME
+// must stay short because unix sockets live under it: daemon.sock, and the ssh
+// ControlMaster at <home>/ssh-cm/<40-char %C> plus the ".<16 random>" suffix ssh
+// appends while CREATING the master. With a long-named cell's t.TempDir() that
+// overran the 108-byte sun_path limit, so every ssh-transport cell of a
+// long-named feature (mesh.snapshot, daemon.mesh-read, mesh.offline-listing)
+// failed with "path too long for Unix domain socket" (regression surface of
+// 4716d2d, which rooted the ControlPath in SESH_HOME for macOS's sake).
+func shortSandboxHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("/tmp", "sesh-sb-")
+	if err != nil {
+		t.Fatalf("sandbox home: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	return home
+}
+
 // newSandbox builds a sandbox for the given locality. The home is a fresh temp
 // dir cleaned up with the test; the runner is local (exec) or remote (ssh
 // localhost) accordingly. Each sandbox gets its OWN tmux socket so cells never
@@ -144,7 +163,7 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 		o(&sc)
 	}
 	bin := seshBin(t)
-	home := t.TempDir()
+	home := shortSandboxHome(t)
 	stamp := time.Now().UnixNano()
 	machine := fmt.Sprintf("sb-%s-%d", loc, stamp)
 	socket := fmt.Sprintf("sesh-test-%s-%d", loc, stamp)
@@ -185,7 +204,7 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	case matrix.Remote:
 		// A separate local client machine that reaches the peer via `--machine`.
 		ensureSSHLocalhost(t)
-		clientHome := t.TempDir()
+		clientHome := shortSandboxHome(t)
 		clientMachine := fmt.Sprintf("client-%d", stamp)
 		clientEnv := map[string]string{
 			"SESH_HOME":          clientHome,
@@ -223,7 +242,7 @@ func newSSHSandbox(t *testing.T) *Sandbox {
 	t.Helper()
 	bin := seshBin(t)
 	ensureSSHLocalhost(t)
-	home := t.TempDir()
+	home := shortSandboxHome(t)
 	stamp := time.Now().UnixNano()
 	machine := fmt.Sprintf("sb-ssh-%d", stamp)
 	socket := fmt.Sprintf("sesh-test-ssh-%d", stamp)

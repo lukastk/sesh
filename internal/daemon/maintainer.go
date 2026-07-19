@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +45,9 @@ type liveState struct {
 	changes         []time.Time // timestamps of recent content changes (pruned to busyWindow)
 	lastActive      int64       // unix time of the most recent change/turn
 	hasActiveTicket bool        // any bound ticket is `active` (set per tick from the digest)
+	// changedGen is the maintainer generation at which this thread's published
+	// snapshot last CHANGED (delta sync, schema 41). Guarded by m.mu.
+	changedGen int64
 }
 
 type maintainer struct {
@@ -60,11 +66,33 @@ type maintainer struct {
 	// home is THIS daemon's user home dir, used to stamp each thread's CwdRel
 	// (~-relative cwd) so cross-machine viewers can label it. "" if undeterminable.
 	home string
+
+	// Delta sync (schema 41, guarded by mu). gen is a monotonic change counter:
+	// bumped whenever a thread's PUBLISHED snapshot actually changes or a thread
+	// disappears. epoch identifies this daemon boot — a peer's cursor from a
+	// previous boot must full-resync, never alias into this run's counters.
+	// tombstones records deleted ids (id -> the gen of the deletion) so a delta
+	// can say "removed"; minReliableGen rises if tombstones are ever pruned, so a
+	// cursor from before the prune degrades to a full resync — never to a cache
+	// that silently keeps a deleted thread.
+	gen            int64
+	epoch          string
+	tombstones     map[string]int64
+	minReliableGen int64
 }
+
+// maxTombstones caps the deletion log. Deletions are rare (hundreds per boot at
+// most); hitting the cap clears the log and raises minReliableGen — older cursors
+// then full-resync, which is always correct.
+const maxTombstones = 4096
 
 func newMaintainer(d *Daemon) *maintainer {
 	home, _ := os.UserHomeDir() // "" => CwdRel stays absolute (viewer shows the raw path)
-	return &maintainer{d: d, st: map[string]*liveState{}, stop: make(chan struct{}), done: make(chan struct{}), home: home}
+	return &maintainer{
+		d: d, st: map[string]*liveState{}, stop: make(chan struct{}), done: make(chan struct{}), home: home,
+		epoch:      strconv.FormatInt(time.Now().UnixNano(), 36),
+		tombstones: map[string]int64{},
+	}
 }
 
 // start launches the maintainer loop.
@@ -115,6 +143,9 @@ func (m *maintainer) tick() {
 	// a continuous ~10% CPU drain for no work. State is already empty, so just clear.
 	if len(threads) == 0 {
 		m.mu.Lock()
+		for id := range m.st {
+			m.recordTombstoneLocked(id)
+		}
 		clear(m.st)
 		m.mu.Unlock()
 		return
@@ -176,14 +207,27 @@ func (m *maintainer) tick() {
 	}
 	wg.Wait()
 
-	// Drop state for threads that no longer exist.
+	// Drop state for threads that no longer exist (tombstoned for delta sync).
 	m.mu.Lock()
 	for id := range m.st {
 		if !present[id] {
 			delete(m.st, id)
+			m.recordTombstoneLocked(id)
 		}
 	}
 	m.mu.Unlock()
+}
+
+// recordTombstoneLocked logs a deletion for delta sync (caller holds m.mu). At
+// the cap the log resets and minReliableGen rises — pre-reset cursors then
+// full-resync rather than ever missing a removal.
+func (m *maintainer) recordTombstoneLocked(id string) {
+	m.gen++
+	if len(m.tombstones) >= maxTombstones {
+		clear(m.tombstones)
+		m.minReliableGen = m.gen
+	}
+	m.tombstones[id] = m.gen
 }
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
@@ -284,23 +328,51 @@ func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 	// once now passes, and a child stays held while a parent's hold is in the future.
 	snap.OnHold = snap.OnHoldEffectiveUnix > time.Now().Unix()
 	m.mu.Lock()
+	// Delta sync: bump the generation only when the published value actually
+	// changed — a byte-stable thread (archived, idle) keeps its changedGen and
+	// therefore never re-transfers. A re-created id supersedes its tombstone.
+	if !reflect.DeepEqual(st.snap, snap) {
+		m.gen++
+		st.changedGen = m.gen
+		if len(m.tombstones) != 0 {
+			delete(m.tombstones, snap.Thread.ID)
+		}
+	}
 	st.snap = snap
 	m.mu.Unlock()
 }
 
 // handleSnapshot serves GET /v1/snapshot: a pure read of the maintained live state
 // (no on-demand probe). This is the PEER-FACING surface — what every peer's mesh
-// sync (http directly, ssh via `thread snapshot --json`) re-downloads on change —
-// served with an ETag: a fetch whose If-None-Match matches costs a bodyless 304
-// instead of the whole payload (issue #1). The payload is the FULL thread set,
-// archived included — an earlier revision slimmed archived-dead threads out of it
-// and Lukas rejected that outright (remote archived threads vanished from the
-// TUI's cached views; an optimization must NEVER change what sesh shows). The
-// invisible-savings follow-up is delta sync (only changed rows transfer), not
-// hiding rows.
+// sync (http directly, ssh via `thread snapshot --json`) re-downloads on change.
+// The payload is always the FULL thread set semantically, archived included — an
+// earlier revision slimmed archived-dead threads out of it and Lukas rejected
+// that outright (an optimization must NEVER change what sesh shows); the savings
+// live at the TRANSFER layer instead:
+//   - `?since=<cursor>` (schema 41): a valid cursor gets only the rows changed
+//     since it + removed ids + the next cursor — a steady round costs ~100 bytes,
+//     a busy tick costs one row. An invalid/stale/other-boot cursor degrades to
+//     the full payload, never to wrong data.
+//   - If-None-Match/ETag (cursor-less clients): an unchanged full payload costs
+//     a bodyless 304.
 func (d *Daemon) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	snap := d.maint.snapshot()
+	if since := r.URL.Query().Get("since"); since != "" {
+		if changed, removed, cur, ok := d.maint.deltaSince(since); ok {
+			writeJSON(w, http.StatusOK, api.MachineSnapshot{
+				Schema:          api.SchemaVersion,
+				Machine:         d.cfg.Machine,
+				GeneratedAtUnix: time.Now().Unix(),
+				Threads:         sortedSnapshotThreads(changed),
+				Delta:           true,
+				Removed:         removed,
+				Generation:      d.maint.cursor(cur),
+			})
+			return
+		}
+	}
+	snap, gen := d.maint.snapshotWithGen()
 	snap.Threads = sortedSnapshotThreads(snap.Threads)
+	snap.Generation = d.maint.cursor(gen)
 	etag := snapshotETag(snap.Threads)
 	if etag != "" {
 		w.Header().Set("ETag", etag)
@@ -347,6 +419,15 @@ func (m *maintainer) stateOf(id string) (api.ThreadSnapshot, bool) {
 
 // snapshot returns this machine's current maintained state (an O(1) read).
 func (m *maintainer) snapshot() api.MachineSnapshot {
+	snap, _ := m.snapshotWithGen()
+	return snap
+}
+
+// snapshotWithGen returns the full maintained state PLUS the generation it
+// corresponds to, read under one lock — the cursor stamped on a full response
+// must match its payload exactly, or the next delta could skip a change that
+// landed between two separate reads.
+func (m *maintainer) snapshotWithGen() (api.MachineSnapshot, int64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := api.MachineSnapshot{
@@ -365,5 +446,47 @@ func (m *maintainer) snapshot() api.MachineSnapshot {
 		}
 		out.Threads = append(out.Threads, st.snap)
 	}
-	return out
+	return out, m.gen
+}
+
+// cursor renders an opaque delta-sync cursor for gen ("<boot-epoch>:<gen>").
+func (m *maintainer) cursor(gen int64) string {
+	return m.epoch + ":" + strconv.FormatInt(gen, 10)
+}
+
+// deltaSince resolves a client cursor. ok=false means the cursor cannot be
+// served incrementally — another boot's epoch, a pruned/garbage/future gen —
+// and the caller must answer with the FULL payload (degrading to full is always
+// correct; serving a wrong delta never is). On ok, changed carries every
+// published row with changedGen > the cursor's gen, removed every id
+// tombstoned after it, and cur the generation the results correspond to.
+func (m *maintainer) deltaSince(cursorStr string) (changed []api.ThreadSnapshot, removed []string, cur int64, ok bool) {
+	epoch, genStr, found := strings.Cut(cursorStr, ":")
+	if !found || epoch != m.epoch {
+		return nil, nil, 0, false
+	}
+	gen, err := strconv.ParseInt(genStr, 10, 64)
+	if err != nil {
+		return nil, nil, 0, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if gen < m.minReliableGen || gen > m.gen {
+		return nil, nil, 0, false
+	}
+	for _, st := range m.st {
+		if st.snap.Thread.ID == "" {
+			continue
+		}
+		if st.changedGen > gen {
+			changed = append(changed, st.snap)
+		}
+	}
+	for id, tombGen := range m.tombstones {
+		if tombGen > gen {
+			removed = append(removed, id)
+		}
+	}
+	sort.Strings(removed)
+	return changed, removed, m.gen, true
 }

@@ -411,13 +411,24 @@ type ThreadSnapshot struct {
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 }
 
-// MachineSnapshot is one machine's full live thread state, returned by
-// GET /v1/snapshot — a pure read of the maintained state.
+// MachineSnapshot is one machine's live thread state, returned by
+// GET /v1/snapshot — a pure read of the maintained state. Normally Threads is the
+// FULL set; a schema-41 daemon answering a valid `since=<cursor>` sets Delta and
+// sends only the rows changed since that cursor (plus Removed ids), so a mesh
+// sync round transfers what changed, not the whole machine.
 type MachineSnapshot struct {
 	Schema          int              `json:"schema"`
 	Machine         string           `json:"machine"`
 	GeneratedAtUnix int64            `json:"generated_at_unix"`
 	Threads         []ThreadSnapshot `json:"threads"`
+	// Delta (schema 41): Threads is the changed-rows set for the requested cursor,
+	// not the full machine; Removed lists thread ids deleted since it.
+	Delta   bool     `json:"delta,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+	// Generation (schema 41) is the OPAQUE cursor for the next conditional fetch.
+	// Present on every schema-41 response (full or delta); absent from a pre-41
+	// daemon, which is how a syncer knows to stay on the ETag/304 flow.
+	Generation string `json:"generation,omitempty"`
 }
 
 // MachineView is one machine's slice of the merged mesh view: its threads plus how

@@ -140,14 +140,22 @@ levers fixed it, all mixed-mesh safe:
   `"0s"` = never idle). Demand arriving while idle KICKS an immediate round, so the first
   TUI frame after an idle stretch is fresh within ~an RTT. `daemon status` reports the
   current pace as `mesh_cadence` (active / idle / hooks-pinned / always).
+- **Delta sync (schema 41).** The payload-size lever, done invisibly: the maintainer
+  assigns each thread a change generation (bumped only when its PUBLISHED snapshot
+  actually changes; deletions tombstoned), and `GET /v1/snapshot?since=<cursor>`
+  returns only the rows changed since the cursor plus removed ids and the next cursor.
+  The syncer holds a per-peer cursor + an in-memory working set and patches the cached
+  payload in place; every degradation (other-boot epoch, pruned/garbage cursor, missing
+  cache row or base, failed write) goes to a FULL refetch — never to wrong data. A
+  steady round costs ~100 bytes (an empty delta), a busy tick costs ~one row, and an
+  archived thread transfers ONCE and then never again. Proven at the wire by the
+  `mesh.delta-sync.http` cell (a counting proxy between two real daemons).
 - ~~**Peer-facing slim.**~~ TRIED AND REVERTED (same day): excluding archived-dead
   threads from the served snapshot made remote archived threads vanish from cached mesh
   views — the phone's archived tab collapsed to a single row. Lukas's verdict, now a
-  standing rule: **an optimization must never change what sesh shows.** Only
-  transfer-layer levers (ETag/304, cadence) are acceptable; the payload-size savings
-  belong to a future **delta sync** (a version cursor so only CHANGED rows transfer —
-  archived threads replicate once and then cost nothing), which achieves the same
-  bytes with zero visible change.
+  standing rule: **an optimization must never change what sesh shows.** Delta sync
+  (above) is its invisible replacement — same bytes saved, zero visible change; the
+  `mesh.snapshot` cells carry a full-replication guard so slimming can't come back.
 
 **Cache (SQLite-backed, survives restart → instant cold start):**
 

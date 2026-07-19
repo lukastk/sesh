@@ -163,6 +163,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "mesh.delta-sync.http",
+		Description: "delta sync over the TCP API (schema 41): steady-state sync rounds transfer ~empty deltas, a one-row change transfers ~one row (measured at the wire through a counting proxy between two REAL daemons), and the replicated set stays COMPLETE throughout — the transfer-layer replacement for the rejected archived-slim. HTTP-only by design: the ssh transport always full-fetches",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "mesh.offline-listing",
 		Description: "offline browsing (SSH transport): a peer going down keeps its last-known threads listed (reachable=false, retained from cache), and a recovered peer refreshes to reachable",
 		Localities:  []Locality{Remote},

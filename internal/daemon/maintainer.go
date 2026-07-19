@@ -291,13 +291,16 @@ func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 // handleSnapshot serves GET /v1/snapshot: a pure read of the maintained live state
 // (no on-demand probe). This is the PEER-FACING surface — what every peer's mesh
 // sync (http directly, ssh via `thread snapshot --json`) re-downloads on change —
-// so it is slimmed to peerFacingThreads and served with an ETag: a fetch whose
-// If-None-Match matches costs a bodyless 304 instead of the whole payload
-// (issue #1). Local merged reads (GET /v1/mesh's self entry, the eventer) use the
-// unfiltered maintainer state directly.
+// served with an ETag: a fetch whose If-None-Match matches costs a bodyless 304
+// instead of the whole payload (issue #1). The payload is the FULL thread set,
+// archived included — an earlier revision slimmed archived-dead threads out of it
+// and Lukas rejected that outright (remote archived threads vanished from the
+// TUI's cached views; an optimization must NEVER change what sesh shows). The
+// invisible-savings follow-up is delta sync (only changed rows transfer), not
+// hiding rows.
 func (d *Daemon) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	snap := d.maint.snapshot()
-	snap.Threads = peerFacingThreads(snap.Threads)
+	snap.Threads = sortedSnapshotThreads(snap.Threads)
 	etag := snapshotETag(snap.Threads)
 	if etag != "" {
 		w.Header().Set("ETag", etag)
@@ -309,24 +312,10 @@ func (d *Daemon) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
-// peerFacingThreads filters the snapshot served to peers: archived threads with
-// no live pane are dead weight that every machine on the mesh would otherwise
-// re-download on every change forever (issue #1: 200+ archived threads made one
-// machine's snapshot ~124 KB). Archived-but-HEADFUL threads stay — the default
-// view shows an archived thread while its agent still runs (the H40 contract).
-// The trade (signed off): a remote machine's archived-dead threads no longer
-// appear in a viewer's CACHED mesh views; they remain reachable via --machine
-// routing and the live all-machines fan-out, which lists archived as before.
-// The kept threads are returned sorted by ID so the wire payload — and thus the
-// ETag — is deterministic (the maintainer's map iteration is not).
-func peerFacingThreads(threads []api.ThreadSnapshot) []api.ThreadSnapshot {
-	out := make([]api.ThreadSnapshot, 0, len(threads))
-	for _, t := range threads {
-		if t.Archived && t.Head != api.Headful {
-			continue
-		}
-		out = append(out, t)
-	}
+// sortedSnapshotThreads orders the wire payload by thread ID so it — and thus
+// the ETag — is deterministic (the maintainer's map iteration is not).
+func sortedSnapshotThreads(threads []api.ThreadSnapshot) []api.ThreadSnapshot {
+	out := append([]api.ThreadSnapshot(nil), threads...)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }

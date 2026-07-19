@@ -140,11 +140,14 @@ levers fixed it, all mixed-mesh safe:
   `"0s"` = never idle). Demand arriving while idle KICKS an immediate round, so the first
   TUI frame after an idle stretch is fresh within ~an RTT. `daemon status` reports the
   current pace as `mesh_cadence` (active / idle / hooks-pinned / always).
-- **Peer-facing slim.** The served snapshot EXCLUDES archived threads with no live pane
-  (archived-but-HEADFUL stays — the H40 default-view contract). Trade: a remote machine's
-  archived-dead threads don't appear in cached mesh views; they remain reachable via
-  `--machine` routing and the live fan-out. Local reads (`/v1/mesh` self, the eventer)
-  use the unfiltered maintainer state.
+- ~~**Peer-facing slim.**~~ TRIED AND REVERTED (same day): excluding archived-dead
+  threads from the served snapshot made remote archived threads vanish from cached mesh
+  views — the phone's archived tab collapsed to a single row. Lukas's verdict, now a
+  standing rule: **an optimization must never change what sesh shows.** Only
+  transfer-layer levers (ETag/304, cadence) are acceptable; the payload-size savings
+  belong to a future **delta sync** (a version cursor so only CHANGED rows transfer —
+  archived threads replicate once and then cost nothing), which achieves the same
+  bytes with zero visible change.
 
 **Cache (SQLite-backed, survives restart → instant cold start):**
 

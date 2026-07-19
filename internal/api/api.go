@@ -181,16 +181,16 @@ package api
 //
 // 40: MESH-SYNC DATA RATIONING (GitHub issue #1 — the 1 Hz full-snapshot poll burned
 // ~450 MB/hr of mobile data on the termux leaf). GET /v1/snapshot serves an ETag over
-// its (sorted, peer-facing) threads payload and honors If-None-Match with a bodyless
-// 304; the mesh sync fetches conditionally and idles to [mesh] idle_interval when
-// nothing consumes the mesh view (no /v1/mesh read or all-machines fan-out in the
-// active window, no [[hooks]] configured). The peer-facing snapshot also EXCLUDES
-// archived threads with no live pane (archived-but-HEADFUL stays — the H40 default-view
-// contract). StatusResponse gains `mesh_cadence`. Mixed-mesh safe: ETag/304 are plain
-// HTTP conditionals (a pre-40 daemon ignores the header and serves the full 200; a
-// pre-40 syncer sends no If-None-Match and gets the full 200); mesh_cadence is
-// additive/omitempty; the slimmed snapshot only changes what a viewer's CACHED mesh
-// view lists (remote archived-dead threads), never a wire shape.
+// its sorted threads payload and honors If-None-Match with a bodyless 304; the mesh
+// sync fetches conditionally and idles to [mesh] idle_interval when nothing consumes
+// the mesh view (no /v1/mesh read or all-machines fan-out in the active window, no
+// [[hooks]] configured). StatusResponse gains `mesh_cadence`. Mixed-mesh safe:
+// ETag/304 are plain HTTP conditionals (a pre-40 daemon ignores the header and serves
+// the full 200; a pre-40 syncer sends no If-None-Match and gets the full 200);
+// mesh_cadence is additive/omitempty. (An initial revision of 40 also slimmed
+// archived-dead threads out of the peer-facing snapshot; REVERTED same-day — it made
+// remote archived threads vanish from cached mesh views, and an optimization must
+// never change what sesh shows. The invisible replacement is delta sync — a ticket.)
 const SchemaVersion = 40
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml

@@ -545,11 +545,9 @@ through the cache, so they pin full pace). Otherwise it idles to `[mesh] idle_in
 the TUI after an idle stretch is fresh within ~a round trip. `sesh peer list` showing
 "synced 45s ago" on a quiet daemon is therefore deliberate idling, not degraded sync —
 `sesh daemon status` reports the pace as `mesh_cadence` (active / idle / hooks-pinned /
-always). Unchanged snapshots transfer as bodyless 304s (ETag), and the peer-facing
-snapshot (`thread snapshot`) excludes archived threads with no live pane — so a remote
-machine's archived-dead threads don't appear in the cached mesh views; read them with
-`thread list --archived --machine <m>` or the live `--all-machines` fan-out, which is
-unaffected.
+always). Unchanged snapshots transfer as bodyless 304s (ETag). What the views SHOW is
+unchanged by any of this — every machine's full thread set, archived included, still
+replicates across the mesh.
 
 ## Config (`~/.sesh/config.toml`)
 

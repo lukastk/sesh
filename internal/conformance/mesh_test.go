@@ -204,11 +204,12 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 		t.Errorf("merged mesh missing the local machine (self)")
 	}
 
-	// PEER-FACING SLIM (issue #1): archiving the (headless => no live pane) peer
-	// thread must drop it from the peer's served snapshot, and thus from the local
-	// cached mesh view — over THIS real transport (http: the slimmed /v1/snapshot;
-	// ssh: the slimmed `thread snapshot --json`). A second live thread proves the
-	// sync itself keeps flowing, so the absence is the filter, not a dead sync.
+	// FULL-REPLICATION GUARD (issue #1 follow-up): archiving the (headless => no
+	// live pane) peer thread must NOT drop it from the peer's served snapshot —
+	// the archived FLAG replicates, the row STAYS, over THIS real transport. An
+	// earlier revision slimmed archived-dead threads out of the peer-facing
+	// snapshot and Lukas rejected it (remote archived threads vanished from the
+	// TUI's archived tab): an optimization must never change what sesh shows.
 	stays := peer.newHeadlessThread(t, "pi", "stays")
 	if !waitUntil(15*time.Second, func() bool {
 		mv, ok := peerView(t, c, peer.Machine)
@@ -221,11 +222,19 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	}
 	if !waitUntil(15*time.Second, func() bool {
 		mv, ok := peerView(t, c, peer.Machine)
-		return ok && !hasThreadID(mv, there.ID) && hasThreadID(mv, stays.ID)
+		if !ok || !hasThreadID(mv, stays.ID) {
+			return false
+		}
+		for _, th := range mv.Threads {
+			if th.ID == there.ID && th.Archived {
+				return true // the flag replicated AND the row is still listed
+			}
+		}
+		return false
 	}) {
 		mv, _ := peerView(t, c, peer.Machine)
-		t.Fatalf("archived+dead peer thread still in the cached mesh view (archived=%v stays=%v) — the peer-facing snapshot must slim it",
-			hasThreadID(mv, there.ID), hasThreadID(mv, stays.ID))
+		t.Fatalf("archived peer thread must STAY in the cached mesh view with archived=true (present=%v) — slimming it out is the rejected behavior",
+			hasThreadID(mv, there.ID))
 	}
 
 	// STEADY-STATE FRESHNESS: with the peer's state now byte-stable, the cache's

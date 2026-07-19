@@ -36,12 +36,13 @@ func snap(id string, archived bool, head api.Head) api.ThreadSnapshot {
 	return api.ThreadSnapshot{Thread: api.Thread{ID: id, Machine: "m", Archived: archived}, Head: head}
 }
 
-// TestSnapshotSlimAndConditional: the real /v1/snapshot handler must (a) slim the
-// peer-facing payload — archived+dead threads dropped, archived-but-HEADFUL kept
-// (the H40 contract) — and (b) answer a matching If-None-Match with a bodyless
-// 304, then a NEW payload once the state changes. Driven end-to-end through the
-// real client.SnapshotConditional.
-func TestSnapshotSlimAndConditional(t *testing.T) {
+// TestSnapshotFullAndConditional: the real /v1/snapshot handler must (a) serve
+// the FULL thread set — archived included, headless or not; an earlier revision
+// slimmed archived-dead rows out and Lukas rejected it (an optimization must
+// never change what sesh shows) — and (b) answer a matching If-None-Match with a
+// bodyless 304, then a NEW payload once the state changes. Driven end-to-end
+// through the real client.SnapshotConditional.
+func TestSnapshotFullAndConditional(t *testing.T) {
 	d := seedMaintDaemon(t,
 		snap("live-1", false, api.Headful),
 		snap("arch-live", true, api.Headful),
@@ -62,11 +63,8 @@ func TestSnapshotSlimAndConditional(t *testing.T) {
 	for _, th := range ms.Threads {
 		ids[th.ID] = true
 	}
-	if !ids["live-1"] || !ids["arch-live"] {
-		t.Errorf("peer-facing snapshot missing live rows: %v (archived+HEADFUL must stay — H40)", ids)
-	}
-	if ids["arch-dead"] {
-		t.Errorf("peer-facing snapshot still carries the archived+headless thread")
+	if !ids["live-1"] || !ids["arch-live"] || !ids["arch-dead"] {
+		t.Errorf("snapshot must carry the FULL thread set (archived-dead included): %v", ids)
 	}
 
 	// Unchanged state + the ETag => 304, no payload.
@@ -75,8 +73,9 @@ func TestSnapshotSlimAndConditional(t *testing.T) {
 		t.Fatalf("conditional refetch: err=%v notMod=%v etag2=%q (want 304 with the same ETag)", err, notMod, etag2)
 	}
 
-	// A state change => full 200 with a NEW ETag.
-	d.maint.st["live-2"] = &liveState{snap: snap("live-2", false, api.Headful)}
+	// A state change => full 200 with a NEW ETag — including an archived-dead
+	// addition: it is DATA, so it must transfer and be visible.
+	d.maint.st["arch-dead-2"] = &liveState{snap: snap("arch-dead-2", true, api.Headless)}
 	ms3, etag3, notMod, err := c.SnapshotConditional(t.Context(), etag)
 	if err != nil || notMod {
 		t.Fatalf("post-change fetch: err=%v notMod=%v (a changed snapshot must be a full 200)", err, notMod)
@@ -86,20 +85,12 @@ func TestSnapshotSlimAndConditional(t *testing.T) {
 	}
 	found := false
 	for _, th := range ms3.Threads {
-		if th.ID == "live-2" {
+		if th.ID == "arch-dead-2" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("post-change payload missing the new thread")
-	}
-
-	// A dead-archived-only change is INVISIBLE to peers: archiving the payload's
-	// dead weight must not churn the ETag (that churn is the 124 KB-per-tick bug).
-	d.maint.st["arch-dead-2"] = &liveState{snap: snap("arch-dead-2", true, api.Headless)}
-	_, etag4, notMod, err := c.SnapshotConditional(t.Context(), etag3)
-	if err != nil || !notMod || etag4 != etag3 {
-		t.Errorf("adding an archived+dead thread changed the peer-facing payload: notMod=%v etag %q -> %q", notMod, etag3, etag4)
+		t.Errorf("post-change payload missing the new archived thread")
 	}
 }
 

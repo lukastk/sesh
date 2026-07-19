@@ -86,4 +86,37 @@ func testDoctor(t *testing.T) {
 	if !sawFail {
 		t.Errorf("doctor did not flag the broken cwd_label config: %v", bresp.Checks)
 	}
+
+	// API bind state is reported HONESTLY (ticket aeaca0d0: an unresolvable bind
+	// host spun the background retry loop for 12 days while doctor said "ok" and
+	// the mesh silently showed the machine offline). A daemon whose SESH_API_ADDR
+	// can never bind must show api=fail naming the reason; a daemon actually
+	// listening shows api=ok.
+	apiCheck := func(sb *Sandbox) api.DoctorCheck {
+		t.Helper()
+		out, stderr, rerr := sb.Runner.Run(t, "doctor", "--json")
+		var r api.DoctorResponse
+		if uerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &r); uerr != nil {
+			t.Fatalf("doctor decode: %v (runErr=%v)\n%s%s", uerr, rerr, out, stderr)
+		}
+		for _, c := range r.Checks {
+			if c.Name == "api" {
+				return c
+			}
+		}
+		t.Fatalf("no api check in doctor output: %v", r.Checks)
+		return api.DoctorCheck{}
+	}
+
+	unbound := newSandbox(t, matrix.Local, withAPI("api-unbindable.invalid:7878", "tok"))
+	unbound.startDaemon(t)
+	if c := apiCheck(unbound); c.Status != "fail" || !strings.Contains(c.Detail, "NOT BOUND") {
+		t.Errorf("unbindable api addr: check = %+v, want fail/NOT BOUND", c)
+	}
+
+	bound := newSandbox(t, matrix.Local, withAPI(freePort(t), "tok"))
+	bound.startDaemon(t)
+	if c := apiCheck(bound); c.Status != "ok" || !strings.Contains(c.Detail, "listening") {
+		t.Errorf("bound api addr: check = %+v, want ok/listening", c)
+	}
 }

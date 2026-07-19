@@ -68,9 +68,21 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 		add("work tmux", "ok", "socket "+d.tmux.Socket())
 	}
 
-	// API exposure: exposed-without-a-token is refused at startup, so just report.
+	// API exposure: exposed-without-a-token is refused at startup. The bind itself
+	// is background-retried, so "configured" is NOT "listening" — an unresolvable
+	// bind host (ideapad's NM-clobbered resolver, ticket aeaca0d0) once spun the
+	// retry loop for 12 days while this check said "ok" and the whole mesh showed
+	// the machine offline. Report the REAL bind state, loudly.
 	if d.cfg.APIAddr != "" {
-		add("api", "ok", "exposed on "+d.cfg.APIAddr)
+		if d.apiBound.Load() {
+			add("api", "ok", "listening on "+d.cfg.APIAddr)
+		} else {
+			msg := "configured on " + d.cfg.APIAddr + " but NOT BOUND — cross-machine http access to this daemon is down (bind retries every " + apiBindRetry.String() + ")"
+			if e, _ := d.apiBindErr.Load().(string); e != "" {
+				msg += "; last error: " + e
+			}
+			add("api", "fail", msg)
+		}
 	}
 
 	// Peers: the mesh sync's last-known reachability (no fresh hop — the live

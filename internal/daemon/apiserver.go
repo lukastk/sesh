@@ -42,15 +42,21 @@ func (d *Daemon) startAPI() error {
 }
 
 // serveAPIWithRetry binds and serves the TCP API, retrying a failed bind every
-// apiBindRetry until it succeeds or the daemon stops. Loud on every failure.
+// apiBindRetry until it succeeds or the daemon stops. Loud on every failure, and
+// the bind state is TRACKED (apiBound/apiBindErr) so `sesh doctor` can surface a
+// configured-but-never-bound API — ideapad's daemon once retried "lookup ideapad:
+// no such host" every 5s for 12 DAYS while doctor said "api: ok, exposed on …",
+// and the whole mesh silently showed the machine offline (ticket aeaca0d0).
 func (d *Daemon) serveAPIWithRetry() {
 	for {
 		ln, err := net.Listen("tcp", d.cfg.APIAddr)
 		if err == nil {
+			d.apiBound.Store(true)
 			log.Printf("daemon: api listening on %s", d.cfg.APIAddr)
 			d.apiSrv.Serve(ln) //nolint:errcheck — returns on Shutdown
 			return
 		}
+		d.apiBindErr.Store(err.Error())
 		log.Printf("daemon: api listen %s failed, retrying in %s (the local socket is unaffected): %v", d.cfg.APIAddr, apiBindRetry, err)
 		select {
 		case <-time.After(apiBindRetry):

@@ -73,9 +73,13 @@ type Daemon struct {
 
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
-	// is set. apiStop stops the background bind-retry loop on shutdown.
-	apiSrv  *http.Server
-	apiStop chan struct{}
+	// is set. apiStop stops the background bind-retry loop on shutdown. apiBound /
+	// apiBindErr track whether the listener ever actually bound (the retry loop can
+	// spin forever on an unresolvable bind host) so doctor can surface it.
+	apiSrv     *http.Server
+	apiStop    chan struct{}
+	apiBound   atomic.Bool
+	apiBindErr atomic.Value // string: the most recent bind error
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses

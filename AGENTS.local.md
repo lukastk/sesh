@@ -105,6 +105,41 @@ payload-size problem (whole 124 KB re-sends whenever ANY row changes) = DELTA SY
 sysfs are PERMISSION-DENIED in termux and it has no `ip`; measure from the OTHER END via
 `tailscale status` per-peer tx/rx counters on mymain.
 
+### H44 follow-up 2 — DELTA SYNC shipped (sesh PR #3 merge 2e6ff15 impl e308c77; api 40→41, NO store migration; deployed ALL FIVE; ticket 953ac79d done)
+The UX-invisible replacement for the reverted slim, built same-day on Lukas's go-ahead.
+MECHANICS: maintainer assigns a monotonic per-thread CHANGE GENERATION — publish() bumps it
+only when the published snapshot actually changed (reflect.DeepEqual vs previous; archived/
+idle rows keep their gen forever); deletions tombstoned in BOTH delete paths (tick cleanup +
+zero-threads early-out; cap 4096 → clear + raise minReliableGen). Cursor = opaque
+"<boot-epoch>:<gen>" (epoch = start unixnano base36 — cross-boot cursors can NEVER alias).
+GET /v1/snapshot?since=<cursor> → {delta:true, threads:changed, removed:[ids],
+generation:next}; empty delta ≈ 100 B = the steady state; ANY unservable cursor (other
+epoch, pruned, garbage, future) → FULL payload — degrade toward full, never toward wrong.
+snapshotWithGen() reads payload+gen under ONE lock (separate reads could mint a cursor
+ahead of its payload and skip a concurrent change). ETag/304 kept for cursor-less (pre-41)
+clients; ssh transport stays full-fetch. meshsync: per-peer cursor + IN-MEMORY working map
+(id→row) coherent with the STORED blob (both updated only after successful upsert; removals
+applied BEFORE upserts — a re-created id appears in both lists); empty delta → TouchPeer
+Snapshot; missing row/base or failed write → clearCondState + syncPeerFull SAME round.
+peer_snapshots blob format unchanged ⇒ no migration, no reader changes.
+TESTS: TestSnapshotDelta / TestMeshSyncDeltaFetch / TestMeshSyncMissingRowRefetches (all
+against the REAL handler + REAL client; test seeding now goes through pubThread/dropThread =
+the real publish path, else generations never exist — direct st writes bypass them, bit me).
+NEW matrix feature mesh.delta-sync.http (http-only BY DESIGN, own feature id like
+mesh.snapshot.http — no N/A needed): two real daemons with a byte-COUNTING PROXY between
+them (a measurement tap is honest — nothing mocked), 24 virtual-thread seed, asserts every
+steady round < 1 KB and < full/10, a rename crosses < full/4, set stays COMPLETE with the
+renamed row. ANTI-GAMING: neutering the since-branch → cell red with "transferred 8937
+bytes (full=8937)". GOTCHA: after CLI-seeding threads, WAIT for the maintainer to publish
+them (~300ms tick) before measuring the reference full snapshot — the first direct fetch saw
+10/24 rows.
+DEPLOY (schema 41 = rebuild + restart, all five: mymain/macbook/macstudio/ideapad
+supervisorctl; termux kill-by-pid + setsid relaunch). LIVE-MEASURED (tailscale per-peer
+counters on mymain): phone mesh ACTIVE at 1 Hz vs churning mymain = 3.6 KB/s total link
+(~1 KB/s mesh share after the attached-cockpit ssh streams) vs 34 KB/s post-revert full
+re-sends vs 124 KB/s original — full thread set incl. archived replicating everywhere.
+Issue #1 got a follow-up comment; ticket 953ac79d done.
+
 ## H43 — mmt-copy-clipboard-to-master: push the BASE machine's clipboard into the master's clipboard (2026-07-12, myrig efc8cad; NO sesh change; deployed 4/5 — termux OFFLINE, pending; ticket 1d978651)
 Ticket 1d978651 "mmt command similar to mmt-copy-to-master but instead transfers the current
 clipboard content of the base to the master". MYRIG-ONLY (shell.sh.jinja): new zsh function

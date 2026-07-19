@@ -57,16 +57,18 @@ idle" — the assessment FOUND THE ONE REAL REGRESSION and it became a design in
 - LIVE-PROVEN on the real mesh (mymain): idle daemon = peers "synced 53s ago" → ONE /v1/mesh
   read → 1s-fresh in 2.5s + cadence idle→active; curl If-None-Match → 304 size=0; ideapad
   reports hooks-pinned, macstudio/mymain idle.
-DEPLOY (api 40 = rebuild + daemon RESTART): mymain (native, supervisorctl) + macstudio
-(cij@, /opt/homebrew/bin/go) + ideapad (lukastk@, native) at e31ec3c schema 40. **macbook
-PENDING — sshd :22 down but its DAEMON IS UP on :7878 (mesh reachable=True); when sshd back:
-git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f &&
-supervisorctl restart sesh-daemon. termux PENDING — android-main:8022 REFUSED (Termux app
-dead ⇒ its daemon is dead too, so NOT currently burning data; adb also unreachable, port
-rotates); when back: git pull && PLAIN go build (CGO=1/android per H22) && .new+mv && kill
-daemon by EXPLICIT pid && setsid-nohup relaunch per H38.** Old peers are harmless meanwhile
-(pre-40 syncer sends no If-None-Match → full 200s at 1 Hz until upgraded; they still get the
-SLIMMED payload from upgraded daemons).
+DEPLOY (api 40 = rebuild + daemon RESTART): ALL FIVE at schema 40. mymain (native,
+supervisorctl) + macstudio (cij@) + ideapad (native) at e31ec3c; macbook came back on its own
+already at 40/hooks-pinned (upgraded outside this session ~31min before checked — its sshd was
+down but daemon reachable on :7878 the whole time); termux deployed later the same day once
+android-main:8022 returned (git pull + PLAIN go build CGO=1/android per H22 + .new+mv + kill
+by explicit pid + setsid relaunch → pid 5826, schema 40, cadence idle, rev ac8e157).
+MEASURED (tailscale per-peer counters on mymain — /proc/net/dev + sysfs are PERMISSION-DENIED
+on termux and it has no `ip`; `tailscale status` tx/rx per peer is the workable phone-traffic
+source): mymain→phone 20.5 KB/s (~1.8 GB/day) with the OLD termux client against slim-serving
+mymain → 2.4 KB/s (~0.2 GB/day) after the deploy — and the residual is almost all the ATTACHED
+phone master COCKPIT (3 persistent ssh -tt links streaming remote tmux status bars ~1/s, the
+H29 residual; mmt-kill drops it), NOT the mesh (phone cadence idle).
 SIDE-FINDING (ticket aeaca0d0, triage): ideapad's TCP API has NEVER BOUND (~12 days) —
 `api listen ideapad:7878 ... lookup ideapad: no such host` every 5s: Arch systemd-resolved
 refuses SINGLE-LABEL lookups over the 127.0.0.53 stub and Go's resolver uses the stub (getent

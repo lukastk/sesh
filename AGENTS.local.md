@@ -1,5 +1,79 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H44 — MESH-SYNC DATA RATIONING (GitHub issue #1): ETag/304 + demand-driven cadence + peer-facing slim + DNS-check retry (2026-07-19, sesh PR #2 merge e31ec3c impl bb51843; api 39→40, NO store migration; deployed 3/5 — macbook + termux pending; tickets e9e48b31→4f0ab408 done, side ticket aeaca0d0 triage)
+GitHub issue #1: meshsync fetched EVERY peer's FULL /v1/snapshot at 1 Hz forever — on termux
+~128 KB/s ≈ 11 GB/day of mobile data (mymain's 203-thread snapshot alone 124 KB). Conferred
+with Lukas (AskUserQuestion): ETag+demand-driven (over metered-detection — unnecessary after
+these and it'd put Android policy in sesh), slim YES, default-on-everywhere YES. He then
+interrupted once: "make sure to assess the usage-experience impact incl. going into/out of
+idle" — the assessment FOUND THE ONE REAL REGRESSION and it became a design input:
+- HOOKS PIN (the load-bearing UX finding): macbook/ideapad run [[hooks]] notify-idle, and the
+  EVENTER observes REMOTE busy→idle THROUGH the peer-snapshot cache. At a 60s sample a remote
+  turn shorter than the window produces NO busy edge ⇒ the toast would SILENTLY NEVER FIRE
+  exactly when Lukas walked away. ⇒ a daemon with [[hooks]] configured NEVER idles
+  (mesh_cadence "hooks-pinned"). Subscriptions/turn-delivery are UNAFFECTED by cadence
+  (deliverSubscriptions is owner-side only; a local thread's edges come from the local
+  maintainer, always 1s-fresh).
+- DEMAND = GET /v1/mesh reads AND the all-machines fan-outs (fanOutThreads/fanOutGrid):
+  sesh-ui's ThreadsScreen polls the LIVE fan-out (NOT the cache) yet leans on the cache's
+  knownOfflinePeers gate — fan-out reads must bump demand or sesh-ui-open would let
+  reachability go stale. TUI polls /v1/mesh (~3s) so it self-sustains active cadence.
+- MECHANICS: [mesh] idle_interval (config.LoadMesh; default 60s, "0s"=never idle, broken =
+  daemon refuses loudly). meshSync ZERO VALUE never idles (hand-built test daemons unchanged).
+  Demand while idle KICKS an immediate round (buffered chan, 2s debounce) ⇒ first TUI frame
+  after idle corrects in ~an RTT. ETag = sha256 over SORTED-by-id peer-facing threads JSON
+  (map iteration is nondeterministic — sorting is load-bearing); syncer remembers per-peer
+  ETags in memory, set ONLY after a successful upsert (etag↔stored-payload coherence); 304 →
+  store.TouchPeerSnapshot (synced_at+reachable only; touched=false ⇒ row deleted under us
+  [peer remove+re-add] ⇒ drop etag + refetch full SAME round). ssh transport unconditional.
+  SLIM: handleSnapshot serves peerFacingThreads() = drop Archived && Head!=Headful
+  (archived+HEADFUL stays — H40 contract); /v1/mesh self entry + eventer use the UNFILTERED
+  maintainer, so only REMOTE archived-dead vanish from cached views (still via --machine +
+  live fan-out, which lists archived as before). StatusResponse.MeshCadence
+  (active/idle/hooks-pinned/always) + `daemon status` line. DNS self-check now RETRIES
+  5s/15s/30s/60s/120s (runPeerDNSCheck, injectable), loud FAILED only after exhaustion, logs
+  recovery — kills the boot false alarm racing tailscale MagicDNS.
+- HARNESS FIX (separate pre-existing breakage, proven via a main-worktree run): the
+  ssh-transport cells mesh.snapshot / mesh.offline-listing / daemon.mesh-read / route.parity
+  (+ stage-file's client) were RED ON CLEAN MAIN since 4716d2d rooted the ssh ControlPath in
+  SESH_HOME: a t.TempDir() home embeds the FULL TEST NAME, so <home>/ssh-cm/<40-char %C> +
+  ssh's ".<16 rand>" master-creation suffix overran sun_path 108 for long-named cells. NEW
+  shortSandboxHome(t) (mktemp /tmp/sesh-sb-XXX) replaces EVERY test SESH_HOME (harness + the
+  ad-hoc routing clients in route/ticket/tmux tests). Cells green again and ~15x faster.
+  LESSON RE-LEARNED: anything that puts a unix socket under SESH_HOME makes EVERY test home
+  length-critical. ALSO BIT ME: used `git checkout <file>` to restore after an anti-gaming
+  neuter — it wiped my UNCOMMITTED edits in that file (re-applied); reverse the edit itself,
+  never git-checkout a file with uncommitted work.
+- TESTS (anti-gaming: slim + 304 each neutered → suites RED → restored): unit
+  TestSnapshotSlimAndConditional (REAL handleSnapshot ↔ REAL client.SnapshotConditional; incl.
+  archived-dead churn NOT changing the ETag), TestMeshSyncConditionalFetch/304MissingRow (real
+  store+handler), TestShouldSyncAndCadence, TestMeshSyncIdleAndKick (real run loop),
+  TestDNSCheckRetry, TestTouchPeerSnapshot, TestLoadMesh. mesh.snapshot(+.http) cells EXTENDED:
+  archive a headless peer thread → drops from the cached mesh view over BOTH real transports
+  (presence-first, second live thread proves sync flows) + steady-state synced_at keeps
+  advancing (on http that IS the 304/touch path). Blast radius green: mesh/*, route.parity,
+  list-all, hold, stage-file, ticket.get/unbind, lifecycle, TUI claims mesh-render-offline /
+  view-hold / view-active-archived-live; -race clean.
+- LIVE-PROVEN on the real mesh (mymain): idle daemon = peers "synced 53s ago" → ONE /v1/mesh
+  read → 1s-fresh in 2.5s + cadence idle→active; curl If-None-Match → 304 size=0; ideapad
+  reports hooks-pinned, macstudio/mymain idle.
+DEPLOY (api 40 = rebuild + daemon RESTART): mymain (native, supervisorctl) + macstudio
+(cij@, /opt/homebrew/bin/go) + ideapad (lukastk@, native) at e31ec3c schema 40. **macbook
+PENDING — sshd :22 down but its DAEMON IS UP on :7878 (mesh reachable=True); when sshd back:
+git pull && /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f &&
+supervisorctl restart sesh-daemon. termux PENDING — android-main:8022 REFUSED (Termux app
+dead ⇒ its daemon is dead too, so NOT currently burning data; adb also unreachable, port
+rotates); when back: git pull && PLAIN go build (CGO=1/android per H22) && .new+mv && kill
+daemon by EXPLICIT pid && setsid-nohup relaunch per H38.** Old peers are harmless meanwhile
+(pre-40 syncer sends no If-None-Match → full 200s at 1 Hz until upgraded; they still get the
+SLIMMED payload from upgraded daemons).
+SIDE-FINDING (ticket aeaca0d0, triage): ideapad's TCP API has NEVER BOUND (~12 days) —
+`api listen ideapad:7878 ... lookup ideapad: no such host` every 5s: Arch systemd-resolved
+refuses SINGLE-LABEL lookups over the 127.0.0.53 stub and Go's resolver uses the stub (getent
+resolves via NSS fine) — H22's class, bind-side. So mymain's mesh shows ideapad unreachable/
+12d-stale and cross-machine views never list ideapad threads. Fix needs Lukas's call (myrig
+FQDN coords vs IP bind vs resolver knob) — do NOT silently "fix" it per-machine.
+
 ## H43 — mmt-copy-clipboard-to-master: push the BASE machine's clipboard into the master's clipboard (2026-07-12, myrig efc8cad; NO sesh change; deployed 4/5 — termux OFFLINE, pending; ticket 1d978651)
 Ticket 1d978651 "mmt command similar to mmt-copy-to-master but instead transfers the current
 clipboard content of the base to the master". MYRIG-ONLY (shell.sh.jinja): new zsh function

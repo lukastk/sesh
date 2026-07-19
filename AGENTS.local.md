@@ -140,6 +140,37 @@ counters on mymain): phone mesh ACTIVE at 1 Hz vs churning mymain = 3.6 KB/s tot
 re-sends vs 124 KB/s original — full thread set incl. archived replicating everywhere.
 Issue #1 got a follow-up comment; ticket 953ac79d done.
 
+## H45 — ideapad was a MESH ISLAND for 12 days: NM clobbered tailscale DNS; resolved-stack fix + doctor bind-state check (2026-07-19/20, myrig e9ef43c + sesh 4063a93; deployed ALL FIVE; ticket aeaca0d0 done)
+Ticket aeaca0d0 (found during H44 deploys): ideapad's daemon retried `api listen ideapad:7878
+... lookup ideapad: no such host` every 5s. ROOT CAUSE (bigger than the bind): on 2026-07-07
+NetworkManager overwrote /etc/resolv.conf with LAN-only DNS (router 192.168.1.1, search
+mynet) — tailscaled's direct-mode file lost the fight (accept-dns WAS on; no systemd-resolved
+on the box). Go's PURE resolver reads resolv.conf directly ⇒ EVERY tailnet name went dead for
+Go: no API bind (inbound dead) AND meshsync couldn't dial mymain/macbook/macstudio (outbound
+dead — ideapad's own mesh view was 12.3d stale). libc/NSS (ssh, curl, getent) kept working,
+which MASKED it. H22's lesson generalized: Go-resolver vs system-resolver divergence, now on
+the BIND side + NM-fight flavor.
+FIX (live, then encoded): the RESOLVED STACK so nothing fights over resolv.conf — enable
+systemd-resolved; /etc/NetworkManager/conf.d/dns.conf `[main] dns=systemd-resolved` (NM feeds
+per-network DNS into resolved; apply with `nmcli general reload` — a FULL NM restart drops
+the WiFi and kills your ssh session mid-sequence, bit me; run multi-step network surgery as a
+DETACHED script via setsid nohup); /etc/resolv.conf → resolved STUB symlink — the stub's
+`search tail27f06c.ts.net` line is what makes bare tailnet names resolve for Go; tailscaled
+registers 100.100.100.100 + ts.net with resolved over D-Bus (it had ALREADY done so — only
+the file was wrong; note tailscaled REWRITES resolv.conf in direct mode if it doesn't see the
+stub there at its restart, so order matters: stub link LAST, no tailscaled restart needed).
+PROVEN: daemon bound within 5s of DNS returning ("api listening on ideapad:7878", LISTEN on
+100.116.77.31:7878); mymain's mesh flipped ideapad reachable; ideapad's peers 0-1s fresh;
+`getent hosts ideapad` resolves on-box via search completion. myrig e9ef43c encodes it in
+setup/installs/arch/tailscale.py (3 idempotent steps, re-run against the fixed box =
+byte-identical). 
+RECURRENCE-VISIBILITY (sesh 4063a93, no schema change, deployed all five + restarts): doctor
+said "api: ok, exposed on <addr>" from CONFIG alone the whole 12 days. Daemon now tracks
+apiBound/apiBindErr in serveAPIWithRetry; doctor reports ok/"listening on" vs
+fail/"configured … but NOT BOUND — cross-machine http access to this daemon is down" + last
+bind error. daemon.doctor cell extended (unresolvable SESH_API_ADDR sandbox → fail/NOT
+BOUND; bound → ok/listening).
+
 ## H43 — mmt-copy-clipboard-to-master: push the BASE machine's clipboard into the master's clipboard (2026-07-12, myrig efc8cad; NO sesh change; deployed 4/5 — termux OFFLINE, pending; ticket 1d978651)
 Ticket 1d978651 "mmt command similar to mmt-copy-to-master but instead transfers the current
 clipboard content of the base to the master". MYRIG-ONLY (shell.sh.jinja): new zsh function

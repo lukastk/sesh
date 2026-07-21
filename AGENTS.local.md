@@ -27,6 +27,17 @@ macbook anyway". TWO separate things, one policy change:
   names the thread = toast actually sent), then --off again. Did exactly that on macbook:
   `hs.notify: chanu-dashboards` + "hook notify-idle ran ok". (b) `hooks` commands are NOT
   --machine-routable — run them on the target machine over ssh.
+- FOLLOW-UP (myrig 4debbf5): toasts should PERSIST until clicked away. TWO layers make a mac
+  notification auto-hide: (1) our script's `withdrawAfter=15` — now 0 in BOTH hs.notify.new
+  branches (0 = never expire; hs DEFAULTS to 5s when omitted, so explicit 0 is required;
+  autoWithdraw=true kept = click dismisses); (2) macOS's per-app style — "Banners" auto-hide
+  regardless, only "Alerts" sit on screen. On macOS 26 (macbook, 26.5.2) that setting has NO
+  scriptable store: com.apple.ncprefs is GONE (domain doesn't exist — the classic flags-
+  bitfield trick is dead), and it's not in the usernoted db2 (delivered-notifications only)
+  or any Group Containers plist I could find ⇒ flipping Banners→Alerts is a MANUAL System
+  Settings → Notifications → Hammerspoon step. Deploy: notify is a SYMLINKED script — git
+  pull on macbook only (the sole machine with hs); no render/restart. Test toast fired
+  through the new code.
 CONTEXT (same session, earlier): `thread send --text` has a de-facto ~16.3 KB cap — NOT sesh's:
 tmux's client→server imsg protocol caps one command at MAX_IMSGSIZE=16384, and SendText passes
 the whole text as ONE argv to `set-buffer` (send-keys -l same cap). Fails atomically + loudly

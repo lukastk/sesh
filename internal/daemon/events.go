@@ -29,6 +29,13 @@ func (e Event) Env() map[string]string {
 		"SESH_TAGS":        strings.Join(e.Snap.Tags, ","),
 		"SESH_HEAD":        string(e.Snap.Head),
 		"SESH_BUSY":        string(e.Snap.Busy),
+		// Attachment ("attached"/"detached") lets a hook tell user-driven busy
+		// flips from background ones: typing into a pane or the redraw of
+		// navigating onto it latches the content-diff busy probe exactly like
+		// agent output, so a busy→idle edge alone can't distinguish "a turn
+		// finished" from "the user stopped interacting". A notify hook can skip
+		// attached threads (the user is looking at that session already).
+		"SESH_ATTACHMENT": string(e.Snap.Attachment),
 		// The per-thread gate: the user's notify hook respects it (the daemon
 		// never decides what a notification is — policy stays in the hook).
 		"SESH_NOTIFY": map[bool]string{true: "1", false: "0"}[e.Snap.Notify],

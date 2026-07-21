@@ -34,7 +34,7 @@ notifications = true
 name    = "gate-probe"
 event   = "busy_changed"
 to      = "idle"
-command = 'echo "gate=$SESH_NOTIFY $SESH_THREAD_ID" >> ` + outFile + `'
+command = 'echo "gate=$SESH_NOTIFY att=$SESH_ATTACHMENT $SESH_THREAD_ID" >> ` + outFile + `'
 `
 	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"), []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ command = 'echo "gate=$SESH_NOTIFY $SESH_THREAD_ID" >> ` + outFile + `'
 	sb.headlessTurn(t, th.ID, "Reply with exactly: ok")
 	if !waitUntil(30*time.Second, func() bool {
 		b, _ := os.ReadFile(outFile)
-		return strings.Contains(string(b), "gate=1 "+th.ID)
+		return strings.Contains(string(b), "gate=1 att=detached "+th.ID)
 	}) {
 		b, _ := os.ReadFile(outFile)
 		t.Fatalf("hook never saw gate=1:\n%s", b)
@@ -77,7 +77,7 @@ command = 'echo "gate=$SESH_NOTIFY $SESH_THREAD_ID" >> ` + outFile + `'
 	sb.headlessTurn(t, th.ID, "Reply with exactly: ok again")
 	if !waitUntil(30*time.Second, func() bool {
 		b, _ := os.ReadFile(outFile)
-		return strings.Contains(string(b), "gate=0 "+th.ID)
+		return strings.Contains(string(b), "gate=0 att=detached "+th.ID)
 	}) {
 		b, _ := os.ReadFile(outFile)
 		t.Fatalf("hook never saw gate=0 after the toggle:\n%s", b)

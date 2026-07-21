@@ -590,6 +590,16 @@ to = "idle"
 command = "~/.mybin/sesh-notify"
 ```
 
+A hook command runs through `$SHELL -c` with the event described in env vars:
+`SESH_EVENT` (+`SESH_EVENT_FROM`/`SESH_EVENT_TO` on edges), `SESH_THREAD_ID`,
+`SESH_THREAD_NAME`, `SESH_AGENT`, `SESH_MACHINE`, `SESH_CWD`, `SESH_SESSION`,
+`SESH_TAGS` (comma-joined), `SESH_HEAD`, `SESH_BUSY`, `SESH_ATTACHMENT`
+(`attached`/`detached` — lets a notify hook skip threads the user is currently
+viewing: typing into a pane or navigating onto it latches the content-diff busy
+probe like agent output would, so a busy→idle edge alone can't tell a finished
+turn from the user pausing), and `SESH_NOTIFY` (the per-thread gate as `1`/`0` —
+the hook fires regardless; honoring the gate is the hook's job).
+
 ## Common flags & environment
 
 - `--json` — machine-readable output (use it when scripting).

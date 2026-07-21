@@ -1,5 +1,39 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H46 — notifications now OPT-IN fleet-wide + macbook notify was a MUTED HOOK (2026-07-21, myrig e254b11; NO sesh change; deployed ALL FIVE)
+Lukas: "threads should have notifications off by default" + "notifications don't work on my
+macbook anyway". TWO separate things, one policy change:
+- DEFAULT OFF (myrig e254b11): `[defaults] notifications` true→false in home/.sesh/
+  config.toml.jinja — new threads start with the notify gate OFF; opt in per thread with
+  `sesh thread notify --on`. This is a RECORD-CREATION knob read by the daemon at start ⇒
+  deploy = re-render config.toml (install-home) + daemon RESTART, all five (mymain native
+  python3; macbook/macstudio/ideapad `uv run --with jinja2` — ideapad's bare python3 LACKS
+  jinja2, first render silently produced nothing and the restart ran on the OLD config, caught
+  by grepping the rendered file; termux python3 has jinja2, daemon relaunched the termux way —
+  explicit pid kill + setsid-nohup, pid 21742). ALSO bulk-flipped EVERY existing thread
+  (incl. --archived — an archived-but-headful thread still fires busy→idle per H40) to
+  notify=off via `thread notify --off` loops: all were true = the old default, ZERO explicit
+  opt-ins existed, so nothing deliberate was lost. 0 notify-on remaining mesh-wide.
+- MACBOOK ROOT CAUSE: the notify-idle [[hooks]] entry (rendered only on macbook/ideapad —
+  the machines Lukas sits at; observer-bound, covers the whole mesh) was `muted: true` on
+  macbook's daemon — hook mute is PERSISTED in the store (store.SetHookMuted, survives
+  restarts), so someone ran `sesh hooks disable` there at some point (no timestamp — unknown
+  who/when). NOT a PATH/env problem: `hs` resolves fine in a non-login zsh (hooks run via
+  `$SHELL -c`). Fixed with `sesh hooks enable --name notify-idle`; ideapad was already enabled.
+- VERIFY GOTCHAS: (a) `sesh hooks test --name notify-idle` with NO --thread builds a SYNTHETIC
+  snapshot whose Notify is the Go zero value FALSE → SESH_NOTIFY=0 → sesh-notify gates itself
+  off and the test "ran ok" with NO toast — a vacuous pass. For a VISIBLE end-to-end proof:
+  `thread notify --on` a real thread on that machine, `hooks test --thread <id>` (hs output
+  names the thread = toast actually sent), then --off again. Did exactly that on macbook:
+  `hs.notify: chanu-dashboards` + "hook notify-idle ran ok". (b) `hooks` commands are NOT
+  --machine-routable — run them on the target machine over ssh.
+CONTEXT (same session, earlier): `thread send --text` has a de-facto ~16.3 KB cap — NOT sesh's:
+tmux's client→server imsg protocol caps one command at MAX_IMSGSIZE=16384, and SendText passes
+the whole text as ONE argv to `set-buffer` (send-keys -l same cap). Fails atomically + loudly
+("command too long"; at the exact boundary "failed to send command"). Lukas declined a fix
+(would be: stream via `tmux load-buffer -b <buf> -` on stdin, which has no such cap) — big
+content goes via a file path or @blob token (expands to a PATH, stays short) by design.
+
 ## H44 — MESH-SYNC DATA RATIONING (GitHub issue #1): ETag/304 + demand-driven cadence + peer-facing slim + DNS-check retry (2026-07-19, sesh PR #2 merge e31ec3c impl bb51843; api 39→40, NO store migration; deployed 3/5 — macbook + termux pending; tickets e9e48b31→4f0ab408 done, side ticket aeaca0d0 triage)
 GitHub issue #1: meshsync fetched EVERY peer's FULL /v1/snapshot at 1 Hz forever — on termux
 ~128 KB/s ≈ 11 GB/day of mobile data (mymain's 203-thread snapshot alone 124 KB). Conferred

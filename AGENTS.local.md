@@ -1,5 +1,38 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H47 — spurious toasts on nav/typing: SESH_ATTACHMENT in hook env + attached-gate in sesh-notify (2026-07-21, sesh 2d7441a + myrig 298d2b3; NO schema change; deployed ALL FIVE)
+Lukas: notifications fired just from NAVIGATING onto a thread in sesh tui, or from TYPING into
+it. ROOT CAUSE (mechanism, not a bug per se): busy is a pane CONTENT-DIFF (≥2 changes in 2s,
+maintainer.go) and cannot attribute changes — keystroke ECHOES and the resize/redraw of
+switching a client onto a session (window-size latest ⇒ reflow+repaint) latch busy exactly
+like agent output; when the user stops, the settle emits busy_changed busy→idle = the edge
+notify-idle subscribes to ⇒ toast for your own interaction.
+FIX (mechanism/policy split per the events.go doctrine — the daemon never decides what a
+notification is): sesh 2d7441a adds SESH_ATTACHMENT ("attached"/"detached") to Event.Env()
+from the snapshot's attachment axis; myrig 298d2b3 gates in sesh-notify — exit 0 when
+EXACTLY "attached" (empty/absent = pre-2d7441a daemon ⇒ still notify; fail OPEN). Attached =
+a tmux client is on the session = you're looking at it — covers BOTH symptoms (nav + typing
+imply attachment). KEY PRECONDITION verified: attachment RIDES THE MESH snapshot to the
+observing daemon — H44's peer-facing slim was REJECTED (api.go:190; Lukas), snapshots are
+full, so the gate works for remote threads too. KNOWN EDGE (accepted): interact → nav AWAY
+within the idle-confirm window → idle fires while detached ⇒ still toasts.
+TESTS: TestEventEnv (internal/daemon/events_test.go) pins the FULL hook-env contract with an
+entry-count check so a new env var FAILS the test until added (bit me immediately — I'd
+missed SESH_SESSION from my own want-map); thread.notify local cell's hook echoes
+att=$SESH_ATTACHMENT and both gate assertions require att=detached (headless thread = no
+pane = detached), proving wire delivery through a REAL daemon + real pi turns; local+remote
+cells green. SKILL sync: sesh-cli SKILL now lists ALL hook env vars (there was no list
+anywhere before — config/hooks.go only says "SESH_EVENT_* variables").
+LIVE-PROVEN on macbook through the real chain (hooks test --thread): the ATTACHED thread
+(chanu-dashboards — Lukas's live session) → "ran ok" with NO hs.notify line = gated; a
+DETACHED thread → hs.notify toast fired. Direct env-injected sesh-notify runs confirmed both
+gate directions too.
+DEPLOY (binary + daemon RESTART all five — only hook machines macbook/ideapad strictly need
+it, fleet kept consistent; myrig = symlinked script, git pull): mymain (native, supervisorctl),
+macbook + macstudio (/opt/homebrew/bin/go + supervisorctl), ideapad (native + supervisorctl),
+termux (plain go build = CGO=1/android per H22, kill by explicit pid + setsid-nohup relaunch,
+pid 19399). All on 2d7441a.
+
 ## H46 — notifications now OPT-IN fleet-wide + macbook notify was a MUTED HOOK (2026-07-21, myrig e254b11; NO sesh change; deployed ALL FIVE)
 Lukas: "threads should have notifications off by default" + "notifications don't work on my
 macbook anyway". TWO separate things, one policy change:

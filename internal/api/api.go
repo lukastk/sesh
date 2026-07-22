@@ -203,7 +203,17 @@ package api
 // the full 200 (no `generation` ⇒ the client stays on the ETag/304 flow); a pre-41
 // client never sends `since`. What the views SHOW is unchanged — this is transfer-layer
 // only (the no-UX-tradeoffs rule from the 40 revert).
-const SchemaVersion = 41
+//
+// 42: ATTACHED-CLIENT ACTIVITY (H47 follow-up). ThreadSnapshot gains
+// `attached_activity_unix` — the newest tmux client_activity (last INPUT from a
+// client, owner's clock) among clients attached to the thread's session, stamped by
+// the owning maintainer's existing per-tick list-clients probe; 0/omitted = detached
+// or unknown. Motivation: the notify hook's "is the user watching?" gate — raw
+// attachment over-suppresses because cockpit clients PARK on sessions, so the hook
+// needs "was there recent user INPUT" (plus the observer-local attachment-flip age,
+// which needs no wire change). Additive/omitempty ⇒ mixed-mesh safe: a pre-42 peer's
+// rows read 0 (unknown) and the hook fails open to notifying.
+const SchemaVersion = 42
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

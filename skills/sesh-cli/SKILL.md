@@ -594,11 +594,18 @@ A hook command runs through `$SHELL -c` with the event described in env vars:
 `SESH_EVENT` (+`SESH_EVENT_FROM`/`SESH_EVENT_TO` on edges), `SESH_THREAD_ID`,
 `SESH_THREAD_NAME`, `SESH_AGENT`, `SESH_MACHINE`, `SESH_CWD`, `SESH_SESSION`,
 `SESH_TAGS` (comma-joined), `SESH_HEAD`, `SESH_BUSY`, `SESH_ATTACHMENT`
-(`attached`/`detached` — lets a notify hook skip threads the user is currently
-viewing: typing into a pane or navigating onto it latches the content-diff busy
-probe like agent output would, so a busy→idle edge alone can't tell a finished
-turn from the user pausing), and `SESH_NOTIFY` (the per-thread gate as `1`/`0` —
-the hook fires regardless; honoring the gate is the hook's job).
+(`attached`/`detached`), `SESH_ATTACHED_ACTIVITY_AGO` (seconds since the last
+INPUT on a client attached to the thread's session; absent when detached or
+unknown), `SESH_ATTACHMENT_CHANGED_AGO` (seconds since the observing daemon saw
+the attachment axis flip — the "just navigated onto it" signal; absent if no
+flip observed since daemon start), and `SESH_NOTIFY` (the per-thread gate as
+`1`/`0` — the hook fires regardless; honoring the gate is the hook's job). The
+activity/flip ages exist because a busy→idle edge alone can't tell a finished
+turn from the user pausing: typing into a pane or navigating onto it latches
+the content-diff busy probe like agent output would, while raw attachment
+over-suppresses (cockpit clients park on sessions) — a notify hook should skip
+only when attached AND (recent input OR a recent attachment flip), failing
+open when the vars are absent.
 
 ## Common flags & environment
 

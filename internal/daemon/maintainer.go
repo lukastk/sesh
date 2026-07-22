@@ -152,7 +152,7 @@ func (m *maintainer) tick() {
 	}
 	attached, err := m.d.tmux.AttachedSessions()
 	if err != nil {
-		attached = map[string]bool{} // tmux unreachable => nothing attached
+		attached = map[string]int64{} // tmux unreachable => nothing attached
 	}
 	tickets, err := m.d.store.OpenTicketDigests()
 	if err != nil {
@@ -232,7 +232,7 @@ func (m *maintainer) recordTombstoneLocked(id string) {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -276,8 +276,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]bool, tick
 		return
 	}
 	snap.Head = api.Headful
-	if attached[loc.Session] {
+	if act, ok := attached[loc.Session]; ok {
 		snap.Attachment = api.Attached
+		snap.AttachedActivityUnix = act
 	}
 
 	content, err := m.d.tmux.CapturePane(loc.Pane)

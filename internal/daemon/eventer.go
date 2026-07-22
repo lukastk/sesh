@@ -29,12 +29,19 @@ type eventer struct {
 	prev     map[string]api.ThreadSnapshot
 	baseline bool // true once the first tick has seeded prev
 
+	// attachFlip records, per thread, when THIS observer last saw the thread's
+	// attachment axis change (either direction). Observer-local by design — it
+	// needs no wire change, and "the user just navigated onto this session" is
+	// only meaningful to the machine whose hooks are about to fire. Absent =
+	// no flip observed since daemon start.
+	attachFlip map[string]time.Time
+
 	stop chan struct{}
 	done chan struct{}
 }
 
 func newEventer(d *Daemon, runner *hookRunner) *eventer {
-	return &eventer{d: d, runner: runner, stop: make(chan struct{}), done: make(chan struct{})}
+	return &eventer{d: d, runner: runner, attachFlip: map[string]time.Time{}, stop: make(chan struct{}), done: make(chan struct{})}
 }
 
 func (e *eventer) run() {
@@ -90,32 +97,55 @@ func (e *eventer) tick() {
 	for id, now := range cur {
 		was, existed := prev[id]
 		if !existed {
-			e.runner.handle(Event{Type: "thread_created", Snap: now})
+			e.runner.handle(e.decorate(Event{Type: "thread_created", Snap: now}))
 			continue
 		}
+		// Record the attachment flip BEFORE emitting this tick's events, so an
+		// event caused by the flip itself (nav → redraw → busy edge) already
+		// carries AttachmentChangedAgo ≈ 0.
+		if was.Attachment != now.Attachment && was.Attachment != "" && now.Attachment != "" {
+			e.attachFlip[id] = time.Now()
+		}
 		if was.Busy != now.Busy && was.Busy != "" && now.Busy != "" {
-			e.runner.handle(Event{Type: "busy_changed", Snap: now, From: string(was.Busy), To: string(now.Busy)})
+			e.runner.handle(e.decorate(Event{Type: "busy_changed", Snap: now, From: string(was.Busy), To: string(now.Busy)}))
 			if now.Busy == api.BusyIdle {
 				// The turn-delivery engine (C3): owner-side, guarded per edge.
 				go e.d.deliverSubscriptions(now)
 			}
 		}
 		if was.Head != now.Head && was.Head != "" && now.Head != "" {
-			e.runner.handle(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)})
+			e.runner.handle(e.decorate(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)}))
 		}
 		if !was.Archived && now.Archived {
-			e.runner.handle(Event{Type: "thread_archived", Snap: now})
+			e.runner.handle(e.decorate(Event{Type: "thread_archived", Snap: now}))
 		}
 		if was.Archived && !now.Archived {
-			e.runner.handle(Event{Type: "thread_unarchived", Snap: now})
+			e.runner.handle(e.decorate(Event{Type: "thread_unarchived", Snap: now}))
 		}
 		if was.Name != now.Name {
-			e.runner.handle(Event{Type: "thread_renamed", Snap: now})
+			e.runner.handle(e.decorate(Event{Type: "thread_renamed", Snap: now}))
 		}
 	}
 	for id, was := range prev {
 		if _, still := cur[id]; !still {
-			e.runner.handle(Event{Type: "thread_deleted", Snap: was})
+			delete(e.attachFlip, id)
+			e.runner.handle(e.decorate(Event{Type: "thread_deleted", Snap: was}))
 		}
 	}
+}
+
+// decorate stamps the observer-computed age fields onto an event: seconds since
+// the newest input on a client attached to the thread's session (from the
+// owner-stamped snapshot field) and seconds since this observer saw the
+// attachment axis flip. -1 = unknown; Env() omits unknowns so a hook's numeric
+// test on an empty var never mis-reads 0 ("just now").
+func (e *eventer) decorate(ev Event) Event {
+	ev.AttachedActivityAgo, ev.AttachmentChangedAgo = -1, -1
+	if ev.Snap.AttachedActivityUnix > 0 {
+		ev.AttachedActivityAgo = max(time.Now().Unix()-ev.Snap.AttachedActivityUnix, 0)
+	}
+	if t, ok := e.attachFlip[ev.Snap.ID]; ok {
+		ev.AttachmentChangedAgo = int64(time.Since(t).Seconds())
+	}
+	return ev
 }

@@ -388,14 +388,20 @@ type ThreadGridResponse struct {
 // _dev/MESH.md.
 type ThreadSnapshot struct {
 	Thread
-	Head             Head       `json:"head"`
-	Busy             Busy       `json:"busy"`
-	Attachment       Attachment `json:"attachment"`
-	TicketsOpen      int        `json:"tickets_open"`
-	TicketName       string     `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
-	TicketNeedsInput bool       `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
-	AgentRunning     bool       `json:"agent_running"`
-	LastActiveUnix   int64      `json:"last_active_unix"` // last pane change / turn completion
+	Head       Head       `json:"head"`
+	Busy       Busy       `json:"busy"`
+	Attachment Attachment `json:"attachment"`
+	// AttachedActivityUnix is the newest tmux client_activity (last INPUT from a
+	// client, the OWNING machine's clock) among clients attached to the thread's
+	// session; 0 = detached or unknown (e.g. a pre-42 peer). Lets a notify hook
+	// tell "the user is driving this session" from "a cockpit client is merely
+	// parked on it" — raw attachment cannot (schema 42).
+	AttachedActivityUnix int64  `json:"attached_activity_unix,omitempty"`
+	TicketsOpen          int    `json:"tickets_open"`
+	TicketName           string `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
+	TicketNeedsInput     bool   `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
+	AgentRunning         bool   `json:"agent_running"`
+	LastActiveUnix       int64  `json:"last_active_unix"` // last pane change / turn completion
 	// CwdRel is Cwd rendered ~-relative to the OWNING machine's home, stamped by
 	// that machine's maintainer (the home is owner data the viewer cannot know). A
 	// viewer applies its own [[cwd_label]] rules to this, so the CWD column labels

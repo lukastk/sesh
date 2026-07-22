@@ -198,21 +198,39 @@ func (s *Server) ClientCount(session string) (int, error) {
 	return len(strings.Split(out, "\n")), nil
 }
 
-// AttachedSessions returns the set of session names that have at least one client
-// attached — one list-clients call for the WHOLE server (the state maintainer's
-// per-tick attachment probe, instead of one ClientCount per thread).
-func (s *Server) AttachedSessions() (map[string]bool, error) {
-	out, err := s.run("list-clients", "-F", "#{client_session}")
+// AttachedSessions returns, for every session with at least one client attached,
+// the newest client_activity (unix seconds of the last INPUT received from a
+// client — output/redraws never bump it, so it distinguishes a user driving the
+// session from a cockpit client merely parked on it; a switch-client does not
+// bump it either, verified live). One list-clients call for the WHOLE server
+// (the state maintainer's per-tick attachment probe, instead of one ClientCount
+// per thread). Presence in the map == attached.
+func (s *Server) AttachedSessions() (map[string]int64, error) {
+	// Activity first: it is a bare integer, so the session name (which may
+	// contain spaces, but never the TAB tmux passes through verbatim) is
+	// everything after the first TAB.
+	out, err := s.run("list-clients", "-F", "#{client_activity}\t#{client_session}")
 	if err != nil {
 		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "error connecting") {
-			return map[string]bool{}, nil
+			return map[string]int64{}, nil
 		}
 		return nil, err
 	}
-	set := map[string]bool{}
+	set := map[string]int64{}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line != "" {
-			set[line] = true
+		if line == "" {
+			continue
+		}
+		act, sess, ok := strings.Cut(line, "\t")
+		if !ok {
+			return nil, fmt.Errorf("tmux: list-clients line %q has no field separator", line)
+		}
+		n, err := strconv.ParseInt(act, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("tmux: list-clients activity %q: %w", act, err)
+		}
+		if n > set[sess] {
+			set[sess] = n
 		}
 	}
 	return set, nil

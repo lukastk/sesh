@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 )
@@ -52,8 +53,11 @@ func (d *Daemon) handleHooksTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The test event: the named thread's CURRENT snapshot (or a synthetic one),
-	// with the hook's own event type so it matches by construction.
-	ev := Event{Type: "test", From: "busy", To: "idle"}
+	// with the hook's own event type so it matches by construction. The age
+	// fields default to UNKNOWN (-1, omitted from the env) — a zero-value Event
+	// would read as "input 0s ago" and wrongly trip an activity-gating hook;
+	// the activity age is then computed from the real snapshot below.
+	ev := Event{Type: "test", From: "busy", To: "idle", AttachedActivityAgo: -1, AttachmentChangedAgo: -1}
 	for _, h := range d.hooks.hooks {
 		if h.Name == req.Name {
 			ev.Type = h.Event
@@ -68,6 +72,9 @@ func (d *Daemon) handleHooksTest(w http.ResponseWriter, r *http.Request) {
 	if req.ThreadID != "" {
 		if sn, ok := d.maint.stateOf(req.ThreadID); ok {
 			ev.Snap = sn
+			if sn.AttachedActivityUnix > 0 {
+				ev.AttachedActivityAgo = max(time.Now().Unix()-sn.AttachedActivityUnix, 0)
+			}
 		} else if th, err := d.store.GetThread(req.ThreadID); err == nil {
 			ev.Snap.Thread = th
 		} else {

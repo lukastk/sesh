@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -14,6 +15,14 @@ type Event struct {
 	Snap api.ThreadSnapshot
 	From string
 	To   string
+	// AttachedActivityAgo is seconds since the newest INPUT on a client attached
+	// to the thread's session, computed at event time from the owner-stamped
+	// snapshot field. -1 = unknown (detached, or a pre-42 owner).
+	AttachedActivityAgo int64
+	// AttachmentChangedAgo is seconds since THIS observer saw the thread's
+	// attachment axis flip (either direction) — the "user just navigated onto
+	// it" signal. -1 = no flip observed since daemon start.
+	AttachmentChangedAgo int64
 }
 
 // Env is the environment a hook command receives.
@@ -43,6 +52,14 @@ func (e Event) Env() map[string]string {
 	if e.From != "" || e.To != "" {
 		m["SESH_EVENT_FROM"] = e.From
 		m["SESH_EVENT_TO"] = e.To
+	}
+	// The "is the user actually driving this session?" ages (integer seconds).
+	// UNSET means unknown — a hook must fail open (notify), never read it as 0.
+	if e.AttachedActivityAgo >= 0 {
+		m["SESH_ATTACHED_ACTIVITY_AGO"] = strconv.FormatInt(e.AttachedActivityAgo, 10)
+	}
+	if e.AttachmentChangedAgo >= 0 {
+		m["SESH_ATTACHMENT_CHANGED_AGO"] = strconv.FormatInt(e.AttachmentChangedAgo, 10)
 	}
 	return m
 }

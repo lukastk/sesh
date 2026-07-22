@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 )
@@ -13,9 +14,11 @@ import (
 // indistinguishable from a finished turn without the attachment axis).
 func TestEventEnv(t *testing.T) {
 	ev := Event{
-		Type: "busy_changed",
-		From: "busy",
-		To:   "idle",
+		Type:                 "busy_changed",
+		From:                 "busy",
+		To:                   "idle",
+		AttachedActivityAgo:  42,
+		AttachmentChangedAgo: 7,
 		Snap: api.ThreadSnapshot{
 			Thread: api.Thread{
 				ID:          "tid-1",
@@ -44,10 +47,12 @@ func TestEventEnv(t *testing.T) {
 		"SESH_CWD":         "/w",
 		"SESH_SESSION":     "sesh_worker",
 		"SESH_TAGS":        "a,b",
-		"SESH_HEAD":        string(api.Headful),
-		"SESH_BUSY":        string(api.BusyIdle),
-		"SESH_ATTACHMENT":  "attached",
-		"SESH_NOTIFY":      "1",
+		"SESH_HEAD":                   string(api.Headful),
+		"SESH_BUSY":                   string(api.BusyIdle),
+		"SESH_ATTACHMENT":             "attached",
+		"SESH_ATTACHED_ACTIVITY_AGO":  "42",
+		"SESH_ATTACHMENT_CHANGED_AGO": "7",
+		"SESH_NOTIFY":                 "1",
 	}
 	for k, v := range want {
 		if env[k] != v {
@@ -67,5 +72,52 @@ func TestEventEnv(t *testing.T) {
 	}
 	if env["SESH_NOTIFY"] != "0" {
 		t.Errorf("SESH_NOTIFY = %q, want 0", env["SESH_NOTIFY"])
+	}
+
+	// Unknown ages (-1) must be OMITTED, not exported as a number — a hook's
+	// numeric comparison on an empty var fails open (notifies); on "0" or "-1"
+	// it would wrongly suppress.
+	ev.AttachedActivityAgo, ev.AttachmentChangedAgo = -1, -1
+	env = ev.Env()
+	for _, k := range []string{"SESH_ATTACHED_ACTIVITY_AGO", "SESH_ATTACHMENT_CHANGED_AGO"} {
+		if v, present := env[k]; present {
+			t.Errorf("%s = %q, want ABSENT when unknown", k, v)
+		}
+	}
+}
+
+// TestEventerDecorate covers the observer-side age computation: activity age
+// from the owner-stamped snapshot unix (clamped at 0 for small clock skew),
+// flip age from the eventer's attachFlip record, -1 (unknown) when absent.
+func TestEventerDecorate(t *testing.T) {
+	e := &eventer{attachFlip: map[string]time.Time{}}
+
+	// Nothing known: both unknown.
+	ev := e.decorate(Event{Snap: api.ThreadSnapshot{Thread: api.Thread{ID: "a"}}})
+	if ev.AttachedActivityAgo != -1 || ev.AttachmentChangedAgo != -1 {
+		t.Fatalf("bare event: got ago %d/%d, want -1/-1", ev.AttachedActivityAgo, ev.AttachmentChangedAgo)
+	}
+
+	// Activity stamped 100s ago; flip seen 5s ago.
+	e.attachFlip["a"] = time.Now().Add(-5 * time.Second)
+	ev = e.decorate(Event{Snap: api.ThreadSnapshot{
+		Thread:               api.Thread{ID: "a"},
+		AttachedActivityUnix: time.Now().Unix() - 100,
+	}})
+	if ev.AttachedActivityAgo < 99 || ev.AttachedActivityAgo > 102 {
+		t.Errorf("activity ago = %d, want ~100", ev.AttachedActivityAgo)
+	}
+	if ev.AttachmentChangedAgo < 4 || ev.AttachmentChangedAgo > 7 {
+		t.Errorf("flip ago = %d, want ~5", ev.AttachmentChangedAgo)
+	}
+
+	// An owner clock slightly ahead of ours must clamp to 0, not go negative
+	// (negative would be omitted from the env = read as unknown).
+	ev = e.decorate(Event{Snap: api.ThreadSnapshot{
+		Thread:               api.Thread{ID: "b"},
+		AttachedActivityUnix: time.Now().Unix() + 3,
+	}})
+	if ev.AttachedActivityAgo != 0 {
+		t.Errorf("future activity ago = %d, want clamped 0", ev.AttachedActivityAgo)
 	}
 }

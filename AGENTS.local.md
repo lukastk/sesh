@@ -1,5 +1,50 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H48 — H47's attached-gate KILLED all macbook toasts (parked cockpit clients): activity+flip ages (2026-07-22, sesh 1165589 api 41→42, myrig 7e3ce6e; deployed ALL FIVE)
+Lukas: "notifications don't work anymore on macbook" — the day after H47. DIAGNOSIS: his ONE
+opted-in thread (corkboard-codex on mymain, id a2f69b62 = the codex agent from the corkboard
+collab) read attached ~ALWAYS: its session held TWO clients, one with input 14s fresh (him)
+and one PARKED since the previous day (activity ~6h stale — cockpit clients park on sessions).
+H47's blanket attached-gate therefore suppressed every toast for exactly the thread he watches.
+ATTACHMENT IS THE WRONG PROXY for "the user is watching". MEASURED FACTS (isolated tmux):
+tmux `client_activity` = last INPUT from a client — typing bumps it, agent output does NOT,
+and **switch-client does NOT** (so nav needs a different signal: the attachment FLIP itself).
+CONFERRED (AskUserQuestion): Lukas picked activity+nav-window over drop-the-gate / keep-and-
+detach.
+- MECHANISM (sesh 1165589, api 41→42 additive/omitempty): ThreadSnapshot.attached_activity_unix
+  = MAX client_activity among clients attached to the thread's session, stamped by the owning
+  maintainer's EXISTING per-tick probe (tmux.AttachedSessions now returns map[session]→activity;
+  format `#{client_activity}\t#{client_session}` — activity FIRST since session names may hold
+  spaces but never the TAB tmux passes verbatim; malformed lines error loudly). Eventer keeps an
+  observer-LOCAL attachFlip map (id → when THIS observer saw the attachment axis change; no wire
+  change needed — flips recorded BEFORE emitting the same tick's events so a nav-caused busy edge
+  reads flip-age ~0; deleted with the thread). decorate() stamps Event.AttachedActivityAgo +
+  AttachmentChangedAgo (-1 = unknown; Env() OMITS unknowns — a hook's numeric test on an empty
+  var fails OPEN; exporting 0/-1 would wrongly suppress). Env vars SESH_ATTACHED_ACTIVITY_AGO /
+  SESH_ATTACHMENT_CHANGED_AGO. hooksapi builds test Events with explicit -1 (zero-value Event =
+  "input 0s ago" footgun) + computes real activity age from the thread's snapshot.
+- POLICY (myrig 7e3ce6e, sesh-notify): suppress iff attached AND (ACTIVITY_AGO<60 OR
+  CHANGED_AGO<30). Parked (stale both) → TOAST. Absent vars (old daemon) → toast (fail open).
+  Known accepted gap: a turn finishing <60s after your last keystroke in that thread is silent.
+- TESTS: TestEventEnv contract (+2 vars; absent-when-unknown; the ENTRY-COUNT check works — it
+  caught my own missing SESH_SESSION in H47); TestEventerDecorate (unknown/-1, real ages,
+  future-clock clamps to 0 not negative); tmux TestAttachedSessionsActivity = REAL nested client
+  (`env -u TMUX tmux attach` in a driver pane): attached present w/ sane activity, input THROUGH
+  the client bumps it (sleep 1.5s first — tmux stamps whole seconds), detached absent.
+  Conformance green: thread.notify local+remote, thread.runtime-state/pi/local, mesh.snapshot
+  (+.http). NB ~20 files fail `gofmt -l` on clean HEAD (toolchain drift) — format ONLY touched
+  files, don't sweep.
+- GOTCHA: `sesh hooks test --thread` resolves LOCAL-only (stateOf/GetThread on that daemon) — it
+  CANNOT exercise a remote thread's event even though the eventer observes remote threads fine.
+  Verified the remote case by parts instead: macbook's CACHED mesh row of the mymain thread
+  carries attached_activity_unix (same stale value), + env-injected sesh-notify runs on macbook
+  proved all four gate directions (fresh-input gated / fresh-flip gated / parked TOASTS /
+  no-vars TOASTS).
+- sesh-ui: NO change (doesn't render activity; hooks are daemon-side).
+DEPLOY (schema 42 = rebuild + daemon RESTART all five + myrig pull): mymain (native), macbook +
+macstudio (/opt/homebrew/bin/go), ideapad (native) via supervisorctl; termux plain go build +
+explicit-pid kill + setsid-nohup relaunch. All five verified api schema 42.
+
 ## H47 — spurious toasts on nav/typing: SESH_ATTACHMENT in hook env + attached-gate in sesh-notify (2026-07-21, sesh 2d7441a + myrig 298d2b3; NO schema change; deployed ALL FIVE)
 Lukas: notifications fired just from NAVIGATING onto a thread in sesh tui, or from TYPING into
 it. ROOT CAUSE (mechanism, not a bug per se): busy is a pane CONTENT-DIFF (≥2 changes in 2s,

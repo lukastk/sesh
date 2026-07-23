@@ -2226,3 +2226,26 @@ is SYMLINKED by install-home (non-.jinja under home/ → symlink), so deploy = `
 os.login_tty present on every python3 (linux/macOS/android); compiles clean. LESSON: a pty wrapper for
 a full-screen TUI MUST set the child pty's winsize + forward SIGWINCH — pty.spawn alone doesn't, and a
 plain-pane test won't catch it; test inside the actual display-popup.
+
+## H49 — herdr-vs-sesh migration assessment: DON'T migrate; steal the integration idea (2026-07-23, NO code change; ticket 3aa7a590 done)
+Lukas found https://herdr.dev/ (Rust agent multiplexer, ogulcancelik/herdr, v0.7.5, solo
+full-time maintainer, Apache-2.0) and asked whether to migrate off sesh. Cloned + three deep
+code passes. FINDINGS: herdr = the tmux+`sesh tui` cockpit layer only, done very well
+(mouse-first, per-agent manifests for 19 agents incl. claude/codex/pi, AUTHORITATIVE
+lifecycle integrations w/ real `blocked` + seen/unseen `done` states, rich newline-JSON unix
+socket API, plugin [[events]] hooks). It has NONE of the four load-bearing pillars: (1) no
+persistent identity — no UUIDs anywhere (workspaces w1/w2, panes w1:p3, forgotten at close),
+(2) no archiving/history — close is destructive, code-verified, (3) no tickets/task concept
+at all + API is LOCAL-ONLY (zero TCP in codebase → mysystem can't reach it), (4) no
+multi-machine — --remote is a thin ssh stdio bridge of the RENDER client to ONE host; no
+mesh/fleet/merged view. Also no cwd→label regex (sesh's boxyard-feel cwd_label; herdr
+sidebar has custom $name metadata tokens but they're wiped on server restart). herdr DOES
+auto-resume still-open panes across server restart via stored native session refs
+(claude --resume/codex resume/pi --session) — restart-continuity only, not revival of
+closed conversations. Assessment in myvault pad "Herdr vs sesh - migration assessment".
+VERDICT (delivered): don't migrate; bridging = rebuilding sesh's daemon/store/mesh on a
+preview-channel API. IDEAS WORTH STEALING for sesh: (a) integration-style authoritative
+turn-state reporting from inside pi/claude → replace the content-diff busy heuristic (the
+H24/H47/H48 bug class); (b) a `blocked`/approval-prompt state + seen/unseen done for notify
+gating. BRIDGE THAT EXISTS TODAY: a conversation started in a herdr pane can be registered
+into sesh afterwards via headless adopt (`thread adopt --agent X --session-id Y`).

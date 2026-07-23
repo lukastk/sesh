@@ -28,7 +28,8 @@ type TUIConfig struct {
 	//	before = "machine"
 	ColumnMoves []ColumnMove `toml:"column"`
 	// ColumnColors tint individual columns. Built-in defaults (NAME blue, CWD
-	// green) apply unless overridden; an entry with an empty colour clears one.
+	// green, TKT! red) apply unless overridden; an entry with an empty colour
+	// clears one.
 	//
 	//	[[tui.column_color]]
 	//	name  = "cwd"

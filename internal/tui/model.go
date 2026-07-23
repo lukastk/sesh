@@ -2373,6 +2373,10 @@ var (
 	styleDim      = lipgloss.NewStyle().Faint(true)
 	styleMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	// styleRunning tints the gutter's running-state glyphs green (▶ = this thread
+	// is executing a turn, ↓ = a descendant is) so live activity pops out of the
+	// grid. Applied at render time to non-selected rows only, like column colours.
+	styleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 )
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
@@ -2702,7 +2706,16 @@ func (m Model) View() string {
 			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
+			// Running-state glyphs render green (▶ this thread's turn, ↓ a descendant's);
+			// the selected branch above stays untinted — reverse video is the dominant cue.
+			busy := BusyGlyph(row)
+			if row.Busy == api.BusyBusy {
+				busy = styleRunning.Render(busy)
+			}
+			if descRun[row.ID] {
+				desc = styleRunning.Render(desc)
+			}
+			line := mark + HeadGlyph(row) + busy + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

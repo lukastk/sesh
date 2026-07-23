@@ -76,7 +76,9 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
-  … — is running a turn; blank = none), a fourth shows attachment (`*` = a tmux
+  … — is running a turn; blank = none). The running-state glyphs (`▶` and `↓`) render
+  **green** on non-selected rows so live activity pops out (the selected row's reverse
+  video wins). A fourth marker shows attachment (`*` = a tmux
   client is attached), and a fifth shows **archived** (`⊘` = the thread is archived —
   it appears in the default view only while still headful). The TUI's gutter header for
   the core three is `HBD` (head, busy, descendant).
@@ -359,8 +361,8 @@ Two opt-in columns surface ticket state per thread: **`ticket_name`** (the newes
 ticket's name, `+N` if more) and **`ticket_input`** (a `!` when an active ticket sits on a
 headful·idle thread — i.e. it needs your input).
 
-Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue and CWD
-green by default (tunable via `[[tui.column_color]]`).
+Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue, CWD
+green, and the `ticket_input` `!` red by default (tunable via `[[tui.column_color]]`).
 
 Each column is **capped at a max width by default** (full-width NAME/CWD/TKT-NAME at
 40/40/30, fixed columns at their built-in width) so one long name/cwd can't blow out
@@ -566,7 +568,7 @@ label = 'mysetup/{rel}'
 columns = ["machine","agent","name","cwd","tags","notify"]
 all_machines = true              # default `sesh tui` to the cross-machine view (= --all-machines)
 show_offline = true              # show OFFLINE machines' threads by default (else hidden; `o` toggles)
-[[tui.column_color]]             # NAME blue / CWD green by default; override here
+[[tui.column_color]]             # NAME blue / CWD green / ticket_input red by default; override here
 name = "cwd"
 color = "green"
 [[tui.views]]                    # custom Tab-cycle views over the predicate language

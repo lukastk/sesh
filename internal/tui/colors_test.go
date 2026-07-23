@@ -3,7 +3,7 @@ package tui
 import "testing"
 
 func TestResolveColumnColorsDefaults(t *testing.T) {
-	// No config → the built-in defaults: NAME blue, CWD green, nothing else.
+	// No config → the built-in defaults: NAME blue, CWD green, TKT! red, nothing else.
 	got, err := ResolveColumnColors(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -13,6 +13,9 @@ func TestResolveColumnColorsDefaults(t *testing.T) {
 	}
 	if _, ok := got[ColCwd]; !ok {
 		t.Errorf("CWD should be coloured by default")
+	}
+	if _, ok := got[ColTicketInput]; !ok {
+		t.Errorf("TKT! (ticket_input) should be coloured by default")
 	}
 	if _, ok := got[ColMachine]; ok {
 		t.Errorf("MACHINE should have no default colour")

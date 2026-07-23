@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/muesli/termenv"
 )
 
 // row builds a ThreadRow with a parent link and a busy state for the descendant tests.
@@ -70,6 +73,45 @@ func TestViewRendersDescendantGlyph(t *testing.T) {
 	}
 	if !strings.Contains(view, "HBD") {
 		t.Errorf("gutter header should read HBD: %q", view)
+	}
+}
+
+// The running-state glyphs are TINTED (green) on non-selected rows — ▶ for the
+// thread's own turn, ↓ for a descendant's — and left untinted inside the selected
+// row (reverse video is the dominant cue, same rule as column colours). Rendered
+// under a forced ANSI colour profile so the assertion is deterministic off-tty.
+func TestViewTintsRunningGlyphs(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	defer lipgloss.SetColorProfile(prev)
+
+	m := Model{rows: []api.ThreadRow{
+		descRow("solo", "", api.BusyIdle),
+		descRow("boss", "", api.BusyIdle),
+		descRow("worker", "boss", api.BusyBusy),
+	}}
+	m.columns = append([]string(nil), DefaultColumns...)
+	m.defaultExpand = true
+
+	// tinted matches an SGR sequence immediately preceding the glyph — the shape
+	// styleRunning.Render produces; a plain (or merely reverse-video-wrapped) glyph
+	// does not match.
+	tinted := func(glyph string) *regexp.Regexp {
+		return regexp.MustCompile(`\x1b\[[0-9;]*m` + glyph)
+	}
+
+	view := m.View() // cursor 0 = solo; boss and worker are non-selected
+	if line := rowLineLocal(view, "worker"); !tinted("▶").MatchString(line) {
+		t.Errorf("busy row's ▶ should be tinted: %q", line)
+	}
+	if line := rowLineLocal(view, "boss"); !tinted("↓").MatchString(line) {
+		t.Errorf("descendant-running row's ↓ should be tinted: %q", line)
+	}
+
+	m.cursor = 2 // select worker: its ▶ must lose the tint (reverse video wins)
+	view = m.View()
+	if line := rowLineLocal(view, "worker"); tinted("▶").MatchString(line) {
+		t.Errorf("selected row's ▶ must NOT be tinted: %q", line)
 	}
 }
 

@@ -1,9 +1,10 @@
 package tui
 
 // Per-column foreground colours (G4). A column can be tinted via
-// [[tui.column_color]] in config.toml ({ name = "cwd", color = "green" }). Two
-// built-in defaults ship (NAME blue, CWD green, Lukas's choice); a config entry
-// for the same column overrides it, and an entry with an empty colour clears it.
+// [[tui.column_color]] in config.toml ({ name = "cwd", color = "green" }). Three
+// built-in defaults ship (NAME blue, CWD green, TKT! red — Lukas's choice); a
+// config entry for the same column overrides it, and an entry with an empty
+// colour clears it.
 // Colours are applied at render time to non-selected cells only — a selected row
 // is reverse-video (the dominant cue) and a filter match recolours its own runes,
 // so per-column colour yields to both (see renderCells). Unknown column names and
@@ -29,6 +30,7 @@ type ColumnColorSpec struct {
 var DefaultColumnColors = []ColumnColorSpec{
 	{Name: ColName, Color: "blue"},
 	{Name: ColCwd, Color: "green"},
+	{Name: ColTicketInput, Color: "red"}, // the TKT! "!" = a ticket needs input
 }
 
 // namedColors maps the basic ANSI colour names to their palette numbers.

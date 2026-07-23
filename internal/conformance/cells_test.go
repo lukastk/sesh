@@ -37,6 +37,7 @@ var skipReasons = map[string]string{
 	"thread.runtime-state":      "head(headful/headless) x busy(busy/idle) + attachment axes, all transitions both directions (codex: directory-trust prompt at spawn eats input)",
 	"thread.state-authority":    "in-agent reporters (pi extension, claude hooks) drive busy exactly; state_authority reported|heuristic visible; pane death clears authority (codex N/A: no in-agent turn-start surface)",
 	"thread.blocked":            "blocked overlay via the claude Notification/PostToolUse hooks: real permission prompt -> blocked+reason, approval -> unblocked, turn end clears (pi/codex N/A: no native block state / no hook surface)",
+	"thread.done-seen":          "done marker: real turn ends detached -> done; real nested attach (the seen signal) clears it; a turn ending while freshly attended never sets it (both directions)",
 	"thread.rename":             "rename a thread record",
 	"thread.tag":                "add/remove tags",
 	"thread.archive":            "park a thread (hidden from active list, record kept)",

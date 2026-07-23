@@ -36,6 +36,7 @@ func TestEventEnv(t *testing.T) {
 			StateAuthority: api.AuthorityReported,
 			Blocked:        true,
 			BlockedReason:  "needs permission to use Bash",
+			Done:           true,
 		},
 	}
 	env := ev.Env()
@@ -59,6 +60,7 @@ func TestEventEnv(t *testing.T) {
 		"SESH_BLOCKED":                "1",
 		"SESH_BLOCKED_REASON":         "needs permission to use Bash",
 		"SESH_STATE_AUTHORITY":        "reported",
+		"SESH_DONE":                   "1",
 	}
 	for k, v := range want {
 		if env[k] != v {

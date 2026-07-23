@@ -379,6 +379,8 @@ func atomFn(t ptok) (predFn, error) {
 		return func(r api.ThreadRow) bool { return r.OnHold }, nil
 	case "blocked":
 		return func(r api.ThreadRow) bool { return r.Blocked }, nil
+	case "done":
+		return func(r api.ThreadRow) bool { return r.Done }, nil
 	case "ticketed":
 		return func(r api.ThreadRow) bool { return r.TicketsOpen > 0 }, nil
 	}
@@ -386,5 +388,5 @@ func atomFn(t ptok) (predFn, error) {
 	if key, ok := strings.CutPrefix(strings.ToLower(t.text), "meta."); ok && key != "" {
 		return func(r api.ThreadRow) bool { return r.Meta[key] != "" }, nil
 	}
-	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, onhold, blocked, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
+	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, onhold, blocked, done, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
 }

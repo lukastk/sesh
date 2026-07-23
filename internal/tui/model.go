@@ -538,7 +538,7 @@ func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all
 			continue
 		}
 		for _, t := range mv.Threads {
-			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority, Blocked: t.Blocked, BlockedReason: t.BlockedReason}
+			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority, Blocked: t.Blocked, BlockedReason: t.BlockedReason, Done: t.Done, DoneSinceUnix: t.DoneSinceUnix}
 			if preselect != "" && t.ID == preselect {
 				preselectSeen = true // present in the mesh, regardless of the view filter
 			}
@@ -2442,7 +2442,8 @@ func HeadGlyph(row api.ThreadRow) string {
 //
 //	▶ busy (a turn is executing)   · idle (quiet)   ‼ blocked (mid-turn,
 //	stalled on the human — an approval prompt/question, per the in-agent
-//	reporter; schema 43)   ? unknown
+//	reporter)   ✔ done (a turn finished while nobody was watching, not yet
+//	seen — implies idle)   ? unknown   (schema 43)
 func BusyGlyph(row api.ThreadRow) string {
 	if row.Blocked {
 		return "‼"
@@ -2451,6 +2452,9 @@ func BusyGlyph(row api.ThreadRow) string {
 	case api.BusyBusy:
 		return "▶"
 	case api.BusyIdle:
+		if row.Done {
+			return "✔"
+		}
 		return "·"
 	default:
 		return "?"

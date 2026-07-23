@@ -392,6 +392,10 @@ type ThreadRow struct {
 	// reported authority — the content-diff heuristic cannot know it. Schema 43.
 	Blocked       bool   `json:"blocked,omitempty"`
 	BlockedReason string `json:"blocked_reason,omitempty"`
+	// Done: a turn finished while nobody was watching, not yet seen. See
+	// ThreadSnapshot.Done. Schema 43.
+	Done          bool  `json:"done,omitempty"`
+	DoneSinceUnix int64 `json:"done_since_unix,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -446,6 +450,16 @@ type ThreadSnapshot struct {
 	// in-agent reporter (only under reported authority). Schema 43.
 	Blocked       bool   `json:"blocked,omitempty"`
 	BlockedReason string `json:"blocked_reason,omitempty"`
+	// Done: a turn finished while nobody was watching (busy→idle while the
+	// session was not attended — not attached, or attached with stale input),
+	// and the thread has not been "seen" since (an attachment flip onto it, or
+	// fresh input). The scannable "finished behind your back" marker. Runtime
+	// state (in-memory, cleared by a daemon restart), stamped by the owning
+	// maintainer; set only by HEADFUL turn edges (headless completion has
+	// subscriptions/await as its delivery path) but retained across
+	// stop/headless until seen. Schema 43.
+	Done          bool  `json:"done,omitempty"`
+	DoneSinceUnix int64 `json:"done_since_unix,omitempty"`
 }
 
 // MachineSnapshot is one machine's live thread state, returned by

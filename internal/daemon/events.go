@@ -50,6 +50,8 @@ func (e Event) Env() map[string]string {
 		"SESH_NOTIFY": map[bool]string{true: "1", false: "0"}[e.Snap.Notify],
 		// The blocked overlay (mid-turn, stalled on the human) — schema 43.
 		"SESH_BLOCKED": map[bool]string{true: "1", false: "0"}[e.Snap.Blocked],
+		// The done/seen marker (finished while nobody watched) — schema 43.
+		"SESH_DONE": map[bool]string{true: "1", false: "0"}[e.Snap.Done],
 	}
 	if e.From != "" || e.To != "" {
 		m["SESH_EVENT_FROM"] = e.From

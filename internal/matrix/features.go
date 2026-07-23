@@ -297,6 +297,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.done-seen",
+		Description: "the done/seen marker: a HEADFUL turn ending while unattended (detached, or attached with stale input) reads done until seen (fresh input or an attachment flip onto it); agent-independent derivation over the busy edge + attachment axes (schema 43)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.blocked",
 		Description: "the blocked overlay: mid-turn stalled on the human (approval prompt), reported by the in-agent hook; blocked always implies busy; cleared by approval (unblocked), turn boundaries, and pane death (schema 43)",
 		Agents:      agentic,

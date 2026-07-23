@@ -74,7 +74,9 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
     (a pure grouping node — no agent at all; see *Virtual threads* below).
   - **busy**: `▶` busy (mid-turn) / `·` idle / `‼` **blocked** (mid-turn but
     stalled on YOU — an approval prompt/question, reported by the agent's
-    in-agent hook; claude only for now).
+    in-agent hook; claude only for now) / `✔` **done** (a turn finished while
+    you weren't watching and you haven't looked since — clears when you enter
+    the thread or type into it).
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
@@ -590,7 +592,7 @@ name = "busy"
 color = "2"                      # a name, a 0-255 number, or #rrggbb; empty clears the tint
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
-filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/blocked/ticketed
+filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/blocked/done/ticketed
 
 [defaults]
 notifications = true
@@ -621,11 +623,13 @@ flip observed since daemon start), `SESH_NOTIFY` (the per-thread gate as
 `1`/`0` — the hook fires regardless; honoring the gate is the hook's job),
 `SESH_BLOCKED` (`1`/`0` — mid-turn, stalled on the human, per the in-agent
 reporter), `SESH_BLOCKED_REASON` (present only while blocked with a reason,
-e.g. the permission prompt's message), and `SESH_STATE_AUTHORITY`
-(`reported`/`heuristic` — which mechanism decided busy; absent when unknown).
-The event vocabulary includes `blocked_changed` (from/to
+e.g. the permission prompt's message), `SESH_STATE_AUTHORITY`
+(`reported`/`heuristic` — which mechanism decided busy; absent when unknown),
+and `SESH_DONE` (`1`/`0` — a turn finished while nobody was watching, not yet
+seen). The event vocabulary includes `blocked_changed` (from/to
 `blocked`/`unblocked`) — the "agent needs you" edge, ideal for an immediate
-toast. The activity/flip ages exist because a HEURISTIC busy→idle edge alone
+toast — and `done_changed` (from/to `done`/`seen`) — the exact
+"finished behind your back" edge, the natural notify trigger. The activity/flip ages exist because a HEURISTIC busy→idle edge alone
 can't tell a finished turn from the user pausing: typing into a pane or
 navigating onto it latches the content-diff busy probe like agent output
 would, while raw attachment over-suppresses (cockpit clients park on

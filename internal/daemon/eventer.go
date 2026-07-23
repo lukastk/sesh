@@ -127,6 +127,16 @@ func (e *eventer) tick() {
 			}
 			e.runner.handle(e.decorate(Event{Type: "blocked_changed", Snap: now, From: from, To: to}))
 		}
+		// The done/seen marker flipping: to=done is "a turn finished while
+		// nobody was watching" (the exact toast edge), to=seen is the user
+		// catching up. Mesh-wide like every event (done rides the snapshot).
+		if was.Done != now.Done {
+			from, to := "seen", "done"
+			if was.Done {
+				from, to = "done", "seen"
+			}
+			e.runner.handle(e.decorate(Event{Type: "done_changed", Snap: now, From: from, To: to}))
+		}
 		if !was.Archived && now.Archived {
 			e.runner.handle(e.decorate(Event{Type: "thread_archived", Snap: now}))
 		}

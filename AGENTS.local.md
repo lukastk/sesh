@@ -35,6 +35,34 @@ SKILL sync: glyph-list prose (bright green, reverse-video-wins) + column_color d
 sesh-cli SKILL. No help.go change (no flag/key/column surface change). sesh-ui unaffected
 (GUI with its own rendering — terminal-TUI-only).
 
+### H49 follow-up — glyph colours now CONFIG-CONTROLLABLE ([[tui.glyph_color]]) + Lukas's pick = "2" (sesh 1d20908 + myrig c1d649a; deployed — myrig render 4/5, mymain PENDING)
+Lukas (after a swatch comparison — printing `\e[38;5;Nm▶` candidates in his terminal worked
+well for choosing): "make all of them settings controllable instead, and set them to '2' in
+my config". styleRunning DELETED; new [[tui.glyph_color]] mirrors [[tui.column_color]]
+exactly: GlyphColorSpec + DefaultGlyphColors (busy/descendant both "10" = the previous
+hardcoded bright green) + ResolveGlyphColors (empty colour clears; unknown glyph/bad colour
+LOUD) in colors.go; Model.glyphColors + WithGlyphColors; config.TUIConfig.GlyphColors
+(toml "glyph_color"); cmd/sesh/tui.go wires it beside the column colours. The `!` was
+ALREADY config-controllable (column_color ticket_input). NB BurntSushi toml.Unmarshal
+IGNORES unknown keys — verified before shipping, so the new config key is harmless to old
+binaries AND to the daemon's section loaders (deploy order irrelevant; no restart, TUI
+reads [tui] at launch). POLICY in myrig c1d649a: config.toml.jinja gets active
+[[tui.glyph_color]] busy=2 + descendant=2 (after the [tui] scalars, TOML
+subtables-after-scalars). Tests: ResolveGlyphColors defaults/override+clear/loud;
+TestViewTintsRunningGlyphs wires ResolveGlyphColors(nil) + a cleared→untinted case;
+TestLoadTUIGlyphColors (config parse). LIVE-PROVEN macbook: isolated-tmux sesh tui vs the
+live daemon captured `ESC[32m▶` = palette 2 from the RENDERED config (was [92m = 10).
+DEPLOY: sesh binary 1d20908 ALL FIVE (mymain again via throwaway shallow clone — its
+checkout still on herdr-steals). myrig render: macbook (uv --with jinja2 — its BARE python3
+LACKS jinja2 now, H46 was right / H43 stale; and DON'T >/dev/null the first render attempt,
+grep the rendered file), macstudio + ideapad (uv), termux (python3) all show 3
+glyph_color hits. **mymain myrig PENDING**: its checkout has ANOTHER AGENT'S unpushed local
+commits (8df129b "claude turn-state hooks + exact-edge notify policy for sesh schema 43" +
+e2e02a4 ghostty) — 8df129b likely touches config.toml.jinja ([[hooks]] lives there), so a
+pull --rebase risks a conflict inside their in-flight work; left untouched, self-heals when
+they sync (harmless meanwhile: mymain TUI shows default bright green; NEVER install-home
+from a temp clone — it would re-point the home symlinks INTO the clone).
+
 ## H48 — H47's attached-gate KILLED all macbook toasts (parked cockpit clients): activity+flip ages (2026-07-22, sesh 1165589 api 41→42, myrig 7e3ce6e; deployed ALL FIVE)
 Lukas: "notifications don't work anymore on macbook" — the day after H47. DIAGNOSIS: his ONE
 opted-in thread (corkboard-codex on mymain, id a2f69b62 = the codex agent from the corkboard

@@ -251,10 +251,20 @@ func claimCustomViews(t *testing.T) {
 	}
 	m := tui.New(sb.Home+"/daemon.sock", false).WithViews(views)
 
-	// Tab past the three built-ins to the custom view; wait for the
-	// maintainer's snapshot to carry the ticket join.
-	for range 3 {
+	// Tab to the custom view by its TITLE, not a hardcoded count — the number
+	// of built-ins has grown before (`on hold`, H25) and a count silently
+	// lands on the wrong view (this claim was red on clean main for exactly
+	// that reason). Then wait for the maintainer's snapshot to carry the
+	// ticket join.
+	for range 8 {
+		if strings.Contains(m.View(), "[ticketed]") {
+			break
+		}
 		m = runSpecial(t, m, tea.KeyTab)
+		m, _ = render(t, m)
+	}
+	if !strings.Contains(m.View(), "[ticketed]") {
+		t.Fatalf("tabbing never reached the custom view: %q", firstLine(m.View()))
 	}
 	if !waitUntilT(t, func() bool {
 		m, _ = render(t, m)
@@ -262,9 +272,6 @@ func claimCustomViews(t *testing.T) {
 		return strings.Contains(v, "withticket") && !strings.Contains(v, "noticket")
 	}) {
 		t.Fatalf("custom view never settled to exactly the ticketed thread:\n%s", m.View())
-	}
-	if !strings.Contains(m.View(), "[ticketed]") {
-		t.Errorf("title does not name the custom view: %q", firstLine(m.View()))
 	}
 
 	// Close the ticket -> the row leaves the view (the predicate tracks REAL

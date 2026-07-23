@@ -2373,10 +2373,10 @@ var (
 	styleDim      = lipgloss.NewStyle().Faint(true)
 	styleMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-	// styleRunning tints the gutter's running-state glyphs green (▶ = this thread
-	// is executing a turn, ↓ = a descendant is) so live activity pops out of the
-	// grid. Applied at render time to non-selected rows only, like column colours.
-	styleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	// styleRunning tints the gutter's running-state glyphs bright green (▶ = this
+	// thread is executing a turn, ↓ = a descendant is) so live activity pops out of
+	// the grid. Applied at render time to non-selected rows only, like column colours.
+	styleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 )
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal

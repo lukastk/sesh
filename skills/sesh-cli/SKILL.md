@@ -77,8 +77,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
   … — is running a turn; blank = none). The running-state glyphs (`▶` and `↓`) render
-  **green** on non-selected rows so live activity pops out (the selected row's reverse
-  video wins). A fourth marker shows attachment (`*` = a tmux
+  **bright green** on non-selected rows so live activity pops out (the selected row's
+  reverse video wins). A fourth marker shows attachment (`*` = a tmux
   client is attached), and a fifth shows **archived** (`⊘` = the thread is archived —
   it appears in the default view only while still headful). The TUI's gutter header for
   the core three is `HBD` (head, busy, descendant).

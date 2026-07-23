@@ -42,7 +42,7 @@ func TestMachineReachable(t *testing.T) {
 // newly-added routed key). If you add an owner-routed key to handleKey, add it here too.
 func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	// Keys that shell out `sesh <verb> --machine <owner>` (mutate or enter a thread).
-	routed := []string{"enter", "a", "d", "x", "f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"}
+	routed := []string{"enter", "a", "d", "x", "f", "F", "ctrl+f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"}
 	for _, k := range routed {
 		if !requiresReachableOwner(k) {
 			t.Errorf("owner-routed key %q not gated by requiresReachableOwner", k)
@@ -75,7 +75,7 @@ func TestOfflineActionRefusedInstantly(t *testing.T) {
 		}
 	}
 	// Every owner-routed key must be refused with no side effects.
-	for _, k := range []string{"enter", "a", "d", "x", "f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"} {
+	for _, k := range []string{"enter", "a", "d", "x", "f", "F", "ctrl+f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"} {
 		m := base()
 		var key tea.KeyMsg
 		if k == "enter" {

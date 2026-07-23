@@ -225,7 +225,29 @@ package api
 // always visible, never silent. Additive (new endpoint + omitempty field) ⇒
 // mixed-mesh safe: a pre-43 daemon 404s the route loudly (its threads simply
 // stay heuristic) and a pre-43 viewer ignores the field.
-const SchemaVersion = 43
+//
+// 44: FLAGGED replaces the 43-era done/blocked overlays (ticket df4fb07a —
+// Lukas: "any agent that stops their turn, regardless of whether it is blocked
+// or done, should be looked at"). Thread record gains STORED flagged +
+// flag_reason + flag_disabled (store migration; persists across restarts,
+// replicates like any record field). The OWNING daemon auto-flags on an
+// unattended turn end (in-agent reporter edges for all three agents — codex
+// via its notify hook, which is turn-end-only and therefore sufficient here —
+// or the busy→idle heuristic edge for agents opted in via [flags]) and on an
+// agent stalling on a question/approval while unattended; flags NEVER
+// auto-clear (manual `thread flag --off` / the TUI key only). Manual flag-on
+// re-enables a flag-disabled thread. POST /v1/threads/flag (on|off|disable|
+// enable). The snapshot fields done/done_since_unix/blocked/blocked_reason are
+// REMOVED (the blocked stall state became daemon-internal: it feeds
+// auto-flagging and the wait endpoint's blocked/settled conditions, both
+// owner-local); hook events done_changed/blocked_changed became flag_changed,
+// env SESH_DONE/SESH_BLOCKED/SESH_BLOCKED_REASON became SESH_FLAGGED/
+// SESH_FLAG_REASON. Mixed-mesh: additive fields + removed omitempty fields —
+// a pre-44 viewer simply never renders flags (and its stale done/blocked
+// never render on 44); a pre-44 daemon 404s the flag route loudly. The 43-era
+// [[hooks]] events refuse a 44 daemon at start, so config + binary deploy
+// together (myrig notify-flagged).
+const SchemaVersion = 44
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

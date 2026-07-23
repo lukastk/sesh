@@ -53,6 +53,11 @@ func (c *Client) ThreadReportState(ctx context.Context, req api.ReportStateReque
 	return c.postJSON(ctx, "http://unix/v1/threads/report-state", req, nil)
 }
 
+// ThreadFlag posts POST /v1/threads/flag (schema 44): on|off|disable|enable.
+func (c *Client) ThreadFlag(ctx context.Context, id, action string) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/flag", api.FlagThreadRequest{ID: id, Action: action}, nil)
+}
+
 // ThreadWait performs ONE bounded server-owned wait (schema 43): the daemon
 // polls its maintained state until the condition or timeoutMs (server-capped
 // at 10s). Callers loop until their own deadline.

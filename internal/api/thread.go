@@ -81,6 +81,21 @@ type Thread struct {
 	// (which may live on offline machines). Cleared when the thread is archived or
 	// reparented under another thread.
 	PinOrder *float64 `json:"pin_order,omitempty"`
+	// Flagged marks the thread as needing the user's attention (schema 44). Set
+	// AUTOMATICALLY by the owning daemon when a turn ends or the agent stalls on
+	// a question/approval while the session is unattended (in-agent reporter
+	// events; the busy→idle heuristic edge only for agents opted in via [flags]),
+	// or MANUALLY (thread flag / the TUI key). NEVER auto-cleared — a flag stays
+	// until the user unflags it (Lukas 2026-07-23; explicitness over convenience).
+	Flagged bool `json:"flagged,omitempty"`
+	// FlagReason optionally says WHY the thread auto-flagged (e.g. the question
+	// claude asked). Cleared with the flag. Empty for manual flags.
+	FlagReason string `json:"flag_reason,omitempty"`
+	// FlagDisabled suppresses AUTO-flagging for this thread (e.g. children a
+	// parent thread monitors — their turn ends are the parent's business).
+	// Manually flagging a flag-disabled thread RE-ENABLES flagging and flags it
+	// (one simple rule — no auto-vs-manual provenance bit).
+	FlagDisabled bool `json:"flag_disabled,omitempty"`
 }
 
 // The live runtime state of a thread is two ORTHOGONAL axes, each from a
@@ -386,16 +401,12 @@ type ThreadRow struct {
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 	// StateAuthority is which mechanism decided Busy for a headful thread
 	// (reported vs heuristic); omitted = unknown/not-applicable. Schema 43.
+	// (The blocked/done overlays that briefly lived here in 43 were replaced
+	// by the flagged system in 44: agent-stall state is daemon-internal now —
+	// it feeds auto-flagging and the wait endpoint's settled condition, both
+	// owner-local — and "finished while you weren't looking" became the
+	// stored, manually-cleared Flagged field on the record.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
-	// Blocked: the agent is mid-turn but stalled on the human (approval
-	// prompt/question), per its in-agent reporter. Only ever true under
-	// reported authority — the content-diff heuristic cannot know it. Schema 43.
-	Blocked       bool   `json:"blocked,omitempty"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	// Done: a turn finished while nobody was watching, not yet seen. See
-	// ThreadSnapshot.Done. Schema 43.
-	Done          bool  `json:"done,omitempty"`
-	DoneSinceUnix int64 `json:"done_since_unix,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -444,22 +455,10 @@ type ThreadSnapshot struct {
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 	// StateAuthority is which mechanism decided Busy for this headful thread
 	// (reported vs heuristic); omitted = unknown/not-applicable (headless, a
-	// pre-43 peer). Stamped by the owning maintainer. Schema 43.
+	// pre-43 peer). Stamped by the owning maintainer. Schema 43. (The 43-era
+	// blocked/done snapshot overlays were replaced by the stored Flagged
+	// record field in 44 — see Thread.Flagged.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
-	// Blocked/BlockedReason: mid-turn but stalled on the human, per the
-	// in-agent reporter (only under reported authority). Schema 43.
-	Blocked       bool   `json:"blocked,omitempty"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	// Done: a turn finished while nobody was watching (busy→idle while the
-	// session was not attended — not attached, or attached with stale input),
-	// and the thread has not been "seen" since (an attachment flip onto it, or
-	// fresh input). The scannable "finished behind your back" marker. Runtime
-	// state (in-memory, cleared by a daemon restart), stamped by the owning
-	// maintainer; set only by HEADFUL turn edges (headless completion has
-	// subscriptions/await as its delivery path) but retained across
-	// stop/headless until seen. Schema 43.
-	Done          bool  `json:"done,omitempty"`
-	DoneSinceUnix int64 `json:"done_since_unix,omitempty"`
 }
 
 // MachineSnapshot is one machine's live thread state, returned by
@@ -529,6 +528,26 @@ type HoldThreadRequest struct {
 	OnHoldUntilUnix int64  `json:"on_hold_until_unix"`
 }
 
+// FlagThreadRequest is POST /v1/threads/flag (schema 44). Action semantics:
+//   - "on":      flag the thread (manual). Also RE-ENABLES flagging if it was
+//     disabled — one simple rule instead of an auto-vs-manual provenance bit.
+//   - "off":     clear the flag (+ its reason). Flags NEVER auto-clear.
+//   - "disable": suppress auto-flagging for this thread (parent-monitored
+//     children); also clears any current flag.
+//   - "enable":  re-allow auto-flagging (does not flag by itself).
+type FlagThreadRequest struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+}
+
+// FlagThreadRequest actions.
+const (
+	FlagOn      = "on"
+	FlagOff     = "off"
+	FlagDisable = "disable"
+	FlagEnable  = "enable"
+)
+
 // ThreadWaitResponse is GET /v1/threads/wait?id=&until=&timeout_ms= — one
 // server-owned bounded wait for a thread state (schema 43). The daemon polls
 // its maintained state internally (~100ms) for up to timeout_ms (capped at
@@ -573,7 +592,9 @@ type ReportStateRequest struct {
 // `blocked`/`unblocked` overlay the busy axis: the agent is MID-TURN but
 // stalled on the human (an approval prompt, a question). turn_started and
 // turn_ended both clear the blocked overlay — a new or finished turn is never
-// still blocked.
+// still blocked. Since 44 the blocked state is DAEMON-INTERNAL (no snapshot
+// field): it feeds the auto-flag trigger and the wait endpoint's
+// blocked/settled conditions, both resolved on the owning daemon.
 const (
 	ReportTurnStarted = "turn_started"
 	ReportTurnEnded   = "turn_ended"

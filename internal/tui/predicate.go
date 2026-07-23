@@ -26,8 +26,8 @@ package tui
 //   - agent, machine, name, cwd, id, tags (tags = comma-joined; ~ matches any)
 //
 // A bare ATOM (no operator) is a state keyword: headful, headless, busy, idle,
-// attached, detached, archived, onhold, blocked (mid-turn, stalled on the
-// human — reporter-only, schema 43), ticketed (= at least one open ticket).
+// attached, detached, archived, onhold, flagged (needs attention — schema 44),
+// flagdisabled (auto-flagging suppressed), ticketed (= at least one open ticket).
 // `~`/`!~` match the selector against an RE2 regex. Equality is exact and
 // case-sensitive; the canonical axis values are lowercase.
 //
@@ -377,10 +377,10 @@ func atomFn(t ptok) (predFn, error) {
 		return func(r api.ThreadRow) bool { return r.Archived }, nil
 	case "onhold":
 		return func(r api.ThreadRow) bool { return r.OnHold }, nil
-	case "blocked":
-		return func(r api.ThreadRow) bool { return r.Blocked }, nil
-	case "done":
-		return func(r api.ThreadRow) bool { return r.Done }, nil
+	case "flagged":
+		return func(r api.ThreadRow) bool { return r.Flagged }, nil
+	case "flagdisabled":
+		return func(r api.ThreadRow) bool { return r.FlagDisabled }, nil
 	case "ticketed":
 		return func(r api.ThreadRow) bool { return r.TicketsOpen > 0 }, nil
 	}
@@ -388,5 +388,5 @@ func atomFn(t ptok) (predFn, error) {
 	if key, ok := strings.CutPrefix(strings.ToLower(t.text), "meta."); ok && key != "" {
 		return func(r api.ThreadRow) bool { return r.Meta[key] != "" }, nil
 	}
-	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, onhold, blocked, done, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
+	return nil, fmt.Errorf("%q is not a state keyword (headful, headless, busy, idle, attached, detached, archived, onhold, flagged, flagdisabled, ticketed, meta.<key>) — comparisons need an operator (e.g. agent == pi)", t.text)
 }

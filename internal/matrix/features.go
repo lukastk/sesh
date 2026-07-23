@@ -302,22 +302,15 @@ func init() {
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
+	// (The 43-era thread.done-seen + thread.blocked features were REPLACED by
+	// thread.flagged in 44 — ticket df4fb07a. Their overlays left the wire;
+	// the blocked stall state lives on daemon-internally as a flag trigger
+	// and the wait endpoint's settled condition.)
 	Register(Feature{
-		ID:          "thread.done-seen",
-		Description: "the done/seen marker: a HEADFUL turn ending while unattended (detached, or attached with stale input) reads done until seen (fresh input or an attachment flip onto it); agent-independent derivation over the busy edge + attachment axes (schema 43)",
-		Localities:  bothLoc,
-	})
-	Register(Feature{
-		ID:          "thread.blocked",
-		Description: "the blocked overlay: mid-turn stalled on the human (approval prompt), reported by the in-agent hook; blocked always implies busy; cleared by approval (unblocked), turn boundaries, and pane death (schema 43)",
+		ID:          "thread.flagged",
+		Description: "the flagged system (schema 44): stored needs-attention flag — auto-set on unattended turn ends (harness hooks: claude Stop, pi agent_settled, codex notify; heuristic edges only via [flags] opt-in) and question/approval stalls; NEVER auto-cleared; manual on/off/disable/enable (flag-on re-enables a disabled thread); flag_disabled suppresses auto-flags",
 		Agents:      agentic,
 		Localities:  bothLoc,
-		NA: []NAEntry{
-			{Agent: Pi, Locality: Local, Reason: "pi natively never blocks: tools run unapproved by design (defaultProjectTrust/yolo-equivalent) and extension-raised UI asks expose no public event — revisit if pi grows an ask/approval event"},
-			{Agent: Pi, Locality: Remote, Reason: "pi natively never blocks: tools run unapproved by design (defaultProjectTrust/yolo-equivalent) and extension-raised UI asks expose no public event — revisit if pi grows an ask/approval event"},
-			{Agent: Codex, Locality: Local, Reason: "codex has no in-agent hook surface at all (see thread.state-authority) — blocked requires reported authority"},
-			{Agent: Codex, Locality: Remote, Reason: "codex has no in-agent hook surface at all (see thread.state-authority) — blocked requires reported authority"},
-		},
 	})
 	Register(Feature{
 		ID:          "thread.state-authority",

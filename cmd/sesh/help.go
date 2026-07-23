@@ -193,6 +193,11 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--clear) [--id <id>] [--machine <m>]",
 		examples: []string{"sesh thread hold --until 2026-07-01 --id 1a2b3c4d", "sesh thread hold --clear"},
 	},
+	"thread flag": {
+		summary:  "flag/unflag a thread (needs-attention marker) or disable/enable its auto-flagging",
+		usage:    "sesh thread flag (--on|--off|--disable|--enable) [--id <id>] [--machine <m>]",
+		examples: []string{"sesh thread flag --off --id 1a2b3c4d", "sesh thread flag --disable --id 1a2b3c4d"},
+	},
 	"thread report-state": {
 		summary:  "report an in-agent turn-lifecycle fact (reporter hooks; overrides the busy heuristic)",
 		usage:    "sesh thread report-state --event <turn_started|turn_ended|blocked|unblocked|release> --source <s> [--id <id>] [--seq <n>] [--reason <text>] [--machine <m>]",

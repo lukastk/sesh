@@ -45,12 +45,10 @@ type liveState struct {
 	changes         []time.Time // timestamps of recent content changes (pruned to busyWindow)
 	lastActive      int64       // unix time of the most recent change/turn
 	hasActiveTicket bool        // any bound ticket is `active` (set per tick from the digest)
-	// doneSince: when a headful turn last finished UNSEEN (0 = none / seen
-	// since) — the done marker (doneseen.go). prevAttachment is last tick's
-	// published attachment, for the flip-detection clear. Maintainer-goroutine
-	// only (like the probe fields above).
-	doneSince      int64
-	prevAttachment api.Attachment
+	// stallFlagged latches "this stall episode already auto-flagged" so a
+	// manual unflag is not re-flagged every tick while the SAME prompt sits
+	// open; reset when the stall clears. Maintainer-goroutine only.
+	stallFlagged bool
 	// changedGen is the maintainer generation at which this thread's published
 	// snapshot last CHANGED (delta sync, schema 41). Guarded by m.mu.
 	changedGen int64
@@ -335,27 +333,35 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	// and the rolling change window warm, so a released/cleared authority
 	// degrades to an already-seeded heuristic, not a cold baseline. Which
 	// mechanism decided is always stamped — degradation is visible, never silent.
-	if auth, ok := m.d.reportedState(th.ID); ok {
+	auth, hasAuth := m.d.reportedState(th.ID)
+	if hasAuth {
 		if auth.busy {
 			snap.Busy = api.BusyBusy
 			st.lastActive = now.Unix() // a reported in-flight turn is activity
 		} else {
 			snap.Busy = api.BusyIdle
 		}
-		// blocked (mid-turn, stalled on the human) exists ONLY under reported
-		// authority — the content-diff cannot know it.
-		snap.Blocked = auth.blocked
-		snap.BlockedReason = auth.blockedReason
 		snap.StateAuthority = api.AuthorityReported
 	} else {
 		snap.StateAuthority = api.AuthorityHeuristic
 	}
-	// The done/seen marker: set on this tick's busy→idle edge if unattended,
-	// cleared by input/attachment-flip (doneseen.go). Uses LAST tick's
-	// published busy/attachment (st.snap / st.prevAttachment; publish updates
-	// prevAttachment as the single choke point).
-	st.doneSince = nextDoneSince(st.doneSince, st.snap.Busy, snap.Busy,
-		st.prevAttachment, snap.Attachment, snap.AttachedActivityUnix, now.Unix())
+	// Auto-flagging (autoflag.go): an unattended turn end, or an unanswered
+	// question/approval stall (the reporter's blocked state — daemon-internal
+	// since 44), flags the thread. The store's AutoFlag respects flag_disabled
+	// + already-flagged atomically; the record read next tick carries the flag
+	// into the published snapshot (≤ one tick of lag).
+	stalled := hasAuth && auth.blocked
+	if reason, flag := autoFlagTrigger(st.snap.Busy, snap.Busy,
+		snap.StateAuthority, m.d.heuristicFlagAllowed(th.AgentKind),
+		stalled, auth.blockedReason, st.stallFlagged,
+		snap.Attachment, snap.AttachedActivityUnix, now.Unix()); flag {
+		if _, err := m.d.store.AutoFlag(th.ID, reason); err == nil && stalled {
+			st.stallFlagged = true
+		}
+	}
+	if !stalled {
+		st.stallFlagged = false // stall episode over; a new one may flag again
+	}
 	snap.LastActiveUnix = st.lastActive
 	m.publish(st, snap)
 }
@@ -365,13 +371,6 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 // an active ticket on a headful·idle thread is the human-blocked state.
 func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 	snap.TicketNeedsInput = st.hasActiveTicket && snap.Head == api.Headful && snap.Busy == api.BusyIdle
-	// The done marker is stamped on EVERY path (a thread stopped after
-	// finishing unseen keeps it until seen); prevAttachment updates here so
-	// headless ticks (Detached) participate in flip detection — reviving and
-	// attaching a done thread reads as seen.
-	snap.Done = st.doneSince != 0
-	snap.DoneSinceUnix = st.doneSince
-	st.prevAttachment = snap.Attachment
 	// "On hold right now" derives from the EFFECTIVE (own + inherited) deadline vs THIS
 	// machine's clock (the owner is authoritative for its own threads); it auto-expires
 	// once now passes, and a child stays held while a parent's hold is in the future.

@@ -29,6 +29,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesThreadOps(mux)
 	d.routesReportState(mux)
 	d.routesWait(mux)
+	d.routesFlag(mux)
 	d.routesResume(mux)
 	d.routesRealize(mux)
 	d.routesPin(mux)

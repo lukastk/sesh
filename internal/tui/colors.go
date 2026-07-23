@@ -74,10 +74,14 @@ func parseColor(s string) (lipgloss.Color, error) {
 const (
 	GlyphBusy       = "busy"
 	GlyphDescendant = "descendant"
+	// GlyphFlag tints the ⚑ needs-attention flag (schema 44); the ⌀
+	// flag-disabled marker stays plain (it is a suppression state, not an
+	// attention state).
+	GlyphFlag = "flag"
 )
 
 // validGlyphNames lists the tintable glyphs, in gutter order (for error messages).
-var validGlyphNames = []string{GlyphBusy, GlyphDescendant}
+var validGlyphNames = []string{GlyphBusy, GlyphDescendant, GlyphFlag}
 
 // GlyphColorSpec is one [[tui.glyph_color]] entry. An empty Color clears the
 // glyph's colour (including a built-in default).
@@ -92,6 +96,8 @@ type GlyphColorSpec struct {
 var DefaultGlyphColors = []GlyphColorSpec{
 	{Name: GlyphBusy, Color: "10"},
 	{Name: GlyphDescendant, Color: "10"},
+	// The flag is an attention marker — red by default.
+	{Name: GlyphFlag, Color: "9"},
 }
 
 // ResolveGlyphColors builds the per-glyph style map: the built-in defaults

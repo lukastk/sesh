@@ -252,6 +252,14 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"thread flag": {
+		{"--on", "flag the thread; also RE-ENABLES auto-flagging if it was disabled (one rule, no auto-vs-manual distinction)"},
+		{"--off", "clear the flag (flags never auto-clear — this and the TUI F key are the only clears)"},
+		{"--disable", "suppress auto-flagging for this thread (parent-monitored children); also clears any current flag"},
+		{"--enable", "re-allow auto-flagging (does not flag by itself)"},
+		{"--id", "thread id or unique prefix (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"thread report-state": {
 		{"--event", "the lifecycle fact: turn_started | turn_ended | blocked | unblocked | release (release withdraws the reporter's authority)"},
 		{"--source", "reporter identity recorded with the report (e.g. sesh:pi-ext, sesh:claude-hook)"},

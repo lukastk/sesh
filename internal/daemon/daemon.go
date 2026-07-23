@@ -73,6 +73,8 @@ type Daemon struct {
 	defaults config.Defaults
 	// spawn: the [spawn] launch policy (mode + extra args, per agent).
 	spawn config.Spawn
+	// flags: the [flags] auto-flagging policy (heuristic-edge opt-ins).
+	flags config.FlagsConfig
 	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
 	subTracker *subscribe.Tracker
 	// mmaint converges the master cockpit (one window per connected machine);
@@ -157,6 +159,11 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err // a broken [spawn] refuses the daemon loudly
 	}
 	d.spawn = spawn
+	flagsCfg, err := config.LoadFlags(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [flags] refuses the daemon loudly
+	}
+	d.flags = flagsCfg
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly

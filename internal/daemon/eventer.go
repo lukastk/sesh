@@ -116,26 +116,16 @@ func (e *eventer) tick() {
 		if was.Head != now.Head && was.Head != "" && now.Head != "" {
 			e.runner.handle(e.decorate(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)}))
 		}
-		// The blocked overlay flipping (agent stalled on the human / resumed) —
-		// the "agent needs you" edge a notify hook wants immediately, mesh-wide
-		// like every other event (blocked rides the snapshot). From/To carry
-		// "blocked"/"unblocked" for hook filters.
-		if was.Blocked != now.Blocked {
-			from, to := "unblocked", "blocked"
-			if was.Blocked {
-				from, to = "blocked", "unblocked"
+		// The flag flipping (schema 44): to=flagged is "this thread needs the
+		// user" — the toast edge (auto-flags fire it on unattended turn ends
+		// and question stalls; manual flags fire it too). Mesh-wide like every
+		// event (the flag is a record field riding the snapshot).
+		if was.Flagged != now.Flagged {
+			from, to := "unflagged", "flagged"
+			if was.Flagged {
+				from, to = "flagged", "unflagged"
 			}
-			e.runner.handle(e.decorate(Event{Type: "blocked_changed", Snap: now, From: from, To: to}))
-		}
-		// The done/seen marker flipping: to=done is "a turn finished while
-		// nobody was watching" (the exact toast edge), to=seen is the user
-		// catching up. Mesh-wide like every event (done rides the snapshot).
-		if was.Done != now.Done {
-			from, to := "seen", "done"
-			if was.Done {
-				from, to = "done", "seen"
-			}
-			e.runner.handle(e.decorate(Event{Type: "done_changed", Snap: now, From: from, To: to}))
+			e.runner.handle(e.decorate(Event{Type: "flag_changed", Snap: now, From: from, To: to}))
 		}
 		if !was.Archived && now.Archived {
 			e.runner.handle(e.decorate(Event{Type: "thread_archived", Snap: now}))

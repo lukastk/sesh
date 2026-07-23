@@ -15,27 +15,24 @@ import (
 // idle-or-blocked rule (a blocked thread reads busy on the execution axis, so
 // a bare idle wait would sit out an approval prompt forever).
 func TestWaitConditionMet(t *testing.T) {
-	busy := api.ThreadSnapshot{Busy: api.BusyBusy}
-	idle := api.ThreadSnapshot{Busy: api.BusyIdle}
-	blocked := api.ThreadSnapshot{Busy: api.BusyBusy, Blocked: true}
-
 	cases := []struct {
-		until string
-		snap  api.ThreadSnapshot
-		want  bool
+		until   string
+		busy    api.Busy
+		blocked bool
+		want    bool
 	}{
-		{"busy", busy, true}, {"busy", idle, false},
-		{"idle", idle, true}, {"idle", busy, false}, {"idle", blocked, false},
-		{"blocked", blocked, true}, {"blocked", busy, false},
-		{"settled", idle, true}, {"settled", blocked, true}, {"settled", busy, false},
+		{"busy", api.BusyBusy, false, true}, {"busy", api.BusyIdle, false, false},
+		{"idle", api.BusyIdle, false, true}, {"idle", api.BusyBusy, false, false}, {"idle", api.BusyBusy, true, false},
+		{"blocked", api.BusyBusy, true, true}, {"blocked", api.BusyBusy, false, false},
+		{"settled", api.BusyIdle, false, true}, {"settled", api.BusyBusy, true, true}, {"settled", api.BusyBusy, false, false},
 	}
 	for _, tc := range cases {
-		got, err := waitConditionMet(tc.until, tc.snap)
+		got, err := waitConditionMet(tc.until, tc.busy, tc.blocked)
 		if err != nil || got != tc.want {
-			t.Errorf("waitConditionMet(%s, %+v) = %v/%v, want %v", tc.until, tc.snap.Busy, got, err, tc.want)
+			t.Errorf("waitConditionMet(%s, %s, %v) = %v/%v, want %v", tc.until, tc.busy, tc.blocked, got, err, tc.want)
 		}
 	}
-	if _, err := waitConditionMet("running", api.ThreadSnapshot{}); err == nil {
+	if _, err := waitConditionMet("running", "", false); err == nil {
 		t.Error("unknown until must be a loud error")
 	}
 }

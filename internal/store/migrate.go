@@ -153,6 +153,16 @@ var migrations = []string{
 	// on reparent-to-child (SetThreadParent). NULLABLE so 0/negative keys are valid keys,
 	// distinct from "unpinned". APPENDED last.
 	`ALTER TABLE threads ADD COLUMN pin_order REAL;`,
+	// The flagged system (api schema 44, ticket df4fb07a): flagged = needs the
+	// user's attention (auto-set on unattended turn ends / question stalls,
+	// NEVER auto-cleared — manual unflag only); flag_reason = why (e.g. the
+	// question the agent asked; cleared with the flag); flag_disabled =
+	// suppress auto-flagging (parent-monitored children; manual flag-on
+	// re-enables). One migration element, multi-statement (atomic in its tx).
+	// APPENDED last (migrations are append-only).
+	`ALTER TABLE threads ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE threads ADD COLUMN flag_reason TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE threads ADD COLUMN flag_disabled INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

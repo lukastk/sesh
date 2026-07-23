@@ -42,10 +42,10 @@ type Hook struct {
 // they reach commands verbatim via SESH_EVENT).
 var ValidHookEvents = []string{
 	"busy_changed", "head_changed",
-	// blocked_changed (from/to blocked|unblocked): the agent stalled on the
-	// human / resumed. done_changed (from/to done|seen): a turn finished while
-	// nobody was watching / the user caught up. Both schema 43.
-	"blocked_changed", "done_changed",
+	// flag_changed (from/to flagged|unflagged, schema 44): the thread's
+	// needs-attention flag flipped — to=flagged is the toast edge (auto-flags
+	// on unattended turn ends / question stalls, and manual flags alike).
+	"flag_changed",
 	"thread_created", "thread_deleted",
 	"thread_archived", "thread_unarchived", "thread_renamed",
 }

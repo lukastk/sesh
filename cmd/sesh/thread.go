@@ -79,6 +79,8 @@ func runThread(args []string) error {
 		return threadReportState(cfg, rest)
 	case "wait":
 		return threadWait(cfg, rest)
+	case "flag":
+		return threadFlag(cfg, rest)
 	case "hold":
 		return threadHold(cfg, rest)
 	case "pin":
@@ -1007,6 +1009,45 @@ func threadReportState(cfg config.Config, args []string) error {
 	return daemonClient(cfg).ThreadReportState(context.Background(), api.ReportStateRequest{
 		ThreadID: rid, Source: *source, Event: *event, Seq: s, Reason: *reason,
 	})
+}
+
+// threadFlag applies one flagged-system action (schema 44): --on flags (and
+// re-enables a flag-disabled thread — one rule, no provenance bit), --off
+// clears (flags NEVER auto-clear), --disable suppresses auto-flagging (+
+// clears any current flag; parent-monitored children), --enable re-allows it.
+func threadFlag(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("flag", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	on := fs.Bool("on", false, "flag the thread (also re-enables auto-flagging if disabled)")
+	off := fs.Bool("off", false, "clear the flag")
+	disable := fs.Bool("disable", false, "suppress auto-flagging for this thread (also clears any current flag)")
+	enable := fs.Bool("enable", false, "re-allow auto-flagging")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	action := ""
+	n := 0
+	for _, c := range []struct {
+		set bool
+		act string
+	}{{*on, api.FlagOn}, {*off, api.FlagOff}, {*disable, api.FlagDisable}, {*enable, api.FlagEnable}} {
+		if c.set {
+			action = c.act
+			n++
+		}
+	}
+	if n != 1 {
+		return errors.New("thread flag: exactly one of --on, --off, --disable, --enable is required")
+	}
+	rid, err := resolveIDFlag(cfg, fs, id)
+	if err != nil {
+		return err
+	}
+	if err := daemonClient(cfg).ThreadFlag(context.Background(), rid, action); err != nil {
+		return err
+	}
+	fmt.Printf("flag %s: %s\n", action, rid)
+	return nil
 }
 
 // threadHold parks/unparks a thread: sets on_hold_until to an absolute instant so

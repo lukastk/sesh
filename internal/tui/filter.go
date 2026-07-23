@@ -182,6 +182,19 @@ func (m *Model) visibleMatches() []treeRow {
 		}
 		return false // both unpinned: keep the stable (fetch) order
 	})
+	// flaggedUnder collects flagged descendants of id (ANY depth), in walk
+	// order — the fold-piercing set (ticket df4fb07a).
+	var flaggedUnder func(id string) []string
+	flaggedUnder = func(id string) []string {
+		var got []string
+		for _, k := range children[id] {
+			if inSet[k].row.Flagged {
+				got = append(got, k)
+			}
+			got = append(got, flaggedUnder(k)...)
+		}
+		return got
+	}
 	var out []treeRow
 	var walk func(id, indent string, isLast, isRoot bool)
 	walk = func(id, indent string, isLast, isRoot bool) {
@@ -202,17 +215,30 @@ func (m *Model) visibleMatches() []treeRow {
 			}
 		}
 		out = append(out, treeRow{rowMatch: inSet[id], prefix: prefix})
-		if len(kids) > 0 && m.isExpanded(id) {
-			childIndent := indent
-			if !isRoot {
-				if isLast {
-					childIndent += "  "
-				} else {
-					childIndent += "│ "
-				}
+		childIndent := indent
+		if !isRoot {
+			if isLast {
+				childIndent += "  "
+			} else {
+				childIndent += "│ "
 			}
+		}
+		if len(kids) > 0 && m.isExpanded(id) {
 			for i, k := range kids {
 				walk(k, childIndent, i == len(kids)-1, false)
+			}
+		} else if len(kids) > 0 {
+			// FOLD-PIERCING: flagged descendants stay visible under a
+			// collapsed parent — a flag must never hide inside a fold. They
+			// render as direct rails of the collapsed node (intermediate
+			// unflagged ancestry elided; the ▸ marker says more is hidden).
+			pierced := flaggedUnder(id)
+			for i, k := range pierced {
+				rail := "├ "
+				if i == len(pierced)-1 {
+					rail = "└ "
+				}
+				out = append(out, treeRow{rowMatch: inSet[k], prefix: childIndent + rail})
 			}
 		}
 	}

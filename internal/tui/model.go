@@ -538,7 +538,7 @@ func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all
 			continue
 		}
 		for _, t := range mv.Threads {
-			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority, Blocked: t.Blocked, BlockedReason: t.BlockedReason, Done: t.Done, DoneSinceUnix: t.DoneSinceUnix}
+			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority}
 			if preselect != "" && t.ID == preselect {
 				preselectSeen = true // present in the mesh, regardless of the view filter
 			}
@@ -1217,12 +1217,14 @@ func (m Model) machineReachable(machine string) bool {
 func requiresReachableOwner(key string) bool {
 	switch key {
 	case "enter", // navSelected (resume/nav on the owner)
-		"a", // archive/unarchive
-		"d", // delete
-		"x", // stop
-		"f", // fork (thread new --fork-from on the owner)
-		"r", // rename
-		"t", // tag add
+		"a",      // archive/unarchive
+		"d",      // delete
+		"x",      // stop
+		"f",      // fork (thread new --fork-from on the owner)
+		"F",      // flag toggle (owner-routed setter)
+		"ctrl+f", // flag-gate toggle (owner-routed setter)
+		"r",      // rename
+		"t",      // tag add
 		"T", // tag remove
 		"P", // reparent
 		"h", // hold toggle
@@ -1344,6 +1346,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "n":
 		return m, m.notifySelected()
+	case "F":
+		return m, m.flagSelected()
+	case "ctrl+f":
+		return m, m.flagGateSelected()
 	case "y":
 		if _, ok := m.Selected(); ok {
 			m.uuidPopup = true
@@ -2229,6 +2235,37 @@ func (m Model) notifySelected() tea.Cmd {
 	return m.routedVerb(row, &rowPatch{notify: bptr(want)}, "notify", flag)
 }
 
+// flagSelected (F) toggles the selected thread's needs-attention flag:
+// flagged → off; else on (which also re-enables a flag-disabled thread —
+// the one-rule semantic, schema 44). No optimistic patch: flags change only
+// a gutter glyph, the ~1s reconcile is fine.
+func (m Model) flagSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	action := "--on"
+	if row.Flagged {
+		action = "--off"
+	}
+	return m.routedVerb(row, nil, "flag", action)
+}
+
+// flagGateSelected (^f) toggles AUTO-flagging for the selected thread:
+// disabled → enable; else disable (which also clears any current flag) —
+// the parent-monitored-children knob.
+func (m Model) flagGateSelected() tea.Cmd {
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	action := "--disable"
+	if row.FlagDisabled {
+		action = "--enable"
+	}
+	return m.routedVerb(row, nil, "flag", action)
+}
+
 // archiveSelected TOGGLES the selected thread's archived state (archive in the
 // active view, unarchive in the archived/all views — the row knows which). Routed.
 func (m Model) archiveSelected() tea.Cmd {
@@ -2388,7 +2425,7 @@ var (
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
 // width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · I details · i ids · w widths · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · F flag · ^f flag-gate · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · I details · i ids · w widths · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
 
 // reorderLegendText is the legend while MOVE MODE is active — only the reposition
 // keys are live.
@@ -2440,25 +2477,34 @@ func HeadGlyph(row api.ThreadRow) string {
 
 // BusyGlyph renders the execution axis:
 //
-//	▶ busy (a turn is executing)   · idle (quiet)   ‼ blocked (mid-turn,
-//	stalled on the human — an approval prompt/question, per the in-agent
-//	reporter)   ✔ done (a turn finished while nobody was watching, not yet
-//	seen — implies idle)   ? unknown   (schema 43)
+//	▶ busy (a turn is executing)   · idle (quiet)   ? unknown
+//
+// (Attention states render in the FLAG gutter cell — see FlagGlyph — not
+// here; the 43-era ‼/✔ overlays were replaced by the flagged system.)
 func BusyGlyph(row api.ThreadRow) string {
-	if row.Blocked {
-		return "‼"
-	}
 	switch row.Busy {
 	case api.BusyBusy:
 		return "▶"
 	case api.BusyIdle:
-		if row.Done {
-			return "✔"
-		}
 		return "·"
 	default:
 		return "?"
 	}
+}
+
+// FlagGlyph renders the flagged system's gutter cell (schema 44):
+//
+//	⚑ flagged (needs your attention — auto-set on unattended turn ends and
+//	question stalls, or manually; NEVER auto-cleared)   ⌀ flagging disabled
+//	(auto-flags suppressed — e.g. a parent-monitored child)   ' ' neither
+func FlagGlyph(row api.ThreadRow) string {
+	if row.Flagged {
+		return "⚑"
+	}
+	if row.FlagDisabled {
+		return "⌀"
+	}
+	return " "
 }
 
 // ArchivedGlyph renders the archived slot: a marker on an ARCHIVED thread, blank
@@ -2716,10 +2762,11 @@ func (m Model) View() string {
 		mark := pinMark(row, m.reordering && row.ID == m.reorderID)
 		desc := DescendantGlyph(descRun[row.ID])
 		arch := ArchivedGlyph(row)
+		flag := FlagGlyph(row)
 		if selected {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, nil, false)
+			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + flag + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
 			// Running-state glyphs render tinted ([[tui.glyph_color]]; default bright
@@ -2732,7 +2779,10 @@ func (m Model) View() string {
 			if st, ok := m.glyphColors[GlyphDescendant]; ok && descRun[row.ID] {
 				desc = st.Render(desc)
 			}
-			line := mark + HeadGlyph(row) + busy + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
+			if st, ok := m.glyphColors[GlyphFlag]; ok && row.Flagged {
+				flag = st.Render(flag)
+			}
+			line := mark + HeadGlyph(row) + busy + desc + att + arch + flag + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")
 		}
 	}

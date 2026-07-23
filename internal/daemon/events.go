@@ -48,10 +48,8 @@ func (e Event) Env() map[string]string {
 		// The per-thread gate: the user's notify hook respects it (the daemon
 		// never decides what a notification is — policy stays in the hook).
 		"SESH_NOTIFY": map[bool]string{true: "1", false: "0"}[e.Snap.Notify],
-		// The blocked overlay (mid-turn, stalled on the human) — schema 43.
-		"SESH_BLOCKED": map[bool]string{true: "1", false: "0"}[e.Snap.Blocked],
-		// The done/seen marker (finished while nobody watched) — schema 43.
-		"SESH_DONE": map[bool]string{true: "1", false: "0"}[e.Snap.Done],
+		// The flag (needs the user's attention; manual-clear) — schema 44.
+		"SESH_FLAGGED": map[bool]string{true: "1", false: "0"}[e.Snap.Flagged],
 	}
 	if e.From != "" || e.To != "" {
 		m["SESH_EVENT_FROM"] = e.From
@@ -65,9 +63,10 @@ func (e Event) Env() map[string]string {
 	if e.AttachmentChangedAgo >= 0 {
 		m["SESH_ATTACHMENT_CHANGED_AGO"] = strconv.FormatInt(e.AttachmentChangedAgo, 10)
 	}
-	// Present only when there is one (a blocked thread) — hooks test presence.
-	if e.Snap.BlockedReason != "" {
-		m["SESH_BLOCKED_REASON"] = e.Snap.BlockedReason
+	// Present only when there is one (an auto-flag's trigger, e.g. the
+	// question the agent asked) — hooks test presence.
+	if e.Snap.FlagReason != "" {
+		m["SESH_FLAG_REASON"] = e.Snap.FlagReason
 	}
 	// Which mechanism decided busy (reported|heuristic); ABSENT when unknown
 	// (headless, a pre-43 owner) — a hook must not read absence as either value.

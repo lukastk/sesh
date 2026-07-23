@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, archived_at, pin_order)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.ArchivedAtUnix, t.PinOrder,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled),
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -234,13 +234,15 @@ func (s *Store) updateThread(query string, arg any, id string) error {
 func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
-	var headless, started, archived, notify int
+	var headless, started, archived, notify, flagged, flagDisabled int
 	var meta string
 	var pinOrder sql.NullFloat64
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.ArchivedAtUnix, &pinOrder); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
+	t.Flagged = flagged == 1
+	t.FlagDisabled = flagDisabled == 1
 	if pinOrder.Valid {
 		v := pinOrder.Float64
 		t.PinOrder = &v
@@ -339,4 +341,53 @@ func (s *Store) SetThreadMetaKey(id, key, value string) error {
 		return ErrThreadNotFound
 	}
 	return nil
+}
+
+// SetThreadFlagAction applies one manual flag action atomically (see
+// api.FlagThreadRequest): "on" flags AND re-enables a flag-disabled thread
+// (one rule, no auto-vs-manual provenance); "off" clears flag + reason (flags
+// never auto-clear); "disable" suppresses auto-flagging and clears any
+// current flag; "enable" re-allows auto-flagging. reason is stored only for
+// "on" (an optional note; auto-flags carry their trigger's reason instead).
+func (s *Store) SetThreadFlagAction(id, action, reason string) error {
+	var q string
+	args := []any{id}
+	switch action {
+	case "on":
+		q = `UPDATE threads SET flagged = 1, flag_reason = ?, flag_disabled = 0 WHERE id = ?`
+		args = []any{reason, id}
+	case "off":
+		q = `UPDATE threads SET flagged = 0, flag_reason = '' WHERE id = ?`
+	case "disable":
+		q = `UPDATE threads SET flag_disabled = 1, flagged = 0, flag_reason = '' WHERE id = ?`
+	case "enable":
+		q = `UPDATE threads SET flag_disabled = 0 WHERE id = ?`
+	default:
+		return fmt.Errorf("store: unknown flag action %q", action)
+	}
+	res, err := s.db.Exec(q, args...)
+	if err != nil {
+		return fmt.Errorf("store: flag %s: %w", action, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+// AutoFlag sets the flag from an automatic trigger (turn end / question
+// stall). The flag-disabled and already-flagged guards live IN the SQL so
+// check-and-set is atomic; returns whether the flag was newly set (false for
+// disabled/already-flagged — the caller then emits nothing). An unknown id
+// also returns false: the thread may have been deleted mid-tick, which is a
+// benign race, not an error.
+func (s *Store) AutoFlag(id, reason string) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE threads SET flagged = 1, flag_reason = ? WHERE id = ? AND flag_disabled = 0 AND flagged = 0`,
+		reason, id)
+	if err != nil {
+		return false, fmt.Errorf("store: auto-flag: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }

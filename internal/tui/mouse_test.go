@@ -24,7 +24,7 @@ func step(t *testing.T, m Model, msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // flatModel is a plain grid of N nameless-but-named top-level threads, sized so nothing
-// scrolls. With columns=[NAME] the state gutter is 9 cols wide and NAME starts at X=9;
+// scrolls. With columns=[NAME] the state gutter is 10 cols wide and NAME starts at X=10;
 // the first data row renders at Y=2 (title + column header, no ▲ indicator).
 func flatModel(names ...string) Model {
 	rows := make([]api.ThreadRow, len(names))
@@ -135,11 +135,11 @@ func TestClickFoldMarkerToggles(t *testing.T) {
 			{Thread: api.Thread{ID: "p", Name: "parent"}},
 			{Thread: api.Thread{ID: "c", Name: "child", Parent: "p"}},
 		}}
-	// Collapsed by default: only the parent shows, with a "▸ " marker at X=9.
+	// Collapsed by default: only the parent shows, with a "▸ " marker at X=10.
 	if got := len(m.visibleMatches()); got != 1 {
 		t.Fatalf("collapsed tree should show 1 row, got %d", got)
 	}
-	m, _ = step(t, m, click(9, firstRowY)) // the ▸ glyph
+	m, _ = step(t, m, click(10, firstRowY)) // the ▸ glyph
 	if !m.isExpanded("p") {
 		t.Fatalf("clicking the fold marker should expand the node")
 	}
@@ -147,7 +147,7 @@ func TestClickFoldMarkerToggles(t *testing.T) {
 		t.Errorf("expanded tree should show 2 rows, got %d", got)
 	}
 	// Click it again → collapse.
-	m, _ = step(t, m, click(9, firstRowY))
+	m, _ = step(t, m, click(10, firstRowY))
 	if m.isExpanded("p") {
 		t.Errorf("clicking the fold marker again should collapse the node")
 	}

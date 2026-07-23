@@ -2387,10 +2387,9 @@ auto-vs-manual provenance bit — his refinement).
   (ghostty/spacework) — fetch+rebase before every push this week.
 - DEPLOY (44 = rebuild + RENDER + restart TOGETHER — the 43-era hook events REFUSE a 44
   daemon): mymain + macbook (uv-render; hooks list shows notify-flagged enabled) +
-  macstudio + ideapad ✓. **termux OFFLINE (android-main:8022 timeout) → PENDING; when back:
-  sesh pull + plain go build + .new+mv, myrig pull + python3 install-home (full
-  $MYRIG_TARGETS), kill daemon by explicit pid + setsid-nohup relaunch (SESH_HOME=~/.sesh
-  SESH_MACHINE=termux sockets sesh/sesh-master), verify schema 44.** LIVE-PROVEN on mymain:
+  macstudio + ideapad ✓; termux came back later the same day and was deployed the standard
+  termux way (pull + plain go build + explicit-pid kill 3298 + setsid-nohup relaunch → pid
+  5973, schema 44 verified ON THE BOX — it is an outbound leaf, per H38) → ALL FIVE on 44. LIVE-PROVEN on mymain:
   detached pi turn → flagged=True reason="turn ended" (+ send --wait settled); flag --off/
   stop/delete clean. Cross-machine cached-view spot-check SKIPPED (grid fan-out hung on the
   offline termux peer — the H35/H36 slow-peer class); replication rides the same

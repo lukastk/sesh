@@ -45,6 +45,14 @@ type Daemon struct {
 	hlInFlight map[string]bool
 	hlReply    map[string]string
 
+	// State authority (schema 43): per-thread reported turn state from in-agent
+	// reporters, preferred over the content-diff heuristic by the maintainer.
+	// In-memory only (runtime is re-derived, never persisted); bounded by pane
+	// liveness (the maintainer clears entries on every no-runtime path). See
+	// reportstate.go / _dev/STATE_AUTHORITY.md.
+	authMu sync.Mutex
+	auth   map[string]*authorityState
+
 	// maint is the L1 state maintainer: it keeps every local thread's live state
 	// continuously fresh so reads are O(1) (see _dev/MESH.md).
 	maint *maintainer

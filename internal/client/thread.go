@@ -47,6 +47,12 @@ func (c *Client) ThreadHold(ctx context.Context, id string, onHoldUntilUnix int6
 	return c.postJSON(ctx, "http://unix/v1/threads/hold", api.HoldThreadRequest{ID: id, OnHoldUntilUnix: onHoldUntilUnix}, nil)
 }
 
+// ThreadReportState posts POST /v1/threads/report-state — an in-agent
+// reporter's turn-lifecycle fact (schema 43, _dev/STATE_AUTHORITY.md).
+func (c *Client) ThreadReportState(ctx context.Context, req api.ReportStateRequest) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/report-state", req, nil)
+}
+
 // ThreadReparent posts POST /v1/threads/reparent (” parent = make root).
 func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)

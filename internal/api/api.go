@@ -213,7 +213,19 @@ package api
 // needs "was there recent user INPUT" (plus the observer-local attachment-flip age,
 // which needs no wire change). Additive/omitempty ⇒ mixed-mesh safe: a pre-42 peer's
 // rows read 0 (unknown) and the hook fails open to notifying.
-const SchemaVersion = 42
+//
+// 43: STATE AUTHORITY (issue #4, _dev/STATE_AUTHORITY.md). POST
+// /v1/threads/report-state lets an in-agent reporter (a pi extension, a claude
+// hook) report turn lifecycle (turn_started/turn_ended/release, per-thread
+// monotonic seq) to the OWNING daemon; the maintainer then prefers the reported
+// busy over the pane content-diff heuristic for that headful thread, bounded by
+// pane liveness (pane/agent death clears the authority — a crashed agent can
+// never pin busy). ThreadRow/ThreadSnapshot gain `state_authority`
+// ("reported"|"heuristic", omitempty) so degradation to the heuristic floor is
+// always visible, never silent. Additive (new endpoint + omitempty field) ⇒
+// mixed-mesh safe: a pre-43 daemon 404s the route loudly (its threads simply
+// stay heuristic) and a pre-43 viewer ignores the field.
+const SchemaVersion = 43
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

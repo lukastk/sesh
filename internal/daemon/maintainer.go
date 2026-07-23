@@ -255,6 +255,11 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	// (headless).
 	loc, found := panes[th.ID]
 	if !found {
+		// No pane ⇒ no live reporter either: reported authority is bounded by
+		// pane liveness (a reporter that died with its pane must not pin busy).
+		// StateAuthority stays unset — headless busy comes from the daemon-owned
+		// turn registry, which needs no authority label.
+		m.d.clearAuthority(th.ID)
 		snap.Head = api.Headless
 		snap.Busy = api.BusyIdle
 		if m.d.turnInFlight(th.ID) {
@@ -269,6 +274,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	snap.AgentRunning = running && agent.Kind == th.AgentKind
 	if !snap.AgentRunning {
 		// A marked pane whose agent exited: no live runtime — headless·idle.
+		m.d.clearAuthority(th.ID)
 		snap.Head = api.Headless
 		snap.Busy = api.BusyIdle
 		snap.LastActiveUnix = st.lastActive
@@ -284,6 +290,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	content, err := m.d.tmux.CapturePane(loc.Pane)
 	if err != nil {
 		// Pane vanished mid-tick: no runtime after all.
+		m.d.clearAuthority(th.ID)
 		snap.Head = api.Headless
 		snap.Busy = api.BusyIdle
 		snap.LastActiveUnix = st.lastActive
@@ -314,6 +321,24 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		snap.Busy = api.BusyBusy
 	} else {
 		snap.Busy = api.BusyIdle
+	}
+	// State authority (schema 43): a live in-agent reporter's turn state
+	// OVERRIDES the content-diff for the busy axis — the report is exact where
+	// the diff can only infer (keystroke echoes and redraws latch the diff just
+	// like agent output). The content-diff above still ran: it keeps lastActive
+	// and the rolling change window warm, so a released/cleared authority
+	// degrades to an already-seeded heuristic, not a cold baseline. Which
+	// mechanism decided is always stamped — degradation is visible, never silent.
+	if busy, ok := m.d.reportedBusy(th.ID); ok {
+		if busy {
+			snap.Busy = api.BusyBusy
+			st.lastActive = now.Unix() // a reported in-flight turn is activity
+		} else {
+			snap.Busy = api.BusyIdle
+		}
+		snap.StateAuthority = api.AuthorityReported
+	} else {
+		snap.StateAuthority = api.AuthorityHeuristic
 	}
 	snap.LastActiveUnix = st.lastActive
 	m.publish(st, snap)

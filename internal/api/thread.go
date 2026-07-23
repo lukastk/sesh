@@ -137,6 +137,21 @@ const (
 	Detached Attachment = "detached"
 )
 
+// StateAuthority says WHICH mechanism decided a headful thread's busy axis: an
+// in-agent reporter ("reported" — exact, via POST /v1/threads/report-state) or
+// the pane content-diff heuristic ("heuristic" — the floor). Omitted = unknown:
+// a pre-43 peer's row, a headless thread (its busy comes from the daemon-owned
+// turn registry, which needs no authority label), or the grid's on-demand
+// fallback path (which never runs the rolling probe). Degradation from reported
+// to heuristic must always be VISIBLE through this field, never silent. See
+// _dev/STATE_AUTHORITY.md (schema 43).
+type StateAuthority string
+
+const (
+	AuthorityReported  StateAuthority = "reported"
+	AuthorityHeuristic StateAuthority = "heuristic"
+)
+
 // NewThreadRequest is the body of POST /v1/threads.
 type NewThreadRequest struct {
 	Agent    string `json:"agent"`              // claude | codex | pi
@@ -369,6 +384,9 @@ type ThreadRow struct {
 	// not held. OnHoldUntilUnix stays the thread's OWN editable value (what `hold`/`H`
 	// set/clear); this is the inherited maximum the view/column read.
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
+	// StateAuthority is which mechanism decided Busy for a headful thread
+	// (reported vs heuristic); omitted = unknown/not-applicable. Schema 43.
+	StateAuthority StateAuthority `json:"state_authority,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -415,6 +433,10 @@ type ThreadSnapshot struct {
 	// OnHoldEffectiveUnix is the effective hold deadline including inherited holds —
 	// max(own, same-machine ancestors' own). See ThreadRow.OnHoldEffectiveUnix.
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
+	// StateAuthority is which mechanism decided Busy for this headful thread
+	// (reported vs heuristic); omitted = unknown/not-applicable (headless, a
+	// pre-43 peer). Stamped by the owning maintainer. Schema 43.
+	StateAuthority StateAuthority `json:"state_authority,omitempty"`
 }
 
 // MachineSnapshot is one machine's live thread state, returned by
@@ -483,6 +505,30 @@ type HoldThreadRequest struct {
 	ID              string `json:"id"`
 	OnHoldUntilUnix int64  `json:"on_hold_until_unix"`
 }
+
+// ReportStateRequest is POST /v1/threads/report-state — an in-agent reporter
+// (a pi extension, a claude hook) tells the OWNING daemon a turn-lifecycle
+// fact about its thread (schema 43; see _dev/STATE_AUTHORITY.md). Seq must
+// be strictly increasing per thread: a stale/duplicate seq is refused loudly
+// (409), never applied out of order — reports may race over the wire and a
+// late-arriving turn_started must not overwrite the turn_ended after it.
+type ReportStateRequest struct {
+	ThreadID string `json:"thread_id"`
+	// Source identifies the reporter (e.g. "sesh:pi-ext"), for diagnostics.
+	Source string `json:"source"`
+	// Event is one of the Report* constants below.
+	Event string `json:"event"`
+	Seq   int64  `json:"seq"`
+}
+
+// Reporter event vocabulary. `release` withdraws the reporter's authority
+// (only a real agent QUIT should send it — see the pi runtime-rebind footnote
+// in _dev/STATE_AUTHORITY.md); the thread then degrades to the heuristic floor.
+const (
+	ReportTurnStarted = "turn_started"
+	ReportTurnEnded   = "turn_ended"
+	ReportRelease     = "release"
+)
 
 // AdoptThreadRequest brings an agent sesh didn't spawn under management.
 //

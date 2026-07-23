@@ -27,6 +27,7 @@ func (d *Daemon) routes() http.Handler {
 	mux.HandleFunc("POST /v1/tmux/stage-file", d.handleTmuxStageFile)
 	d.routesThreads(mux)
 	d.routesThreadOps(mux)
+	d.routesReportState(mux)
 	d.routesResume(mux)
 	d.routesRealize(mux)
 	d.routesPin(mux)

@@ -2227,7 +2227,7 @@ os.login_tty present on every python3 (linux/macOS/android); compiles clean. LES
 a full-screen TUI MUST set the child pty's winsize + forward SIGWINCH — pty.spawn alone doesn't, and a
 plain-pane test won't catch it; test inside the actual display-popup.
 
-## H49 — herdr-vs-sesh migration assessment: DON'T migrate; steal the integration idea (2026-07-23, NO code change; ticket 3aa7a590 done)
+## H50 — herdr-vs-sesh migration assessment: DON'T migrate; steal the integration idea (2026-07-23, NO code change; ticket 3aa7a590 done)
 Lukas found https://herdr.dev/ (Rust agent multiplexer, ogulcancelik/herdr, v0.7.5, solo
 full-time maintainer, Apache-2.0) and asked whether to migrate off sesh. Cloned + three deep
 code passes. FINDINGS: herdr = the tmux+`sesh tui` cockpit layer only, done very well

@@ -1,5 +1,40 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H49 — attention-glyph COLOURS: ▶/↓ bright green, TKT! red (2026-07-23, sesh 8bc529e + 9afdb10; NO schema change; deployed ALL FIVE)
+Lukas: colour the attention glyphs — ▶ (busy) green, the TKT! `!` red, ↓ (descendant running)
+green; then mid-turn "make it a brighter green" → palette "2"→"10" (9afdb10). PURE TUI-client
+render change ⇒ deploy = binary only, NO daemon restart. TWO mechanisms, matching each glyph's
+home: (a) ▶/↓ are GUTTER glyphs (not columns) → new hardcoded styleRunning
+(lipgloss Foreground "10", model.go) applied in View()'s NON-selected branch only — the
+selected row stays untinted (reverse video is the dominant cue, the exact rule renderCells
+follows for column colours); idle `·`/`?` untinted. (b) the `!` lives in the ticket_input
+COLUMN → added {ticket_input, red} to DefaultColumnColors (colors.go) so the EXISTING
+[[tui.column_color]] machinery renders it and config can still override/clear. Lukas's live
+config already has ticket_input at position 1 ⇒ no settings change needed.
+TESTS: TestResolveColumnColorsDefaults extended (ticket_input present);
+TestViewTintsRunningGlyphs (descendant_test.go) forces lipgloss.SetColorProfile(termenv.ANSI)
+— DETERMINISTIC off-tty, where the profile is Ascii and styles render as no-ops — and asserts
+an SGR immediately precedes ▶ (busy row) / ↓ (parent of a running child), and that selecting
+the busy row DROPS the tint (the reverse-video wrap's SGR is at line start, not glyph-adjacent,
+so the regex `\x1b\[[0-9;]*m▶` discriminates). Anti-gaming: neutered the tint (`if false &&`)
+→ test red, reversed the edit (never git-checkout, the H44 lesson). Existing tests were
+ANSI-safe by audit: all glyph assertions are single-rune Contains (survive ANSI wrapping) or
+already strip ANSI; no test asserts contiguous "●▶". termenv was ALREADY a direct go.mod dep.
+Conformance descendant-running-glyph claim green post-change (real daemon + real pi turn).
+LIVE-PROVEN (isolated tmux `sesh tui` vs the live daemon, read-only, capture-pane -e): 4 busy
+rows rendered `ESC[32m▶` at 8bc529e, then `ESC[92m▶` after the brighten — my own thread's
+in-flight turn guarantees a busy row during a smoke.
+DEPLOY GOTCHA (new): mymain's ~/mysetup/sesh checkout was on ANOTHER AGENT'S WIP branch
+(herdr-steals, uncommitted edits — the issue #6 done/seen feature) — do NOT pull/switch it;
+deployed via a THROWAWAY `git clone --depth 1` in /tmp, built from there, rm'd the clone
+(vcs.revision stamps fine from a shallow clone). Other four: normal pull+build (.new+mv;
+termux plain go build CGO=1 per H22). ALSO: hit the H30-class zsh `=word` gotcha AGAIN — a
+bare `echo ===` in a compound aborts the WHOLE line ("== not found") before later commands
+run; a `git stash` in that line never executed (verified stash list empty before proceeding).
+SKILL sync: glyph-list prose (bright green, reverse-video-wins) + column_color defaults in
+sesh-cli SKILL. No help.go change (no flag/key/column surface change). sesh-ui unaffected
+(GUI with its own rendering — terminal-TUI-only).
+
 ## H48 — H47's attached-gate KILLED all macbook toasts (parked cockpit clients): activity+flip ages (2026-07-22, sesh 1165589 api 41→42, myrig 7e3ce6e; deployed ALL FIVE)
 Lukas: "notifications don't work anymore on macbook" — the day after H47. DIAGNOSIS: his ONE
 opted-in thread (corkboard-codex on mymain, id a2f69b62 = the codex agent from the corkboard

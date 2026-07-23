@@ -329,13 +329,17 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	// and the rolling change window warm, so a released/cleared authority
 	// degrades to an already-seeded heuristic, not a cold baseline. Which
 	// mechanism decided is always stamped — degradation is visible, never silent.
-	if busy, ok := m.d.reportedBusy(th.ID); ok {
-		if busy {
+	if auth, ok := m.d.reportedState(th.ID); ok {
+		if auth.busy {
 			snap.Busy = api.BusyBusy
 			st.lastActive = now.Unix() // a reported in-flight turn is activity
 		} else {
 			snap.Busy = api.BusyIdle
 		}
+		// blocked (mid-turn, stalled on the human) exists ONLY under reported
+		// authority — the content-diff cannot know it.
+		snap.Blocked = auth.blocked
+		snap.BlockedReason = auth.blockedReason
 		snap.StateAuthority = api.AuthorityReported
 	} else {
 		snap.StateAuthority = api.AuthorityHeuristic

@@ -48,6 +48,8 @@ func (e Event) Env() map[string]string {
 		// The per-thread gate: the user's notify hook respects it (the daemon
 		// never decides what a notification is — policy stays in the hook).
 		"SESH_NOTIFY": map[bool]string{true: "1", false: "0"}[e.Snap.Notify],
+		// The blocked overlay (mid-turn, stalled on the human) — schema 43.
+		"SESH_BLOCKED": map[bool]string{true: "1", false: "0"}[e.Snap.Blocked],
 	}
 	if e.From != "" || e.To != "" {
 		m["SESH_EVENT_FROM"] = e.From
@@ -60,6 +62,15 @@ func (e Event) Env() map[string]string {
 	}
 	if e.AttachmentChangedAgo >= 0 {
 		m["SESH_ATTACHMENT_CHANGED_AGO"] = strconv.FormatInt(e.AttachmentChangedAgo, 10)
+	}
+	// Present only when there is one (a blocked thread) — hooks test presence.
+	if e.Snap.BlockedReason != "" {
+		m["SESH_BLOCKED_REASON"] = e.Snap.BlockedReason
+	}
+	// Which mechanism decided busy (reported|heuristic); ABSENT when unknown
+	// (headless, a pre-43 owner) — a hook must not read absence as either value.
+	if e.Snap.StateAuthority != "" {
+		m["SESH_STATE_AUTHORITY"] = string(e.Snap.StateAuthority)
 	}
 	return m
 }

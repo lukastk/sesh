@@ -108,6 +108,56 @@ func TestReportStateValidation(t *testing.T) {
 	}
 }
 
+// TestReportStateBlocked pins the blocked overlay's transitions: blocked always
+// implies busy (mid-turn by definition, even with no prior entry), carries its
+// reason, unblocked resumes the turn, and BOTH turn boundaries clear it.
+func TestReportStateBlocked(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "sesh.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	d := &Daemon{store: st}
+	if err := st.InsertThread(api.Thread{ID: "tid-b", Machine: "test", SessionName: "sb", AgentKind: "claude"}); err != nil {
+		t.Fatalf("InsertThread: %v", err)
+	}
+	report := func(event, reason string, seq int64) {
+		t.Helper()
+		if _, err := d.reportState(api.ReportStateRequest{ThreadID: "tid-b", Source: "sesh:claude-hook", Event: event, Seq: seq, Reason: reason}, 1000); err != nil {
+			t.Fatalf("%s: %v", event, err)
+		}
+	}
+	assertState := func(wantBusy, wantBlocked bool, wantReason string) {
+		t.Helper()
+		a, ok := d.reportedState("tid-b")
+		if !ok {
+			t.Fatal("no authority entry")
+		}
+		if a.busy != wantBusy || a.blocked != wantBlocked || a.blockedReason != wantReason {
+			t.Fatalf("state busy=%v blocked=%v reason=%q, want %v/%v/%q", a.busy, a.blocked, a.blockedReason, wantBusy, wantBlocked, wantReason)
+		}
+	}
+
+	// blocked with NO prior entry (daemon restarted mid-turn): busy implied.
+	report(api.ReportBlocked, "needs permission to use Bash", 1)
+	assertState(true, true, "needs permission to use Bash")
+
+	// unblocked resumes the turn: busy stays, blocked clears.
+	report(api.ReportUnblocked, "", 2)
+	assertState(true, false, "")
+
+	// blocked again, then turn_ended clears the overlay with the turn.
+	report(api.ReportBlocked, "question", 3)
+	assertState(true, true, "question")
+	report(api.ReportTurnEnded, "", 4)
+	assertState(false, false, "")
+
+	// blocked, then a NEW turn (turn_started) is never still blocked.
+	report(api.ReportBlocked, "again", 5)
+	report(api.ReportTurnStarted, "", 6)
+	assertState(true, false, "")
+}
+
 // TestAuthorityClearedByLiveness proves the pane-liveness bound with a REAL
 // maintainer tick against a real (empty, isolated) tmux server: a thread whose
 // reporter claimed busy but whose pane does not exist resolves headless·idle

@@ -30,9 +30,12 @@ func TestEventEnv(t *testing.T) {
 				Tags:        []string{"a", "b"},
 				Notify:      true,
 			},
-			Head:       api.Headful,
-			Busy:       api.BusyIdle,
-			Attachment: api.Attached,
+			Head:           api.Headful,
+			Busy:           api.BusyIdle,
+			Attachment:     api.Attached,
+			StateAuthority: api.AuthorityReported,
+			Blocked:        true,
+			BlockedReason:  "needs permission to use Bash",
 		},
 	}
 	env := ev.Env()
@@ -53,6 +56,9 @@ func TestEventEnv(t *testing.T) {
 		"SESH_ATTACHED_ACTIVITY_AGO":  "42",
 		"SESH_ATTACHMENT_CHANGED_AGO": "7",
 		"SESH_NOTIFY":                 "1",
+		"SESH_BLOCKED":                "1",
+		"SESH_BLOCKED_REASON":         "needs permission to use Bash",
+		"SESH_STATE_AUTHORITY":        "reported",
 	}
 	for k, v := range want {
 		if env[k] != v {
@@ -63,15 +69,29 @@ func TestEventEnv(t *testing.T) {
 		t.Errorf("Env() has %d entries, want %d — a new variable must be added to this contract test", len(env), len(want))
 	}
 
-	// The other attachment value and the gate's off state.
+	// The other attachment value and the gate's off state; an unblocked thread
+	// with no authority/reason must OMIT the presence-gated vars (a hook tests
+	// presence — absence must never read as a value).
 	ev.Snap.Attachment = api.Detached
 	ev.Snap.Notify = false
+	ev.Snap.Blocked = false
+	ev.Snap.BlockedReason = ""
+	ev.Snap.StateAuthority = ""
 	env = ev.Env()
 	if env["SESH_ATTACHMENT"] != "detached" {
 		t.Errorf("SESH_ATTACHMENT = %q, want detached", env["SESH_ATTACHMENT"])
 	}
 	if env["SESH_NOTIFY"] != "0" {
 		t.Errorf("SESH_NOTIFY = %q, want 0", env["SESH_NOTIFY"])
+	}
+	if env["SESH_BLOCKED"] != "0" {
+		t.Errorf("SESH_BLOCKED = %q, want 0", env["SESH_BLOCKED"])
+	}
+	if _, present := env["SESH_BLOCKED_REASON"]; present {
+		t.Error("SESH_BLOCKED_REASON must be absent when there is no reason")
+	}
+	if _, present := env["SESH_STATE_AUTHORITY"]; present {
+		t.Error("SESH_STATE_AUTHORITY must be absent when the authority is unknown")
 	}
 
 	// Unknown ages (-1) must be OMITTED, not exported as a number — a hook's

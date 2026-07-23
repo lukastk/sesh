@@ -72,7 +72,9 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 - **Two orthogonal state axes** (what the glyphs mean):
   - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `◇` **virtual**
     (a pure grouping node — no agent at all; see *Virtual threads* below).
-  - **busy**: `▶` busy (mid-turn) / `·` idle.
+  - **busy**: `▶` busy (mid-turn) / `·` idle / `‼` **blocked** (mid-turn but
+    stalled on YOU — an approval prompt/question, reported by the agent's
+    in-agent hook; claude only for now).
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
@@ -588,7 +590,7 @@ name = "busy"
 color = "2"                      # a name, a 0-255 number, or #rrggbb; empty clears the tint
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
-filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/ticketed
+filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/blocked/ticketed
 
 [defaults]
 notifications = true
@@ -615,14 +617,21 @@ A hook command runs through `$SHELL -c` with the event described in env vars:
 INPUT on a client attached to the thread's session; absent when detached or
 unknown), `SESH_ATTACHMENT_CHANGED_AGO` (seconds since the observing daemon saw
 the attachment axis flip — the "just navigated onto it" signal; absent if no
-flip observed since daemon start), and `SESH_NOTIFY` (the per-thread gate as
-`1`/`0` — the hook fires regardless; honoring the gate is the hook's job). The
-activity/flip ages exist because a busy→idle edge alone can't tell a finished
-turn from the user pausing: typing into a pane or navigating onto it latches
-the content-diff busy probe like agent output would, while raw attachment
-over-suppresses (cockpit clients park on sessions) — a notify hook should skip
-only when attached AND (recent input OR a recent attachment flip), failing
-open when the vars are absent.
+flip observed since daemon start), `SESH_NOTIFY` (the per-thread gate as
+`1`/`0` — the hook fires regardless; honoring the gate is the hook's job),
+`SESH_BLOCKED` (`1`/`0` — mid-turn, stalled on the human, per the in-agent
+reporter), `SESH_BLOCKED_REASON` (present only while blocked with a reason,
+e.g. the permission prompt's message), and `SESH_STATE_AUTHORITY`
+(`reported`/`heuristic` — which mechanism decided busy; absent when unknown).
+The event vocabulary includes `blocked_changed` (from/to
+`blocked`/`unblocked`) — the "agent needs you" edge, ideal for an immediate
+toast. The activity/flip ages exist because a HEURISTIC busy→idle edge alone
+can't tell a finished turn from the user pausing: typing into a pane or
+navigating onto it latches the content-diff busy probe like agent output
+would, while raw attachment over-suppresses (cockpit clients park on
+sessions) — a notify hook should skip only when attached AND (recent input OR
+a recent attachment flip), failing open when the vars are absent. Under
+`SESH_STATE_AUTHORITY=reported` the edge is exact (a real turn boundary).
 
 ## Common flags & environment
 

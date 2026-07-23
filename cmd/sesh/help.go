@@ -190,7 +190,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread report-state": {
 		summary:  "report an in-agent turn-lifecycle fact (reporter hooks; overrides the busy heuristic)",
-		usage:    "sesh thread report-state --event <turn_started|turn_ended|release> --source <s> [--id <id>] [--seq <n>] [--machine <m>]",
+		usage:    "sesh thread report-state --event <turn_started|turn_ended|blocked|unblocked|release> --source <s> [--id <id>] [--seq <n>] [--reason <text>] [--machine <m>]",
 		examples: []string{"sesh thread report-state --event turn_ended --source sesh:pi-ext"},
 	},
 	"thread reparent": {

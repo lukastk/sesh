@@ -28,7 +28,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 
 input="$(cat 2>/dev/null || true)"
 
-event="$(printf '%s' "$input" | python3 -c '
+out="$(printf '%s' "$input" | python3 -c '
 import json, sys
 
 try:
@@ -38,9 +38,28 @@ except Exception:
 if h.get("agent_id"):  # subagent invocation, not the main turn
     sys.exit(0)
 name = h.get("hook_event_name", "")
-print({"UserPromptSubmit": "turn_started", "Stop": "turn_ended"}.get(name, ""))
+if name == "Notification":
+    # Notification carries BOTH permission requests and idle reminders
+    # ("Claude is waiting for your input"); only a permission request is the
+    # blocked state (mid-turn, stalled on the human). Evidence-based message
+    # match — the only signal claude exposes here.
+    msg = str(h.get("message", "") or "")
+    if "permission" in msg.lower():
+        print("blocked\t" + msg.replace("\n", " ")[:200])
+    sys.exit(0)
+# PostToolUse = a tool completed, i.e. any permission stall resolved and the
+# turn is running again.
+print({"UserPromptSubmit": "turn_started", "Stop": "turn_ended", "PostToolUse": "unblocked"}.get(name, ""))
 ' 2>/dev/null || true)"
 
+event="${out%%$(printf '\t')*}"
+reason="${out#*$(printf '\t')}"
+[ "$reason" = "$out" ] && reason=""
+
 [ -n "$event" ] || exit 0
-"$SESH_CMD" thread report-state --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event" >/dev/null 2>&1 || true
+if [ -n "$reason" ]; then
+	"$SESH_CMD" thread report-state --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event" --reason "$reason" >/dev/null 2>&1 || true
+else
+	"$SESH_CMD" thread report-state --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event" >/dev/null 2>&1 || true
+fi
 exit 0

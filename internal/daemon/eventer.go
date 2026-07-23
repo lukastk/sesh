@@ -116,6 +116,17 @@ func (e *eventer) tick() {
 		if was.Head != now.Head && was.Head != "" && now.Head != "" {
 			e.runner.handle(e.decorate(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)}))
 		}
+		// The blocked overlay flipping (agent stalled on the human / resumed) —
+		// the "agent needs you" edge a notify hook wants immediately, mesh-wide
+		// like every other event (blocked rides the snapshot). From/To carry
+		// "blocked"/"unblocked" for hook filters.
+		if was.Blocked != now.Blocked {
+			from, to := "unblocked", "blocked"
+			if was.Blocked {
+				from, to = "blocked", "unblocked"
+			}
+			e.runner.handle(e.decorate(Event{Type: "blocked_changed", Snap: now, From: from, To: to}))
+		}
 		if !was.Archived && now.Archived {
 			e.runner.handle(e.decorate(Event{Type: "thread_archived", Snap: now}))
 		}

@@ -866,9 +866,10 @@ func threadNotify(cfg config.Config, args []string) error {
 func threadReportState(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("report-state", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
-	event := fs.String("event", "", "lifecycle event: turn_started | turn_ended | release")
+	event := fs.String("event", "", "lifecycle event: turn_started | turn_ended | blocked | unblocked | release")
 	source := fs.String("source", "", "reporter identity (e.g. sesh:pi-ext)")
 	seq := fs.Int64("seq", 0, "strictly-increasing per-thread sequence (default: current unix nanos)")
+	reason := fs.String("reason", "", "optional description for a blocked event (the prompt's message)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -890,7 +891,7 @@ func threadReportState(cfg config.Config, args []string) error {
 		s = time.Now().UnixNano()
 	}
 	return daemonClient(cfg).ThreadReportState(context.Background(), api.ReportStateRequest{
-		ThreadID: rid, Source: *source, Event: *event, Seq: s,
+		ThreadID: rid, Source: *source, Event: *event, Seq: s, Reason: *reason,
 	})
 }
 

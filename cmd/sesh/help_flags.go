@@ -253,10 +253,11 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread report-state": {
-		{"--event", "the lifecycle fact: turn_started | turn_ended | release (release withdraws the reporter's authority)"},
+		{"--event", "the lifecycle fact: turn_started | turn_ended | blocked | unblocked | release (release withdraws the reporter's authority)"},
 		{"--source", "reporter identity recorded with the report (e.g. sesh:pi-ext, sesh:claude-hook)"},
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--seq", "strictly-increasing per-thread sequence; stale seqs are refused (default: current unix nanos)"},
+		{"--reason", "optional description carried by a blocked event (e.g. the permission prompt's message)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread hold": {

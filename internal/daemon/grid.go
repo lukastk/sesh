@@ -92,8 +92,11 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment,
 			TicketsOpen: dg.Count, TicketName: dg.NewestName,
 			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
-			CwdRel:           snap.CwdRel, OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil}
+			CwdRel:           snap.CwdRel, OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil,
+			StateAuthority:   snap.StateAuthority, Blocked: snap.Blocked, BlockedReason: snap.BlockedReason}
 	}
+	// NB the on-demand fallback below never runs the rolling probe, so it
+	// carries no state_authority/blocked (unknown, omitted) by design.
 	row := api.ThreadRow{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
 		CwdRel: config.TildeRelative(th.Cwd, d.maint.home), OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil}
 	head, busy, err := d.resolveState(th)

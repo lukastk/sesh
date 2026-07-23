@@ -23,6 +23,8 @@ import (
 // authorityState is one thread's live reported state. Guarded by d.authMu.
 type authorityState struct {
 	busy           bool
+	blocked        bool
+	blockedReason  string
 	seq            int64
 	source         string
 	reportedAtUnix int64
@@ -55,10 +57,10 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		return http.StatusBadRequest, fmt.Errorf("report-state: source is required")
 	}
 	switch req.Event {
-	case api.ReportTurnStarted, api.ReportTurnEnded, api.ReportRelease:
+	case api.ReportTurnStarted, api.ReportTurnEnded, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease:
 	default:
-		return http.StatusBadRequest, fmt.Errorf("report-state: unknown event %q (want %s|%s|%s)",
-			req.Event, api.ReportTurnStarted, api.ReportTurnEnded, api.ReportRelease)
+		return http.StatusBadRequest, fmt.Errorf("report-state: unknown event %q (want %s|%s|%s|%s|%s)",
+			req.Event, api.ReportTurnStarted, api.ReportTurnEnded, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease)
 	}
 	th, err := d.store.GetThread(req.ThreadID)
 	if err != nil {
@@ -86,25 +88,44 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 	if d.auth == nil {
 		d.auth = map[string]*authorityState{}
 	}
-	d.auth[req.ThreadID] = &authorityState{
-		busy:           req.Event == api.ReportTurnStarted,
-		seq:            req.Seq,
-		source:         req.Source,
-		reportedAtUnix: nowUnix,
+	next := &authorityState{seq: req.Seq, source: req.Source, reportedAtUnix: nowUnix}
+	switch req.Event {
+	case api.ReportTurnStarted:
+		next.busy = true // a fresh turn is never still blocked
+	case api.ReportTurnEnded:
+		// busy false, blocked cleared: a finished turn is never blocked.
+	case api.ReportBlocked:
+		// A blocked agent is MID-TURN by definition (stalled on the human), so
+		// blocked always implies busy — even if a late/lost report left the
+		// entry idle, or the daemon restarted mid-turn and has no entry.
+		next.busy = true
+		next.blocked = true
+		next.blockedReason = req.Reason
+	case api.ReportUnblocked:
+		// The stall resolved and the turn continues: busy stays (or becomes)
+		// true; turn_ended is what ends it.
+		next.busy = true
 	}
+	d.auth[req.ThreadID] = next
 	return 0, nil
 }
 
-// reportedBusy returns the reported busy value for a thread, if a live
-// authority entry exists. Read by the maintainer each tick.
-func (d *Daemon) reportedBusy(id string) (busy, ok bool) {
+// reportedState returns a copy of the thread's live authority entry, if one
+// exists. Read by the maintainer each tick.
+func (d *Daemon) reportedState(id string) (authorityState, bool) {
 	d.authMu.Lock()
 	defer d.authMu.Unlock()
 	st := d.auth[id]
 	if st == nil {
-		return false, false
+		return authorityState{}, false
 	}
-	return st.busy, true
+	return *st, true
+}
+
+// reportedBusy is reportedState reduced to the busy axis (test convenience).
+func (d *Daemon) reportedBusy(id string) (busy, ok bool) {
+	st, ok := d.reportedState(id)
+	return st.busy, ok
 }
 
 // clearAuthority drops a thread's authority entry. The maintainer calls it on

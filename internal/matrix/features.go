@@ -297,6 +297,18 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.blocked",
+		Description: "the blocked overlay: mid-turn stalled on the human (approval prompt), reported by the in-agent hook; blocked always implies busy; cleared by approval (unblocked), turn boundaries, and pane death (schema 43)",
+		Agents:      agentic,
+		Localities:  bothLoc,
+		NA: []NAEntry{
+			{Agent: Pi, Locality: Local, Reason: "pi natively never blocks: tools run unapproved by design (defaultProjectTrust/yolo-equivalent) and extension-raised UI asks expose no public event — revisit if pi grows an ask/approval event"},
+			{Agent: Pi, Locality: Remote, Reason: "pi natively never blocks: tools run unapproved by design (defaultProjectTrust/yolo-equivalent) and extension-raised UI asks expose no public event — revisit if pi grows an ask/approval event"},
+			{Agent: Codex, Locality: Local, Reason: "codex has no in-agent hook surface at all (see thread.state-authority) — blocked requires reported authority"},
+			{Agent: Codex, Locality: Remote, Reason: "codex has no in-agent hook surface at all (see thread.state-authority) — blocked requires reported authority"},
+		},
+	})
+	Register(Feature{
 		ID:          "thread.state-authority",
 		Description: "in-agent reporters (pi extension, claude hooks) override the content-diff busy heuristic; state_authority=reported|heuristic always visible; authority bounded by pane liveness (schema 43, _dev/STATE_AUTHORITY.md)",
 		Agents:      agentic,

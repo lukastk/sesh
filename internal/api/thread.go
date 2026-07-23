@@ -387,6 +387,11 @@ type ThreadRow struct {
 	// StateAuthority is which mechanism decided Busy for a headful thread
 	// (reported vs heuristic); omitted = unknown/not-applicable. Schema 43.
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// Blocked: the agent is mid-turn but stalled on the human (approval
+	// prompt/question), per its in-agent reporter. Only ever true under
+	// reported authority — the content-diff heuristic cannot know it. Schema 43.
+	Blocked       bool   `json:"blocked,omitempty"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -437,6 +442,10 @@ type ThreadSnapshot struct {
 	// (reported vs heuristic); omitted = unknown/not-applicable (headless, a
 	// pre-43 peer). Stamped by the owning maintainer. Schema 43.
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// Blocked/BlockedReason: mid-turn but stalled on the human, per the
+	// in-agent reporter (only under reported authority). Schema 43.
+	Blocked       bool   `json:"blocked,omitempty"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
 }
 
 // MachineSnapshot is one machine's live thread state, returned by
@@ -519,14 +528,23 @@ type ReportStateRequest struct {
 	// Event is one of the Report* constants below.
 	Event string `json:"event"`
 	Seq   int64  `json:"seq"`
+	// Reason optionally describes a `blocked` event (e.g. the permission
+	// prompt's message). Ignored for other events.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Reporter event vocabulary. `release` withdraws the reporter's authority
 // (only a real agent QUIT should send it — see the pi runtime-rebind footnote
 // in _dev/STATE_AUTHORITY.md); the thread then degrades to the heuristic floor.
+// `blocked`/`unblocked` overlay the busy axis: the agent is MID-TURN but
+// stalled on the human (an approval prompt, a question). turn_started and
+// turn_ended both clear the blocked overlay — a new or finished turn is never
+// still blocked.
 const (
 	ReportTurnStarted = "turn_started"
 	ReportTurnEnded   = "turn_ended"
+	ReportBlocked     = "blocked"
+	ReportUnblocked   = "unblocked"
 	ReportRelease     = "release"
 )
 

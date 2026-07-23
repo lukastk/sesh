@@ -2333,3 +2333,68 @@ both transports) + full TUI claims + -race clean.
 - REMAINING: #8 (persistent sidebar cockpit UI revamp) — design-discussion-first, NOT
   started, by Lukas's instruction. sesh-ui: no changes made; the new snapshot fields
   (state_authority/blocked/done) are available to it — surfacing them there is follow-up.
+
+## H52 — the FLAGGED system replaces done/blocked (2026-07-23, sesh eeae368+12dcfae api 43→44 store 21→22, myrig b51b136; deployed 4/5 — termux OFFLINE, pending; ticket df4fb07a done)
+Lukas, hours after H51 shipped: "not much of a distinction between done and blocked — any
+agent that stops their turn should be looked at" → both 43-era overlays REMOVED, replaced
+by his ticket-df4fb07a flag design. CONFERRED: manual-only clearing (flags NEVER
+auto-clear); flag-on RE-ENABLES a flag-disabled thread and flags it (one rule, no
+auto-vs-manual provenance bit — his refinement).
+- MODEL: STORED flagged/flag_reason/flag_disabled on the record (migration 22) — persists
+  across restarts + replicates like any record field (fixes done's runtime-only wart).
+  AutoFlag guards (flag_disabled + already-flagged) in SQL, atomic. Auto-set (autoflag.go,
+  pure truth table): UNATTENDED (H48 60s-input window; parked clients don't count) turn-end
+  edge — REPORTED edges always, HEURISTIC edges only via [flags] heuristic_agents (default
+  none, per ticket) — or an unanswered STALL (question/approval), checked per tick so
+  nav-away-from-a-prompt still flags; one flag per stall episode (stallFlagged latch) so a
+  manual unflag isn't fought while the same prompt sits open. Headless turn ends do NOT
+  flag (delegate/await/subscriptions own that delivery).
+- WIRE REMOVALS (44): done/done_since/blocked/blocked_reason snapshot fields,
+  done_changed/blocked_changed events (ValidHookEvents!), SESH_DONE/SESH_BLOCKED* env.
+  blocked lives on DAEMON-INTERNALLY (authorityState) feeding the flag trigger + the wait
+  endpoint's blocked/settled conditions (waitConditionMet now takes busy+blocked; the wait
+  runs on the owner and reads its own authority map). flag_changed event +
+  SESH_FLAGGED/SESH_FLAG_REASON (presence-gated).
+- ALL THREE HARNESSES hook-driven (the ticket's preference): claude Stop; pi agent_settled;
+  CODEX = sesh now wires its notify config AT SPAWN (embedded internal/agents/codexnotify.sh
+  → materialized <SESH_HOME>/codex-notify.sh; notify= PREPENDED into codex config.toml — a
+  TOP-LEVEL toml key, appending would land inside the last [projects.*] table; an existing
+  user notify is never clobbered). codex reports the NEW turn_ended_no_authority event =
+  flag evaluation WITHOUT busy authority (one-directional authority would pin idle through
+  real turns — the reason codex is N/A on thread.state-authority).
+- ASKUSERQUESTION (his explicit contingency): PreToolUse fires with tool_name=AskUserQuestion
+  + the FULL question JSON exactly when the prompt shows (verified empirically via a
+  project-scoped hook logger BEFORE designing) → blocked report with the question as reason
+  → flag reason = the question. TWO gotchas bit me: (1) the script mapping alone did
+  NOTHING — PreToolUse also had to be REGISTERED in myrig settings.json (cell caught it);
+  (2) claude ALSO fires a generic "needs your permission" Notification for the SAME prompt
+  (identical message for questions and permission prompts!) and hooks run concurrently →
+  daemon rule: within one stall episode the FIRST reason wins (a later 409'd/generic report
+  can't overwrite the specific question).
+- TUI: new FLAG gutter cell (gutterWidth 9→10 + header + mouse-test coords — the H40
+  drill): ⚑ red-tinted (new [[tui.glyph_color]] name="flag", default "9") / ⌀ disabled;
+  F toggle + ^f gate toggle (requiresReachableOwner + offline lists); flagged/flagdisabled
+  predicates; FOLD-PIERCING: flagged descendants (any depth) render as direct rails under a
+  collapsed parent (▸ kept), unflagging re-hides (TestFoldPiercing + view-flag-pierce claim).
+- MATRIX: thread.done-seen + thread.blocked features REMOVED (superseded, not gamed);
+  thread.flagged 6/6 GREEN (all agents × both loc; claude cells drive a REAL
+  AskUserQuestion; codex cells prove the notify wiring end to end). TUI claims action-flag +
+  view-flag-pierce (registered AND declared). ANTI-GAMING: neutered autoFlagTrigger →
+  pi/local red "turn end never flagged" → reverse-edited back. Blast radius green:
+  state-authority ×4, send-wait ×6, runtime-state/pi ×2, FULL TUI claims, -race.
+  filter-target-uuid FLAKED once under batch load (passes ×3 isolated — the H8 flake class).
+- CONCURRENT SESSIONS twice more: sesh push rejected (glyph-colors session), myrig too
+  (ghostty/spacework) — fetch+rebase before every push this week.
+- DEPLOY (44 = rebuild + RENDER + restart TOGETHER — the 43-era hook events REFUSE a 44
+  daemon): mymain + macbook (uv-render; hooks list shows notify-flagged enabled) +
+  macstudio + ideapad ✓. **termux OFFLINE (android-main:8022 timeout) → PENDING; when back:
+  sesh pull + plain go build + .new+mv, myrig pull + python3 install-home (full
+  $MYRIG_TARGETS), kill daemon by explicit pid + setsid-nohup relaunch (SESH_HOME=~/.sesh
+  SESH_MACHINE=termux sockets sesh/sesh-master), verify schema 44.** LIVE-PROVEN on mymain:
+  detached pi turn → flagged=True reason="turn ended" (+ send --wait settled); flag --off/
+  stop/delete clean. Cross-machine cached-view spot-check SKIPPED (grid fan-out hung on the
+  offline termux peer — the H35/H36 slow-peer class); replication rides the same
+  record-serialization path the mesh full-replication guards pin.
+- NOTE: with [spawn] mode=yolo fleet-wide, permission-prompt stalls rarely occur, but
+  AskUserQuestion stalls + turn-end flags fire under yolo too — the flag triggers that
+  matter are live. sesh-ui: flags not yet surfaced there (follow-up if wanted).

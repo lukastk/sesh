@@ -53,6 +53,16 @@ func (c *Client) ThreadReportState(ctx context.Context, req api.ReportStateReque
 	return c.postJSON(ctx, "http://unix/v1/threads/report-state", req, nil)
 }
 
+// ThreadWait performs ONE bounded server-owned wait (schema 43): the daemon
+// polls its maintained state until the condition or timeoutMs (server-capped
+// at 10s). Callers loop until their own deadline.
+func (c *Client) ThreadWait(ctx context.Context, id, until string, timeoutMs int) (api.ThreadWaitResponse, error) {
+	var out api.ThreadWaitResponse
+	u := "http://unix/v1/threads/wait?id=" + url.QueryEscape(id) +
+		"&until=" + url.QueryEscape(until) + "&timeout_ms=" + strconv.Itoa(timeoutMs)
+	return out, c.getJSON(ctx, u, &out)
+}
+
 // ThreadReparent posts POST /v1/threads/reparent (” parent = make root).
 func (c *Client) ThreadReparent(ctx context.Context, id, parent string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/reparent", api.ReparentThreadRequest{ID: id, Parent: parent}, nil)

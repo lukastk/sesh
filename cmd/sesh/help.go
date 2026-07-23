@@ -145,8 +145,13 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread send": {
 		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise)",
-		usage:    "sesh thread send --id <id> --text <text> [--machine <m>]",
-		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'"},
+		usage:    "sesh thread send --id <id> --text <text> [--wait --timeout <dur>] [--machine <m>]",
+		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m"},
+	},
+	"thread wait": {
+		summary:  "block until a thread reaches a state (server-owned wait; one routed hop for --machine)",
+		usage:    "sesh thread wait --until <busy|idle|blocked|settled> --timeout <dur> [--id <id>] [--machine <m>]",
+		examples: []string{"sesh thread wait --id 1a2b3c4d --until settled --timeout 5m", "sesh thread wait --id 1a2b3c4d --until blocked --timeout 2m"},
 	},
 	"thread send-headless": {
 		summary:  "start a headless turn on an idle thread (a stateless --resume turn); 409 if a pane is live or a turn is in flight. --model overrides the thread's pinned model for THIS turn only (empty = the thread's model / agent default).",

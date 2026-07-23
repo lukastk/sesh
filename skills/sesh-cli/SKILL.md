@@ -522,6 +522,10 @@ sesh thread new --agent claude --name x --cwd ~/proj --machine macbook
 
 ```bash
 sesh thread send --id <id> --text 'run the tests'          # inject into a LIVE pane
+sesh thread send --id <id> --text 'fix it' --wait --timeout 5m  # ...and block until the turn SETTLES (idle/blocked);
+                                                           # fails fast (~5s) if the input produces no state change
+sesh thread wait --id <id> --until settled --timeout 5m    # block until a state: busy|idle|blocked|settled
+                                                           # (settled = idle-or-blocked; loud error naming the last state on timeout)
 sesh thread send-headless --id <id> --text 'summarize'     # run a stateless turn on an idle thread
 sesh thread send-headless --id <id> --text 'quick check' --model anthropic/claude-haiku-4-5  # override the model for THIS turn only
 sesh thread headless-reply --id <id> --json                # poll a headless turn's result

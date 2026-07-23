@@ -304,6 +304,14 @@ var flagDocs = map[string][]flagDoc{
 	"thread send": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--text", "message text to send into the pane (required)"},
+		{"--wait", "block until the turn settles (idle or blocked); fails fast if the input produces no state change within 5s"},
+		{"--timeout", "overall deadline for --wait, e.g. 5m (required with --wait)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"thread wait": {
+		{"--until", "target state: busy | idle | blocked | settled (settled = idle or blocked — the agent stopped on its own)"},
+		{"--timeout", "overall deadline, e.g. 5m (required; loud error naming the last state on expiry)"},
+		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread send-headless": {

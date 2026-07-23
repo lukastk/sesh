@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -76,6 +77,8 @@ func runThread(args []string) error {
 		return threadNotify(cfg, rest)
 	case "report-state":
 		return threadReportState(cfg, rest)
+	case "wait":
+		return threadWait(cfg, rest)
 	case "hold":
 		return threadHold(cfg, rest)
 	case "pin":
@@ -438,11 +441,19 @@ func threadSend(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
 	text := fs.String("text", "", "message text (required)")
+	wait := fs.Bool("wait", false, "block until the turn settles (idle or blocked)")
+	timeout := fs.Duration("timeout", 0, "overall deadline for --wait (required with --wait)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *text == "" {
 		return errors.New("thread send: --text is required")
+	}
+	if *wait && *timeout <= 0 {
+		return errors.New("thread send: --wait requires --timeout")
+	}
+	if !*wait && *timeout != 0 {
+		return errors.New("thread send: --timeout only applies with --wait")
 	}
 	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
@@ -450,10 +461,113 @@ func threadSend(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
+	// For --wait's stall guard: the pre-send activity marker. Read BEFORE the
+	// send so a delivered keystroke's pane change is observable as progress.
+	var preActive int64
+	preBusy := false
+	if *wait {
+		pre, werr := c.ThreadWait(context.Background(), rid, "busy", 0)
+		if werr != nil {
+			return werr
+		}
+		preActive, preBusy = pre.LastActiveUnix, pre.Reached
+	}
 	if err := c.ThreadSend(context.Background(), *id, *text); err != nil {
 		return err
 	}
-	fmt.Println("sent", *id)
+	if !*wait {
+		fmt.Println("sent", *id)
+		return nil
+	}
+	// STALL GUARD (herdr's agent_prompt_stalled): a send from a non-busy state
+	// must produce SOME observed change within 5s — a busy latch, or at least
+	// the delivered keystrokes changing the pane (LastActiveUnix advancing).
+	// Neither = the input likely never registered; failing fast beats waiting
+	// out the whole timeout against a wedged pane. (From an already-busy
+	// state the guard is skipped — completion of the ACTIVE turn may satisfy
+	// the wait, same caveat as herdr.)
+	if !preBusy {
+		stalled := true
+		stallDeadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(stallDeadline) {
+			resp, werr := c.ThreadWait(context.Background(), rid, "busy",
+				int(time.Until(stallDeadline).Milliseconds()))
+			if werr != nil {
+				return werr
+			}
+			if resp.Reached || resp.LastActiveUnix > preActive {
+				stalled = false
+				break
+			}
+		}
+		if stalled {
+			return fmt.Errorf("thread send: no state change within 5s of delivery — the input may not have registered (agent wedged, modal open?); thread %s still idle", rid)
+		}
+	}
+	final, err := waitLoop(c, rid, "settled", *timeout)
+	if err != nil {
+		return err
+	}
+	state := string(final.Busy)
+	if final.Blocked {
+		state = "blocked"
+	}
+	fmt.Printf("sent %s; settled: %s\n", rid, state)
+	return nil
+}
+
+// waitLoop drives bounded server-side waits until the condition or deadline.
+func waitLoop(c *client.Client, id, until string, timeout time.Duration) (api.ThreadWaitResponse, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			resp, _ := c.ThreadWait(context.Background(), id, until, 0)
+			state := string(resp.Busy)
+			if resp.Blocked {
+				state = "blocked"
+			}
+			return resp, fmt.Errorf("wait: thread %s did not reach %s within %s (last state: %s)", id, until, timeout, state)
+		}
+		resp, err := c.ThreadWait(context.Background(), id, until, int(remaining.Milliseconds()))
+		if err != nil {
+			return resp, err
+		}
+		if resp.Reached {
+			return resp, nil
+		}
+	}
+}
+
+// threadWait blocks until a thread reaches a state (server-owned bounded
+// polls under the hood; one routed hop for --machine).
+func threadWait(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	until := fs.String("until", "", "target state: busy | idle | blocked | settled (required)")
+	timeout := fs.Duration("timeout", 0, "overall deadline (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *until == "" {
+		return errors.New("thread wait: --until is required")
+	}
+	if *timeout <= 0 {
+		return errors.New("thread wait: --timeout is required")
+	}
+	rid, err := resolveIDFlag(cfg, fs, id)
+	if err != nil {
+		return err
+	}
+	final, err := waitLoop(daemonClient(cfg), rid, *until, *timeout)
+	if err != nil {
+		return err
+	}
+	state := string(final.Busy)
+	if final.Blocked {
+		state = "blocked"
+	}
+	fmt.Printf("%s reached %s (state: %s)\n", rid, *until, state)
 	return nil
 }
 

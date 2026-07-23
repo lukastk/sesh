@@ -297,6 +297,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.send-wait",
+		Description: "send --wait / thread wait --until: server-owned bounded waits released by REAL turn boundaries, with a fail-fast stall guard when delivered input produces no state change (schema 43)",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.done-seen",
 		Description: "the done/seen marker: a HEADFUL turn ending while unattended (detached, or attached with stale input) reads done until seen (fresh input or an attachment flip onto it); agent-independent derivation over the busy edge + attachment axes (schema 43)",
 		Localities:  bothLoc,

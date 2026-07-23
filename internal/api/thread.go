@@ -529,6 +529,26 @@ type HoldThreadRequest struct {
 	OnHoldUntilUnix int64  `json:"on_hold_until_unix"`
 }
 
+// ThreadWaitResponse is GET /v1/threads/wait?id=&until=&timeout_ms= — one
+// server-owned bounded wait for a thread state (schema 43). The daemon polls
+// its maintained state internally (~100ms) for up to timeout_ms (capped at
+// 10s per request — clients loop to their own deadline, which keeps every
+// transport's per-request timeout safe). reached=false after the bound is a
+// normal outcome (200), not an error: the caller's loop decides when the
+// OVERALL wait has failed. `until` vocabulary: busy | idle | blocked |
+// settled (= idle or blocked — "the agent stopped running on its own").
+type ThreadWaitResponse struct {
+	Schema  int    `json:"schema"`
+	ID      string `json:"id"`
+	Reached bool   `json:"reached"`
+	Head    Head   `json:"head"`
+	Busy    Busy   `json:"busy"`
+	Blocked bool   `json:"blocked,omitempty"`
+	// LastActiveUnix rides along for the send --wait stall guard: delivered
+	// keystrokes change the pane, which bumps it even before a turn latches.
+	LastActiveUnix int64 `json:"last_active_unix,omitempty"`
+}
+
 // ReportStateRequest is POST /v1/threads/report-state — an in-agent reporter
 // (a pi extension, a claude hook) tells the OWNING daemon a turn-lifecycle
 // fact about its thread (schema 43; see _dev/STATE_AUTHORITY.md). Seq must

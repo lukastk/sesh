@@ -2249,3 +2249,87 @@ turn-state reporting from inside pi/claude → replace the content-diff busy heu
 H24/H47/H48 bug class); (b) a `blocked`/approval-prompt state + seen/unseen done for notify
 gating. BRIDGE THAT EXISTS TODAY: a conversation started in a herdr pane can be registered
 into sesh afterwards via headless adopt (`thread adopt --agent X --session-id Y`).
+
+## H51 — the herdr-steals batch SHIPPED: state authority + blocked + done/seen + send --wait (2026-07-23, sesh cf0092f..649bb60 api 42→43, myrig 8df129b, myagent 7eb8033; deployed ALL FIVE; issues #4-#7 closed, #8 open)
+The four features from the H50 assessment, implemented + deployed in one session. 14 new
+matrix cells green + blast radius (runtime-state ×6, send.headful ×6, notify, mesh.snapshot
+both transports) + full TUI claims + -race clean.
+- STATE AUTHORITY (#4): in-agent reporters override the content-diff busy heuristic.
+  POST /v1/threads/report-state {thread_id, source, event turn_started|turn_ended|blocked|
+  unblocked|release, strictly-monotonic seq, reason?} → in-memory authority map on Daemon
+  (runtime state; restart = heuristic floor until next report); maintainer's headful path
+  prefers a live entry (content-diff still runs — keeps lastActive + the window warm for
+  degradation); EVERY no-runtime path clears authority (pane-liveness bound — a dead
+  reporter can't pin busy). snapshot/row gain state_authority reported|heuristic (omitempty;
+  unset on headless — the turn registry needs no label; the grid's on-demand fallback also
+  unset by design). REPORTERS exec `$SESH_BIN thread report-state` — SESH_BIN
+  (agents.EnvSeshBin, injected by Daemon.spawnEnv into every spawn/revive/into-pane env) is
+  the daemon's own os.Executable(); a pane's PATH `sesh` is UNRELIABLE (login shells
+  re-prepend profile dirs — the smoke pi called the old schema-42 binary until this). pi:
+  integrations/pi/sesh-agent-state (extension in THIS repo; myagent 7eb8033 registers it as
+  extensions/sesh-agent-state → relative relay symlink; herdr-derived mechanics:
+  agent_settled + ctx.isIdle() double-check, session_start re-derives after mid-turn
+  /reload, release ONLY on session_shutdown reason=quit, serialized latest-wins send queue).
+  claude: integrations/claude/sesh-agent-state.sh via Claude Code hooks (myrig settings.json,
+  now UserPromptSubmit/Stop/Notification/PostToolUse — skips subagent invocations via
+  agent_id, never maps SubagentStop, ALWAYS exit 0 or Stop hooks would block claude). codex:
+  justified N/A both localities (notify config = turn-end only; one-directional authority is
+  worse than the heuristic — Lukas's call).
+- BLOCKED (#5): reported-only overlay (busy axis stays two-valued; blocked ALWAYS implies
+  busy incl. no-prior-entry). claude Notification → blocked iff message contains
+  "permission" (the idle reminder is NOT blocked); PostToolUse → unblocked; both turn
+  boundaries clear. blocked_changed event + SESH_BLOCKED(1/0 always)/SESH_BLOCKED_REASON
+  (presence-gated)/SESH_STATE_AUTHORITY(presence-gated) env. TUI ‼ + `blocked` keyword.
+  Cell drives a REAL permission prompt — sandbox forces [spawn.claude] args
+  --permission-mode default because the user-level default is an AUTO mode that
+  self-approves safe Bash (live-smoke finding). KNOWN POLICY GAP (flagged): the fleet's
+  [spawn] mode=yolo bypasses permissions → blocked rarely fires for spawned threads until a
+  thread opts out of yolo.
+- DONE/SEEN (#6): liveState.doneSince via PURE nextDoneSince (doneseen.go truth table):
+  headful busy→idle edge while unattended (detached OR attached-with-input-staler-than-60s —
+  parked cockpit clients don't count, H48) sets; fresh input OR an attachment FLIP onto the
+  session clears (switch-client bumps no client_activity — the flip IS the nav signal);
+  retained across stop/headless; publish() stamps done/done_since_unix + prevAttachment
+  (single choke point). done_changed event + SESH_DONE. TUI ✔ (idle-only; ‼ wins) + `done`.
+  Cell: real pi turn detached → done; REAL nested attach (attachViewer) clears with zero
+  keystrokes; freshly-attended turn end never sets. Headless turn completion deliberately
+  excluded (subscriptions/await own that).
+- SEND --WAIT (#7): GET /v1/threads/wait?id&until&timeout_ms — ONE bounded server-owned
+  wait (100ms polls, 10s/request cap; reached=false@bound is a 200 — the CLIENT loop
+  decides; keeps the client's hard 15s http timeout safe; remote = the --machine router
+  re-execs the CLI on the owner so the loop is local there, ONE hop total). until: busy|
+  idle|blocked|settled (settled = idle-or-blocked — bare idle would sit out an approval
+  prompt). CLI `thread wait --until --timeout` + `thread send --wait --timeout` with the 5s
+  stall guard (busy latch OR LastActiveUnix advancing = progress; already-busy sends skip
+  it). GOTCHA: a wedged pane CANNOT be honestly staged in a cell — tmux SIGCONTs any
+  stopped pane child instantly (measured; SIGTTIN is caught by node agents) — so the stall
+  composition is cmd/sesh UNIT tests vs a scripted daemon (legit outside the matrix); the
+  cells prove real-turn release (computed GREENLIGHT sentinel present on return) + loud
+  timeout, all 3 agents × both loc.
+- HOOKS/NOTIFY: blocked_changed + done_changed added to config.ValidHookEvents (they were
+  emitted but UNSUBSCRIBABLE — the daemon refuses unknown hook events at start; deploy
+  ordering: new binary must land with/before the rendered config). myrig 8df129b: notify-idle
+  (busy_changed + H47/H48 age-gating) REPLACED by notify-done (done_changed seen→done — the
+  daemon's derivation makes the edge exact) + notify-blocked (blocked_changed → "‼ <name>
+  needs you" + reason); sesh-notify keeps the attended-gate as belt-and-braces. Hook mute
+  state is per-NAME → renamed hooks start enabled.
+- REPAIRED pre-existing red: TUI claim custom-views hardcoded 3 Tabs to reach the custom
+  view — red on CLEAN main since H25 added the `on hold` built-in (verified via worktree).
+  Now tabs by TITLE (bounded 8).
+- CONCURRENT-SESSION rebase: another agent landed tui glyph-colors + took H49 (sesh
+  4f60d10, myrig c1d649a) while this ran — rebased sesh (clean) + myrig (clean), renumbered
+  my assessment entry H49→H50. Check `git log origin/main` before pushing.
+- DEPLOY (api 43 = rebuild + daemon RESTART all five + myrig RENDER + myagent pull/symlink):
+  mymain native; macbook + macstudio /opt/homebrew/bin/go + supervisorctl (macbook's system
+  python3 LOST jinja2 — render needed `uv run --with jinja2`, the H46 class; macstudio's
+  still has it); ideapad uv-render + supervisorctl; termux plain go build + explicit-pid
+  kill + setsid-nohup relaunch (pid 8412). pi-extension symlink created on all five
+  (~/.pi/agent/extensions/sesh-agent-state → myagent relay). All five verified schema 43;
+  macbook lists notify-done + notify-blocked enabled. LIVE-PROVEN on the real fleet: spawn
+  pi → send --wait settled with the turn → state_authority=reported + done=True (detached
+  finish); macbook's fan-out shows a mymain thread auth=reported (mesh replication of the
+  new fields); even THIS pre-43-spawned claude session reports (hook's PATH fallback now
+  resolves the deployed binary).
+- REMAINING: #8 (persistent sidebar cockpit UI revamp) — design-discussion-first, NOT
+  started, by Lukas's instruction. sesh-ui: no changes made; the new snapshot fields
+  (state_authority/blocked/done) are available to it — surfacing them there is follow-up.

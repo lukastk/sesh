@@ -242,6 +242,10 @@ type Model struct {
 	// colColors tints individual columns ([[tui.column_color]] + built-in defaults).
 	// Applied to non-selected, non-highlighted cells only (see renderCells).
 	colColors map[string]lipgloss.Style
+	// glyphColors tints the gutter's attention glyphs ([[tui.glyph_color]] +
+	// built-in defaults: busy ▶ / descendant ↓ bright green). Applied to
+	// non-selected rows only, when the glyph is in its active state.
+	glyphColors map[string]lipgloss.Style
 	// maxColWidth caps each column at a maximum render width (the default, set via
 	// New / [tui] max_column_widths). The `w` key toggles it per session: off, every
 	// column grows to its content so clipped text (a long name/cwd) is fully visible.
@@ -437,6 +441,13 @@ func (m Model) WithCwdLabeler(f func(string) string) Model {
 // defaults-merged via ResolveColumnColors). Unset = no per-column tint.
 func (m Model) WithColumnColors(c map[string]lipgloss.Style) Model {
 	m.colColors = c
+	return m
+}
+
+// WithGlyphColors sets the gutter-glyph colour styles (already validated +
+// defaults-merged via ResolveGlyphColors). Unset = no glyph tint.
+func (m Model) WithGlyphColors(c map[string]lipgloss.Style) Model {
+	m.glyphColors = c
 	return m
 }
 
@@ -2373,10 +2384,6 @@ var (
 	styleDim      = lipgloss.NewStyle().Faint(true)
 	styleMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-	// styleRunning tints the gutter's running-state glyphs bright green (▶ = this
-	// thread is executing a turn, ↓ = a descendant is) so live activity pops out of
-	// the grid. Applied at render time to non-selected rows only, like column colours.
-	styleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 )
 
 // legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
@@ -2706,14 +2713,15 @@ func (m Model) View() string {
 			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, nil, false)
 			b.WriteString(styleSelected.Render("> "+line) + "\n")
 		} else {
-			// Running-state glyphs render green (▶ this thread's turn, ↓ a descendant's);
-			// the selected branch above stays untinted — reverse video is the dominant cue.
+			// Running-state glyphs render tinted ([[tui.glyph_color]]; default bright
+			// green — ▶ this thread's turn, ↓ a descendant's); the selected branch
+			// above stays untinted — reverse video is the dominant cue.
 			busy := BusyGlyph(row)
-			if row.Busy == api.BusyBusy {
-				busy = styleRunning.Render(busy)
+			if st, ok := m.glyphColors[GlyphBusy]; ok && row.Busy == api.BusyBusy {
+				busy = st.Render(busy)
 			}
-			if descRun[row.ID] {
-				desc = styleRunning.Render(desc)
+			if st, ok := m.glyphColors[GlyphDescendant]; ok && descRun[row.ID] {
+				desc = st.Render(desc)
 			}
 			line := mark + HeadGlyph(row) + busy + desc + att + arch + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")

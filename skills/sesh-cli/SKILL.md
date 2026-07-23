@@ -77,8 +77,9 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
   … — is running a turn; blank = none). The running-state glyphs (`▶` and `↓`) render
-  **bright green** on non-selected rows so live activity pops out (the selected row's
-  reverse video wins). A fourth marker shows attachment (`*` = a tmux
+  **bright green** by default on non-selected rows so live activity pops out (the
+  selected row's reverse video wins); tune or clear per glyph via `[[tui.glyph_color]]`
+  (names `busy`, `descendant`). A fourth marker shows attachment (`*` = a tmux
   client is attached), and a fifth shows **archived** (`⊘` = the thread is archived —
   it appears in the default view only while still headful). The TUI's gutter header for
   the core three is `HBD` (head, busy, descendant).
@@ -571,6 +572,9 @@ show_offline = true              # show OFFLINE machines' threads by default (el
 [[tui.column_color]]             # NAME blue / CWD green / ticket_input red by default; override here
 name = "cwd"
 color = "green"
+[[tui.glyph_color]]              # gutter attention glyphs: busy ▶ / descendant ↓ (bright green by default)
+name = "busy"
+color = "2"                      # a name, a 0-255 number, or #rrggbb; empty clears the tint
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
 filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/ticketed

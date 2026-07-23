@@ -35,6 +35,14 @@ type TUIConfig struct {
 	//	name  = "cwd"
 	//	color = "green"   # a name, a 0-255 number, or #rrggbb
 	ColumnColors []ColumnColor `toml:"column_color"`
+	// GlyphColors tint the state gutter's attention glyphs. Built-in defaults
+	// (busy ▶ / descendant ↓ bright green) apply unless overridden; an entry with
+	// an empty colour clears one. Valid names: busy, descendant.
+	//
+	//	[[tui.glyph_color]]
+	//	name  = "busy"
+	//	color = "2"       # a name, a 0-255 number, or #rrggbb
+	GlyphColors []GlyphColor `toml:"glyph_color"`
 	// MaxColumnWidths caps each column at a maximum render width (the default: a
 	// long name/cwd is truncated so it can't blow out the layout; the `w` key toggles
 	// it per session). Set false to disable the cap entirely so every column grows to
@@ -107,6 +115,14 @@ type TUIView struct {
 // ColumnColor tints one column. Color is a name (green/blue/…), a 0-255 palette
 // number, or a #rrggbb hex; empty clears the column's colour (incl. a default).
 type ColumnColor struct {
+	Name  string `toml:"name"`
+	Color string `toml:"color"`
+}
+
+// GlyphColor tints one gutter glyph (busy ▶ / descendant ↓). Color is a name, a
+// 0-255 palette number, or a #rrggbb hex; empty clears the glyph's colour
+// (incl. a default). Validated by the TUI's ResolveGlyphColors.
+type GlyphColor struct {
 	Name  string `toml:"name"`
 	Color string `toml:"color"`
 }

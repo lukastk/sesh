@@ -53,6 +53,35 @@ color = "green"
 	}
 }
 
+// TestLoadTUIGlyphColors covers the [[tui.glyph_color]] entries (gutter attention
+// glyphs: busy ▶ / descendant ↓), coexisting with the other [tui] shapes.
+func TestLoadTUIGlyphColors(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, `
+[tui]
+columns = ["name"]
+
+[[tui.glyph_color]]
+name  = "busy"
+color = "2"
+
+[[tui.glyph_color]]
+name  = "descendant"
+color = "2"
+`)
+	c, err := LoadTUI(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil {
+		t.Fatal("nil TUI config")
+	}
+	if len(c.GlyphColors) != 2 || c.GlyphColors[0].Name != "busy" || c.GlyphColors[0].Color != "2" ||
+		c.GlyphColors[1].Name != "descendant" || c.GlyphColors[1].Color != "2" {
+		t.Errorf("glyph_color entries not parsed: %+v", c.GlyphColors)
+	}
+}
+
 // TestLoadTUIColumnWidths covers the [tui] max-column-width cap default and the
 // [[tui.column_width]] per-column overrides.
 func TestLoadTUIColumnWidths(t *testing.T) {

@@ -66,6 +66,71 @@ func parseColor(s string) (lipgloss.Color, error) {
 	return "", fmt.Errorf("unknown colour %q (use a name like green/blue, a 0-255 number, or #rrggbb)", s)
 }
 
+// Gutter glyph names tintable via [[tui.glyph_color]]. These are the state
+// gutter's ATTENTION glyphs — busy = ▶ (this thread is executing a turn),
+// descendant = ↓ (a child/grandchild is). The tint applies only when the glyph
+// is in its active state (idle `·`/blank stays plain) and only on non-selected
+// rows (reverse video is the selected row's dominant cue, as with columns).
+const (
+	GlyphBusy       = "busy"
+	GlyphDescendant = "descendant"
+)
+
+// validGlyphNames lists the tintable glyphs, in gutter order (for error messages).
+var validGlyphNames = []string{GlyphBusy, GlyphDescendant}
+
+// GlyphColorSpec is one [[tui.glyph_color]] entry. An empty Color clears the
+// glyph's colour (including a built-in default).
+type GlyphColorSpec struct {
+	Name  string
+	Color string
+}
+
+// DefaultGlyphColors are the built-in glyph colours: the running-state glyphs
+// bright green so live activity pops out of the grid. Overridable/clearable per
+// glyph via [[tui.glyph_color]].
+var DefaultGlyphColors = []GlyphColorSpec{
+	{Name: GlyphBusy, Color: "10"},
+	{Name: GlyphDescendant, Color: "10"},
+}
+
+// ResolveGlyphColors builds the per-glyph style map: the built-in defaults
+// overlaid by the config entries (an entry with an empty colour clears that
+// glyph). Unknown glyph names and unparseable colours are LOUD errors.
+func ResolveGlyphColors(cfg []GlyphColorSpec) (map[string]lipgloss.Style, error) {
+	known := map[string]bool{}
+	for _, n := range validGlyphNames {
+		known[n] = true
+	}
+	colors := map[string]string{}
+	for _, d := range DefaultGlyphColors {
+		colors[d.Name] = d.Color
+	}
+	for _, e := range cfg {
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		if name == "" {
+			return nil, fmt.Errorf("[[tui.glyph_color]]: name is required")
+		}
+		if !known[name] {
+			return nil, fmt.Errorf("[[tui.glyph_color]] %q: unknown glyph (valid: %s)", name, strings.Join(validGlyphNames, ", "))
+		}
+		if strings.TrimSpace(e.Color) == "" {
+			delete(colors, name) // explicit clear
+			continue
+		}
+		colors[name] = e.Color
+	}
+	out := map[string]lipgloss.Style{}
+	for name, cstr := range colors {
+		col, err := parseColor(cstr)
+		if err != nil {
+			return nil, fmt.Errorf("[[tui.glyph_color]] %q: %w", name, err)
+		}
+		out[name] = lipgloss.NewStyle().Foreground(col)
+	}
+	return out, nil
+}
+
 // ResolveColumnColors builds the per-column style map: the built-in defaults
 // overlaid by the config entries (an entry with an empty colour clears that
 // column). Unknown column names and unparseable colours are LOUD errors.

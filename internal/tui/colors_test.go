@@ -55,6 +55,47 @@ func TestResolveColumnColorsLoud(t *testing.T) {
 	}
 }
 
+func TestResolveGlyphColorsDefaults(t *testing.T) {
+	// No config → both running-state glyphs coloured (bright green).
+	got, err := ResolveGlyphColors(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{GlyphBusy, GlyphDescendant} {
+		if _, ok := got[name]; !ok {
+			t.Errorf("%s should be coloured by default", name)
+		}
+	}
+}
+
+func TestResolveGlyphColorsOverrideAndClear(t *testing.T) {
+	got, err := ResolveGlyphColors([]GlyphColorSpec{
+		{Name: "busy", Color: "2"},
+		{Name: "descendant", Color: ""}, // empty colour clears the default
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got[GlyphBusy]; !ok {
+		t.Errorf("busy colour should remain (overridden)")
+	}
+	if _, ok := got[GlyphDescendant]; ok {
+		t.Errorf("descendant colour should have been cleared")
+	}
+}
+
+func TestResolveGlyphColorsLoud(t *testing.T) {
+	if _, err := ResolveGlyphColors([]GlyphColorSpec{{Name: "bogus", Color: "green"}}); err == nil {
+		t.Errorf("unknown glyph must be loud")
+	}
+	if _, err := ResolveGlyphColors([]GlyphColorSpec{{Name: "busy", Color: "not-a-color"}}); err == nil {
+		t.Errorf("bad colour must be loud")
+	}
+	if _, err := ResolveGlyphColors([]GlyphColorSpec{{Name: "", Color: "green"}}); err == nil {
+		t.Errorf("missing name must be loud")
+	}
+}
+
 func TestParseColor(t *testing.T) {
 	for _, ok := range []string{"green", "Blue", "magenta", "0", "255", "#ff8800", "12"} {
 		if _, err := parseColor(ok); err != nil {

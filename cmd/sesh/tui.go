@@ -81,6 +81,18 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui colors: %w", err)
 	}
+	// Gutter glyph colours: built-in defaults (busy ▶ / descendant ↓ bright green)
+	// overlaid by any [[tui.glyph_color]] entries. Unknown glyph / bad colour is loud.
+	var glyphSpecs []tui.GlyphColorSpec
+	if tcfg != nil {
+		for _, g := range tcfg.GlyphColors {
+			glyphSpecs = append(glyphSpecs, tui.GlyphColorSpec{Name: g.Name, Color: g.Color})
+		}
+	}
+	glyphColors, err := tui.ResolveGlyphColors(glyphSpecs)
+	if err != nil {
+		return fmt.Errorf("tui glyph colors: %w", err)
+	}
 	// Per-column max-width overrides ([[tui.column_width]]) + the cap on/off default
 	// ([tui] max_column_widths, unset = on). Unknown column / bad max is loud here.
 	var widthSpecs []tui.ColumnWidthSpec
@@ -138,7 +150,7 @@ func runTUI(args []string) error {
 	// Offline machines' stale threads are hidden by default; --show-offline or
 	// [tui] show_offline reveals them (the `o` key toggles it per-session either way).
 	showOfflineDefault := *showOffline || (tcfg != nil && tcfg.ShowOffline)
-	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithEditor(editor).
+	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithGlyphColors(glyphColors).WithEditor(editor).
 		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(colWidths)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {

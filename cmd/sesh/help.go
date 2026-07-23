@@ -188,6 +188,11 @@ var helpRegistry = map[string]cmdHelp{
 		usage:    "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--clear) [--id <id>] [--machine <m>]",
 		examples: []string{"sesh thread hold --until 2026-07-01 --id 1a2b3c4d", "sesh thread hold --clear"},
 	},
+	"thread report-state": {
+		summary:  "report an in-agent turn-lifecycle fact (reporter hooks; overrides the busy heuristic)",
+		usage:    "sesh thread report-state --event <turn_started|turn_ended|release> --source <s> [--id <id>] [--seq <n>] [--machine <m>]",
+		examples: []string{"sesh thread report-state --event turn_ended --source sesh:pi-ext"},
+	},
 	"thread reparent": {
 		summary:  "re-parent a thread to a new parent, or make it a root (--root)",
 		usage:    "sesh thread reparent (--parent <id>|--root) [--id <id>] [--machine <m>]",

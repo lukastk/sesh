@@ -483,6 +483,9 @@ func sandboxEnv(extra map[string]string) []string {
 		if strings.HasPrefix(name, "SESH_") {
 			continue // never inherit the user's sesh config/sockets
 		}
+		if _, ok := extra[name]; ok {
+			continue // an explicit override wins; never emit duplicate entries
+		}
 		out = append(out, e)
 	}
 	for k, v := range extra {

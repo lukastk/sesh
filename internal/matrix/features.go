@@ -297,6 +297,16 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.state-authority",
+		Description: "in-agent reporters (pi extension, claude hooks) override the content-diff busy heuristic; state_authority=reported|heuristic always visible; authority bounded by pane liveness (schema 43, _dev/STATE_AUTHORITY.md)",
+		Agents:      agentic,
+		Localities:  bothLoc,
+		NA: []NAEntry{
+			{Agent: Codex, Locality: Local, Reason: "codex has no in-agent hook surface for turn-start (its notify config reports only turn-end); one-directional authority is worse than the heuristic, so codex stays heuristic-only by design — Lukas 2026-07-23"},
+			{Agent: Codex, Locality: Remote, Reason: "codex has no in-agent hook surface for turn-start (its notify config reports only turn-end); one-directional authority is worse than the heuristic, so codex stays heuristic-only by design — Lukas 2026-07-23"},
+		},
+	})
+	Register(Feature{
 		ID:          "thread.rename",
 		Description: "rename a thread (record only)",
 		Localities:  bothLoc,

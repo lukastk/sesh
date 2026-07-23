@@ -527,6 +527,17 @@ sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # leave the worker ac
 sesh subscribe <subscribee> --from <subscriber>            # pipe one thread's turns into another
 ```
 
+**State authority.** A headful thread's busy/idle normally comes from a pane
+content-diff heuristic, but pi and claude threads carry an in-agent reporter
+(a pi extension / claude hooks, installed via myagent/myrig) that reports turn
+starts/ends EXACTLY — the snapshot's `state_authority` field says which
+mechanism decided (`reported` or `heuristic`; absent for headless threads).
+Reporters use `sesh thread report-state --event turn_started|turn_ended|release
+--source <s> [--id <id>] [--seq <n>]` — a mechanism verb you normally never
+type: stale `--seq` values are refused, and authority is dropped automatically
+when the thread's pane dies. codex threads stay heuristic (no in-agent hook
+surface).
+
 ## Mesh, peers, master cockpit, daemon
 
 ```bash

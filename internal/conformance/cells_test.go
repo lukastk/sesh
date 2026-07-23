@@ -35,6 +35,7 @@ var skipReasons = map[string]string{
 	"thread.resolve-pane":       "resolve pane via @sesh-thread-id marker",
 	"thread.capture":            "capture a thread's live pane text (v1 pane-capture); dead = loud 409; routed cross-machine",
 	"thread.runtime-state":      "head(headful/headless) x busy(busy/idle) + attachment axes, all transitions both directions (codex: directory-trust prompt at spawn eats input)",
+	"thread.state-authority":    "in-agent reporters (pi extension, claude hooks) drive busy exactly; state_authority reported|heuristic visible; pane death clears authority (codex N/A: no in-agent turn-start surface)",
 	"thread.rename":             "rename a thread record",
 	"thread.tag":                "add/remove tags",
 	"thread.archive":            "park a thread (hidden from active list, record kept)",

@@ -74,6 +74,8 @@ func runThread(args []string) error {
 		return threadTranscript(cfg, rest)
 	case "notify":
 		return threadNotify(cfg, rest)
+	case "report-state":
+		return threadReportState(cfg, rest)
 	case "hold":
 		return threadHold(cfg, rest)
 	case "pin":
@@ -854,6 +856,42 @@ func threadNotify(cfg config.Config, args []string) error {
 	}
 	fmt.Printf("notifications %s for %s\n", state, rid)
 	return nil
+}
+
+// threadReportState delivers an in-agent reporter's turn-lifecycle fact to the
+// thread's daemon (schema 43, _dev/STATE_AUTHORITY.md): the maintainer then
+// prefers this reported state over the pane content-diff heuristic. Mechanism
+// for reporter hooks (the pi extension, the claude hook script) — SILENT on
+// success, since hooks run per turn and their stdout can surface in the agent.
+func threadReportState(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("report-state", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
+	event := fs.String("event", "", "lifecycle event: turn_started | turn_ended | release")
+	source := fs.String("source", "", "reporter identity (e.g. sesh:pi-ext)")
+	seq := fs.Int64("seq", 0, "strictly-increasing per-thread sequence (default: current unix nanos)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *event == "" {
+		return errors.New("thread report-state: --event is required")
+	}
+	if *source == "" {
+		return errors.New("thread report-state: --source is required")
+	}
+	rid, err := resolveIDFlag(cfg, fs, id)
+	if err != nil {
+		return err
+	}
+	s := *seq
+	if s == 0 {
+		// The default seq is the invocation instant in nanos: successive
+		// reporter invocations (which serialize agent-side) read increasing
+		// clocks, satisfying the daemon's strictly-monotonic requirement.
+		s = time.Now().UnixNano()
+	}
+	return daemonClient(cfg).ThreadReportState(context.Background(), api.ReportStateRequest{
+		ThreadID: rid, Source: *source, Event: *event, Seq: s,
+	})
 }
 
 // threadHold parks/unparks a thread: sets on_hold_until to an absolute instant so

@@ -55,6 +55,17 @@ const (
 // agent can identify itself (e.g. `sesh ticket list --thread $SESH_THREAD_ID`).
 const EnvThreadID = "SESH_THREAD_ID"
 
+// EnvSeshBin is injected alongside EnvThreadID: the spawning daemon's own
+// executable path. In-agent state reporters (the pi extension, the claude
+// hook) exec `$SESH_BIN thread report-state ...` — resolving a bare `sesh`
+// from the pane's PATH would find an older installed binary (pane login
+// shells re-prepend their profile dirs ahead of anything the daemon set),
+// which is exactly how a conformance daemon's reporters would silently talk
+// an older schema. Absent (pre-43 spawner, adopted agent) the reporters fall
+// back to PATH resolution and their failure is VISIBLE as the thread staying
+// state_authority=heuristic.
+const EnvSeshBin = "SESH_BIN"
+
 // Valid reports whether k is a known agent kind.
 func Valid(k Kind) bool {
 	switch k {

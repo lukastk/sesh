@@ -148,7 +148,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		sessionID = resolved
 	}
 
-	env := map[string]string{agents.EnvThreadID: id}
+	env := d.spawnEnv(id)
 	if err := d.prepCodexEnv(kind, env, thread.Cwd); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

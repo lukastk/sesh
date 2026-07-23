@@ -38,17 +38,32 @@ except Exception:
 if h.get("agent_id"):  # subagent invocation, not the main turn
     sys.exit(0)
 name = h.get("hook_event_name", "")
+if name == "PreToolUse":
+    # AskUserQuestion = the agent is stalled on a QUESTION (verified live:
+    # PreToolUse fires with the full question JSON exactly when the prompt
+    # shows). Report blocked with the actual question as the reason — it
+    # becomes the flag reason/toast text. Other tools are not stalls.
+    if h.get("tool_name") == "AskUserQuestion":
+        q = ""
+        try:
+            qs = (h.get("tool_input") or {}).get("questions") or []
+            q = str(qs[0].get("question", "")) if qs else ""
+        except Exception:
+            q = ""
+        print("blocked\t" + (q or "agent asked a question").replace("\n", " ")[:200])
+    sys.exit(0)
 if name == "Notification":
-    # Notification carries BOTH permission requests and idle reminders
-    # ("Claude is waiting for your input"); only a permission request is the
-    # blocked state (mid-turn, stalled on the human). Evidence-based message
+    # Notification carries permission requests, question prompts AND idle
+    # reminders ("Claude is waiting for your input"); the permission match
+    # covers the approval prompts (and backstops AskUserQuestion, whose
+    # message also says "needs your permission"). Evidence-based message
     # match — the only signal claude exposes here.
     msg = str(h.get("message", "") or "")
     if "permission" in msg.lower():
         print("blocked\t" + msg.replace("\n", " ")[:200])
     sys.exit(0)
-# PostToolUse = a tool completed, i.e. any permission stall resolved and the
-# turn is running again.
+# PostToolUse = a tool completed, i.e. any permission/question stall resolved
+# and the turn is running again.
 print({"UserPromptSubmit": "turn_started", "Stop": "turn_ended", "PostToolUse": "unblocked"}.get(name, ""))
 ' 2>/dev/null || true)"
 

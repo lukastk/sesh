@@ -72,11 +72,14 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
 - **Two orthogonal state axes** (what the glyphs mean):
   - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `◇` **virtual**
     (a pure grouping node — no agent at all; see *Virtual threads* below).
-  - **busy**: `▶` busy (mid-turn) / `·` idle / `‼` **blocked** (mid-turn but
-    stalled on YOU — an approval prompt/question, reported by the agent's
-    in-agent hook; claude only for now) / `✔` **done** (a turn finished while
-    you weren't watching and you haven't looked since — clears when you enter
-    the thread or type into it).
+  - **busy**: `▶` busy (mid-turn) / `·` idle.
+  - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your
+    attention. Auto-set when a turn ends or the agent stalls on a
+    question/approval while you weren't watching; NEVER auto-cleared (unflag
+    with `F` or `thread flag --off`). `⌀` = auto-flagging **disabled** for
+    this thread (e.g. children a parent thread monitors). A flagged child
+    stays VISIBLE under a collapsed parent (fold-piercing) — a flag never
+    hides inside a fold.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
   `◌▶` = a headless turn in flight (wait); `◌·` = idle headless (revivable). A third
   marker shows **descendant activity** (`↓` = a descendant thread — child, grandchild,
@@ -276,6 +279,8 @@ m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it w
 D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal line
              in the pinned block, on the SELECTED row's machine; reposition it with `m`
 n            toggle notify          i          toggle the ID column
+F            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
+ctrl+f       toggle auto-flagging for the thread (⌀ when disabled; also unflags)
 w            toggle the column-width cap (off = every column grows to its content,
              so clipped text — a long name/cwd — becomes fully visible)
 I            thread details: a read-only popup of ALL of the selected thread's
@@ -540,11 +545,22 @@ content-diff heuristic, but pi and claude threads carry an in-agent reporter
 (a pi extension / claude hooks, installed via myagent/myrig) that reports turn
 starts/ends EXACTLY — the snapshot's `state_authority` field says which
 mechanism decided (`reported` or `heuristic`; absent for headless threads).
-Reporters use `sesh thread report-state --event turn_started|turn_ended|release
---source <s> [--id <id>] [--seq <n>]` — a mechanism verb you normally never
+Reporters use `sesh thread report-state` — a mechanism verb you normally never
 type: stale `--seq` values are refused, and authority is dropped automatically
-when the thread's pane dies. codex threads stay heuristic (no in-agent hook
-surface).
+when the thread's pane dies. codex threads stay heuristic for busy (no
+turn-start surface), but their `notify` hook — wired into the codex config by
+sesh at spawn — still reports turn ENDS for flagging.
+
+**Flags (`sesh thread flag`).** The flag is the "look at this thread" marker:
+the daemon auto-flags when a turn ends or the agent stalls on a question /
+approval prompt (claude's AskUserQuestion flags with the question as the
+reason) while the session is unattended; nothing ever auto-clears a flag.
+`thread flag --off` clears; `--disable` suppresses auto-flagging for a thread
+(parent-monitored children; also clears any current flag); `--enable`
+re-allows it; `--on` flags manually AND re-enables a disabled thread (one
+rule). Heuristic busy→idle edges flag only for agents opted in via `[flags]
+heuristic_agents = ["codex"]` in config.toml (default: none — reporter edges
+are exact, the heuristic can mistake your own typing-settle for a turn end).
 
 ## Mesh, peers, master cockpit, daemon
 
@@ -596,7 +612,7 @@ name = "busy"
 color = "2"                      # a name, a 0-255 number, or #rrggbb; empty clears the tint
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
-filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/blocked/done/ticketed
+filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/flagged/flagdisabled/ticketed
 
 [defaults]
 notifications = true
@@ -625,15 +641,13 @@ unknown), `SESH_ATTACHMENT_CHANGED_AGO` (seconds since the observing daemon saw
 the attachment axis flip — the "just navigated onto it" signal; absent if no
 flip observed since daemon start), `SESH_NOTIFY` (the per-thread gate as
 `1`/`0` — the hook fires regardless; honoring the gate is the hook's job),
-`SESH_BLOCKED` (`1`/`0` — mid-turn, stalled on the human, per the in-agent
-reporter), `SESH_BLOCKED_REASON` (present only while blocked with a reason,
-e.g. the permission prompt's message), `SESH_STATE_AUTHORITY`
-(`reported`/`heuristic` — which mechanism decided busy; absent when unknown),
-and `SESH_DONE` (`1`/`0` — a turn finished while nobody was watching, not yet
-seen). The event vocabulary includes `blocked_changed` (from/to
-`blocked`/`unblocked`) — the "agent needs you" edge, ideal for an immediate
-toast — and `done_changed` (from/to `done`/`seen`) — the exact
-"finished behind your back" edge, the natural notify trigger. The activity/flip ages exist because a HEURISTIC busy→idle edge alone
+`SESH_FLAGGED` (`1`/`0` — the needs-attention flag), `SESH_FLAG_REASON`
+(present only when an auto-flag carries one, e.g. the question the agent
+asked), and `SESH_STATE_AUTHORITY` (`reported`/`heuristic` — which mechanism
+decided busy; absent when unknown). The event vocabulary includes
+`flag_changed` (from/to `flagged`/`unflagged`) — to=flagged is THE toast
+edge: the daemon flags exactly when a turn ends or the agent stalls on a
+question/approval while nobody watches (and on manual flags). The activity/flip ages exist because a HEURISTIC busy→idle edge alone
 can't tell a finished turn from the user pausing: typing into a pane or
 navigating onto it latches the content-diff busy probe like agent output
 would, while raw attachment over-suppresses (cockpit clients park on

@@ -57,10 +57,10 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		return http.StatusBadRequest, fmt.Errorf("report-state: source is required")
 	}
 	switch req.Event {
-	case api.ReportTurnStarted, api.ReportTurnEnded, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease:
+	case api.ReportTurnStarted, api.ReportTurnEnded, api.ReportTurnEndedNoAuthority, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease:
 	default:
-		return http.StatusBadRequest, fmt.Errorf("report-state: unknown event %q (want %s|%s|%s|%s|%s)",
-			req.Event, api.ReportTurnStarted, api.ReportTurnEnded, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease)
+		return http.StatusBadRequest, fmt.Errorf("report-state: unknown event %q (want %s|%s|%s|%s|%s|%s)",
+			req.Event, api.ReportTurnStarted, api.ReportTurnEnded, api.ReportTurnEndedNoAuthority, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease)
 	}
 	th, err := d.store.GetThread(req.ThreadID)
 	if err != nil {
@@ -68,6 +68,24 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 	}
 	if api.NonAgentKind(th.AgentKind) {
 		return http.StatusConflict, fmt.Errorf("report-state: thread %s is a %s node — it runs no agent", th.ID, th.AgentKind)
+	}
+	if req.Event == api.ReportTurnEndedNoAuthority {
+		// codex's notify path: evaluate auto-flagging (with the same
+		// unattended gate the maintainer applies) and touch NOTHING else — in
+		// particular no authority entry, which would pin idle through real
+		// turns for a turn-end-only reporter.
+		attended := false
+		if d.maint != nil {
+			if snap, ok := d.maint.stateOf(req.ThreadID); ok {
+				attended = attendedNow(snap.Attachment, snap.AttachedActivityUnix, nowUnix)
+			}
+		}
+		if !attended {
+			if _, ferr := d.store.AutoFlag(req.ThreadID, "turn ended"); ferr != nil {
+				return http.StatusInternalServerError, ferr
+			}
+		}
+		return 0, nil
 	}
 
 	d.authMu.Lock()
@@ -101,6 +119,13 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		next.busy = true
 		next.blocked = true
 		next.blockedReason = req.Reason
+		// Within ONE stall episode the FIRST reason wins: claude fires
+		// PreToolUse (the actual question text) and then a generic
+		// Notification ("needs your permission") for the same prompt, and the
+		// specific reason must not be overwritten by the backstop.
+		if prev != nil && prev.blocked && prev.blockedReason != "" {
+			next.blockedReason = prev.blockedReason
+		}
 	case api.ReportUnblocked:
 		// The stall resolved and the turn continues: busy stays (or becomes)
 		// true; turn_ended is what ends it.

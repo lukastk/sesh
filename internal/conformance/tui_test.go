@@ -58,6 +58,8 @@ var declaredTUIClaims = []string{
 	"filter-target-uuid",        // ctrl+t toggles the search target to uuid; a tid prefix narrows to exactly that thread
 	"filter-esc-applies",        // Esc APPLIES the filter (stays active, / re-edits); normal-mode Esc still quits
 	"filter-start-flag",         // --filter (the popup binding) opens already filtering
+	"action-flag",              // F toggles the flag on the daemon + ⚑/⌀ render; ^f gates; F re-enables (one rule)
+	"view-flag-pierce",         // a flagged child pierces a collapsed parent; unflagging re-hides it
 	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
 	"action-hold",               // h parks the thread on the daemon (future on_hold_until) + leaves the active view; h again releases it; H opens the explicit-date prompt
 	"view-hold",                 // the default active view HIDES on-hold threads; the `on hold` view is the complement

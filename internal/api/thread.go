@@ -598,9 +598,15 @@ type ReportStateRequest struct {
 const (
 	ReportTurnStarted = "turn_started"
 	ReportTurnEnded   = "turn_ended"
-	ReportBlocked     = "blocked"
-	ReportUnblocked   = "unblocked"
-	ReportRelease     = "release"
+	// ReportTurnEndedNoAuthority: a turn-end signal from a reporter that
+	// CANNOT report turn starts (codex's notify hook). It feeds the auto-flag
+	// decision but claims NO busy authority — a one-directional authority
+	// would pin idle through real turns, the very reason codex is a justified
+	// N/A on thread.state-authority (schema 44).
+	ReportTurnEndedNoAuthority = "turn_ended_no_authority"
+	ReportBlocked              = "blocked"
+	ReportUnblocked            = "unblocked"
+	ReportRelease              = "release"
 )
 
 // AdoptThreadRequest brings an agent sesh didn't spawn under management.

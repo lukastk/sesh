@@ -28,6 +28,16 @@ func (d *Daemon) prepCodexEnv(kind agents.Kind, env map[string]string, cwd strin
 	if err := agents.EnsureCodexTrust(codexHome, cwd); err != nil {
 		return err
 	}
+	// Wire the turn-end reporter (the flagged system, schema 44): materialize
+	// the embedded script and reference it from the codex config's notify key
+	// (left alone if the user already has one — see EnsureCodexNotify).
+	script, err := agents.WriteCodexNotifyScript(d.cfg.Home)
+	if err != nil {
+		return err
+	}
+	if err := agents.EnsureCodexNotify(codexHome, script); err != nil {
+		return err
+	}
 	if d.cfg.CodexHome != "" {
 		env["CODEX_HOME"] = d.cfg.CodexHome
 	}

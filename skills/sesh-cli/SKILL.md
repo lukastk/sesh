@@ -247,8 +247,13 @@ narrow NAME-only column preset (the state gutter carries the rest; `[tui] column
 thread does not quit the TUI**: the nav happens and focus hands to the sibling pane in
 the same tmux window, so the sidebar stays ambiently visible beside the agent. A
 **single mouse click enters a thread** (the sidebar is a jump list — no
-select-then-double-click; clicking the ▸/▾ marker still just folds). Every other
-key/view/action works exactly as in the normal grid.
+select-then-double-click; clicking the ▸/▾ marker still just folds). **Moving the
+selection FOLLOWS**: once the cursor rests (~300ms) the sibling pane previews the
+selected thread while focus stays in the sidebar — Enter/click is what commits focus.
+Follow previews only live headful threads on the window's own machine (it never
+revives a dead thread and never switches master windows; Enter still does both); the
+window's machine comes from $SESH_TUI_MASTER_MACHINE or the tmux window name. Every
+other key/view/action works exactly as in the normal grid.
 
 Keymap (normal mode):
 

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,22 @@ import (
 	"github.com/lukastk/sesh/internal/tmux"
 	"github.com/lukastk/sesh/internal/tui"
 )
+
+// sidebarWindowName reads the tmux window name the sidebar pane lives in, via
+// its own inherited $TMUX/$TMUX_PANE (a plain `tmux` exec resolves the right
+// server). "" when not inside tmux or unreadable — never an error: it only
+// feeds the optional follow/start-cursor affordances.
+func sidebarWindowName() string {
+	pane := os.Getenv("TMUX_PANE")
+	if os.Getenv("TMUX") == "" || pane == "" {
+		return ""
+	}
+	out, err := exec.Command("tmux", "display-message", "-t", pane, "-p", "#{window_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // runTUI launches the live thread grid. It is a thin client over the local
 // daemon's HTTP+JSON surface (use --all-machines to fan out across the mesh).
@@ -228,6 +245,23 @@ func runTUI(args []string) error {
 	}
 	if *sidebarFlag {
 		m = m.WithSidebar()
+		// Selection-FOLLOW needs to know which machine the sibling attach pane
+		// shows: $SESH_TUI_MASTER_MACHINE when the spawner bakes it (the myrig
+		// conf; also the master-cursor carrier, handled above), else the
+		// sidebar's own WINDOW NAME — the cockpit names master windows after
+		// their machines (mastermaint), so a sidebar split into one inherits its
+		// target. Unresolvable (not in tmux / renamed window that matches no
+		// machine) just disables follow — Enter still navs everything.
+		fm := os.Getenv("SESH_TUI_MASTER_MACHINE")
+		if fm == "" {
+			fm = sidebarWindowName()
+			if fm != "" {
+				m = m.WithMasterCursor(fm) // start with the cursor on the shown thread, like prefix+s
+			}
+		}
+		if fm != "" {
+			m = m.WithSidebarFollow(fm)
+		}
 	}
 	if *filter {
 		m = m.WithFilterStart()

@@ -577,7 +577,9 @@ func claimSidebarNavStays(t *testing.T) {
 	}
 	local := newSandbox(t, matrix.Local)
 	local.startDaemon(t)
-	th := local.newThread(t, "pi", "sbnav", "/tmp")
+	thA := local.newThread(t, "pi", "sbnav-a", "/tmp")
+	local.waitThreadReady(t, thA.ID, "pi")
+	th := local.newThread(t, "pi", "sbnav-b", "/tmp")
 	local.waitThreadReady(t, th.ID, "pi")
 
 	master := "sesh-tuisbnav-" + th.ID[:8]
@@ -588,12 +590,36 @@ func claimSidebarNavStays(t *testing.T) {
 
 	bin := seshBin(t)
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
-	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1").WithSidebar()
-	m, _ = renderUntilRow(t, m, "sbnav")
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1").WithSidebar().WithSidebarFollow(local.Machine)
+	m, _ = renderUntilRow(t, m, "sbnav-b")
 	// The post-nav focus handoff reads the AMBIENT $TMUX at run time; scrub it so
 	// running the follow-up cmd below can never select-pane in the developer's own
 	// live tmux (the model's nav context is the injected WithTmux, unaffected).
 	t.Setenv("TMUX", "")
+
+	// FOLLOW: arrow onto the second thread; the armed debounce cmd() blocks out
+	// the rest window then yields the tick; feeding it back runs the REAL follow
+	// nav — which must succeed, keep the TUI open, and hand NO focus (nil cmd:
+	// the user is still arrowing in the sidebar).
+	nmF, armed := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nmF.(tui.Model)
+	if armed == nil {
+		t.Fatalf("arrow move in sidebar mode armed no follow debounce")
+	}
+	nmF2, followCmd := m.Update(armed()) // blocks ~300ms, returns the settled tick
+	m = nmF2.(tui.Model)
+	if followCmd == nil {
+		t.Fatalf("settled follow tick produced no nav command")
+	}
+	followMsg := followCmd() // the REAL follow nav
+	nmF3, afterFollow := m.Update(followMsg)
+	m = nmF3.(tui.Model)
+	if m.ActionErr() != nil {
+		t.Fatalf("follow nav errored: %v", m.ActionErr())
+	}
+	if afterFollow != nil {
+		t.Fatalf("follow nav must hand no focus and never quit (got a follow-up cmd)")
+	}
 
 	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("enter")})
 	if cmd == nil {

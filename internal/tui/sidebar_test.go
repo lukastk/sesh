@@ -68,6 +68,92 @@ func TestSidebarSingleClickEnters(t *testing.T) {
 	}
 }
 
+// TestSidebarFollow (Lukas): moving the selection FOLLOWS — the sibling pane
+// navs to the selected thread while focus stays in the sidebar; Enter is what
+// commits focus. This pins the policy truth table: debounced (a stale seq is
+// dropped), dedup'd (the already-shown thread re-navs nothing), live headful
+// same-machine reachable rows only (a preview must never revive a dead thread
+// or switch master windows), and disabled entirely without a known sibling
+// machine.
+func TestSidebarFollow(t *testing.T) {
+	row := func(id string, head api.Head, machine string) api.ThreadRow {
+		return api.ThreadRow{Thread: api.Thread{ID: id, Name: id, Machine: machine, SessionName: "s_" + id}, Head: head}
+	}
+	base := func() Model {
+		m := Model{sidebar: true, followMachine: "mymain", machine: "mymain",
+			machines: []api.MachineView{{Machine: "mymain", Self: true, Reachable: true}, {Machine: "peer", Reachable: false}},
+			rows: []api.ThreadRow{
+				row("live", api.Headful, "mymain"),
+				row("dead", api.Headless, "mymain"),
+				row("far", api.Headful, "peer"),
+			}}
+		return m
+	}
+
+	// Arrow-down arms a debounce tick; the settled tick on a live same-machine
+	// row yields a follow cmd.
+	m := base()
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(Model)
+	if cmd == nil {
+		t.Fatalf("moving the selection in sidebar mode should arm the follow debounce")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+	m.cursor = 0 // put it on the live row for the eligibility checks below
+	if _, ok := m.followEligible(m.followSeq); !ok {
+		t.Fatalf("live headful same-machine row must be follow-eligible")
+	}
+	// A STALE seq (the user kept moving) is dropped.
+	if _, ok := m.followEligible(m.followSeq - 1); ok {
+		t.Fatalf("a stale debounce tick must not follow")
+	}
+	// Dedup: the thread the sibling already shows re-navs nothing.
+	m.lastFollowedID = "live"
+	if _, ok := m.followEligible(m.followSeq); ok {
+		t.Fatalf("the already-shown thread must not re-follow")
+	}
+	m.lastFollowedID = ""
+	// A headless row must NEVER follow (a preview must not revive).
+	m.cursor = 1
+	if _, ok := m.followEligible(m.followSeq); ok {
+		t.Fatalf("a headless row must not follow (would revive)")
+	}
+	// A cross-machine row must NEVER follow (would switch master windows) —
+	// and this one's owner is offline too.
+	m.cursor = 2
+	if _, ok := m.followEligible(m.followSeq); ok {
+		t.Fatalf("a cross-machine row must not follow")
+	}
+	// No known sibling machine = follow disabled entirely (armFollow returns nil).
+	m2 := base()
+	m2.followMachine = ""
+	if cmd := m2.armFollow(); cmd != nil {
+		t.Fatalf("follow must be disabled without a known sibling machine")
+	}
+	// Not in sidebar mode: arrows never arm a follow.
+	m3 := base()
+	m3.sidebar = false
+	if cmd := m3.armFollow(); cmd != nil {
+		t.Fatalf("the normal grid must never follow")
+	}
+
+	// The follow's navDoneMsg records the shown thread and does NOT hand focus
+	// (no cmd at all — focus stays in the sidebar); an ENTER navDoneMsg still
+	// hands focus (non-nil cmd; TMUX scrubbed so it no-ops here).
+	t.Setenv("TMUX", "")
+	m4 := base()
+	nm4, cmd4 := m4.Update(navDoneMsg{name: "live", id: "live", follow: true})
+	g4 := nm4.(Model)
+	if cmd4 != nil {
+		t.Fatalf("a follow nav must not run a focus handoff")
+	}
+	if g4.lastFollowedID != "live" {
+		t.Fatalf("follow did not record lastFollowedID")
+	}
+}
+
 // TestSidebarColumnsPreset pins the --sidebar column preset: NAME only, and it
 // resolves cleanly through the normal column machinery.
 func TestSidebarColumnsPreset(t *testing.T) {

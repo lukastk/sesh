@@ -30,8 +30,8 @@ the myvault pad "Herdr vs sesh - migration assessment".
 - **Column preset**: when `--columns` is not given, the sidebar uses the NAME-only
   preset (`tui.SidebarColumns()`) instead of `[tui] columns` (which is tuned for
   the wide grid). An explicit `--columns` still wins.
-- **Nav does not quit** (the core change): on a successful Enter/double-click nav,
-  a normal TUI quits (`navDoneMsg` → `tea.Quit`) so the popup gets out of the way.
+- **Nav does not quit** (the core change): on a successful Enter/click nav, a
+  normal TUI quits (`navDoneMsg` → `tea.Quit`) so the popup gets out of the way.
   In sidebar mode the TUI stays running and instead hands FOCUS to its sibling
   pane in the same window (`tmux select-pane` against the sidebar's own `$TMUX`
   socket — the attach pane, so the user lands typing at the agent). Cross-machine
@@ -39,8 +39,21 @@ the myvault pad "Herdr vs sesh - migration assessment".
   the handoff on our window is then a harmless no-op that leaves the attach pane
   active for the next visit. A single-pane window (standalone testing) is a
   no-op, not an error.
+- **Selection FOLLOW** (Lukas, testing v1): moving the selection (arrows/j/k,
+  ^j/^k, wheel) PREVIEWS the thread — after the cursor rests (300ms debounce)
+  the sibling pane navs to it while focus STAYS in the sidebar, so you can keep
+  arrowing; Enter (or a single click) is what commits focus to the thread pane.
+  Follow policy (deliberate no-op skips, never errors): live HEADFUL threads
+  only (a preview must never revive a dead thread), the sibling window's OWN
+  machine only (a preview must never switch master windows — Enter still does
+  the full cross-machine switch), reachable owner, deduped against the thread
+  already shown. The sibling machine comes from `$SESH_TUI_MASTER_MACHINE`
+  (spawner-baked) or the sidebar's own WINDOW NAME (cockpit windows are named
+  by machine); unresolvable = follow disabled, Enter-only.
+- **A single mouse click enters** (focus handoff included) — the sidebar is a
+  jump list, no select-then-double-click; clicking the ▸/▾ marker still folds.
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
-  mouse (click select / double-click enter — H41), offline handling, `?` keymap.
+  offline handling, `?` keymap.
 
 Nav routing needs no new carrier: a sidebar pane is a real pane on the master
 server, so `sesh tmux nav` takes the master path (marker-client based, H8/H10);

@@ -39,7 +39,7 @@ var declaredTUIClaims = []string{
 	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
 	"action-nav-remote-dead",    // Enter on a DEAD thread on ANOTHER machine resumes it THERE (routed over the mesh) and enters it
 	"quit-esc",                  // Esc quits from normal mode; inside the line prompt it only closes the prompt
-	"view-cycle-tab",            // Tab cycles active/archived/all against REAL archived state; the title names the view
+	"view-cycle-tab",            // Tab opens the VIEW PICKER (list of all views; enter/click applies, esc cancels) against REAL archived state; tab+enter reproduces the old cycle
 	"action-rename",             // the r line-prompt really renames the thread on the daemon
 	"action-tag",                // the t line-prompt really adds a tag on the daemon
 	"action-untag",              // T opens a picker over the thread's tags; enter removes the highlighted one on the daemon, others survive

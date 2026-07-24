@@ -267,7 +267,10 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
-tab          cycle views (active / on hold / archived / all / custom [[tui.views]]).
+tab          view PICKER: a popup listing every view (active / on hold / archived /
+             all / custom [[tui.views]]) preselecting the next one — tab/↑/↓ move
+             (wrap), enter or a mouse click applies, esc cancels; the wheel moves
+             the selection. tab+enter reproduces the old blind cycle.
              The default `active` view shows every non-archived thread PLUS archived
              threads that are still headful (a live pane, glyph `⊘`), and hides on-hold
              threads — i.e. `(not archived OR headful) AND not on hold`. So an archived

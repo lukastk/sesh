@@ -58,8 +58,11 @@ type customView struct {
 	pred Predicate
 }
 
-func (m Model) viewName() string {
-	switch m.view {
+func (m Model) viewName() string { return m.viewNameAt(int(m.view)) }
+
+// viewNameAt names the i-th view (built-ins then [[tui.views]] customs).
+func (m Model) viewNameAt(i int) string {
+	switch View(i) {
 	case ViewActive:
 		return "active"
 	case ViewHold:
@@ -69,8 +72,8 @@ func (m Model) viewName() string {
 	case ViewAll:
 		return "all"
 	}
-	if i := int(m.view - viewBuiltins); i >= 0 && i < len(m.customViews) {
-		return m.customViews[i].name
+	if c := i - int(viewBuiltins); c >= 0 && c < len(m.customViews) {
+		return m.customViews[c].name
 	}
 	return "?"
 }
@@ -267,6 +270,13 @@ type Model struct {
 	maxColWidth bool
 	colMax      map[string]int
 
+	// viewPicker: Tab opens a picker POPUP listing every view (built-ins +
+	// [[tui.views]]) instead of blind-cycling — navigate with tab/↑/↓ (tab
+	// preserves the old tap-tap rhythm: it opens preselecting the NEXT view, so
+	// tab+enter ≡ the old single tab), Enter applies, Esc cancels, a mouse
+	// click applies directly, the wheel moves the selection.
+	viewPicker       bool
+	viewPickerCursor int
 	// helpPopup: `?` opens a full-screen takeover showing the complete keymap
 	// (the bottom line only carries the "? keys" hint); helpOffset scrolls it
 	// when the binding list overflows the terminal height.
@@ -733,6 +743,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				if m.helpOffset < m.helpMaxOffset() {
 					m.helpOffset++
+				}
+			}
+			return m, nil
+		}
+		// While the Tab view picker is up: the wheel moves its selection, a left
+		// click on a view line applies it directly (click outside the list is a
+		// no-op — the popup stays, esc dismisses).
+		if m.viewPicker {
+			n := m.viewCount()
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.viewPickerCursor = (m.viewPickerCursor - 1 + n) % n
+			case tea.MouseButtonWheelDown:
+				m.viewPickerCursor = (m.viewPickerCursor + 1) % n
+			case tea.MouseButtonLeft:
+				if msg.Action == tea.MouseActionPress {
+					if i, ok := m.viewPickerRowAtY(msg.Y); ok {
+						return m.applyPickedView(i)
+					}
 				}
 			}
 			return m, nil
@@ -1619,6 +1648,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpPopup {
 		return m.handleHelpKey(msg)
 	}
+	if m.viewPicker {
+		return m.handleViewPickerKey(msg)
+	}
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
 	}
@@ -1703,9 +1735,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.promptCursor = len(m.promptInput)
 		}
 	case "tab":
-		m.view = (m.view + 1) % View(m.viewCount())
-		m.cursor = 0
-		return m, m.fetch()
+		// Open the VIEW PICKER preselecting the NEXT view — tab+enter reproduces
+		// the old cycle in two taps, while the list shows where you're going.
+		m.viewPicker = true
+		m.viewPickerCursor = (int(m.view) + 1) % m.viewCount()
 	case "i":
 		m.showID = !m.showID
 	case "w":
@@ -2854,7 +2887,7 @@ var helpBindings = []struct{ key, desc string }{
 	{"^h/^l", "pan columns"},
 	{"enter", "enter the thread (revives a dead one)"},
 	{"/", "filter mode (fuzzy)"},
-	{"tab", "cycle views (active / on hold / archived / all)"},
+	{"tab", "view picker (tab/↑↓ move · enter apply · esc cancel · click a view)"},
 	{"f", "toggle the needs-attention flag ⚑"},
 	{"ctrl+f", "toggle auto-flagging (⌀ when disabled)"},
 	{"h", "hold until tomorrow / release"},
@@ -2967,6 +3000,71 @@ func (m Model) helpView() string {
 }
 
 // handleHelpKey: ↑/↓ (and j/k, ^j/^k) scroll the keymap; esc/q/?/enter close.
+// handleViewPickerKey drives the Tab view picker: tab/↓/j advance (wrap),
+// shift+tab/↑/k go back, Enter applies the highlighted view, esc/q/ctrl+c
+// cancel. Applying resets the cursor and refetches, exactly as the old blind
+// cycle did.
+func (m Model) handleViewPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	n := m.viewCount()
+	switch msg.String() {
+	case "tab", "down", "j":
+		m.viewPickerCursor = (m.viewPickerCursor + 1) % n
+	case "shift+tab", "up", "k":
+		m.viewPickerCursor = (m.viewPickerCursor - 1 + n) % n
+	case "enter":
+		return m.applyPickedView(m.viewPickerCursor)
+	case "esc", "q", "ctrl+c":
+		m.viewPicker = false
+	}
+	return m, nil
+}
+
+// applyPickedView switches to view i, closes the picker, and refetches.
+func (m Model) applyPickedView(i int) (tea.Model, tea.Cmd) {
+	m.viewPicker = false
+	if i < 0 || i >= m.viewCount() {
+		return m, nil
+	}
+	m.view = View(i)
+	m.cursor = 0
+	return m, m.fetch()
+}
+
+// viewPickerView renders the Tab view picker: one view per line, the selection
+// marked, the active view annotated. The layout is deliberately fixed — title +
+// blank, rows from line 2 — because the mouse handler maps click Y back to a
+// row (viewPickerRowAtY must mirror this).
+func (m Model) viewPickerView() string {
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("view · tab/↑↓ move · enter apply · esc cancel") + "\n\n")
+	for i := 0; i < m.viewCount(); i++ {
+		marker := "  "
+		if i == m.viewPickerCursor {
+			marker = "> "
+		}
+		line := marker + m.viewNameAt(i)
+		if View(i) == m.view {
+			line += "  (current)"
+		}
+		if i == m.viewPickerCursor {
+			b.WriteString(styleSelected.Render(line) + "\n")
+		} else {
+			b.WriteString(line + "\n")
+		}
+	}
+	return b.String()
+}
+
+// viewPickerRowAtY maps a click's terminal row to a picker index (mirrors
+// viewPickerView's fixed layout: rows start at line 2). ok=false outside.
+func (m Model) viewPickerRowAtY(y int) (int, bool) {
+	i := y - 2
+	if i < 0 || i >= m.viewCount() {
+		return 0, false
+	}
+	return i, true
+}
+
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "?", "enter":
@@ -3167,6 +3265,9 @@ func (m Model) View() string {
 	}
 	if m.helpPopup {
 		return m.helpView() // full-screen takeover: the complete keymap
+	}
+	if m.viewPicker {
+		return m.viewPickerView() // full-screen takeover: pick a view (Tab)
 	}
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")

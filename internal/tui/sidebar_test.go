@@ -154,6 +154,70 @@ func TestSidebarFollow(t *testing.T) {
 	}
 }
 
+// TestViewPicker (Lukas): Tab opens a view PICKER instead of blind-cycling —
+// it preselects the NEXT view (tab+enter ≡ the old single tab), tab/↑/↓ move
+// with wrap, Enter applies (cursor reset + fetch), Esc cancels, the wheel moves
+// the selection, and a mouse click on a view line applies it directly.
+func TestViewPicker(t *testing.T) {
+	m := Model{rows: rowsWith("a")}
+
+	nm, _ := m.Update(keyMsg("tab"))
+	m = nm.(Model)
+	if !m.viewPicker || m.viewPickerCursor != int(ViewHold) {
+		t.Fatalf("tab should open the picker preselecting the NEXT view: open=%v cursor=%d", m.viewPicker, m.viewPickerCursor)
+	}
+	// tab advances inside the picker; shift+tab/up go back; both wrap.
+	nm, _ = m.Update(keyMsg("tab"))
+	m = nm.(Model)
+	if m.viewPickerCursor != int(ViewArchived) {
+		t.Fatalf("tab in picker should advance, cursor=%d", m.viewPickerCursor)
+	}
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = nm.(Model)
+	if m.viewPickerCursor != int(ViewHold) {
+		t.Fatalf("up in picker should go back, cursor=%d", m.viewPickerCursor)
+	}
+	// Enter applies: view switches, picker closes, a fetch cmd is returned.
+	nm, cmd := m.Update(keyMsg("enter"))
+	m = nm.(Model)
+	if m.viewPicker || m.view != ViewHold || cmd == nil {
+		t.Fatalf("enter should apply the picked view + fetch: open=%v view=%v cmd=%v", m.viewPicker, m.view, cmd)
+	}
+
+	// Esc cancels without switching.
+	nm, _ = m.Update(keyMsg("tab"))
+	m = nm.(Model)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = nm.(Model)
+	if m.viewPicker || m.view != ViewHold {
+		t.Fatalf("esc should cancel the picker keeping the view: open=%v view=%v", m.viewPicker, m.view)
+	}
+
+	// Mouse: wheel moves the selection; a click on a view line applies it
+	// (rows render from line 2, so view index i is at Y=i+2).
+	nm, _ = m.Update(keyMsg("tab"))
+	m = nm.(Model)
+	nm, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m = nm.(Model)
+	if m.viewPickerCursor != int(ViewAll) {
+		t.Fatalf("wheel down should advance the picker cursor, got %d", m.viewPickerCursor)
+	}
+	nm, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 1, Y: 2 + int(ViewAll)})
+	m = nm.(Model)
+	if m.viewPicker || m.view != ViewAll || cmd == nil {
+		t.Fatalf("click on a view line should apply it: open=%v view=%v cmd=%v", m.viewPicker, m.view, cmd)
+	}
+	// The render lists every view and annotates the current one.
+	nm, _ = m.Update(keyMsg("tab"))
+	m = nm.(Model)
+	pv := m.View()
+	for _, want := range []string{"active", "on hold", "archived", "all", "(current)"} {
+		if !strings.Contains(pv, want) {
+			t.Errorf("picker render missing %q:\n%s", want, pv)
+		}
+	}
+}
+
 // TestSidebarColumnsPreset pins the --sidebar column preset: NAME only, and it
 // resolves cleanly through the normal column machinery.
 func TestSidebarColumnsPreset(t *testing.T) {

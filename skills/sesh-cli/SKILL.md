@@ -293,7 +293,8 @@ F            fork: copy the selected thread into a new HEADLESS thread (same
              conversation, branched; keeps the source name marked ` (fork)`). It
              doesn't start anything — enter the copy to continue from where the
              source left off; the source is untouched.
-x            stop      d  delete    a  archive/unarchive   (d and a ask y/n first)
+x            stop      d  delete (asks y/n)    a  archive/unarchive (INSTANT)
+U            undo the last archive (LIFO across this session's archives)
 q / esc      quit
 ```
 
@@ -335,10 +336,15 @@ removed with `d` (delete), not archived/unpinned. Pinning is a real thread prope
 The CLI verbs are `sesh thread pin` / `sesh thread unpin` / `sesh thread new --divider`
 (see below).
 
-`d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
-other key cancels. The bottom line shows only a dim **`? keys`** hint — press `?` for
-the full keymap in a popup (wrapped to the terminal width so every binding stays
-visible on a narrow pane; esc/q/? closes). Move mode still shows its own ambient legend.
+`d` (delete) opens a **y/n confirmation** — `y` confirms, any other key cancels.
+**Archiving is instant** (no confirm): `a` parks the thread immediately and notes
+"`U` to undo"; `U` un-archives the most recently archived thread (a LIFO stack of
+this session's archives, so repeated `U` walks back through them; an entry whose
+owner machine is offline refuses loudly and stays undoable). The bottom line shows
+only a dim **`? keys`** hint — press `?` for the full keymap in a popup, ONE BINDING
+PER LINE; when the list overflows the terminal height it scrolls (↑/↓, j/k, or the
+wheel; ▲/▼ show what's off-screen; esc/q/? closes). Move mode still shows its own
+ambient legend.
 
 **Offline machines.** A machine's threads keep showing in the mesh view (for offline
 browsing) even after it disconnects, but every action on them routes to the *owning*

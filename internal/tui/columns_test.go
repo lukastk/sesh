@@ -120,35 +120,51 @@ func TestHelpPopupAndLegendHint(t *testing.T) {
 	}
 	m.reordering = false
 
-	// ? opens the popup; the wrapped keymap keeps every binding on-width.
+	// ? opens the popup: ONE BINDING PER LINE, truncated (never overflowing)
+	// at the terminal width.
 	mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m = mm.(Model)
 	if !m.HelpOpen() {
 		t.Fatalf("? did not open the help popup")
 	}
-	out := m.helpView()
+	out := strip.ReplaceAllString(m.helpView(), "")
 	for _, line := range strings.Split(out, "\n") {
-		if w := len([]rune(strings.TrimRight(strip.ReplaceAllString(line, ""), " "))); w > 60 {
+		if w := len([]rune(strings.TrimRight(line, " "))); w > 60 {
 			t.Errorf("help line exceeds width 60 (%d cols): %q", w, line)
 		}
 	}
-	var flatParts []string
-	for _, line := range strings.Split(strip.ReplaceAllString(out, ""), "\n") {
-		flatParts = append(flatParts, strings.TrimSpace(line))
-	}
-	flat := strings.Join(flatParts, " ")
-	for _, binding := range []string{"f flag", "F fork", "q/esc quit"} {
-		if !strings.Contains(flat, binding) {
-			t.Errorf("help popup missing %q (clipped, not wrapped?):\n%s", binding, out)
+	for _, want := range []string{"toggle the needs-attention flag", "fork the thread", "undo the last archive", "quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help popup missing %q (height unknown = everything visible):\n%s", want, out)
 		}
 	}
-	// The popup takes over View() and esc closes it.
+
+	// SCROLLING: with a small height only a window shows, ▼ counts the rest,
+	// and paging down reaches the tail bindings (the H1 no-clipping lesson,
+	// vertical edition).
+	m.height = 10 // 6 binding rows visible
+	out = strip.ReplaceAllString(m.helpView(), "")
+	if !strings.Contains(out, "▼") {
+		t.Fatalf("overflowing help should show the ▼ indicator:\n%s", out)
+	}
+	if strings.Contains(out, "quit") {
+		t.Fatalf("tail binding visible without scrolling at height 10:\n%s", out)
+	}
+	for range len(helpBindings) { // page past the end; the offset clamps
+		mm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+		m = mm.(Model)
+	}
+	out = strip.ReplaceAllString(m.helpView(), "")
+	if !strings.Contains(out, "▲") || !strings.Contains(out, "wheel") {
+		t.Errorf("scrolled-to-end help should show ▲ and the last binding:\n%s", out)
+	}
+	// The popup takes over View() and esc closes it (resetting the offset).
 	if v := m.View(); !strings.Contains(v, "sesh — keys") {
 		t.Errorf("View() did not take over for the help popup")
 	}
 	mm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
-	if m = mm.(Model); m.HelpOpen() {
-		t.Errorf("esc did not close the help popup")
+	if m = mm.(Model); m.HelpOpen() || m.helpOffset != 0 {
+		t.Errorf("esc did not close the help popup / reset its offset")
 	}
 }
 

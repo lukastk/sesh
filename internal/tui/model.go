@@ -138,9 +138,8 @@ const (
 type confirmKind int
 
 const (
-	confirmNone    confirmKind = iota
-	confirmDelete              // `d` — drop the record
-	confirmArchive             // `a` — archive/unarchive toggle
+	confirmNone confirmKind = iota
+	confirmDelete           // `d` — drop the record (archive is instant + undoable since H54)
 )
 
 type Model struct {
@@ -254,8 +253,12 @@ type Model struct {
 	colMax      map[string]int
 
 	// helpPopup: `?` opens a full-screen takeover showing the complete keymap
-	// (the bottom line only carries the "? keys" hint).
-	helpPopup bool
+	// (the bottom line only carries the "? keys" hint); helpOffset scrolls it
+	// when the binding list overflows the terminal height.
+	helpPopup  bool
+	helpOffset int
+	// archiveUndo is the U key's LIFO stack of this session's archives.
+	archiveUndo []archiveUndoEntry
 	// detailsPopup: `I` opens a full-screen takeover showing ALL of the selected
 	// thread's fields (the record + live axes); detailsRow is captured when it opens.
 	// Any of esc/q/enter closes it. It's read-only — nothing routes or shells out.
@@ -600,6 +603,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Shift+vertical-wheel — the reliable cross-terminal path, since many terminals
 		// don't emit horizontal wheel events. Sensitivity divisors ([tui] mouse_scroll_*)
 		// dampen fast scrolling: a notch acts only every Nth event.
+		// While the `?` popup is up, the wheel scrolls the keymap instead.
+		if m.helpPopup {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if m.helpOffset > 0 {
+					m.helpOffset--
+				}
+			case tea.MouseButtonWheelDown:
+				if m.helpOffset < m.helpMaxOffset() {
+					m.helpOffset++
+				}
+			}
+			return m, nil
+		}
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			if msg.Shift {
@@ -713,6 +730,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.pending[msg.id] = msg.patch
 				}
 				m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
+			}
+			if msg.undoArchive != nil {
+				m.archiveUndo = append(m.archiveUndo, *msg.undoArchive)
+				if len(m.archiveUndo) > archiveUndoCap {
+					m.archiveUndo = m.archiveUndo[1:]
+				}
+				m.note = fmt.Sprintf("archived %q · U to undo", msg.undoArchive.name)
 				// Keep the selection on the acted-on thread. A non-hiding change that
 				// reorders the list (rename re-sorts by name) must not shift the cursor onto
 				// a neighbour; reanchorCursor follows the row to its new slot. If the change
@@ -802,7 +826,18 @@ type actionMsg struct {
 	patch     *rowPatch // the optimistic change to show until the daemon's read path catches up
 	preselect string    // on success, move the cursor here on the next fetch (structural changes like reparent: no patch, the tree refetches and the moved node is re-selected)
 	expand    string    // on success, expand this node so a freshly-nested child stays visible even before the snapshot reflects the new parent (avoids the preselect/propagation race)
+	// undoArchive: a CONFIRMED archive pushes its undo entry (the U key's LIFO
+	// stack) — attached on success only, so a failed archive never yields a
+	// bogus undo target.
+	undoArchive *archiveUndoEntry
 }
+
+// archiveUndoEntry is one undoable archive. Archiving is instant (no confirm)
+// since the flow is act-then-undo: U un-archives the most recent entry.
+type archiveUndoEntry struct{ id, machine, name string }
+
+// archiveUndoCap bounds the session's undo stack (oldest entries drop off).
+const archiveUndoCap = 20
 
 // reconcileMsg fires after postActionReconcileDelay to trigger one extra fetch (see
 // reconcileAfter) so a server-side change that lagged the immediate post-action fetch
@@ -1461,10 +1496,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirming, m.confirmRow = confirmDelete, row
 		}
 	case "a":
-		// Archive/unarchive toggle: confirm before parking the thread.
+		// Archive/unarchive INSTANTLY — no confirm (H54): archiving is cheap to
+		// reverse, so the flow is act-then-undo (`U` restores the most recent).
 		if row, ok := m.Selected(); ok {
-			m.confirming, m.confirmRow = confirmArchive, row
+			return m, m.archiveRow(row)
 		}
+	case "U":
+		return m.undoLastArchive()
 	case "K":
 		// Tickets view: a full-screen takeover of the selected thread's tickets.
 		if row, ok := m.Selected(); ok {
@@ -1486,8 +1524,6 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch kind {
 		case confirmDelete:
 			return m, m.deleteRow(row)
-		case confirmArchive:
-			return m, m.archiveRow(row)
 		}
 	}
 	return m, nil
@@ -2304,7 +2340,46 @@ func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
 		patch.desc = fmt.Sprintf("unarchive %q", rowDisplayName(row))
 		return m.routedVerb(row, patch, "archive", "--unarchive")
 	}
-	return m.routedVerb(row, patch, "archive")
+	// The ARCHIVE direction attaches its undo entry on success (never on
+	// failure — a failed archive must not become a bogus U target).
+	entry := &archiveUndoEntry{id: row.ID, machine: row.Machine, name: rowDisplayName(row)}
+	inner := m.routedVerb(row, patch, "archive")
+	return func() tea.Msg {
+		msg := inner()
+		if am, ok := msg.(actionMsg); ok && am.err == nil {
+			am.undoArchive = entry
+			return am
+		}
+		return msg
+	}
+}
+
+// undoLastArchive (U): un-archive the most recently archived thread (LIFO —
+// repeated U walks back through this session's archives). The target comes
+// from the stack, NOT the selection, so reachability is checked against ITS
+// machine here rather than via the selection-based offline gate.
+func (m Model) undoLastArchive() (tea.Model, tea.Cmd) {
+	if len(m.archiveUndo) == 0 {
+		m.note = "nothing to un-archive (U undoes this session's archives)"
+		return m, nil
+	}
+	e := m.archiveUndo[len(m.archiveUndo)-1]
+	if !m.machineReachable(e.machine) {
+		m.actionErr = fmt.Errorf("%s is offline — can't un-archive %q until it reconnects", e.machine, e.name)
+		return m, nil
+	}
+	m.archiveUndo = m.archiveUndo[:len(m.archiveUndo)-1]
+	m.note = fmt.Sprintf("un-archived %q", e.name)
+	row := api.ThreadRow{Thread: api.Thread{ID: e.id, Machine: e.machine, Name: e.name}}
+	inner := m.routedVerb(row, nil, "archive", "--unarchive")
+	return m, func() tea.Msg {
+		msg := inner()
+		if am, ok := msg.(actionMsg); ok && am.err == nil {
+			am.preselect = e.id // land the cursor on the restored thread
+			return am
+		}
+		return msg
+	}
 }
 
 // holdToggleSelected manages the selected thread's OWN hold: if its own hold is
@@ -2433,11 +2508,52 @@ var (
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
 )
 
-// helpKeysText is the full keymap, shown in the `?` popup (the bottom line
-// carries only legendHint — the always-on wrapped legend ate 3-4 rows of every
-// frame). It WRAPS to the terminal width in the popup rather than clipping, so
-// every binding stays visible on any width (the H1 lesson).
-const helpKeysText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · f flag · ^f flag-gate · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · I details · i ids · w widths · y uuid · n notif · F fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+// helpBindings is the full keymap, one entry per line in the `?` popup (the
+// bottom line carries only legendHint — the always-on wrapped legend ate 3-4
+// rows of every frame). The popup SCROLLS when the list overflows the
+// terminal height, so every binding stays reachable on any size (the H1
+// no-clipping lesson, vertical edition).
+var helpBindings = []struct{ key, desc string }{
+	{"↑/↓", "move the selection"},
+	{"^j/^k", "scroll the viewport"},
+	{"←/→", "collapse / expand the tree fold"},
+	{"^h/^l", "pan columns"},
+	{"enter", "enter the thread (revives a dead one)"},
+	{"/", "filter mode (fuzzy)"},
+	{"tab", "cycle views (active / on hold / archived / all)"},
+	{"f", "toggle the needs-attention flag ⚑"},
+	{"ctrl+f", "toggle auto-flagging (⌀ when disabled)"},
+	{"h", "hold until tomorrow / release"},
+	{"H", "hold until a date (prompt)"},
+	{"r", "rename"},
+	{"t", "add a tag"},
+	{"T", "remove a tag"},
+	{"P", "set the parent thread"},
+	{"v", "new virtual group"},
+	{"p", "pin to the top block"},
+	{"u", "unpin"},
+	{"m", "move mode (reorder pinned rows)"},
+	{"D", "new divider"},
+	{"K", "tickets view"},
+	{"I", "thread details"},
+	{"i", "toggle the ID column"},
+	{"w", "toggle the column-width cap"},
+	{"y", "show the full UUID (c copies)"},
+	{"n", "toggle notifications"},
+	{"F", "fork the thread (headless copy)"},
+	{"x", "stop the runtime (keep the record)"},
+	{"a", "archive / unarchive (instant)"},
+	{"U", "undo the last archive"},
+	{"d", "delete (y/n confirm)"},
+	{"o", "show / hide offline machines"},
+	{"R", "force refresh"},
+	{"?", "this help"},
+	{"q/esc", "quit"},
+	{"", ""},
+	{"click", "select the row (double-click enters it)"},
+	{"▸/▾", "click the fold marker to collapse/expand"},
+	{"wheel", "move the selection (shift+wheel pans)"},
+}
 
 // legendHint is the one always-visible bottom line: how to see the keymap.
 const legendHint = "? keys"
@@ -2459,28 +2575,76 @@ func (m Model) renderLegend() string {
 	return styleDim.Render(text)
 }
 
-// helpView is the `?` popup: a full-screen takeover showing the complete keymap,
-// wrapped to the terminal width.
+// helpVisibleRows is how many binding lines fit: the height minus the fixed
+// chrome (title, the two more-indicators, the footer). Height unknown (tests,
+// no WindowSizeMsg yet) = everything.
+func (m Model) helpVisibleRows() int {
+	if m.height <= 0 {
+		return len(helpBindings)
+	}
+	avail := m.height - 4
+	if avail < 1 {
+		avail = 1
+	}
+	if avail > len(helpBindings) {
+		avail = len(helpBindings)
+	}
+	return avail
+}
+
+// helpMaxOffset is the largest useful scroll offset.
+func (m Model) helpMaxOffset() int {
+	return len(helpBindings) - m.helpVisibleRows()
+}
+
+// helpView is the `?` popup: a full-screen takeover listing every binding on
+// its own line, scrollable when the list overflows the terminal height. The
+// two indicator lines are ALWAYS present (blank when unneeded) so the layout
+// is stable while scrolling.
 func (m Model) helpView() string {
-	wrap := func(s string) string {
-		if m.width > 1 {
-			return styleDim.Width(m.width).Render(s)
-		}
-		return styleDim.Render(s)
+	avail := m.helpVisibleRows()
+	off := m.helpOffset
+	if max := m.helpMaxOffset(); off > max {
+		off = max
 	}
 	var b strings.Builder
-	b.WriteString(styleHeader.Render("sesh — keys") + "\n\n")
-	b.WriteString(wrap(helpKeysText) + "\n\n")
-	b.WriteString(wrap("mouse: click select · double-click enter · click ▸/▾ fold · wheel move (shift+wheel pans)") + "\n\n")
-	b.WriteString(styleDim.Render("esc/q/? close") + "\n")
+	b.WriteString(styleHeader.Render("sesh — keys") + "\n")
+	if off > 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▲ %d more", off)) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+	for _, e := range helpBindings[off : off+avail] {
+		line := fmt.Sprintf("  %-8s %s", e.key, e.desc)
+		if m.width > 1 {
+			if r := []rune(line); len(r) > m.width {
+				line = string(r[:m.width-1]) + "…"
+			}
+		}
+		b.WriteString(styleDim.Render(line) + "\n")
+	}
+	if rest := len(helpBindings) - off - avail; rest > 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▼ %d more", rest)) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+	b.WriteString(styleDim.Render("↑/↓ scroll · esc/q/? close") + "\n")
 	return b.String()
 }
 
-// handleHelpKey: any of esc/q/?/enter closes the keymap popup.
+// handleHelpKey: ↑/↓ (and j/k, ^j/^k) scroll the keymap; esc/q/?/enter close.
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "?", "enter":
-		m.helpPopup = false
+		m.helpPopup, m.helpOffset = false, 0
+	case "up", "k", "ctrl+k":
+		if m.helpOffset > 0 {
+			m.helpOffset--
+		}
+	case "down", "j", "ctrl+j":
+		if m.helpOffset < m.helpMaxOffset() {
+			m.helpOffset++
+		}
 	}
 	return m, nil
 }
@@ -2684,14 +2848,7 @@ func (m Model) View() string {
 		b.WriteString(styleDim.Render(m.note) + "\n")
 	}
 	if m.confirming != confirmNone {
-		verb := "delete"
-		if m.confirming == confirmArchive {
-			verb = "archive"
-			if m.confirmRow.Archived {
-				verb = "unarchive"
-			}
-		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("┃ %s %q? ┃", verb, m.confirmRow.Name)) + "\n")
+		b.WriteString(styleHeader.Render(fmt.Sprintf("┃ delete %q? ┃", m.confirmRow.Name)) + "\n")
 		b.WriteString(styleDim.Render("  y to confirm · any other key to cancel") + "\n")
 	}
 	if m.uuidPopup {

@@ -878,18 +878,17 @@ func claimActionArchive(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "parkme")
-	// `a` opens the confirmation; confirm with `y`.
+	// `a` archives INSTANTLY — no confirmation popup (H54: act-then-undo).
 	m = runKey(t, m, "a")
-	if !m.Confirming() {
-		t.Fatalf("a did not open the archive confirmation")
+	if m.Confirming() {
+		t.Fatalf("a opened a confirmation — archive must be instant")
 	}
-	m = runKey(t, m, "y")
 
 	// OPTIMISTIC: the row leaves the active grid IMMEDIATELY — runKey ran the archive
 	// + its actionMsg but NOT the reconcile fetch, so the row dropped without waiting
 	// for the mesh read path to reflect the archived flag (the latency fix).
 	if _, ok := rowByName(m, "parkme"); ok {
-		t.Errorf("archived row still rendered immediately after confirm (optimistic hide missing)")
+		t.Errorf("archived row still rendered immediately (optimistic hide missing)")
 	}
 
 	// Record kept but hidden from the active list (the daemon truth)...
@@ -902,6 +901,14 @@ func claimActionArchive(t *testing.T) {
 	// ...and gone from the rendered active grid (after the maintainer re-reads the
 	// archived flag and the TUI filters it).
 	m = renderUntilGone(t, m, "parkme")
+
+	// U UNDOES the archive: the record returns to the active list on the
+	// daemon (the observable truth) and the row re-renders in the grid.
+	m = runKey(t, m, "U")
+	if !waitUntil(10*time.Second, func() bool { return hasThread(sb.listThreads(t), th.ID) }) {
+		t.Fatalf("U did not un-archive the thread on the daemon")
+	}
+	m, _ = renderUntilRow(t, m, "parkme")
 	_ = m
 }
 

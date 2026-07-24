@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -41,8 +43,8 @@ func reachableMachines(names ...string) []api.MachineView {
 // A hide patch drops the row from the rendered set immediately (no GC on a bare
 // apply — the server is still stale), and leaves siblings alone.
 func TestApplyPendingHideRemovesRow(t *testing.T) {
-	m := Model{rows: rowsWith("a", "b"), pending: map[string]*rowPatch{
-		"a": {hide: true, deadline: futureDeadline()},
+	m := Model{rows: rowsWith("a", "b"), pending: []*rowPatch{
+		{id: "a", hide: true, deadline: futureDeadline()},
 	}}
 	m.applyPending(false)
 	if hasRow(m.rows, "a") {
@@ -51,7 +53,7 @@ func TestApplyPendingHideRemovesRow(t *testing.T) {
 	if !hasRow(m.rows, "b") {
 		t.Errorf("hide patch wrongly dropped sibling b")
 	}
-	if m.pending["a"] == nil {
+	if m.pendingFor("a") == nil {
 		t.Errorf("apply(false) must not GC the patch (server still stale)")
 	}
 }
@@ -63,12 +65,12 @@ func TestApplyPendingHideGCWhenServerCaughtUp(t *testing.T) {
 	m := Model{
 		rows:     rowsWith("b"), // a absent: archived-out / deleted
 		machines: reachableMachines("m1"),
-		pending: map[string]*rowPatch{
-			"a": {hide: true, machine: "m1", deadline: futureDeadline()},
+		pending: []*rowPatch{
+			{id: "a", hide: true, machine: "m1", deadline: futureDeadline()},
 		},
 	}
 	m.applyPending(true)
-	if m.pending["a"] != nil {
+	if m.pendingFor("a") != nil {
 		t.Errorf("patch should be GC'd once the row is gone from the fetch of a reachable machine")
 	}
 }
@@ -85,12 +87,12 @@ func TestApplyPendingAbsenceKeepsPatchWhenMachineNotReporting(t *testing.T) {
 		m := Model{
 			rows:     rowsWith("b"),
 			machines: machines,
-			pending: map[string]*rowPatch{
-				"a": {hide: true, machine: "m1", deadline: futureDeadline()},
+			pending: []*rowPatch{
+				{id: "a", hide: true, machine: "m1", deadline: futureDeadline()},
 			},
 		}
 		m.applyPending(true)
-		if m.pending["a"] == nil {
+		if m.pendingFor("a") == nil {
 			t.Errorf("%s: patch GC'd on the row's absence while machine m1 wasn't reporting — never conclude from missing data", name)
 		}
 	}
@@ -102,8 +104,8 @@ func TestApplyPendingAbsenceKeepsPatchWhenMachineNotReporting(t *testing.T) {
 // fetches, burning every OTHER pending patch), resurfacing archived rows
 // mid-reconcile.
 func TestApplyPendingSurvivesManyStaleFetches(t *testing.T) {
-	m := Model{pending: map[string]*rowPatch{
-		"a": {hide: true, machine: "m1", deadline: futureDeadline()},
+	m := Model{pending: []*rowPatch{
+		{id: "a", hide: true, machine: "m1", deadline: futureDeadline()},
 	}}
 	m.machines = reachableMachines("m1")
 	for i := 0; i < 20; i++ { // 5× the old TTL
@@ -113,7 +115,7 @@ func TestApplyPendingSurvivesManyStaleFetches(t *testing.T) {
 			t.Fatalf("row a resurfaced on stale fetch %d despite an unexpired patch", i+1)
 		}
 	}
-	if m.pending["a"] == nil {
+	if m.pendingFor("a") == nil {
 		t.Errorf("unexpired patch dropped by fetch count — expiry must be wall-clock only")
 	}
 }
@@ -125,15 +127,15 @@ func TestApplyPendingDeadlineExpiryIsLoud(t *testing.T) {
 	m := Model{
 		rows:     rowsWith("a", "b"),
 		machines: reachableMachines("m1"),
-		pending: map[string]*rowPatch{
-			"a": {hide: true, machine: "m1", desc: `archive "a"`, deadline: time.Now().Add(-time.Second)},
+		pending: []*rowPatch{
+			{id: "a", hide: true, machine: "m1", desc: `archive "a"`, confirmed: true, deadline: time.Now().Add(-time.Second)},
 		},
 	}
 	m.applyPending(true)
 	if !hasRow(m.rows, "a") {
 		t.Errorf("row a should resurface once the deadline passes (silent-failure surfacing)")
 	}
-	if m.pending["a"] != nil {
+	if m.pendingFor("a") != nil {
 		t.Errorf("expired patch should be dropped")
 	}
 	if m.actionErr == nil {
@@ -154,12 +156,12 @@ func TestApplyPendingArchivedFieldSatisfiesHidePatch(t *testing.T) {
 	m := Model{
 		rows:     []api.ThreadRow{caughtUp},
 		machines: reachableMachines("m1"),
-		pending: map[string]*rowPatch{
-			"a": {archived: bptr(true), hide: true, machine: "m1", deadline: futureDeadline()},
+		pending: []*rowPatch{
+			{id: "a", archived: bptr(true), hide: true, machine: "m1", deadline: futureDeadline()},
 		},
 	}
 	m.applyPending(true)
-	if m.pending["a"] != nil {
+	if m.pendingFor("a") != nil {
 		t.Errorf("archived=true row should satisfy the archive patch (field proof)")
 	}
 	if !hasRow(m.rows, "a") {
@@ -170,15 +172,15 @@ func TestApplyPendingArchivedFieldSatisfiesHidePatch(t *testing.T) {
 	m2 := Model{
 		rows:     []api.ThreadRow{stale},
 		machines: reachableMachines("m1"),
-		pending: map[string]*rowPatch{
-			"a": {archived: bptr(true), hide: true, machine: "m1", deadline: futureDeadline()},
+		pending: []*rowPatch{
+			{id: "a", archived: bptr(true), hide: true, machine: "m1", deadline: futureDeadline()},
 		},
 	}
 	m2.applyPending(true)
 	if hasRow(m2.rows, "a") {
 		t.Errorf("stale row must stay hidden while the patch is unexpired")
 	}
-	if m2.pending["a"] == nil {
+	if m2.pendingFor("a") == nil {
 		t.Errorf("unsatisfied patch dropped early")
 	}
 }
@@ -220,6 +222,166 @@ func TestHoldClearPatchInheritedHoldNotOptimistic(t *testing.T) {
 	}
 	if m.holdClearPatch(inherited) != nil {
 		t.Errorf("a dominating inherited hold must NOT be cleared optimistically — the owner derives the max")
+	}
+}
+
+// TestKeypressOptimismAndRevert (H55 option A): pressing an action key applies
+// its optimistic patch IMMEDIATELY — before the routed subprocess has run, so
+// the change renders instantly on any machine — and a failure actionMsg reverts
+// EXACTLY that action's entry (loud actionErr, refetch restores server truth).
+func TestKeypressOptimismAndRevert(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "one", Machine: "mymain", AgentKind: "pi", Notify: true}}
+	m := Model{machine: "mymain", rows: []api.ThreadRow{row}, machines: reachableMachines("mymain")}
+	m.machines[0].Self = true
+
+	nm, cmd := m.Update(keyMsg("n")) // notify toggle
+	got := nm.(Model)
+	if cmd == nil {
+		t.Fatal("n produced no command")
+	}
+	// The flip is visible NOW — the cmd (the subprocess) has not run.
+	if got.rows[0].Notify {
+		t.Fatalf("keypress did not flip notify optimistically")
+	}
+	p := got.pendingFor("t1")
+	if p == nil || p.notify == nil || *p.notify {
+		t.Fatalf("keypress did not record the notify patch: %#v", p)
+	}
+	seq := got.pending[0].seq
+	if seq == 0 {
+		t.Fatal("recorded patch carries no per-action seq")
+	}
+
+	// Failure: revert exactly this entry; the next (stale) fetch shows server truth.
+	nm2, _ := got.Update(actionMsg{err: errStub("notify failed"), id: "t1", seq: seq})
+	g2 := nm2.(Model)
+	if g2.ActionErr() == nil {
+		t.Fatal("failed action must surface loudly in actionErr")
+	}
+	if g2.pendingFor("t1") != nil {
+		t.Fatalf("failed action's patch not reverted: %#v", g2.pendingFor("t1"))
+	}
+	g2.rows = []api.ThreadRow{row} // the reconcile fetch returns server truth
+	g2.applyPending(true)
+	if !g2.rows[0].Notify {
+		t.Fatalf("reverted patch still applied after the reconcile fetch")
+	}
+}
+
+// errStub is a trivial error for feeding failure actionMsgs.
+type errStub string
+
+func (e errStub) Error() string { return string(e) }
+
+// TestPerActionRevertKeepsSiblings: reverting one failed action must not
+// disturb ANOTHER in-flight action's patch on the SAME thread (the H36 blocker
+// — the old per-thread merged map could only revert everything).
+func TestPerActionRevertKeepsSiblings(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "old", Machine: "m1"}}
+	m := Model{rows: []api.ThreadRow{row}, machines: reachableMachines("m1")}
+	renameSeq := m.recordPatch(row, &rowPatch{name: sptr("new")}, "rename")
+	notifySeq := m.recordPatch(row, &rowPatch{notify: bptr(true)}, "notify")
+	if renameSeq == notifySeq {
+		t.Fatal("actions must get distinct seqs")
+	}
+	m.dropPatch(renameSeq) // the rename failed
+	m.rows = []api.ThreadRow{row}
+	m.applyPending(true)
+	if m.rows[0].Name != "old" {
+		t.Errorf("reverted rename still applied: %q", m.rows[0].Name)
+	}
+	if !m.rows[0].Notify {
+		t.Errorf("sibling notify patch was disturbed by the rename revert")
+	}
+}
+
+// TestSupersedeSameField: a newer action on the same field REPLACES the older
+// entry's optimism AND its reconcile obligation — two quick notify toggles must
+// not leave the first entry demanding notify=true forever (it would expire into
+// a bogus loud "sync degraded" warning once the server settles on false).
+func TestSupersedeSameField(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Machine: "m1"}}
+	m := Model{rows: []api.ThreadRow{row}, machines: reachableMachines("m1")}
+	m.recordPatch(row, &rowPatch{notify: bptr(true)}, "notify")
+	m.recordPatch(row, &rowPatch{notify: bptr(false)}, "notify")
+	if len(m.pending) != 1 {
+		t.Fatalf("superseded same-field entry not dropped: %d entries", len(m.pending))
+	}
+	// Server settles on the LATEST value → everything reconciles clean.
+	m.rows = []api.ThreadRow{row} // notify=false
+	m.applyPending(true)
+	if len(m.pending) != 0 || m.actionErr != nil {
+		t.Fatalf("supersede left a stale obligation: pending=%d err=%v", len(m.pending), m.actionErr)
+	}
+}
+
+// TestUnarchiveSupersedesArchiveHide: U (or `a` in the archived view) while the
+// ARCHIVE patch is still pending must spend that entry entirely — including its
+// ride-along hide — so the restored row is visible at once instead of staying
+// hidden until the archive patch expires into a bogus warning.
+func TestUnarchiveSupersedesArchiveHide(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "x", Machine: "m1"}}
+	m := Model{view: ViewActive, rows: []api.ThreadRow{row}, machines: reachableMachines("m1")}
+	m.recordPatch(row, &rowPatch{archived: bptr(true), hide: true}, "archive")
+	if hasRow(m.rows, "t1") {
+		t.Fatal("archive hide not applied at keypress")
+	}
+	m.rows = []api.ThreadRow{row} // stale fetch; still hidden by the pending entry
+	m.recordPatch(row, &rowPatch{archived: bptr(false)}, "archive")
+	if len(m.pending) != 1 {
+		t.Fatalf("unarchive did not spend the archive entry: %d entries", len(m.pending))
+	}
+	m.rows = []api.ThreadRow{row}
+	m.applyPending(false)
+	if !hasRow(m.rows, "t1") {
+		t.Fatal("row still hidden after the unarchive superseded the archive")
+	}
+}
+
+// TestFlagKeypressOptimism (H55's headline case): `f` flips the row's Flagged
+// field at KEYPRESS (there was NO flag patch at all before — a remote flag sat
+// visually dead for the whole publish+sync+poll pipeline), and the patch
+// reconciles by field once the server catches up.
+func TestFlagKeypressOptimism(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "one", Machine: "mymain", AgentKind: "pi"}}
+	m := Model{machine: "mymain", rows: []api.ThreadRow{row}, machines: reachableMachines("mymain")}
+	m.machines[0].Self = true
+
+	nm, cmd := m.Update(keyMsg("f"))
+	got := nm.(Model)
+	if cmd == nil {
+		t.Fatal("f produced no command")
+	}
+	if !got.rows[0].Flagged {
+		t.Fatalf("f did not flip Flagged optimistically at keypress")
+	}
+	// Flag-on also re-enables auto-flagging (the one-rule semantic): the patch
+	// asserts flagDisabled=false too.
+	p := got.pendingFor("t1")
+	if p == nil || p.flagged == nil || !*p.flagged || p.flagDisabled == nil || *p.flagDisabled {
+		t.Fatalf("flag patch wrong: %#v", p)
+	}
+	// Server catches up → GC'd by field proof.
+	caught := row
+	caught.Flagged = true
+	got.rows = []api.ThreadRow{caught}
+	got.applyPending(true)
+	if got.pendingFor("t1") != nil {
+		t.Fatalf("flagged server row should satisfy the flag patch")
+	}
+
+	// ^f on a flag-disabled row enables at keypress likewise.
+	disabled := row
+	disabled.FlagDisabled = true
+	m2 := Model{machine: "mymain", rows: []api.ThreadRow{disabled}, machines: reachableMachines("mymain")}
+	m2.machines[0].Self = true
+	nm2, cmd2 := m2.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	g2 := nm2.(Model)
+	if cmd2 == nil {
+		t.Fatal("ctrl+f produced no command")
+	}
+	if g2.rows[0].FlagDisabled {
+		t.Fatalf("ctrl+f did not clear FlagDisabled optimistically")
 	}
 }
 

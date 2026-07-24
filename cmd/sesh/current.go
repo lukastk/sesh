@@ -151,7 +151,18 @@ func resolveThreadID(cfg config.Config, explicit string) (string, error) {
 
 // resolveIDPrefix resolves a full uuid or unique id prefix against the
 // daemon's thread list (archived included). Unknown or ambiguous is loud.
+//
+// A FULL well-formed uuid needs no prefix expansion, so it skips the list
+// fetch entirely. That fetch is the expensive part of a ROUTED verb (`--machine
+// X` points this process at the peer's API, so resolving pulls the peer's whole
+// thread list — archived included — before the actual verb; the TUI always
+// passes full row IDs, so every routed TUI action paid it). Nothing is lost:
+// an unknown full uuid still fails LOUDLY, just at the verb itself (the
+// daemon's 404) instead of here.
 func resolveIDPrefix(c *client.Client, ref string) (string, error) {
+	if isFullUUID(ref) {
+		return ref, nil
+	}
 	threads, err := listAllThreads(c)
 	if err != nil {
 		return "", err
@@ -173,6 +184,29 @@ func resolveIDPrefix(c *client.Client, ref string) (string, error) {
 	default:
 		return "", fmt.Errorf("id prefix %q is ambiguous (%d threads: %s …)", ref, len(hits), shortJoin(hits, 3))
 	}
+}
+
+// isFullUUID reports a canonical full uuid: 36 chars, dashes at 8/13/18/23,
+// lowercase hex elsewhere — the exact form sesh mints ids in. Deliberately
+// conservative (uppercase or nonstandard forms fall through to prefix
+// resolution, which behaves exactly as before).
+func isFullUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func lookupThread(c *client.Client, id string) (api.Thread, bool) {

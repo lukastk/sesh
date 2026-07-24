@@ -109,7 +109,7 @@ func TestPinKey(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("p should return a persist command")
 	}
-	p := got.pending["t1"]
+	p := got.pendingFor("t1")
 	if p == nil || !p.pinSet || p.pinOrder == nil {
 		t.Fatalf("p should apply an optimistic pin patch, got %#v", p)
 	}
@@ -121,7 +121,7 @@ func TestPinKey(t *testing.T) {
 	}
 	nm2, cmd2 := child.Update(keyMsg("p"))
 	g2 := nm2.(Model)
-	if cmd2 != nil || g2.ActionErr() == nil || g2.pending["c1"] != nil {
+	if cmd2 != nil || g2.ActionErr() == nil || g2.pendingFor("c1") != nil {
 		t.Fatalf("pinning a child must refuse loudly and not pin (err=%v cmd=%v)", g2.ActionErr(), cmd2)
 	}
 }
@@ -139,7 +139,7 @@ func TestUnpinKey(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("u on a pinned thread should return a persist command")
 	}
-	p := got.pending["t1"]
+	p := got.pendingFor("t1")
 	if p == nil || !p.pinSet || p.pinOrder != nil {
 		t.Fatalf("u should apply an unpin patch (pinSet, nil order), got %#v", p)
 	}
@@ -150,7 +150,7 @@ func TestUnpinKey(t *testing.T) {
 		machines: selfMachines(),
 	}
 	nm2, cmd2 := notpinned.Update(keyMsg("u"))
-	if cmd2 != nil || nm2.(Model).pending["t2"] != nil {
+	if cmd2 != nil || nm2.(Model).pendingFor("t2") != nil {
 		t.Fatalf("u on an unpinned thread must be a no-op")
 	}
 }
@@ -179,7 +179,7 @@ func TestMoveMode(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("moving in move mode should persist")
 	}
-	if p := g2.pending["p2"]; p == nil || p.pinOrder == nil || *p.pinOrder != 9 {
+	if p := g2.pendingFor("p2"); p == nil || p.pinOrder == nil || *p.pinOrder != 9 {
 		t.Fatalf("up should reposition p2 to order 9, got %#v", p)
 	}
 	if !g2.reordering {

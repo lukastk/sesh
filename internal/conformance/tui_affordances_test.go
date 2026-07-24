@@ -1208,15 +1208,18 @@ func claimActionMutateRemote(t *testing.T) {
 		t.Errorf("remote notify not reflected optimistically: %q", rowLine(m.View(), "remote-notif"))
 	}
 
-	// 'a' (archive) on the remote row also routes — the peer's record becomes archived.
-	// Archive opens a y/n confirmation; confirm with `y`.
+	// 'a' (archive) on the remote row also routes — the peer's record becomes
+	// archived. Archive is INSTANT since H54 (no confirmation; U undoes), and
+	// since the keypress-optimism change the row leaves the grid at the press.
 	m = runKey(t, m, "a")
-	if !m.Confirming() {
-		t.Fatalf("a did not open the archive confirmation")
+	if m.Confirming() {
+		t.Fatalf("a opened a confirmation — archive must be instant")
 	}
-	m = runKey(t, m, "y")
 	if m.ActionErr() != nil {
 		t.Fatalf("remote archive errored: %v", m.ActionErr())
+	}
+	if _, ok := rowByName(m, "remote-notif"); ok {
+		t.Errorf("archived remote row still rendered immediately (keypress optimism missing)")
 	}
 	if !waitUntil(15*time.Second, func() bool {
 		for _, x := range peer.listThreadsArchived(t) {

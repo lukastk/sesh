@@ -247,7 +247,18 @@ package api
 // never render on 44); a pre-44 daemon 404s the flag route loudly. The 43-era
 // [[hooks]] events refuse a 44 daemon at start, so config + binary deploy
 // together (myrig notify-flagged).
-const SchemaVersion = 44
+//
+// 45: POST-WRITE MESH NUDGE (H55 option C / H36 deferred item 5). POST
+// /v1/mesh/nudge {machine} asks the LOCAL daemon to re-sync its cached
+// snapshot of that ONE peer immediately (and counts as mesh demand), instead
+// of at the next sync-cadence tick. The CLI calls it best-effort after every
+// successfully ROUTED `--machine` command, so a mutation on a peer becomes
+// visible in local reads (TUI/mesh) in ~an RTT rather than ≤1s later.
+// Additive and mixed-mesh safe: only the CALLING machine's daemon needs 45 —
+// a pre-45 daemon 404s and the CLI drops the hint (freshness then degrades to
+// the normal cadence, the pre-45 behavior; the routed command itself already
+// succeeded). Unknown machine / self are loud 4xx — a typo must not no-op.
+const SchemaVersion = 45
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

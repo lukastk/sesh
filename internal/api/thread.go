@@ -501,6 +501,15 @@ type MeshSnapshot struct {
 	Machines []MachineView `json:"machines"`
 }
 
+// MeshNudgeRequest (schema 45) is POST /v1/mesh/nudge: sync the named PEER's
+// cached snapshot now — a routed write to that machine just succeeded, so the
+// local cache is provably stale; refreshing immediately makes the change
+// visible in local reads (TUI/mesh) in ~an RTT instead of at the next sync
+// cadence tick. Unknown machine or self is a loud 4xx.
+type MeshNudgeRequest struct {
+	Machine string `json:"machine"`
+}
+
 // HeadlessReplyResponse is returned by GET /v1/threads/headless-reply: whether a
 // turn is still in flight, and the last completed reply (if any).
 type HeadlessReplyResponse struct {

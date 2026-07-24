@@ -168,6 +168,26 @@ func routeMachine(cfg config.Config, machine string, rest []string) (handled boo
 	return true, routeToMachineSSH(peer, rest)
 }
 
+// nudgeLocalMesh tells the LOCAL daemon to re-sync its cached snapshot of
+// `machine` NOW (POST /v1/mesh/nudge, schema 45) — called after a successfully
+// ROUTED command, so a mutation on the peer becomes visible in local reads
+// (TUI/mesh) in ~an RTT instead of at the next sync-cadence tick. cfg must be
+// the LOCAL config captured BEFORE routing (http routing points config.Load at
+// the peer via SESH_REMOTE — the nudge must reach the local daemon).
+//
+// BEST-EFFORT BY DESIGN, errors dropped: the routed command already succeeded,
+// and this is a pure freshness hint to a component that may legitimately be
+// absent — the local daemon down (routing never needed it) or pre-45 (no such
+// endpoint during a rolling deploy). Failing the user's successful command over
+// it would be wrong. Not the silent-fallback anti-pattern: nothing is masked —
+// without the nudge the cache simply catches up at the normal cadence (the
+// pre-45 behavior), observable in `sesh mesh` synced_at.
+func nudgeLocalMesh(cfg config.Config, machine string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	daemonClient(cfg).MeshNudge(ctx, machine) //nolint:errcheck — best-effort, see above
+}
+
 // routeToMachineSSH runs the command on the peer via a real ssh hop into that
 // machine's daemon (the honest remote path). The forwarded command carries NO
 // --machine flag, so it runs against the peer's OWN local daemon. stdout/stderr/

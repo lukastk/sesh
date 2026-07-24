@@ -32,10 +32,17 @@ func main() {
 	// ssh (a real ssh hop) or http (the peer's TCP API). Local-only meta commands
 	// (`peer`, `matrix`, help) are excluded — their own args may legitimately contain
 	// `--machine` (e.g. `peer add --machine Q`).
+	//
+	// postRouteNudge, when set, fires after a ROUTED command completes successfully
+	// (error paths os.Exit before reaching it): it asks the LOCAL daemon to re-sync
+	// its cached view of the routed-to peer now, so a routed mutation shows up in
+	// local reads in ~an RTT (see nudgeLocalMesh). Set for the http-routed
+	// continue-local-dispatch path; the ssh-handled path nudges inline below.
+	var postRouteNudge func()
 	if routableSubcommand(os.Args[1]) {
 		machine, rest := extractMachineFlag(os.Args[1:])
 		if machine != "" {
-			cfg := config.Load()
+			cfg := config.Load() // the LOCAL config — captured before routing can set SESH_REMOTE
 			if machine != cfg.Machine {
 				// handled=true: ran remotely over ssh (done). handled=false: pointed
 				// this process at the peer's TCP API (SESH_REMOTE now set) — continue
@@ -46,8 +53,10 @@ func main() {
 					os.Exit(1)
 				}
 				if handled {
+					nudgeLocalMesh(cfg, machine)
 					return
 				}
+				postRouteNudge = func() { nudgeLocalMesh(cfg, machine) }
 			}
 			// machine == self, or http-routed: drop the flag and run locally.
 			os.Args = append([]string{os.Args[0]}, rest...)
@@ -206,6 +215,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "sesh: unknown command %q\n", os.Args[1])
 		usage()
 		os.Exit(2)
+	}
+	// Reached only when an http-routed command dispatched above and SUCCEEDED
+	// (every failure path exits). See postRouteNudge above.
+	if postRouteNudge != nil {
+		postRouteNudge()
 	}
 }
 

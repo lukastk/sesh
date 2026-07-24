@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -208,24 +209,50 @@ func (s *meshSync) tick() {
 		return
 	}
 	for _, p := range reg.List() {
-		s.imu.Lock()
-		if s.inflight[p.Machine] {
-			s.imu.Unlock()
-			continue
-		}
-		s.inflight[p.Machine] = true
-		s.imu.Unlock()
-		s.wg.Add(1)
-		go func(p peers.Peer) {
-			defer s.wg.Done()
-			defer func() {
-				s.imu.Lock()
-				delete(s.inflight, p.Machine)
-				s.imu.Unlock()
-			}()
-			s.syncPeer(p)
-		}(p)
+		s.launchSync(p)
 	}
+}
+
+// launchSync starts one guarded fetch goroutine for a peer (skipped if that
+// peer already has one in flight — the tick/nudge shared discipline).
+func (s *meshSync) launchSync(p peers.Peer) {
+	s.imu.Lock()
+	if s.inflight[p.Machine] {
+		s.imu.Unlock()
+		return
+	}
+	s.inflight[p.Machine] = true
+	s.imu.Unlock()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer func() {
+			s.imu.Lock()
+			delete(s.inflight, p.Machine)
+			s.imu.Unlock()
+		}()
+		s.syncPeer(p)
+	}()
+}
+
+// nudgePeer syncs ONE peer immediately (schema 45, POST /v1/mesh/nudge): a
+// routed write to that machine just succeeded, so its cached snapshot is
+// provably stale — refresh it now instead of at the next cadence tick. Returns
+// a loud error for an unknown machine (a typo'd nudge must not silently no-op).
+// If a fetch for that peer is already in flight its result may predate the
+// write; the handler's demand bump keeps the cadence active so the next ~1s
+// tick covers that race.
+func (s *meshSync) nudgePeer(machine string) error {
+	reg, err := peers.Load(s.d.cfg.PeersPath())
+	if err != nil {
+		return err
+	}
+	p, ok := reg.Get(machine)
+	if !ok {
+		return fmt.Errorf("unknown machine %q: no peer registered (see `sesh peer add`)", machine)
+	}
+	s.launchSync(p)
+	return nil
 }
 
 // syncPeer fetches one peer's snapshot and records the outcome. The SQLite writes
@@ -472,6 +499,35 @@ func (s *meshSync) fetchPeerSnapshotSSH(ctx context.Context, p peers.Peer) ([]ap
 // peers.SSHMultiplexArgs. Kept as a thin alias so the daemon and the CLI share the
 // exact same ControlPath (the warm connection is reused across both).
 func sshMultiplexArgs() []string { return peers.SSHMultiplexArgs() }
+
+// handleMeshNudge serves POST /v1/mesh/nudge (schema 45): refresh the cached
+// snapshot of ONE peer now, because a routed write to it just succeeded. The
+// sync launches in the background — this returns immediately (the caller is a
+// CLI process about to exit; blocking it on the fetch would re-add the very
+// latency the nudge removes). Also counts as mesh demand, so the cadence goes
+// active for the follow-up window (which covers the nudge racing an already
+// in-flight pre-write fetch). Self / empty / unknown machine are loud.
+func (d *Daemon) handleMeshNudge(w http.ResponseWriter, r *http.Request) {
+	var req api.MeshNudgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	if req.Machine == "" {
+		writeError(w, http.StatusBadRequest, "machine is required")
+		return
+	}
+	if req.Machine == d.cfg.Machine {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is this machine — local threads are live, nothing to nudge", req.Machine))
+		return
+	}
+	d.noteMeshDemand()
+	if err := d.mesh.nudgePeer(req.Machine); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "ok": true})
+}
 
 // handleMesh serves GET /v1/mesh: the merged cross-machine view — this machine's
 // live snapshot (always fresh) plus every cached peer (with staleness), read

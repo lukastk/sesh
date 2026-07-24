@@ -138,8 +138,8 @@ const (
 type confirmKind int
 
 const (
-	confirmNone confirmKind = iota
-	confirmDelete           // `d` — drop the record (archive is instant + undoable since H54)
+	confirmNone   confirmKind = iota
+	confirmDelete             // `d` — drop the record (archive is instant + undoable since H54)
 )
 
 type Model struct {
@@ -288,13 +288,19 @@ type Model struct {
 	// window's attach instead of the invoker).
 	clientName string
 
-	// pending holds confirmed-but-not-yet-reflected optimistic mutations
-	// (rename/tag/notify): the daemon applied them, but the TUI's read path
-	// (maintainer snapshot + mesh-sync) lags the write by a tick, so without this a
-	// reconciling fetch would briefly redisplay the STALE value. Applied to matching
-	// rows after each fetch; dropped once the server agrees — or after a few cycles
-	// (ttl), so a mutation that silently didn't take SURFACES rather than sticking.
-	pending map[string]*rowPatch
+	// pending holds the in-flight optimistic mutations, one entry PER ACTION in
+	// keypress order (rename/tag/notify/archive/hold/flag/stop/pin/delete). An
+	// entry is recorded — and applied to the rows — at KEYPRESS, so every action
+	// renders instantly on every machine; the action's subprocess then confirms
+	// or fails it. Per-action identity (rowPatch.seq) is what makes the failure
+	// path honest: a failed action reverts EXACTLY its own entry (the refetch
+	// restores the server's truth) without disturbing sibling actions' patches
+	// on the same thread. Entries are re-applied to matching rows after each
+	// fetch and dropped once the server agrees — or at their deadline, LOUDLY,
+	// so a mutation that silently didn't take SURFACES rather than sticking.
+	pending []*rowPatch
+	// patchSeq mints rowPatch.seq (monotonic per session; 0 = no patch).
+	patchSeq int
 
 	// tickStarted guards the one-time bootstrap of the poll timer (see meshMsg).
 	tickStarted bool
@@ -715,22 +721,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Action errors live in actionErr, NOT lastErr: the reconcile fetch below
 			// clears lastErr on success, which would instantly erase this warning.
 			m.actionErr = msg.err
+			// REVERT exactly this action's keypress-time optimism (per-action
+			// identity): its entry is dropped and the refetch below restores the
+			// server's truth. Sibling actions' patches are untouched.
+			m.dropPatch(msg.seq)
 		} else {
 			m.actionErr = nil
-			if msg.patch != nil && msg.id != "" {
-				// The mutation is CONFIRMED (no error). Record it as an optimistic patch
-				// and apply it now, so the value updates instantly instead of waiting for
-				// the snapshot/mesh-sync read path to catch up.
-				if m.pending == nil {
-					m.pending = map[string]*rowPatch{}
-				}
-				if cur, ok := m.pending[msg.id]; ok {
-					cur.merge(msg.patch)
-				} else {
-					m.pending[msg.id] = msg.patch
-				}
-				m.applyPending(false) // apply for instant feedback (no GC — server is still stale)
-			}
+			// The mutation is CONFIRMED. Its optimistic patch was applied at
+			// KEYPRESS; re-stamp its deadline from NOW so the TTL bounds only the
+			// read path's catch-up, not the action's own round trip.
+			m.confirmPatch(msg.seq)
 			if msg.undoArchive != nil {
 				m.archiveUndo = append(m.archiveUndo, *msg.undoArchive)
 				if len(m.archiveUndo) > archiveUndoCap {
@@ -765,15 +765,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetch() // reconcile against the daemon
 	case pinDoneMsg:
-		// The optimistic pin patch is already applied (instant feel). Success needs
-		// nothing — the next poll reconciles. A failure surfaces loudly and drops the
-		// optimism, then refetches so the server's true order shows.
+		// The optimistic pin patch is already applied (instant feel). Success
+		// re-stamps its deadline from confirmation; a failure surfaces loudly,
+		// reverts exactly that step's entry, then refetches the server's true order.
 		if msg.err != nil {
 			m.actionErr = msg.err
-			delete(m.pending, msg.id)
-			m.applyPending(false)
+			m.dropPatch(msg.seq)
 			return m, m.fetch()
 		}
+		m.confirmPatch(msg.seq)
 		return m, nil
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us) —
@@ -818,14 +818,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// actionMsg is the result of an in-app mutation. On success (err == nil) an
-// optional patch records the confirmed change for optimistic display (see pending).
+// actionMsg is the result of an in-app mutation whose optimistic patch (if any)
+// was already recorded and applied at KEYPRESS (see recordPatch). seq is that
+// patch's per-action identity (0 = the action had no patch): success re-stamps
+// its reconcile deadline, failure reverts exactly that entry.
 type actionMsg struct {
 	err       error
-	id        string    // the thread the mutation targeted
-	patch     *rowPatch // the optimistic change to show until the daemon's read path catches up
-	preselect string    // on success, move the cursor here on the next fetch (structural changes like reparent: no patch, the tree refetches and the moved node is re-selected)
-	expand    string    // on success, expand this node so a freshly-nested child stays visible even before the snapshot reflects the new parent (avoids the preselect/propagation race)
+	id        string // the thread the mutation targeted
+	seq       int    // the keypress-recorded patch this action owns (0 = none)
+	preselect string // on success, move the cursor here on the next fetch (structural changes like reparent: no patch, the tree refetches and the moved node is re-selected)
+	expand    string // on success, expand this node so a freshly-nested child stays visible even before the snapshot reflects the new parent (avoids the preselect/propagation race)
 	// undoArchive: a CONFIRMED archive pushes its undo entry (the U key's LIFO
 	// stack) — attached on success only, so a failed archive never yields a
 	// bogus undo target.
@@ -964,16 +966,28 @@ func (m *Model) reanchorCursor(anchorID string) {
 // catch-up while still surfacing genuine sync failure promptly.
 const optimisticPatchTTL = 15 * time.Second
 
-// rowPatch is a set of optimistic field overrides for one row (nil/empty = untouched).
+// rowPatch is ONE action's optimistic field overrides for one row (nil/empty =
+// untouched). Entries live in Model.pending in keypress order; seq is the
+// action's identity for confirm/revert.
 type rowPatch struct {
-	name       *string
-	notify     *bool
-	onHold     *bool
-	archived   *bool
-	head       *api.Head
-	busy       *api.Busy
-	addTags    []string
-	removeTags []string
+	// id is the thread the patch overrides; seq its per-action identity
+	// (minted by recordPatch); confirmed flips when the action's subprocess
+	// reported success (drives the deadline-expiry wording — an unconfirmed
+	// expiry is a slow/hung action, not a sync failure).
+	id        string
+	seq       int
+	confirmed bool
+
+	name         *string
+	notify       *bool
+	onHold       *bool
+	archived     *bool
+	flagged      *bool
+	flagDisabled *bool
+	head         *api.Head
+	busy         *api.Busy
+	addTags      []string
+	removeTags   []string
 	// pinSet, when true, overrides the row's manual-ordering key to pinOrder (which may
 	// be nil = un-pinned). It re-sorts the row instantly (pinned block above the auto
 	// block) — the optimism behind `p`/`u`/`m` while the mesh read path catches up.
@@ -995,6 +1009,10 @@ type rowPatch struct {
 	deadline time.Time
 }
 
+// merge folds o's overrides onto p (later action wins per field). Used only to
+// build the READ-ONLY combined view of a thread's pending entries (pendingFor);
+// the pending list itself keeps entries separate — that separation is what
+// per-action revert relies on.
 func (p *rowPatch) merge(o *rowPatch) {
 	if o.name != nil {
 		p.name = o.name
@@ -1007,6 +1025,12 @@ func (p *rowPatch) merge(o *rowPatch) {
 	}
 	if o.archived != nil {
 		p.archived = o.archived
+	}
+	if o.flagged != nil {
+		p.flagged = o.flagged
+	}
+	if o.flagDisabled != nil {
+		p.flagDisabled = o.flagDisabled
 	}
 	if o.head != nil {
 		p.head = o.head
@@ -1037,6 +1061,65 @@ func (p *rowPatch) merge(o *rowPatch) {
 	}
 }
 
+// supersededBy clears from p (an OLDER pending entry on the same thread) every
+// field the NEWER patch o sets: the newer action's optimism replaces p's, and —
+// critically — p's satisfied()/expiry obligation for those fields dies with it
+// (else e.g. two quick notify toggles leave the first entry demanding a value
+// the server will never show, expiring into a bogus loud sync warning).
+// Opposite-direction tag edits cancel likewise. Returns true when the clearing
+// left p SPENT: it had field proof and now has none — its hide (if any) rode on
+// those fields (archive's hide dies when an unarchive lands on top), so the
+// whole entry should be dropped. A from-birth pure hide (delete) shares no
+// fields with anything and is never touched here.
+func (p *rowPatch) supersededBy(o *rowPatch) bool {
+	hadProof := p.hasFieldProof()
+	if o.name != nil {
+		p.name = nil
+	}
+	if o.notify != nil {
+		p.notify = nil
+	}
+	if o.onHold != nil {
+		p.onHold = nil
+	}
+	if o.archived != nil {
+		p.archived = nil
+	}
+	if o.flagged != nil {
+		p.flagged = nil
+	}
+	if o.flagDisabled != nil {
+		p.flagDisabled = nil
+	}
+	if o.head != nil {
+		p.head = nil
+	}
+	if o.busy != nil {
+		p.busy = nil
+	}
+	if o.pinSet {
+		p.pinSet, p.pinOrder = false, nil
+	}
+	for _, t := range o.addTags {
+		p.removeTags = removeStr(p.removeTags, t)
+	}
+	for _, t := range o.removeTags {
+		p.addTags = removeStr(p.addTags, t)
+	}
+	return hadProof && !p.hasFieldProof()
+}
+
+// hasFieldProof reports whether the patch asserts any server-provable field —
+// the overrides satisfied() can check a present row against. A patch without
+// field proof is either empty or a PURE hide (delete), which only the row's
+// absence or the deadline can end.
+func (p *rowPatch) hasFieldProof() bool {
+	return p.name != nil || p.notify != nil || p.onHold != nil ||
+		p.archived != nil || p.flagged != nil || p.flagDisabled != nil ||
+		p.head != nil || p.busy != nil || p.pinSet ||
+		len(p.addTags) > 0 || len(p.removeTags) > 0
+}
+
 func (p *rowPatch) apply(r *api.ThreadRow) {
 	if p.name != nil {
 		r.Name = *p.name
@@ -1049,6 +1132,12 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 	}
 	if p.archived != nil {
 		r.Archived = *p.archived
+	}
+	if p.flagged != nil {
+		r.Flagged = *p.flagged
+	}
+	if p.flagDisabled != nil {
+		r.FlagDisabled = *p.flagDisabled
 	}
 	if p.head != nil {
 		r.Head = *p.head
@@ -1080,10 +1169,8 @@ func (p *rowPatch) apply(r *api.ThreadRow) {
 // prove it) is never satisfied by a present row — only the row's absence (see
 // applyPending) or the deadline ends it.
 func (p *rowPatch) satisfied(r api.ThreadRow) bool {
-	if p.hide && p.name == nil && p.notify == nil && p.onHold == nil &&
-		p.archived == nil && p.head == nil && p.busy == nil && !p.pinSet &&
-		len(p.addTags) == 0 && len(p.removeTags) == 0 {
-		return false
+	if !p.hasFieldProof() {
+		return false // empty or PURE hide (delete): only absence/deadline ends it
 	}
 	if p.name != nil && r.Name != *p.name {
 		return false
@@ -1095,6 +1182,12 @@ func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 		return false
 	}
 	if p.archived != nil && r.Archived != *p.archived {
+		return false
+	}
+	if p.flagged != nil && r.Flagged != *p.flagged {
+		return false
+	}
+	if p.flagDisabled != nil && r.FlagDisabled != *p.flagDisabled {
 		return false
 	}
 	if p.head != nil && r.Head != *p.head {
@@ -1119,16 +1212,97 @@ func (p *rowPatch) satisfied(r api.ThreadRow) bool {
 	return true
 }
 
-// applyPending overlays the pending optimistic patches onto m.rows. When gc is true
-// (a reconcile after a fresh fetch), a patch the server has caught up to is dropped:
-// a present row satisfying every override, or the row ABSENT while its owning
-// machine is reporting reachable (it left this view / was deleted — the read path
-// caught up). Absence with the machine offline or missing proves nothing and never
-// GCs (never conclude from missing data). An unsatisfied patch survives until its
-// wall-clock deadline; expiry surfaces the server's truth LOUDLY via actionErr — a
-// confirmed write the mesh never reflected is a sync problem to report, not mask.
-// When gc is false (right after recording a patch), it only overlays — the
-// freshly-read rows are still stale, so nothing should be GC'd yet.
+// recordPatch is the KEYPRESS half of an optimistic action: it stamps the
+// patch's identity + reconcile context (thread, machine, desc, deadline; the
+// deadline is provisional — confirmPatch re-stamps it once the subprocess
+// reports success, so the TTL bounds the read path, not the round trip),
+// SUPERSEDES older entries' now-replaced fields, appends it to the pending
+// list, and applies it so the change renders instantly. A hide patch removes
+// the selected row, so the cursor re-anchors (falling to the neighbour when
+// the selected row itself vanished — the wanted behaviour). Returns the
+// action's seq for its actionMsg.
+func (m *Model) recordPatch(row api.ThreadRow, p *rowPatch, verb string) int {
+	m.patchSeq++
+	p.id, p.seq = row.ID, m.patchSeq
+	p.machine = row.Machine
+	if p.desc == "" { // an action may pre-set a more precise label (e.g. "unarchive")
+		p.desc = fmt.Sprintf("%s %q", verb, rowDisplayName(row))
+	}
+	p.deadline = time.Now().Add(optimisticPatchTTL)
+	kept := m.pending[:0]
+	for _, old := range m.pending {
+		if old.id == row.ID && old.supersededBy(p) {
+			continue // spent: every field it asserted is now this action's
+		}
+		kept = append(kept, old)
+	}
+	m.pending = append(kept, p)
+	anchor := m.selectedID()
+	m.applyPending(false) // instant feedback (no GC — the rows are still server-stale)
+	m.reanchorCursor(anchor)
+	m.ensureCursorVisible()
+	return p.seq
+}
+
+// confirmPatch marks the action's entry confirmed and restarts its deadline —
+// from confirmation the TTL measures only the read path's catch-up. A missing
+// seq (0, or an entry already GC'd/superseded) is a no-op.
+func (m *Model) confirmPatch(seq int) {
+	for _, p := range m.pending {
+		if p.seq == seq {
+			p.confirmed = true
+			p.deadline = time.Now().Add(optimisticPatchTTL)
+			return
+		}
+	}
+}
+
+// dropPatch reverts EXACTLY one action's optimism (its entry is removed; the
+// caller's refetch restores the server's truth for those fields). Sibling
+// entries — other actions on the same thread — are untouched.
+func (m *Model) dropPatch(seq int) {
+	if seq == 0 {
+		return
+	}
+	kept := m.pending[:0]
+	for _, p := range m.pending {
+		if p.seq != seq {
+			kept = append(kept, p)
+		}
+	}
+	m.pending = kept
+}
+
+// pendingFor is the combined view of a thread's pending entries (in keypress
+// order; nil = none) — inspection/tests only, the list stays per-action.
+func (m Model) pendingFor(id string) *rowPatch {
+	var out *rowPatch
+	for _, p := range m.pending {
+		if p.id != id {
+			continue
+		}
+		if out == nil {
+			out = &rowPatch{id: id}
+		}
+		out.merge(p)
+	}
+	return out
+}
+
+// applyPending overlays the pending optimistic patches onto m.rows, in keypress
+// order (a later action's override wins where they overlap — though recordPatch's
+// supersede keeps same-thread entries field-disjoint). When gc is true (a
+// reconcile after a fresh fetch), an entry the server has caught up to is
+// dropped: a present row satisfying every override, or the row ABSENT while its
+// owning machine is reporting reachable (it left this view / was deleted — the
+// read path caught up). Absence with the machine offline or missing proves
+// nothing and never GCs (never conclude from missing data). An unsatisfied entry
+// survives until its wall-clock deadline; expiry surfaces the server's truth
+// LOUDLY via actionErr — a confirmed write the mesh never reflected is a sync
+// problem to report, not mask (an UNCONFIRMED expiry is a slow/hung action; its
+// own actionMsg will still report the outcome). When gc is false (right after
+// recording a patch), it only overlays — the freshly-read rows are still stale,
+// so nothing should be GC'd yet.
 func (m *Model) applyPending(gc bool) {
 	if len(m.pending) == 0 {
 		return
@@ -1143,47 +1317,52 @@ func (m *Model) applyPending(gc bool) {
 	}
 	now := time.Now()
 	hidden := map[string]bool{}
-	for id, p := range m.pending {
-		i, ok := idx[id]
+	kept := m.pending[:0]
+	for _, p := range m.pending {
+		i, ok := idx[p.id]
 		if gc {
 			if !ok && reach[p.machine] {
-				delete(m.pending, id) // row gone while its owner reports in — the change landed
-				continue
+				continue // row gone while its owner reports in — the change landed
 			}
 			if ok && p.satisfied(m.rows[i]) {
-				delete(m.pending, id)
 				continue
 			}
 			if now.After(p.deadline) {
-				delete(m.pending, id) // server never caught up — surface its truth, loudly
+				// Server never caught up — surface its truth, loudly.
 				desc, owner := p.desc, p.machine
 				if desc == "" {
-					desc = "a change to " + id
+					desc = "a change to " + p.id
 				}
 				if owner == "" {
 					owner = "its owner"
 				}
-				m.actionErr = fmt.Errorf("%s: confirmed by %s but still not reflected in the mesh view after %s — sync may be degraded; showing the server's state", desc, owner, optimisticPatchTTL)
+				if p.confirmed {
+					m.actionErr = fmt.Errorf("%s: confirmed by %s but still not reflected in the mesh view after %s — sync may be degraded; showing the server's state", desc, owner, optimisticPatchTTL)
+				} else {
+					m.actionErr = fmt.Errorf("%s: no confirmation from %s after %s — still running; showing the server's state meanwhile", desc, owner, optimisticPatchTTL)
+				}
 				continue
 			}
 		}
+		kept = append(kept, p)
 		if !ok {
 			continue
 		}
 		if p.hide {
-			hidden[id] = true // drop it from the view until the read path catches up (or the deadline resurrects it)
+			hidden[p.id] = true // drop it from the view until the read path catches up (or the deadline resurrects it)
 		} else {
 			p.apply(&m.rows[i])
 		}
 	}
+	m.pending = kept
 	if len(hidden) > 0 {
-		kept := m.rows[:0]
+		keptRows := m.rows[:0]
 		for _, r := range m.rows {
 			if !hidden[r.ID] {
-				kept = append(kept, r)
+				keptRows = append(keptRows, r)
 			}
 		}
-		m.rows = kept
+		m.rows = keptRows
 	}
 }
 
@@ -1263,17 +1442,17 @@ func requiresReachableOwner(key string) bool {
 		"ctrl+f", // flag-gate toggle (owner-routed setter)
 		"r",      // rename
 		"t",      // tag add
-		"T", // tag remove
-		"P", // reparent
-		"h", // hold toggle
-		"H", // hold until date
-		"n", // notify on/off
-		"v", // new virtual group (created on the selected row's machine)
-		"p", // pin to top (routed pin on the owner)
-		"u", // unpin (routed pin --clear on the owner)
-		"m", // enter move mode (auto-pins on the owner)
-		"D", // new divider (created on the selected row's machine)
-		"K": // tickets view (loadTickets routes to the owner)
+		"T",      // tag remove
+		"P",      // reparent
+		"h",      // hold toggle
+		"H",      // hold until date
+		"n",      // notify on/off
+		"v",      // new virtual group (created on the selected row's machine)
+		"p",      // pin to top (routed pin on the owner)
+		"u",      // unpin (routed pin --clear on the owner)
+		"m",      // enter move mode (auto-pins on the owner)
+		"D",      // new divider (created on the selected row's machine)
+		"K":      // tickets view (loadTickets routes to the owner)
 		return true
 	}
 	return false
@@ -1357,7 +1536,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "h":
 		// Toggle hold: a non-held thread is parked until the start of tomorrow (so it
 		// returns to the active view tomorrow); a held thread is released now.
-		return m, m.holdToggleSelected()
+		// (Bound before returning: the helper records the keypress-time patch on m.)
+		cmd := m.holdToggleSelected()
+		return m, cmd
 	case "H":
 		// Hold until an explicit date: open a prompt (YYYY-MM-DD); blank clears the hold.
 		if row, ok := m.Selected(); ok {
@@ -1386,11 +1567,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, m.fetch()
 	case "n":
-		return m, m.notifySelected()
+		cmd := m.notifySelected()
+		return m, cmd
 	case "f":
-		return m, m.flagSelected()
+		cmd := m.flagSelected()
+		return m, cmd
 	case "ctrl+f":
-		return m, m.flagGateSelected()
+		cmd := m.flagGateSelected()
+		return m, cmd
 	case "?":
 		m.helpPopup = true
 	case "y":
@@ -1443,8 +1627,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			order := m.pinTopOrder()
-			m.applyPinPatch(row, &order)
-			return m, m.persistPin(row, &order)
+			seq := m.applyPinPatch(row, &order)
+			cmd := m.persistPin(row, &order, seq)
+			return m, cmd
 		}
 	case "u":
 		// Unpin: remove the manual ordering (the row rejoins the auto block).
@@ -1457,8 +1642,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionErr = fmt.Errorf("a divider can't be un-pinned — delete it (d)")
 				return m, nil
 			}
-			m.applyPinPatch(row, nil)
-			return m, m.persistPin(row, nil)
+			seq := m.applyPinPatch(row, nil)
+			cmd := m.persistPin(row, nil, seq)
+			return m, cmd
 		}
 	case "m":
 		// Enter MOVE MODE: reposition the selected pinned row (auto-pinning a top-level
@@ -1471,8 +1657,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			if row.PinOrder == nil {
 				order := m.pinTopOrder()
-				m.applyPinPatch(row, &order)
-				cmd = m.persistPin(row, &order)
+				seq := m.applyPinPatch(row, &order)
+				cmd = m.persistPin(row, &order, seq)
 			}
 			m.reordering, m.reorderID = true, row.ID
 			return m, cmd
@@ -1489,7 +1675,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// far more frequent action.)
 		return m, m.forkSelected()
 	case "x":
-		return m, m.stopSelected()
+		cmd := m.stopSelected()
+		return m, cmd
 	case "d":
 		// Destructive: confirm before dropping the record (y/n popup).
 		if row, ok := m.Selected(); ok {
@@ -1499,7 +1686,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Archive/unarchive INSTANTLY — no confirm (H54): archiving is cheap to
 		// reverse, so the flow is act-then-undo (`U` restores the most recent).
 		if row, ok := m.Selected(); ok {
-			return m, m.archiveRow(row)
+			cmd := m.archiveRow(row)
+			return m, cmd
 		}
 	case "U":
 		return m.undoLastArchive()
@@ -1523,7 +1711,8 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if s := msg.String(); s == "y" || s == "Y" {
 		switch kind {
 		case confirmDelete:
-			return m, m.deleteRow(row)
+			cmd := m.deleteRow(row)
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -1598,7 +1787,7 @@ func (m Model) handleTagPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // removeTagRow removes a tag from a thread via the `thread tag --remove` verb,
 // routed to the owning machine, with an optimistic patch so the TAGS column drops
 // it instantly.
-func (m Model) removeTagRow(row api.ThreadRow, tag string) tea.Cmd {
+func (m *Model) removeTagRow(row api.ThreadRow, tag string) tea.Cmd {
 	return m.routedVerb(row, &rowPatch{removeTags: []string{tag}}, "tag", "--remove", tag)
 }
 
@@ -1622,26 +1811,30 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// An empty submit renames to EMPTY (a nameless thread; a bare-rule divider)
 			// — not a cancel. Esc cancels; the prompt is prefilled with the current name,
 			// so clearing it and submitting is a deliberate "clear the name".
-			return m, m.renameRow(row, input)
+			cmd := m.renameRow(row, input)
+			return m, cmd
 		case promptTag:
 			if input == "" {
 				return m, nil
 			}
-			return m, m.tagRow(row, input)
+			cmd := m.tagRow(row, input)
+			return m, cmd
 		case promptReparent:
 			// Empty input is meaningful here: make the thread a root.
 			return m, m.reparentRow(row, input)
 		case promptHold:
 			// Empty input clears the hold; otherwise parse a YYYY-MM-DD date.
 			if input == "" {
-				return m, m.holdRow(row, 0)
+				cmd := m.holdRow(row, 0)
+				return m, cmd
 			}
 			d, err := time.ParseInLocation("2006-01-02", input, time.Local)
 			if err != nil {
 				m.actionErr = fmt.Errorf("hold: bad date %q (want YYYY-MM-DD)", input)
 				return m, nil
 			}
-			return m, m.holdRow(row, d.Unix())
+			cmd := m.holdRow(row, d.Unix())
+			return m, cmd
 		case promptNewVirtual:
 			// Empty = cancel (a group without a name is an accident, not an ask).
 			if input == "" {
@@ -1714,7 +1907,9 @@ func renderPromptInput(input []rune, cursor int) string {
 
 // renameRow renames a thread via the CLI verb (uniform local/remote: the CLI's
 // --machine routing reaches the owning daemon; the TUI does not re-implement it).
-func (m Model) renameRow(row api.ThreadRow, name string) tea.Cmd {
+// The name patch is recorded at keypress, like every routedVerb action.
+func (m *Model) renameRow(row api.ThreadRow, name string) tea.Cmd {
+	seq := m.recordPatch(row, &rowPatch{name: sptr(name)}, "rename")
 	bin, env, machine := m.binaryPath, m.navEnv, m.machine
 	return func() tea.Msg {
 		args := []string{"thread", "rename", "--id", row.ID, "--name", name}
@@ -1724,14 +1919,15 @@ func (m Model) renameRow(row api.ThreadRow, name string) tea.Cmd {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return actionMsg{err: fmt.Errorf("rename %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+			return actionMsg{err: fmt.Errorf("rename %q: %v: %s", row.Name, err, strings.TrimSpace(string(out))), id: row.ID, seq: seq}
 		}
-		return actionMsg{id: row.ID, patch: stampPatch(&rowPatch{name: sptr(name)}, "rename", row)}
+		return actionMsg{id: row.ID, seq: seq}
 	}
 }
 
 // tagRow adds a tag to a thread via the CLI verb (routing as renameRow).
-func (m Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
+func (m *Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
+	seq := m.recordPatch(row, &rowPatch{addTags: []string{tag}}, "tag")
 	bin, env, machine := m.binaryPath, m.navEnv, m.machine
 	return func() tea.Msg {
 		args := []string{"thread", "tag", "--id", row.ID, "--add", tag}
@@ -1741,9 +1937,9 @@ func (m Model) tagRow(row api.ThreadRow, tag string) tea.Cmd {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return actionMsg{err: fmt.Errorf("tag %q: %v: %s", row.Name, err, strings.TrimSpace(string(out)))}
+			return actionMsg{err: fmt.Errorf("tag %q: %v: %s", row.Name, err, strings.TrimSpace(string(out))), id: row.ID, seq: seq}
 		}
-		return actionMsg{id: row.ID, patch: stampPatch(&rowPatch{addTags: []string{tag}}, "tag", row)}
+		return actionMsg{id: row.ID, seq: seq}
 	}
 }
 
@@ -1903,8 +2099,17 @@ func onWorkSocket(tmux, name string) bool {
 // adding --machine when the row isn't local so the mutation ROUTES over the mesh
 // (http/ssh) — exactly like rename/tag. This is why these work on remote threads:
 // the local daemon doesn't own them, so a direct client call would silently miss.
-// On success the (optional) optimistic patch is returned for instant display.
-func (m Model) routedVerb(row api.ThreadRow, patch *rowPatch, verb string, extra ...string) tea.Cmd {
+// The (optional) optimistic patch is recorded and applied at KEYPRESS — the
+// change renders instantly on every machine; the returned command's actionMsg
+// then confirms it (re-stamping its reconcile deadline) or reverts exactly it
+// on failure. Pointer receiver: callers must bind the cmd BEFORE returning m
+// (`cmd := m.routedVerb(...); return m, cmd`), or the returned model may miss
+// the keypress-time patch (return-operand evaluation order is unspecified).
+func (m *Model) routedVerb(row api.ThreadRow, patch *rowPatch, verb string, extra ...string) tea.Cmd {
+	seq := 0
+	if patch != nil {
+		seq = m.recordPatch(row, patch, verb)
+	}
 	bin, env, machine := m.binaryPath, m.navEnv, m.machine
 	return func() tea.Msg {
 		args := append([]string{"thread", verb, "--id", row.ID}, extra...)
@@ -1914,26 +2119,10 @@ func (m Model) routedVerb(row api.ThreadRow, patch *rowPatch, verb string, extra
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return actionMsg{err: fmt.Errorf("%s %q: %v: %s", verb, row.Name, err, strings.TrimSpace(string(out)))}
+			return actionMsg{err: fmt.Errorf("%s %q: %v: %s", verb, row.Name, err, strings.TrimSpace(string(out))), id: row.ID, seq: seq}
 		}
-		return actionMsg{id: row.ID, patch: stampPatch(patch, verb, row)}
+		return actionMsg{id: row.ID, seq: seq}
 	}
-}
-
-// stampPatch labels a confirmed action's optimistic patch with its reconcile
-// context: the owning machine (drives absence-GC), a description for the
-// deadline-expiry warning, and the deadline itself — measured from CONFIRMATION,
-// so it bounds only the read path's catch-up, not the action round trip.
-func stampPatch(p *rowPatch, verb string, row api.ThreadRow) *rowPatch {
-	if p == nil {
-		return nil
-	}
-	p.machine = row.Machine
-	if p.desc == "" { // an action may pre-set a more precise label (e.g. "unarchive")
-		p.desc = fmt.Sprintf("%s %q", verb, rowDisplayName(row))
-	}
-	p.deadline = time.Now().Add(optimisticPatchTTL)
-	return p
 }
 
 // rowDisplayName names a row for action messages: its name, or a short id when nameless.
@@ -1952,7 +2141,7 @@ func rowDisplayName(row api.ThreadRow) string {
 // optimistic patch flips the state glyph to headless·idle (● → ◌) immediately —
 // without it the row sat looking alive until the owner's maintainer noticed the
 // pane gone AND the mesh read path caught up (seconds).
-func (m Model) stopSelected() tea.Cmd {
+func (m *Model) stopSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
@@ -2064,11 +2253,12 @@ func (m Model) newDividerRow(row api.ThreadRow, name string) tea.Cmd {
 }
 
 // pinDoneMsg is the result of a routed pin/unpin/reorder write. The optimistic patch
-// is already applied at keypress time (instant feel), so success is a no-op (the next
-// poll reconciles); a failure surfaces loudly AND drops the optimism, then refetches
-// the server's true order.
+// is already applied at keypress time (instant feel); success re-stamps its reconcile
+// deadline, a failure surfaces loudly AND reverts exactly that step's entry (seq),
+// then refetches the server's true order.
 type pinDoneMsg struct {
 	id  string
+	seq int
 	err error
 }
 
@@ -2138,37 +2328,26 @@ func (m Model) reorderTarget(row api.ThreadRow, dir int) (float64, bool) {
 	return (*pinned[idx+1].PinOrder + *pinned[idx+2].PinOrder) / 2, true
 }
 
-// applyPinPatch stamps and applies an optimistic pin override (order nil = un-pin) for
-// row, so the block re-sorts instantly, then keeps the cursor on the row. The routed
-// write (persistPin) runs alongside; the reconcile poll GCs the patch once the server
-// agrees (or the deadline surfaces a genuine failure).
-func (m *Model) applyPinPatch(row api.ThreadRow, order *float64) {
-	desc := "unpin"
+// applyPinPatch records and applies an optimistic pin override (order nil =
+// un-pin) for row, so the block re-sorts instantly, then keeps the cursor on the
+// row. recordPatch supersedes any older pin entry for the row (latest reorder
+// wins — an intermediate step's obligation must not outlive it). The routed
+// write (persistPin, with the returned seq) runs alongside; the reconcile poll
+// GCs the entry once the server agrees (or the deadline surfaces a failure).
+func (m *Model) applyPinPatch(row api.ThreadRow, order *float64) int {
+	verb := "unpin"
 	if order != nil {
-		desc = "pin"
+		verb = "pin"
 	}
-	patch := &rowPatch{
-		pinSet:   true,
-		pinOrder: order,
-		machine:  row.Machine,
-		desc:     fmt.Sprintf("%s %q", desc, rowDisplayName(row)),
-		deadline: time.Now().Add(optimisticPatchTTL),
-	}
-	if m.pending == nil {
-		m.pending = map[string]*rowPatch{}
-	}
-	if cur, ok := m.pending[row.ID]; ok {
-		cur.merge(patch)
-	} else {
-		m.pending[row.ID] = patch
-	}
-	m.applyPending(false)
+	seq := m.recordPatch(row, &rowPatch{pinSet: true, pinOrder: order}, verb)
 	m.positionCursorOn(row.ID) // the re-sort moved the row — keep the cursor on it
+	return seq
 }
 
 // persistPin writes the pin change to the owning daemon (order nil = un-pin). The
-// optimistic patch already shows the result, so this only persists + reports failure.
-func (m Model) persistPin(row api.ThreadRow, order *float64) tea.Cmd {
+// optimistic patch (entry seq) already shows the result, so this only persists +
+// reports the outcome.
+func (m Model) persistPin(row api.ThreadRow, order *float64, seq int) tea.Cmd {
 	bin, env, machine := m.binaryPath, m.navEnv, m.machine
 	return func() tea.Msg {
 		var args []string
@@ -2183,9 +2362,9 @@ func (m Model) persistPin(row api.ThreadRow, order *float64) tea.Cmd {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return pinDoneMsg{id: row.ID, err: fmt.Errorf("pin %q: %v: %s", rowDisplayName(row), err, strings.TrimSpace(string(out)))}
+			return pinDoneMsg{id: row.ID, seq: seq, err: fmt.Errorf("pin %q: %v: %s", rowDisplayName(row), err, strings.TrimSpace(string(out)))}
 		}
-		return pinDoneMsg{id: row.ID}
+		return pinDoneMsg{id: row.ID, seq: seq}
 	}
 }
 
@@ -2208,9 +2387,10 @@ func (m Model) handleReorderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !moved {
 			return m, nil // already at that end of the block
 		}
-		m.applyPinPatch(row, &order)
+		seq := m.applyPinPatch(row, &order)
 		m.ensureCursorVisible()
-		return m, m.persistPin(row, &order)
+		cmd := m.persistPin(row, &order, seq)
+		return m, cmd
 	case "enter", "esc", "q", "ctrl+c":
 		m.reordering, m.reorderID = false, ""
 		return m, nil
@@ -2239,20 +2419,10 @@ func samePinOrder(a, b *float64) bool {
 	return *a == *b
 }
 
-// deleteSelected drops the selected thread's record. The daemon refuses a live
-// thread (orphan guard); stop it first. Surfaced as an error in actionErr.
-func (m Model) deleteSelected() tea.Cmd {
-	row, ok := m.Selected()
-	if !ok {
-		return nil
-	}
-	return m.deleteRow(row)
-}
-
 // deleteRow drops a specific thread's record (routed to the owner). Delete removes
 // the record from EVERY view, so hide it instantly (the mesh read path lags the
 // write by up to one maintainer tick).
-func (m Model) deleteRow(row api.ThreadRow) tea.Cmd {
+func (m *Model) deleteRow(row api.ThreadRow) tea.Cmd {
 	return m.routedVerb(row, &rowPatch{hide: true}, "delete")
 }
 
@@ -2268,7 +2438,7 @@ func (m Model) leavesViewWith(next api.ThreadRow) bool {
 
 // notifySelected TOGGLES the selected thread's notification gate (routed to the
 // owner, with an optimistic flip so the NTF column updates instantly).
-func (m Model) notifySelected() tea.Cmd {
+func (m *Model) notifySelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
@@ -2281,51 +2451,54 @@ func (m Model) notifySelected() tea.Cmd {
 	return m.routedVerb(row, &rowPatch{notify: bptr(want)}, "notify", flag)
 }
 
-// flagSelected (F) toggles the selected thread's needs-attention flag:
-// flagged → off; else on (which also re-enables a flag-disabled thread —
-// the one-rule semantic, schema 44). No optimistic patch: flags change only
-// a gutter glyph, the ~1s reconcile is fine.
-func (m Model) flagSelected() tea.Cmd {
+// flagPatch is the optimistic patch for a `thread flag` action: the target
+// flagged/flagDisabled state (mirroring the daemon's one-rule semantics), plus
+// a hide when the new state leaves the current view (a custom [[tui.views]]
+// filter can select on flagged/flagdisabled).
+func (m Model) flagPatch(row api.ThreadRow, flagged, flagDisabled bool) *rowPatch {
+	patch := &rowPatch{flagged: bptr(flagged), flagDisabled: bptr(flagDisabled)}
+	next := row
+	next.Flagged, next.FlagDisabled = flagged, flagDisabled
+	if m.leavesViewWith(next) {
+		patch.hide = true
+	}
+	return patch
+}
+
+// flagSelected (f) toggles the selected thread's needs-attention flag:
+// flagged → off; else on (which also re-enables a flag-disabled thread — the
+// one-rule semantic, schema 44). The optimistic patch flips ⚑ at keypress —
+// without it a remote flag sat visually dead for the whole owner-publish +
+// mesh-sync + poll pipeline (the H55 complaint).
+func (m *Model) flagSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	action := "--on"
 	if row.Flagged {
-		action = "--off"
+		return m.routedVerb(row, m.flagPatch(row, false, row.FlagDisabled), "flag", "--off")
 	}
-	return m.routedVerb(row, nil, "flag", action)
+	return m.routedVerb(row, m.flagPatch(row, true, false), "flag", "--on")
 }
 
 // flagGateSelected (^f) toggles AUTO-flagging for the selected thread:
 // disabled → enable; else disable (which also clears any current flag) —
-// the parent-monitored-children knob.
-func (m Model) flagGateSelected() tea.Cmd {
+// the parent-monitored-children knob. Optimistic like flagSelected.
+func (m *Model) flagGateSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	action := "--disable"
 	if row.FlagDisabled {
-		action = "--enable"
+		return m.routedVerb(row, m.flagPatch(row, row.Flagged, false), "flag", "--enable")
 	}
-	return m.routedVerb(row, nil, "flag", action)
-}
-
-// archiveSelected TOGGLES the selected thread's archived state (archive in the
-// active view, unarchive in the archived/all views — the row knows which). Routed.
-func (m Model) archiveSelected() tea.Cmd {
-	row, ok := m.Selected()
-	if !ok {
-		return nil
-	}
-	return m.archiveRow(row)
+	return m.routedVerb(row, m.flagPatch(row, false, true), "flag", "--disable")
 }
 
 // archiveRow toggles a specific thread's archived state (routed to the owner). When
 // the toggle removes the row from the current view it is hidden optimistically, so
 // it disappears at once instead of after the next mesh read.
-func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
+func (m *Model) archiveRow(row api.ThreadRow) tea.Cmd {
 	newArchived := !row.Archived
 	// The archived override (not just hide) lets satisfied() reconcile by FIELD in
 	// a view that still admits the changed row (e.g. `all`) — a hide alone kept
@@ -2357,7 +2530,11 @@ func (m Model) archiveRow(row api.ThreadRow) tea.Cmd {
 // undoLastArchive (U): un-archive the most recently archived thread (LIFO —
 // repeated U walks back through this session's archives). The target comes
 // from the stack, NOT the selection, so reachability is checked against ITS
-// machine here rather than via the selection-based offline gate.
+// machine here rather than via the selection-based offline gate. The
+// unarchive patch's real job is SUPERSEDING a still-pending archive patch for
+// the same thread (recordPatch drops it), so an undo pressed before the mesh
+// reflected the archive can't leave a stale archived=true obligation that
+// keeps the row hidden until it expires into a bogus sync warning.
 func (m Model) undoLastArchive() (tea.Model, tea.Cmd) {
 	if len(m.archiveUndo) == 0 {
 		m.note = "nothing to un-archive (U undoes this session's archives)"
@@ -2371,7 +2548,8 @@ func (m Model) undoLastArchive() (tea.Model, tea.Cmd) {
 	m.archiveUndo = m.archiveUndo[:len(m.archiveUndo)-1]
 	m.note = fmt.Sprintf("un-archived %q", e.name)
 	row := api.ThreadRow{Thread: api.Thread{ID: e.id, Machine: e.machine, Name: e.name}}
-	inner := m.routedVerb(row, nil, "archive", "--unarchive")
+	patch := &rowPatch{archived: bptr(false), desc: fmt.Sprintf("unarchive %q", e.name)}
+	inner := m.routedVerb(row, patch, "archive", "--unarchive")
 	return m, func() tea.Msg {
 		msg := inner()
 		if am, ok := msg.(actionMsg); ok && am.err == nil {
@@ -2387,7 +2565,7 @@ func (m Model) undoLastArchive() (tea.Model, tea.Cmd) {
 // decision is on the OWN hold, not the effective one — a thread held only by an inherited
 // parent hold has no own hold to release, so `h` sets its own (you can't un-hold a child
 // below its parent; that follows the max() rule and is reflected on the next fetch).
-func (m Model) holdToggleSelected() tea.Cmd {
+func (m *Model) holdToggleSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
@@ -2406,7 +2584,7 @@ func (m Model) holdToggleSelected() tea.Cmd {
 // inherited parent hold — effective ≤ own): clearing then definitely un-holds it.
 // A child held higher by an ancestor stays non-optimistic — only the owning daemon
 // derives the inherited max (H26), so let the next fetch reconcile that case.
-func (m Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
+func (m *Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
 	if untilUnix <= time.Now().Unix() {
 		return m.routedVerb(row, m.holdClearPatch(row), "hold", "--clear")
 	}

@@ -161,6 +161,14 @@ func (c *Client) Mesh(ctx context.Context) (api.MeshSnapshot, error) {
 	return out, c.getJSON(ctx, "http://unix/v1/mesh", &out)
 }
 
+// MeshNudge posts POST /v1/mesh/nudge (schema 45): ask the LOCAL daemon to
+// re-sync its cached snapshot of `machine` immediately — called after a routed
+// write to that peer so the change shows in local reads in ~an RTT.
+func (c *Client) MeshNudge(ctx context.Context, machine string) error {
+	var out map[string]any
+	return c.postJSON(ctx, "http://unix/v1/mesh/nudge", api.MeshNudgeRequest{Machine: machine}, &out)
+}
+
 // ThreadGrid fetches GET /v1/threads/grid — every thread with live status.
 func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bool) (api.ThreadGridResponse, error) {
 	var out api.ThreadGridResponse

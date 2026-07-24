@@ -64,6 +64,49 @@ func TestGuardEmptyFlagNamed(t *testing.T) {
 	}
 }
 
+// TestIsFullUUID pins the full-uuid fast path's gate: only a canonical
+// 36-char lowercase-hex uuid qualifies (it skips the whole-list prefix
+// resolve — the expensive round trip on routed verbs); anything else falls
+// through to prefix resolution exactly as before.
+func TestIsFullUUID(t *testing.T) {
+	yes := []string{
+		"95276330-5abf-48e0-8793-d9da5d250446",
+		"00000000-0000-0000-0000-000000000000",
+	}
+	no := []string{
+		"",
+		"95276330",                              // a prefix
+		"95276330-5abf-48e0-8793-d9da5d25044",   // 35 chars
+		"95276330-5abf-48e0-8793-d9da5d2504467", // 37 chars
+		"95276330-5ABF-48e0-8793-d9da5d250446",  // uppercase → conservative fallthrough
+		"95276330-5abf-48e0-8793_d9da5d250446",  // wrong separator
+		"g5276330-5abf-48e0-8793-d9da5d250446",  // non-hex
+		"952763305abf48e08793d9da5d250446",      // undashed
+	}
+	for _, s := range yes {
+		if !isFullUUID(s) {
+			t.Errorf("isFullUUID(%q) = false, want true", s)
+		}
+	}
+	for _, s := range no {
+		if isFullUUID(s) {
+			t.Errorf("isFullUUID(%q) = true, want false", s)
+		}
+	}
+}
+
+// TestResolveIDPrefixFullUUIDSkipsList proves the fast path is real: a full
+// uuid resolves with NO daemon list call at all (nil client — any list attempt
+// would panic), while a prefix still goes to the list (and errors loudly when
+// the daemon is unreachable, as before).
+func TestResolveIDPrefixFullUUIDSkipsList(t *testing.T) {
+	id := "95276330-5abf-48e0-8793-d9da5d250446"
+	got, err := resolveIDPrefix(nil, id)
+	if err != nil || got != id {
+		t.Fatalf("full uuid should resolve to itself without a list fetch: got %q, %v", got, err)
+	}
+}
+
 // TestGuardEmptyPositionalRef proves the positional twin (`sesh info ""`): an
 // explicitly-supplied empty positional id is a loud error; an omitted one is fine.
 func TestGuardEmptyPositionalRef(t *testing.T) {

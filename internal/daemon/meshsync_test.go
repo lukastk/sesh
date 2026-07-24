@@ -206,3 +206,55 @@ func TestMeshSyncShutdownPrompt(t *testing.T) {
 		t.Fatalf("shutdown-aborted fetch marked the peer unreachable — cancellation is not evidence of peer health")
 	}
 }
+
+// TestMeshNudgeSyncsPeerNow drives the REAL POST /v1/mesh/nudge handler (schema
+// 45) against the fixture's real store + real HTTP peer: a nudge alone — no
+// tick, no kick, no run loop — must fetch the named peer's snapshot into the
+// cache and bump mesh demand (so the cadence stays active over the follow-up
+// window). Self / empty / unknown machine are loud 4xx, never silent no-ops.
+func TestMeshNudgeSyncsPeerNow(t *testing.T) {
+	f := newMeshSyncFixture(t, 2*time.Second)
+	defer f.close()
+	f.s.d.mesh = f.s // wire the daemon the way New() does, so the handler reaches the syncer
+
+	nudge := func(machine string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(api.MeshNudgeRequest{Machine: machine})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		f.s.d.handleMeshNudge(rec, httptest.NewRequest(http.MethodPost, "/v1/mesh/nudge", strings.NewReader(string(body))))
+		return rec
+	}
+
+	if d := f.s.d.lastMeshDemand(); !d.IsZero() {
+		t.Fatalf("pre-nudge demand should be zero, got %v", d)
+	}
+	if rec := nudge("healthy"); rec.Code != http.StatusOK {
+		t.Fatalf("nudge(healthy) = %d: %s", rec.Code, rec.Body.String())
+	}
+	// The nudge ALONE lands the peer's payload — the deliberately-absent run
+	// loop proves no tick was involved.
+	f.waitForPayload(t, "sync-1", time.Second)
+	if f.s.d.lastMeshDemand().IsZero() {
+		t.Fatalf("a nudge must count as mesh demand (active cadence covers the in-flight race)")
+	}
+
+	// A second nudge fires a second immediate round.
+	if rec := nudge("healthy"); rec.Code != http.StatusOK {
+		t.Fatalf("second nudge = %d: %s", rec.Code, rec.Body.String())
+	}
+	f.waitForPayload(t, "sync-2", time.Second)
+
+	// Loud validation: a typo'd machine, self, and an empty machine never no-op.
+	if rec := nudge("nosuchmachine"); rec.Code != http.StatusNotFound {
+		t.Fatalf("nudge(unknown) = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if rec := nudge("self"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("nudge(self) = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := nudge(""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("nudge(empty) = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	f.s.wg.Wait() // let the nudge-launched fetch goroutines finish before the store closes
+}

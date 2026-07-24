@@ -2408,3 +2408,19 @@ reorder legend (mode feedback must stay visible); legendLines() budget self-adju
 measures the rendered line). TestLegendOverflowsNotClips → TestHelpPopupAndLegendHint.
 help.go tui long + SKILL synced. Deploy: binary-only on all five (each `sesh tui` runs
 fresh from the binary; ideapad has no `hostname` cmd — verify via `go version -m` vcs.revision).
+
+## H54 — TUI: per-line scrollable `?` keymap + INSTANT archive with `U` undo (2026-07-24, sesh 94a8bd4; NO schema change; binary-only, deployed ALL FIVE, no restarts)
+Two asks. (1) The `?` popup lists ONE BINDING PER LINE (helpBindings entries incl. mouse
+gestures) and SCROLLS on height overflow (↑/↓, j/k, ^j/^k, wheel — the MouseMsg wheel path
+diverts to helpOffset while the popup is up); ▲/▼ more-indicator lines ALWAYS rendered
+(blank when unneeded) for stable layout; width-truncation with …. (2) `a` archives
+INSTANTLY — confirmArchive REMOVED (`d` keeps its y/n) — act-then-undo: a CONFIRMED
+archive attaches archiveUndoEntry to its actionMsg (success only, never a bogus target),
+pushed to a session LIFO stack (cap 20) + note `archived "x" · U to undo`; `U` pops,
+un-archives routed, preselects the restored row; repeated U walks back. KEY DESIGN: U's
+target comes from the STACK not the selection → NOT in requiresReachableOwner (that gate
+checks the SELECTED row's machine — the wrong target); undoLastArchive checks the entry's
+own machine and refuses loudly KEEPING the entry when that owner is offline. Tests:
+TestArchiveInstantAndUndo, TestHelpPopupAndLegendHint (scroll window/paging), claim
+action-archive rewritten (no confirm + U restores on the REAL daemon; action-delete's
+confirm untouched). help.go + SKILL synced. Deployed all five at 94a8bd4 (binary-only).

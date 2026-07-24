@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H56 — remote-action lag KILLED (H55's A+D+C shipped): keypress optimism w/ per-action revert + full-uuid resolve fast path + post-write mesh nudge (2026-07-24, sesh 436dd31 api 44→45, NO store migration; deployed 4/5 — macbook OFFLINE, pending)
+## H56 — remote-action lag KILLED (H55's A+D+C shipped): keypress optimism w/ per-action revert + full-uuid resolve fast path + post-write mesh nudge (2026-07-24, sesh 436dd31 api 44→45, NO store migration; deployed ALL FIVE)
 Lukas approved H55's recommendation verbatim ("Okay do that (A+D+C)"); E/F not built.
 - A — KEYPRESS OPTIMISM, PER-ACTION REVERT (internal/tui/model.go, the H36-item-3 debt):
   Model.pending REBUILT from a per-thread merged map[string]*rowPatch into an ORDERED
@@ -60,11 +60,9 @@ Lukas approved H55's recommendation verbatim ("Okay do that (A+D+C)"); E/F not b
 - DEPLOY (schema 45 = rebuild + daemon RESTART): mymain (native + supervisorctl),
   macstudio (/opt/homebrew/bin/go + supervisorctl), ideapad (native + supervisorctl),
   termux (plain go build CGO=1 per H22, explicit-pid kill 5973 + setsid-nohup relaunch
-  → pid 8868, schema 45 verified on-box). **macbook OFFLINE (ssh :22 timed out) →
-  PENDING, harmless (45 is additive; only the CALLING machine needs it — macbook's 44
-  CLI simply never nudges). When back: cd ~/mysetup/sesh && git pull &&
-  /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f &&
-  supervisorctl restart sesh-daemon.** SKILL sync: id-prefix section notes the
+  → pid 8868, schema 45 verified on-box); macbook came back online later the same day
+  and was deployed the standard way (pull + /opt/homebrew/bin/go + supervisorctl) →
+  schema 45, mesh synced — ALL FIVE current. SKILL sync: id-prefix section notes the
   full-uuid fast path. sesh-ui: NO change (its API surface unchanged; it could adopt
   the nudge pattern after writes if wanted — follow-up only).
 

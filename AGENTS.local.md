@@ -2397,3 +2397,14 @@ auto-vs-manual provenance bit — his refinement).
 - NOTE: with [spawn] mode=yolo fleet-wide, permission-prompt stalls rarely occur, but
   AskUserQuestion stalls + turn-end flags fire under yolo too — the flag triggers that
   matter are live. sesh-ui: flags not yet surfaced there (follow-up if wanted).
+
+## H53 — TUI: f=flag / F=fork swap + keymap → `?` popup (2026-07-24, sesh f296c45; NO schema change; binary-only, deployed ALL FIVE, no restarts)
+Lukas: flag deserves the lowercase key; the always-on wrapped legend ate 3-4 rows. f =
+toggle flag, F = fork (^f unchanged; both stay gated — offline lists + requiresReachable
+comments swapped; action-fork/action-flag/virtual-refusal claims re-pressed + green). `?` =
+full-screen keymap popup (helpView, width-WRAPPED per the H1 lesson; esc/q/?/enter close;
+in the mouse modal guard); bottom line = dim "? keys" hint; MOVE MODE keeps its ambient
+reorder legend (mode feedback must stay visible); legendLines() budget self-adjusts (it
+measures the rendered line). TestLegendOverflowsNotClips → TestHelpPopupAndLegendHint.
+help.go tui long + SKILL synced. Deploy: binary-only on all five (each `sesh tui` runs
+fresh from the binary; ideapad has no `hostname` cmd — verify via `go version -m` vcs.revision).

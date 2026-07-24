@@ -35,6 +35,7 @@ var declaredTUIClaims = []string{
 	"action-nav-headless",       // Enter on a HEADLESS thread promotes it (headful) then enters
 	"action-nav-attach",         // Enter from a plain shell (no tmux) attaches the terminal to the thread
 	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
+	"sidebar-nav-stays",         // --sidebar (issue #8): a SUCCESSFUL nav really lands on the master server AND the TUI stays open (persistent pane)
 	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
 	"action-nav-remote-dead",    // Enter on a DEAD thread on ANOTHER machine resumes it THERE (routed over the mesh) and enters it
 	"quit-esc",                  // Esc quits from normal mode; inside the line prompt it only closes the prompt
@@ -58,8 +59,8 @@ var declaredTUIClaims = []string{
 	"filter-target-uuid",        // ctrl+t toggles the search target to uuid; a tid prefix narrows to exactly that thread
 	"filter-esc-applies",        // Esc APPLIES the filter (stays active, / re-edits); normal-mode Esc still quits
 	"filter-start-flag",         // --filter (the popup binding) opens already filtering
-	"action-flag",              // F toggles the flag on the daemon + ⚑/⌀ render; ^f gates; F re-enables (one rule)
-	"view-flag-pierce",         // a flagged child pierces a collapsed parent; unflagging re-hides it
+	"action-flag",               // F toggles the flag on the daemon + ⚑/⌀ render; ^f gates; F re-enables (one rule)
+	"view-flag-pierce",          // a flagged child pierces a collapsed parent; unflagging re-hides it
 	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
 	"action-hold",               // h parks the thread on the daemon (future on_hold_until) + leaves the active view; h again releases it; H opens the explicit-date prompt
 	"view-hold",                 // the default active view HIDES on-hold threads; the `on hold` view is the complement
@@ -131,6 +132,7 @@ func init() {
 	registerTUIClaim("action-nav-headless", claimActionNavHeadless)
 	registerTUIClaim("action-nav-attach", claimActionNavAttach)
 	registerTUIClaim("action-nav-quits", claimActionNavQuits)
+	registerTUIClaim("sidebar-nav-stays", claimSidebarNavStays)
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
 	registerTUIClaim("tickets-view", claimTicketsView)
@@ -559,6 +561,61 @@ func claimActionNavQuits(t *testing.T) {
 	if after != nil {
 		if _, ok := after().(tea.QuitMsg); ok {
 			t.Errorf("FAILED nav quit the TUI — it must stay open showing the error")
+		}
+	}
+}
+
+// claimSidebarNavStays (issue #8): in --sidebar mode a SUCCESSFUL nav must (a)
+// really land — the master server's active window switches to the machine window,
+// the same observable the master nav path owns — and (b) NOT quit the TUI: the
+// sidebar is a persistent pane beside the thread, not a popup over it. Real
+// daemon, real pi thread, real master tmux server (mirrors claimActionNavQuits,
+// whose quit direction stays the popup contract).
+func claimSidebarNavStays(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	th := local.newThread(t, "pi", "sbnav", "/tmp")
+	local.waitThreadReady(t, th.ID, "pi")
+
+	master := "sesh-tuisbnav-" + th.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "m:home")
+
+	bin := seshBin(t)
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
+	m := tui.New(local.Home+"/daemon.sock", false).WithExec(bin, navEnv).WithLocal(local.Machine, local.TmuxSocket).WithTmux("/tmp/notwork,1,1").WithSidebar()
+	m, _ = renderUntilRow(t, m, "sbnav")
+	// The post-nav focus handoff reads the AMBIENT $TMUX at run time; scrub it so
+	// running the follow-up cmd below can never select-pane in the developer's own
+	// live tmux (the model's nav context is the injected WithTmux, unaffected).
+	t.Setenv("TMUX", "")
+
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("enter")})
+	if cmd == nil {
+		t.Fatalf("enter produced no command")
+	}
+	nm2, after := nm.(tui.Model).Update(cmd()) // cmd() runs the REAL nav
+	m = nm2.(tui.Model)
+	if m.ActionErr() != nil {
+		t.Fatalf("sidebar nav errored: %v", m.ActionErr())
+	}
+	// (a) The nav REALLY happened: the master's active window is the machine window.
+	out, err := exec.Command("tmux", "-L", master, "display-message", "-t", "m", "-p", "#{window_name}").Output()
+	if err != nil {
+		t.Fatalf("read master active window: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != local.Machine {
+		t.Errorf("master active window = %q after sidebar nav, want %q (nav did not land)", got, local.Machine)
+	}
+	// (b) The TUI STAYS: no quit follows a successful sidebar nav.
+	if after != nil {
+		if _, quit := after().(tea.QuitMsg); quit {
+			t.Errorf("sidebar nav QUIT the TUI — a persistent pane must stay open")
 		}
 	}
 }

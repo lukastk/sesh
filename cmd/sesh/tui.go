@@ -28,12 +28,15 @@ func runTUI(args []string) error {
 	expand := fs.Bool("expand", false, "start with tree nodes expanded (default from [tui] expand_children)")
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	editorFlag := fs.String("editor", "", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)")
+	sidebarFlag := fs.Bool("sidebar", false, "persistent-pane mode: narrow name-only layout, and entering a thread keeps the TUI open (focus hands to the sibling pane) instead of quitting")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	cfg := config.Load()
-	// Column set precedence: --columns flag > [tui] columns config > built-in
-	// default. Unknown names are loud at every level.
+	// Column set precedence: --columns flag > sidebar preset (when --sidebar) >
+	// [tui] columns config > built-in default. Unknown names are loud at every
+	// level. The sidebar preset outranks the config columns because those are
+	// tuned for the wide grid, not a ~35-col pane.
 	tcfg, err := config.LoadTUI(cfg.Home)
 	if err != nil {
 		return err
@@ -42,6 +45,8 @@ func runTUI(args []string) error {
 	switch {
 	case *columnsFlag != "":
 		wantCols = strings.Split(*columnsFlag, ",")
+	case *sidebarFlag:
+		wantCols = tui.SidebarColumns()
 	case tcfg != nil && len(tcfg.Columns) > 0:
 		wantCols = tcfg.Columns
 	}
@@ -49,7 +54,15 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui columns: %w", err)
 	}
-	// [[tui.column]] moves reposition individual columns over the base set.
+	// [[tui.column]] moves reposition individual columns over the base set — but
+	// NOT over the sidebar preset: a move can insert/anchor columns the name-only
+	// preset deliberately omits (it would widen the pane or refuse loudly on a
+	// missing anchor). An explicit --columns keeps the moves as usual.
+	if *sidebarFlag && *columnsFlag == "" && tcfg != nil {
+		tcfgMovesOff := *tcfg // shallow copy just to drop the moves for this launch
+		tcfgMovesOff.ColumnMoves = nil
+		tcfg = &tcfgMovesOff
+	}
 	if tcfg != nil && len(tcfg.ColumnMoves) > 0 {
 		var moves []tui.ColumnMove
 		for _, mv := range tcfg.ColumnMoves {
@@ -212,6 +225,9 @@ func runTUI(args []string) error {
 	// ASYNCHRONOUSLY after the first render, so prefix+s startup is never delayed.
 	if mm := os.Getenv("SESH_TUI_MASTER_MACHINE"); mm != "" {
 		m = m.WithMasterCursor(mm)
+	}
+	if *sidebarFlag {
+		m = m.WithSidebar()
 	}
 	if *filter {
 		m = m.WithFilterStart()

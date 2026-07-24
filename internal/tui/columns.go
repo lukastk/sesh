@@ -151,6 +151,12 @@ var colOrder = []colSpec{
 // glyph gutter carries the state; ID off — `i` toggles it).
 var DefaultColumns = []string{ColMachine, ColAgent, ColName, ColCwd, ColTags, ColNotify}
 
+// SidebarColumns is the `tui --sidebar` preset: NAME only — the pane is ~35
+// cols and the state gutter (head/busy/flag/attachment glyphs) already carries
+// the live state, so names are the whole payload. An explicit --columns wins;
+// [tui] columns does NOT apply in sidebar mode (it is tuned for the wide grid).
+func SidebarColumns() []string { return []string{ColName} }
+
 // ValidColumnNames returns the known names (for error messages), in render order.
 func ValidColumnNames() []string {
 	names := make([]string, len(colOrder))

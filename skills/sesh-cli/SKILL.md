@@ -241,6 +241,13 @@ a machine with `boxyard` on the daemon's PATH).
 `sesh tui` opens the live cross-machine thread grid (`--all-machines` to fan out). It is a
 thin client — it **emits** actions by driving the CLI verbs, never reimplementing them.
 
+**Sidebar mode** (`sesh tui --sidebar`): the persistent-pane variant for a cockpit — a
+narrow NAME-only column preset (the state gutter carries the rest; `[tui] columns` and
+`[[tui.column]]` moves don't apply, an explicit `--columns` wins), and **entering a
+thread does not quit the TUI**: the nav happens and focus hands to the sibling pane in
+the same tmux window, so the sidebar stays ambiently visible beside the agent. Every
+other key/view/action works exactly as in the normal grid.
+
 Keymap (normal mode):
 
 ```

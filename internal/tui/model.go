@@ -147,6 +147,9 @@ type Model struct {
 	allMachines bool
 	view        View
 	showID      bool // `i` toggles an ID column (tid8) — the only id surface in the TUI
+	// sidebar (`tui --sidebar`): persistent-pane mode — nav hands focus to the
+	// sibling pane instead of quitting. See WithSidebar.
+	sidebar bool
 	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
 	// hide the last-known threads of a mesh machine that is currently unreachable.
 	// Their owner can't be reached, so every action on them would hang on the routing
@@ -366,6 +369,35 @@ func New(socketPath string, allMachines bool) Model {
 	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
 		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home,
 		scrollDivV: 1, scrollDivH: 1, hideOffline: true, maxColWidth: true}
+}
+
+// WithSidebar puts the TUI in SIDEBAR mode (`tui --sidebar`, issue #8): a
+// persistent narrow pane beside the cockpit's attach pane. The one behavioural
+// difference from the normal grid is that a successful nav does NOT quit — the
+// sidebar stays and hands focus to its sibling pane (see navDoneMsg). Everything
+// else (views, filter, actions, mouse) is the same TUI.
+func (m Model) WithSidebar() Model {
+	m.sidebar = true
+	return m
+}
+
+// focusSiblingPane hands the tmux focus from the sidebar's pane to the OTHER pane
+// of its window (the attach pane the nav just changed), via the sidebar's own
+// inherited $TMUX/$TMUX_PANE (a plain `tmux` exec resolves both). A single-pane
+// window (standalone testing) or a client that nav moved to ANOTHER window makes
+// this a harmless no-op on our window — the select still leaves the attach pane
+// active for the next visit. Only a real exec failure is surfaced.
+func focusSiblingPane() tea.Cmd {
+	return func() tea.Msg {
+		if os.Getenv("TMUX") == "" {
+			return nil // not in tmux (unit tests / odd launch): nothing to focus
+		}
+		cmd := exec.Command("tmux", "select-pane", "-t", ":.+")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("sidebar focus handoff: %v: %s", err, strings.TrimSpace(string(out)))}
+		}
+		return nil
+	}
 }
 
 // WithShowOffline sets whether an OFFLINE mesh machine's stale threads are shown by
@@ -776,9 +808,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirmPatch(msg.seq)
 		return m, nil
 	case navDoneMsg:
-		// The selected thread is now on screen (the client switched under us) —
-		// quit so the TUI (and the popup hosting it) gets out of the way. Staying
-		// open would leave the TUI covering the very thread the user entered.
+		// The selected thread is now on screen (the client switched under us).
+		// SIDEBAR mode: the TUI is a persistent pane BESIDE the thread, not a
+		// popup covering it — stay open and hand focus to the sibling (attach)
+		// pane so the user lands typing at the agent. Otherwise quit so the TUI
+		// (and the popup hosting it) gets out of the way.
+		if m.sidebar {
+			if msg.name != "" {
+				m.note = fmt.Sprintf("entered %q", msg.name)
+			}
+			return m, focusSiblingPane()
+		}
 		return m, tea.Quit
 	case attachMsg:
 		// Quit so the terminal is restored, then runTUI execs the attach.
@@ -1395,8 +1435,11 @@ func bptr(b bool) *bool     { return &b }
 type attachMsg struct{ target, thread string }
 
 // navDoneMsg reports a successful nav: the user is where they asked to be, so the
-// TUI quits. (A FAILED nav stays an actionMsg with the error, keeping the TUI open.)
-type navDoneMsg struct{}
+// TUI quits — except in SIDEBAR mode, where the TUI is a persistent pane: it stays
+// running and hands focus to its sibling (attach) pane instead. (A FAILED nav
+// stays an actionMsg with the error, keeping the TUI open either way.) name labels
+// the entered thread for the sidebar's note line.
+type navDoneMsg struct{ name string }
 
 // machineReachable reports whether `machine` was reachable at the last mesh read. This
 // machine (self, or an empty machine id) is always reachable. A machine not present in
@@ -2056,7 +2099,7 @@ func (m Model) navSelected() tea.Cmd {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return navDoneMsg{}
+		return navDoneMsg{name: rowDisplayName(row)}
 	}
 }
 

@@ -2424,3 +2424,37 @@ own machine and refuses loudly KEEPING the entry when that owner is offline. Tes
 TestArchiveInstantAndUndo, TestHelpPopupAndLegendHint (scroll window/paging), claim
 action-archive rewritten (no confirm + U restores on the REAL daemon; action-delete's
 confirm untouched). help.go + SKILL synced. Deployed all five at 94a8bd4 (binary-only).
+
+## H55 — EXPLORATION (no code): why remote TUI actions lag + the options (2026-07-24; measurements on the live mesh)
+Lukas: flagging/archiving a REMOTE thread from the TUI lags surprisingly. MEASURED (live,
+scratch headless threads, cleaned up): tailnet RTT ~40ms both macbook+ideapad (first
+tailscale ping reads high — path setup; use -c 4). LOCAL flag verb ~33-52ms (mostly fork).
+ROUTED flag verb ~190-240ms = fork(~12) + peers.json + COLD TCP connect + **the id-prefix
+resolve fetching the peer's ENTIRE thread list incl. archived** (resolveIDFlag→
+resolveIDPrefix→listAllThreads runs against the REMOTE daemon once route.go points the
+process at the peer's API) + the actual POST ≈ 3 sequential round trips where 1 would do.
+Change visible in the LOCAL mesh cache (what the TUI renders for remote rows): 0.6-1.4s
+(peer publish ≤300ms + delta pull at the 1s active cadence). TUI adds its own fetch
+alignment (3s poll + the 2 post-action reconciles) ⇒ perceived ⚑ latency ~1-3s (worse
+from idle cadence). KEY UI FACTS: optimistic patches apply at CONFIRMATION (after the
+round trip), and FLAG has NO rowPatch at all (H52 chose none) — archive hides at ~200ms
+remote, flags wait the full cache path. GOTCHA that burned 15 bogus seconds: `sesh mesh
+--json` is ONE pretty-printed document (NOT JSONL like thread list/grid) — a JSONL parser
+returns nothing and a sloppy poll loop reports its own timeout as the latency.
+OPTIONS EVALUATED (recommended A+D+C; E/F stop mattering once A lands):
+- A. KEYPRESS optimism with per-action revert (H36's deferred item 3): patch at keypress,
+  revert exactly that patch + loud actionErr on failure. Needs per-action patch identity
+  (the H36 blocker). 0ms perceived for EVERY action on every machine. The main fix.
+- B. (subsumed by A) at minimum give flag/flagDisabled a rowPatch at confirmation → ~200ms.
+- C. Post-write mesh NUDGE (H36 item 5): after a routed write, kick the local syncer to
+  pull that peer now (H44 kick machinery exists) → cache truth in ~RTT; shrinks A's lie
+  window + lets patches reconcile fast instead of living their TTL.
+- D. Skip the remote LIST when --id is a full well-formed UUID (the TUI always passes
+  row.ID): resolve is a no-op then; saves a round trip + the big-list transfer; daemon
+  still 404s unknown ids loudly. Tiny, zero-risk.
+- E. Daemon-side WARM routing for verbs (generalize H32's master-current fix): local
+  daemon forwards over its warm mesh conn; kills fork+cold-connect (~200→~85ms measured
+  for master-current). Real architecture change; value drops to faster-error-feedback
+  once A exists.
+- F. In-process client for LOCAL rows (routedVerb forks even locally, ~40ms). Same note.
+NOT implemented — Lukas to pick; next session should re-read H36 items 3+5 first.

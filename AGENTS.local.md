@@ -1,5 +1,73 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H56 — remote-action lag KILLED (H55's A+D+C shipped): keypress optimism w/ per-action revert + full-uuid resolve fast path + post-write mesh nudge (2026-07-24, sesh 436dd31 api 44→45, NO store migration; deployed 4/5 — macbook OFFLINE, pending)
+Lukas approved H55's recommendation verbatim ("Okay do that (A+D+C)"); E/F not built.
+- A — KEYPRESS OPTIMISM, PER-ACTION REVERT (internal/tui/model.go, the H36-item-3 debt):
+  Model.pending REBUILT from a per-thread merged map[string]*rowPatch into an ORDERED
+  per-action list []*rowPatch (rowPatch gains id/seq/confirmed; Model.patchSeq mints).
+  recordPatch() stamps+applies at KEYPRESS (provisional deadline; reanchors the cursor
+  over a hide) and SUPERSEDES older same-thread entries' replaced fields (supersededBy:
+  two quick notify toggles must not leave entry-1 demanding a value the server never
+  shows → bogus loud expiry; an entry left hide-only after its fields are superseded is
+  SPENT and dropped — which also fixed a real latent bug: U-during-pending-archive kept
+  the row hidden 15s then warned "sync degraded"). actionMsg carries seq NOT a patch:
+  success = confirmPatch (deadline re-stamped from confirmation so TTL bounds only the
+  read path), failure = dropPatch (revert EXACTLY that entry + loud actionErr + refetch)
+  — per-action identity is what makes revert not clobber merged siblings (the old H36
+  blocker). flag/^f FINALLY have patches (rowPatch flagged/flagDisabled; flagPatch
+  mirrors the daemon one-rule semantics + leavesViewWith hide for flag-filtered custom
+  views) — flag was the worst offender (NO patch at all, 1-3s perceived). Pin path
+  converted (applyPinPatch returns seq; persistPin/pinDoneMsg carry it). GOTCHA baked
+  into the code comments: mutating helpers are now POINTER receivers, so call sites MUST
+  bind the cmd BEFORE returning m (`cmd := m.x(); return m, cmd`) — `return m, m.x()`
+  has UNSPECIFIED operand-evaluation order and can return the pre-mutation copy. Deleted
+  dead archiveSelected/deleteSelected (uncalled since H54's rewiring). stampPatch gone.
+- D — FULL-UUID RESOLVE FAST PATH (cmd/sesh/current.go): resolveIDPrefix skips
+  listAllThreads when --id is a canonical 36-char lowercase-hex uuid — on a ROUTED verb
+  that list pull was the peer's ENTIRE thread set (incl. archived) fetched only to
+  expand a prefix, and the TUI always passes full row.IDs. Unknown full uuid still loud
+  via the daemon's 404 at the verb; uppercase/short forms fall through unchanged.
+  resolveMeshThreadID inherits it (await w/ a bogus full uuid errors "vanished while
+  waiting" on the first poll — still immediate + loud).
+- C — POST-WRITE MESH NUDGE (api 44→45, additive; only the CALLING machine needs 45).
+  POST /v1/mesh/nudge {machine} on the LOCAL daemon syncs that ONE peer now
+  (meshSync.nudgePeer via a launchSync refactor sharing tick()'s inflight guard; bumps
+  mesh demand so active cadence covers the race with an in-flight pre-write fetch;
+  handler returns BEFORE the fetch — the caller is an exiting CLI). Unknown machine 404,
+  self/empty 400 — loud. cmd/sesh nudges after EVERY successfully routed --machine
+  command (ssh-handled inline; http-routed via a postRouteNudge closure after the
+  dispatch switch — cfg captured BEFORE routeMachine sets SESH_REMOTE so the nudge hits
+  the LOCAL daemon). BEST-EFFORT by design (errors dropped, commented why): the routed
+  command already succeeded; a pre-45/down local daemon just degrades freshness to the
+  old cadence — nothing masked, observable in `sesh mesh` synced_at.
+- TESTS (anti-gaming: neutered nudgePeer's launchSync → nudge test red; neutered
+  recordPatch's apply → 3 keypress tests red; both reverse-edited): TestMeshNudgeSyncsPeerNow
+  (REAL handler+store+httptest peer, NO run loop — the nudge alone fetches);
+  TestKeypressOptimismAndRevert / PerActionRevertKeepsSiblings / SupersedeSameField /
+  UnarchiveSupersedesArchiveHide / FlagKeypressOptimism; pending_hide/columns/pin suites
+  ported to the list (pendingFor = merged read-only view for tests); TestIsFullUUID +
+  TestResolveIDPrefixFullUUIDSkipsList (nil client proves no list call). REPAIRED
+  pre-existing red: claim action-mutate-remote still expected the PRE-H54 archive
+  confirm popup (H54 updated claimActionArchive but missed this one) — now asserts
+  instant archive + keypress hide. Green: tui/daemon/cmd -race, FULL TUI claims, mesh.*
+  cells both transports, thread.delete + thread.flagged 6/6.
+- LIVE-MEASURED (mymain→ideapad, scratch thread, vs H55 baselines): routed flag verb
+  190-240ms → 118-120ms (D's saved round trip + list transfer); flag visible in the
+  LOCAL mesh cache 600-1400ms → 96-454ms after verb return. The residual spread is the
+  PEER's ~300ms maintainer publish tick racing the nudge fetch — when the nudge arrives
+  pre-publish, the demand-bumped active cadence catches it next round (~450ms); no
+  sleep-hack added, and perceived TUI latency is ~0ms anyway via A's keypress patch.
+- DEPLOY (schema 45 = rebuild + daemon RESTART): mymain (native + supervisorctl),
+  macstudio (/opt/homebrew/bin/go + supervisorctl), ideapad (native + supervisorctl),
+  termux (plain go build CGO=1 per H22, explicit-pid kill 5973 + setsid-nohup relaunch
+  → pid 8868, schema 45 verified on-box). **macbook OFFLINE (ssh :22 timed out) →
+  PENDING, harmless (45 is additive; only the CALLING machine needs it — macbook's 44
+  CLI simply never nudges). When back: cd ~/mysetup/sesh && git pull &&
+  /opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f &&
+  supervisorctl restart sesh-daemon.** SKILL sync: id-prefix section notes the
+  full-uuid fast path. sesh-ui: NO change (its API surface unchanged; it could adopt
+  the nudge pattern after writes if wanted — follow-up only).
+
 ## H49 — attention-glyph COLOURS: ▶/↓ bright green, TKT! red (2026-07-23, sesh 8bc529e + 9afdb10; NO schema change; deployed ALL FIVE)
 Lukas: colour the attention glyphs — ▶ (busy) green, the TKT! `!` red, ↓ (descendant running)
 green; then mid-turn "make it a brighter green" → palette "2"→"10" (9afdb10). PURE TUI-client

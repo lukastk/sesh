@@ -58,6 +58,25 @@ func TestArchiveInstantAndUndo(t *testing.T) {
 		t.Fatalf("U on an empty stack: cmd=%v note=%q", cmd, m.note)
 	}
 
+	// THREE archives → THREE U's, restored in LIFO order (newest first).
+	for _, name := range []string{"one", "two", "three"} {
+		mm, _ = m.Update(actionMsg{id: "tid-" + name, undoArchive: &archiveUndoEntry{id: "tid-" + name, machine: "m1", name: name}})
+		m = mm.(Model)
+	}
+	if len(m.archiveUndo) != 3 {
+		t.Fatalf("stack depth = %d, want 3", len(m.archiveUndo))
+	}
+	for _, want := range []string{"three", "two", "one"} {
+		mm, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("U")})
+		m = mm.(Model)
+		if cmd == nil || !strings.Contains(m.note, `un-archived "`+want+`"`) {
+			t.Fatalf("LIFO undo: note %q, want un-archived %q (cmd=%v)", m.note, want, cmd)
+		}
+	}
+	if len(m.archiveUndo) != 0 {
+		t.Fatalf("stack not empty after three undos")
+	}
+
 	// An entry whose OWNER is offline: loud error, entry kept for later.
 	m.archiveUndo = []archiveUndoEntry{{id: "tid-2", machine: "peer", name: "far"}}
 	m.machines = []api.MachineView{{Machine: "peer", Reachable: false}}

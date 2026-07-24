@@ -56,6 +56,21 @@ func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// SIDEBAR mode: a SINGLE click enters the thread (Lukas: select-then-double-click
+	// is the popup's ergonomics; a persistent sidebar is a jump list — one click, one
+	// nav, focus hands to the agent pane and the sidebar stays). Fold-marker clicks
+	// (above) still just fold. Same offline-owner gate as the enter key.
+	if m.sidebar {
+		m.resetClickTracking()
+		if !m.machineReachable(tr.row.Machine) {
+			m.note = ""
+			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", tr.row.Machine, offlineRowLabel(tr.row))
+			return m, nil
+		}
+		cmd := m.navSelected()
+		return m, cmd
+	}
+
 	// Double click on the SAME row within the window ENTERS it — the same compose as the
 	// `enter` key, including the offline-owner gate (a routed nav would otherwise hang on
 	// the timeout; refuse instantly and loudly instead).

@@ -245,8 +245,10 @@ thin client — it **emits** actions by driving the CLI verbs, never reimplement
 narrow NAME-only column preset (the state gutter carries the rest; `[tui] columns` and
 `[[tui.column]]` moves don't apply, an explicit `--columns` wins), and **entering a
 thread does not quit the TUI**: the nav happens and focus hands to the sibling pane in
-the same tmux window, so the sidebar stays ambiently visible beside the agent. Every
-other key/view/action works exactly as in the normal grid.
+the same tmux window, so the sidebar stays ambiently visible beside the agent. A
+**single mouse click enters a thread** (the sidebar is a jump list — no
+select-then-double-click; clicking the ▸/▾ marker still just folds). Every other
+key/view/action works exactly as in the normal grid.
 
 Keymap (normal mode):
 

@@ -787,7 +787,7 @@ func claimActionFork(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "trunk") // single thread => cursor on it
-	if m = runKey(t, m, "f"); m.ActionErr() != nil {
+	if m = runKey(t, m, "F"); m.ActionErr() != nil {
 		t.Fatalf("fork action errored: %v", m.ActionErr())
 	}
 

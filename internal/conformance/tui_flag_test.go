@@ -15,7 +15,7 @@ func init() {
 	registerTUIClaim("view-flag-pierce", claimViewFlagPierce)
 }
 
-// claimActionFlag: F toggles the selected thread's flag ON THE DAEMON (record
+// claimActionFlag: f toggles the selected thread's flag ON THE DAEMON (record
 // truth, not just the render) and the ⚑ glyph appears; F again clears it; ^f
 // disables auto-flagging (⌀); F on the disabled thread RE-ENABLES + flags —
 // the one-rule semantic, proven against the real store.
@@ -38,10 +38,10 @@ func claimActionFlag(t *testing.T) {
 		return s.Flagged, s.FlagDisabled
 	}
 
-	// F: flag on the daemon + ⚑ renders after the reconcile fetch.
-	m = runKey(t, m, "F")
+	// f: flag on the daemon + ⚑ renders after the reconcile fetch.
+	m = runKey(t, m, "f")
 	if !waitUntil(10*time.Second, func() bool { f, _ := flagState(); return f }) {
-		t.Fatalf("F never flagged the thread on the daemon")
+		t.Fatalf("f never flagged the thread on the daemon")
 	}
 	if !waitUntil(10*time.Second, func() bool {
 		var v string
@@ -52,13 +52,13 @@ func claimActionFlag(t *testing.T) {
 		t.Fatalf("⚑ never rendered:\n%s", v)
 	}
 
-	// F again: clears (flags never auto-clear — this IS the clear).
-	m = runKey(t, m, "F")
+	// f again: clears (flags never auto-clear — this IS the clear).
+	m = runKey(t, m, "f")
 	if !waitUntil(10*time.Second, func() bool { f, _ := flagState(); return !f }) {
-		t.Fatalf("F never cleared the flag")
+		t.Fatalf("f never cleared the flag")
 	}
 
-	// ^f: disable auto-flagging → ⌀ renders; then F: re-enables AND flags.
+	// ^f: disable auto-flagging → ⌀ renders; then f: re-enables AND flags.
 	m = runKey(t, m, "ctrl+f")
 	if !waitUntil(10*time.Second, func() bool { _, d := flagState(); return d }) {
 		t.Fatalf("^f never disabled flagging on the daemon")
@@ -71,13 +71,13 @@ func claimActionFlag(t *testing.T) {
 		_, v := render(t, m)
 		t.Fatalf("⌀ never rendered:\n%s", v)
 	}
-	m = runKey(t, m, "F")
+	m = runKey(t, m, "f")
 	if !waitUntil(10*time.Second, func() bool {
 		f, d := flagState()
 		return f && !d
 	}) {
 		f, d := flagState()
-		t.Fatalf("F on a disabled thread must re-enable AND flag (flagged=%v disabled=%v)", f, d)
+		t.Fatalf("f on a disabled thread must re-enable AND flag (flagged=%v disabled=%v)", f, d)
 	}
 	_ = m
 }

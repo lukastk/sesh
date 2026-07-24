@@ -35,7 +35,7 @@ func (m *Model) resetClickTracking() {
 // details, confirm/prompt/tag/uuid popups, move mode) own the screen, so a stray click
 // there is ignored rather than reaching the grid underneath.
 func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.ticketMode != ticketNone || m.detailsPopup || m.confirming != confirmNone ||
+	if m.ticketMode != ticketNone || m.detailsPopup || m.helpPopup || m.confirming != confirmNone ||
 		m.prompting != promptNone || m.tagPopup || m.uuidPopup || m.reordering {
 		return m, nil
 	}

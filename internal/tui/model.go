@@ -253,6 +253,9 @@ type Model struct {
 	maxColWidth bool
 	colMax      map[string]int
 
+	// helpPopup: `?` opens a full-screen takeover showing the complete keymap
+	// (the bottom line only carries the "? keys" hint).
+	helpPopup bool
 	// detailsPopup: `I` opens a full-screen takeover showing ALL of the selected
 	// thread's fields (the record + live axes); detailsRow is captured when it opens.
 	// Any of esc/q/enter closes it. It's read-only — nothing routes or shells out.
@@ -1220,8 +1223,8 @@ func requiresReachableOwner(key string) bool {
 		"a",      // archive/unarchive
 		"d",      // delete
 		"x",      // stop
-		"f",      // fork (thread new --fork-from on the owner)
-		"F",      // flag toggle (owner-routed setter)
+		"f",      // flag toggle (owner-routed setter)
+		"F",      // fork (thread new --fork-from on the owner)
 		"ctrl+f", // flag-gate toggle (owner-routed setter)
 		"r",      // rename
 		"t",      // tag add
@@ -1250,6 +1253,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.detailsPopup {
 		return m.handleDetailsKey(msg)
+	}
+	if m.helpPopup {
+		return m.handleHelpKey(msg)
 	}
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
@@ -1346,10 +1352,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case "n":
 		return m, m.notifySelected()
-	case "F":
+	case "f":
 		return m, m.flagSelected()
 	case "ctrl+f":
 		return m, m.flagGateSelected()
+	case "?":
+		m.helpPopup = true
 	case "y":
 		if _, ok := m.Selected(); ok {
 			m.uuidPopup = true
@@ -1439,9 +1447,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// (empty = an unlabeled line; Esc cancels). Created on the selected row's machine.
 		row, _ := m.Selected()
 		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewDivider, row, nil, 0
-	case "f":
+	case "F":
 		// Fork: copy the selected thread into a new headless thread (same
-		// conversation, branched). It doesn't start anything — enter it to continue.
+		// conversation, branched). It doesn't start anything — enter it to
+		// continue. (Uppercase since 44: lowercase f is the flag toggle — the
+		// far more frequent action.)
 		return m, m.forkSelected()
 	case "x":
 		return m, m.stopSelected()
@@ -2423,19 +2433,23 @@ var (
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
 )
 
-// legendText is the one-line keymap help. It OVERFLOWS (wraps) to the terminal
-// width rather than clipping — see renderLegend.
-const legendText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · F flag · ^f flag-gate · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · I details · i ids · w widths · y uuid · n notif · f fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+// helpKeysText is the full keymap, shown in the `?` popup (the bottom line
+// carries only legendHint — the always-on wrapped legend ate 3-4 rows of every
+// frame). It WRAPS to the terminal width in the popup rather than clipping, so
+// every binding stays visible on any width (the H1 lesson).
+const helpKeysText = "↑/↓ move · ^j/^k scroll · ←/→ fold · ^h/^l cols · enter nav · / filter · tab view · f flag · ^f flag-gate · h hold · H hold-date · r rename · t tag · T untag · P parent · v group · p pin · u unpin · m reorder · D divider · K tickets · I details · i ids · w widths · y uuid · n notif · F fork · x stop · d delete · a archive · o offline · R refresh · q/esc quit"
+
+// legendHint is the one always-visible bottom line: how to see the keymap.
+const legendHint = "? keys"
 
 // reorderLegendText is the legend while MOVE MODE is active — only the reposition
-// keys are live.
+// keys are live, so it REPLACES the hint (mode feedback must stay ambient).
 const reorderLegendText = "MOVE MODE — ↑/↓ reposition the pinned row · enter/esc done"
 
-// renderLegend renders the keymap legend, WRAPPED to the terminal width (lipgloss
-// soft-wraps on spaces) so every binding stays visible instead of being clipped at
-// the right edge. Width unknown (no WindowSizeMsg yet — tests) renders one line.
+// renderLegend renders the bottom legend line: the `?` hint normally, the move-mode
+// keymap while reordering (wrapped to width — never clipped).
 func (m Model) renderLegend() string {
-	text := legendText
+	text := legendHint
 	if m.reordering {
 		text = reorderLegendText
 	}
@@ -2444,6 +2458,35 @@ func (m Model) renderLegend() string {
 	}
 	return styleDim.Render(text)
 }
+
+// helpView is the `?` popup: a full-screen takeover showing the complete keymap,
+// wrapped to the terminal width.
+func (m Model) helpView() string {
+	wrap := func(s string) string {
+		if m.width > 1 {
+			return styleDim.Width(m.width).Render(s)
+		}
+		return styleDim.Render(s)
+	}
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("sesh — keys") + "\n\n")
+	b.WriteString(wrap(helpKeysText) + "\n\n")
+	b.WriteString(wrap("mouse: click select · double-click enter · click ▸/▾ fold · wheel move (shift+wheel pans)") + "\n\n")
+	b.WriteString(styleDim.Render("esc/q/? close") + "\n")
+	return b.String()
+}
+
+// handleHelpKey: any of esc/q/?/enter closes the keymap popup.
+func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "?", "enter":
+		m.helpPopup = false
+	}
+	return m, nil
+}
+
+// HelpOpen reports whether the `?` keymap popup is up (tests).
+func (m Model) HelpOpen() bool { return m.helpPopup }
 
 // legendLines is the wrapped legend's height in lines (for the scroll budget —
 // chromeLines). 1 when the width is unknown (unwrapped).
@@ -2623,6 +2666,9 @@ func (m Model) View() string {
 	}
 	if m.detailsPopup {
 		return m.detailsView() // full-screen takeover: all fields of one thread
+	}
+	if m.helpPopup {
+		return m.helpView() // full-screen takeover: the complete keymap
 	}
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")

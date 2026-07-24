@@ -76,7 +76,7 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your
     attention. Auto-set when a turn ends or the agent stalls on a
     question/approval while you weren't watching; NEVER auto-cleared (unflag
-    with `F` or `thread flag --off`). `⌀` = auto-flagging **disabled** for
+    with `f` or `thread flag --off`). `⌀` = auto-flagging **disabled** for
     this thread (e.g. children a parent thread monitors). A flagged child
     stays VISIBLE under a collapsed parent (fold-piercing) — a flag never
     hides inside a fold.
@@ -279,7 +279,7 @@ m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it w
 D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal line
              in the pinned block, on the SELECTED row's machine; reposition it with `m`
 n            toggle notify          i          toggle the ID column
-F            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
+f            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
 ctrl+f       toggle auto-flagging for the thread (⌀ when disabled; also unflags)
 w            toggle the column-width cap (off = every column grows to its content,
              so clipped text — a long name/cwd — becomes fully visible)
@@ -289,7 +289,7 @@ I            thread details: a read-only popup of ALL of the selected thread's
 o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
-f            fork: copy the selected thread into a new HEADLESS thread (same
+F            fork: copy the selected thread into a new HEADLESS thread (same
              conversation, branched; keeps the source name marked ` (fork)`). It
              doesn't start anything — enter the copy to continue from where the
              source left off; the source is untouched.
@@ -336,8 +336,9 @@ The CLI verbs are `sesh thread pin` / `sesh thread unpin` / `sesh thread new --d
 (see below).
 
 `d` (delete) and `a` (archive/unarchive) open a **y/n confirmation** — `y` confirms, any
-other key cancels. The keymap legend at the bottom **overflows (wraps)** to the terminal
-width instead of clipping, so every binding stays visible on a narrow pane.
+other key cancels. The bottom line shows only a dim **`? keys`** hint — press `?` for
+the full keymap in a popup (wrapped to the terminal width so every binding stays
+visible on a narrow pane; esc/q/? closes). Move mode still shows its own ambient legend.
 
 **Offline machines.** A machine's threads keep showing in the mesh view (for offline
 browsing) even after it disconnects, but every action on them routes to the *owning*

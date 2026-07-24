@@ -103,37 +103,52 @@ func TestCwdDisplayUsesOwnerRelative(t *testing.T) {
 	}
 }
 
-// TestLegendOverflowsNotClips proves feature 1: the keymap legend WRAPS to the
-// terminal width instead of being clipped at the right edge — so every binding
-// (including the trailing ones) stays visible, just across more lines.
-func TestLegendOverflowsNotClips(t *testing.T) {
+// TestHelpPopupAndLegendHint: the always-on legend is now the one-line "? keys"
+// hint (the full keymap ate 3-4 rows of every frame); `?` opens a full-screen
+// popup whose keymap WRAPS to the terminal width instead of clipping (the H1
+// lesson carried over — every binding stays visible on any width), and
+// esc/q/? close it. Move mode still replaces the hint with its own legend.
+func TestHelpPopupAndLegendHint(t *testing.T) {
 	strip := regexp.MustCompile("\x1b\\[[0-9;]*m")
 	m := Model{width: 60}
-	out := m.renderLegend()
-	if !strings.Contains(out, "\n") {
-		t.Fatalf("legend did not wrap at width 60:\n%s", out)
+	if got := strip.ReplaceAllString(m.renderLegend(), ""); !strings.Contains(got, "? keys") {
+		t.Fatalf("bottom legend should be the ? hint, got %q", got)
 	}
+	m.reordering = true
+	if got := strip.ReplaceAllString(m.renderLegend(), ""); !strings.Contains(got, "MOVE MODE") {
+		t.Fatalf("move mode must keep its ambient legend, got %q", got)
+	}
+	m.reordering = false
+
+	// ? opens the popup; the wrapped keymap keeps every binding on-width.
+	mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = mm.(Model)
+	if !m.HelpOpen() {
+		t.Fatalf("? did not open the help popup")
+	}
+	out := m.helpView()
 	for _, line := range strings.Split(out, "\n") {
 		if w := len([]rune(strings.TrimRight(strip.ReplaceAllString(line, ""), " "))); w > 60 {
-			t.Errorf("legend line exceeds width 60 (%d cols): %q", w, line)
+			t.Errorf("help line exceeds width 60 (%d cols): %q", w, line)
 		}
 	}
-	// The LAST binding survives — overflow keeps it, clipping would have dropped it.
-	// Flatten the wrap (soft-wrap turns the separating space into a newline, and each
-	// line is space-padded to the width) so the check is robust to WHERE the wrap
-	// falls — only that the trailing binding is present.
 	var flatParts []string
 	for _, line := range strings.Split(strip.ReplaceAllString(out, ""), "\n") {
 		flatParts = append(flatParts, strings.TrimSpace(line))
 	}
 	flat := strings.Join(flatParts, " ")
-	if !strings.Contains(flat, "q/esc quit") {
-		t.Errorf("legend dropped its trailing bindings (clipped, not wrapped):\n%s", out)
+	for _, binding := range []string{"f flag", "F fork", "q/esc quit"} {
+		if !strings.Contains(flat, binding) {
+			t.Errorf("help popup missing %q (clipped, not wrapped?):\n%s", binding, out)
+		}
 	}
-	// Unknown width (no WindowSizeMsg): single line (unwrapped) so size-less tests
-	// keep their existing layout.
-	if strings.Contains((Model{}).renderLegend(), "\n") {
-		t.Errorf("legend wrapped with width unset (should be one line)")
+	// The popup takes over View() and esc closes it.
+	if v := m.View(); !strings.Contains(v, "sesh — keys") {
+		t.Errorf("View() did not take over for the help popup")
+	}
+	mm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m = mm.(Model); m.HelpOpen() {
+		t.Errorf("esc did not close the help popup")
 	}
 }
 

@@ -369,8 +369,8 @@ func claimActionVirtualEnter(t *testing.T) {
 		t.Errorf("Enter on a virtual row spawned a tmux session")
 	}
 
-	// f: fork refuses client-side with a clear message.
-	m = runKey(t, m, "f")
+	// F: fork refuses client-side with a clear message.
+	m = runKey(t, m, "F")
 	if m.ActionErr() == nil || !strings.Contains(m.ActionErr().Error(), "virtual") {
 		t.Errorf("fork on a virtual row should warn about virtualness, got %v", m.ActionErr())
 	}

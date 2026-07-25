@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"reflect"
@@ -33,18 +34,33 @@ const (
 	// keeps the whole sweep well under busyWindow even at ~100 threads, so each pane is
 	// sampled often enough for the content-diff busy signal to latch.
 	maintainerConcurrency = 8
+	// authorityStaleBound: a REPORTED-busy (non-blocked) authority entry is dropped
+	// when the pane has been byte-stable for this long AND the report itself is at
+	// least this old. A real in-flight claude/pi turn animates its TUI every second
+	// (spinner/elapsed timer), so a frozen pane contradicts the report — this is the
+	// lost-turn_ended class: claude's Stop hook does NOT fire on a user interrupt
+	// (Esc), which would otherwise pin busy until the thread's next prompt. Blocked
+	// entries are exempt: a permission/question prompt is genuinely mid-turn with a
+	// static pane. The report-age condition keeps a fresh turn_started on a
+	// long-frozen pane alive until its first render catches up.
+	authorityStaleBound = 2 * time.Minute
 )
 
 // liveState is the maintainer's per-thread working state. All fields except snap
 // are touched ONLY by the single maintainer goroutine; snap is published under the
 // maintainer's lock for readers.
 type liveState struct {
-	snap            api.ThreadSnapshot
-	seeded          bool        // have we captured a baseline for this pane yet?
-	lastContent     string      // last captured pane content (for the diff)
-	changes         []time.Time // timestamps of recent content changes (pruned to busyWindow)
-	lastActive      int64       // unix time of the most recent change/turn
-	hasActiveTicket bool        // any bound ticket is `active` (set per tick from the digest)
+	snap        api.ThreadSnapshot
+	seeded      bool        // have we captured a baseline for this pane yet?
+	lastContent string      // last captured pane content (for the diff)
+	changes     []time.Time // timestamps of recent content changes (pruned to busyWindow)
+	lastActive  int64       // unix time of the most recent change/turn
+	// lastChange is when the pane content last ACTUALLY differed (the baseline
+	// capture counts, so a freshly observed pane is never instantly "frozen").
+	// Unlike lastActive it is never bumped by reported authority — it is the
+	// evidence the authority staleness bound checks reports against.
+	lastChange      time.Time
+	hasActiveTicket bool // any bound ticket is `active` (set per tick from the digest)
 	// stallFlagged latches "this stall episode already auto-flagged" so a
 	// manual unflag is not re-flagged every tick while the SAME prompt sits
 	// open; reset when the stall clears. Maintainer-goroutine only.
@@ -83,6 +99,10 @@ type maintainer struct {
 	epoch          string
 	tombstones     map[string]int64
 	minReliableGen int64
+
+	// staleBound is authorityStaleBound, injectable so a test need not freeze a
+	// pane for two real minutes. Maintainer-goroutine reads only.
+	staleBound time.Duration
 }
 
 // maxTombstones caps the deletion log. Deletions are rare (hundreds per boot at
@@ -90,12 +110,25 @@ type maintainer struct {
 // then full-resync, which is always correct.
 const maxTombstones = 4096
 
+// staleReportedBusy reports whether a reported-busy authority entry is
+// contradicted by the pane: the content has not changed for at least bound AND
+// the report itself is at least bound old (so a fresh turn_started on a
+// long-frozen pane survives until its first render catches up). A zero
+// lastChange (pane never captured) proves nothing.
+func staleReportedBusy(lastChange time.Time, reportedAtUnix int64, now time.Time, bound time.Duration) bool {
+	if lastChange.IsZero() {
+		return false
+	}
+	return now.Sub(lastChange) >= bound && now.Unix()-reportedAtUnix >= int64(bound/time.Second)
+}
+
 func newMaintainer(d *Daemon) *maintainer {
 	home, _ := os.UserHomeDir() // "" => CwdRel stays absolute (viewer shows the raw path)
 	return &maintainer{
 		d: d, st: map[string]*liveState{}, stop: make(chan struct{}), done: make(chan struct{}), home: home,
 		epoch:      strconv.FormatInt(time.Now().UnixNano(), 36),
 		tombstones: map[string]int64{},
+		staleBound: authorityStaleBound,
 	}
 }
 
@@ -308,10 +341,12 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	if !st.seeded {
 		st.seeded = true
 		st.lastContent = content
+		st.lastChange = now
 	} else if content != st.lastContent {
 		st.changes = append(st.changes, now)
 		st.lastActive = now.Unix()
 		st.lastContent = content
+		st.lastChange = now
 	}
 	cutoff := now.Add(-busyWindow)
 	pruned := st.changes[:0]
@@ -334,6 +369,21 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	// degrades to an already-seeded heuristic, not a cold baseline. Which
 	// mechanism decided is always stamped — degradation is visible, never silent.
 	auth, hasAuth := m.d.reportedState(th.ID)
+	if hasAuth && auth.busy && !auth.blocked &&
+		staleReportedBusy(st.lastChange, auth.reportedAtUnix, now, m.staleBound) {
+		// The pane has been byte-stable for the whole bound while the report
+		// claims an in-flight turn — contradiction: a real turn animates the
+		// TUI every second. This is the lost-turn_ended class (claude's Stop
+		// hook does not fire on a user interrupt), which would otherwise pin
+		// busy until the thread's next prompt. Drop the entry LOUDLY and
+		// degrade to the heuristic — visible via state_authority. Blocked
+		// entries are exempt (a permission/question prompt is genuinely
+		// mid-turn with a static pane).
+		log.Printf("maintainer: thread %s reported busy by %s %ds ago but its pane has been byte-stable for %ds — dropping stale authority (lost turn_ended, e.g. an interrupted turn)",
+			th.ID, auth.source, now.Unix()-auth.reportedAtUnix, int(now.Sub(st.lastChange)/time.Second))
+		m.d.clearAuthority(th.ID)
+		hasAuth = false
+	}
 	if hasAuth {
 		if auth.busy {
 			snap.Busy = api.BusyBusy

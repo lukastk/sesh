@@ -1029,6 +1029,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.followInFlight = false
 		if msg.err != nil {
 			m.actionErr = msg.err
+		} else {
+			m.actionErr = nil // successful ambient activity clears a stale error line
 		}
 		if msg.id != "" {
 			// Recorded on FAILURE too: the coalesce below re-arms, and without
@@ -1047,6 +1049,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// sibling (attach) pane so the user lands typing at the agent.
 		// Otherwise quit so the TUI (and the popup hosting it) gets out of the way.
 		if m.sidebar {
+			m.actionErr = nil // a successful nav supersedes any stale error line
 			if msg.id != "" {
 				m.lastFollowedID = msg.id // the cockpit now shows it — no follow needed
 			}
@@ -1785,11 +1788,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
 	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
-	// SIDEBAR mode: esc/q are NO-OPS — a persistent cockpit pane must not die to a
-	// stray keystroke (its pane would vanish and take the traveling slot with it;
-	// hide/show is the cockpit toggle's job). ctrl+c stays as the deliberate kill.
+	// SIDEBAR mode: esc/q never QUIT — a persistent cockpit pane must not die to
+	// a stray keystroke (its pane would vanish and take the traveling slot with
+	// it; hide/show is the cockpit toggle's job). Instead they DISMISS the
+	// message lines (actionErr/note), which otherwise persist until the next
+	// action — indefinitely, in a pane that never quits (Lukas hit a virtual-
+	// thread refusal that sat forever). ctrl+c stays as the deliberate kill.
 	case "q", "esc":
 		if m.sidebar {
+			m.actionErr, m.note = nil, ""
 			return m, nil
 		}
 		return m, tea.Quit

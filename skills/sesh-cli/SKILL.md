@@ -253,8 +253,11 @@ selection FOLLOWS immediately**: the cockpit previews the selected thread while 
 stays in the sidebar — Enter/click is what commits focus. A local preview costs ~a
 tmux switch (one warm daemon call, no subprocess); while one is in flight further
 moves coalesce into a single catch-up nav, so held arrows degrade gracefully.
-**esc/q are no-ops in sidebar mode** — a persistent pane must not die to a stray
-keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job).
+**esc/q never quit in sidebar mode** — a persistent pane must not die to a stray
+keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job);
+instead they DISMISS the ✗ error / note lines, which otherwise persist until the
+next action (indefinitely, in a pane that never quits). A successful nav or follow
+also clears a stale error.
 Entering a thread from `/` search exits search (query cleared, cursor on the entered
 thread) — the sidebar returns to the whole ambient list. A **maximized** sidebar
 (pane >= 80 cols — the cockpit zoom toggle) adaptively renders the FULL grid column

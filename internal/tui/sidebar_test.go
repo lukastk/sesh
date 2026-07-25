@@ -45,12 +45,18 @@ func TestSidebarNavDoesNotQuit(t *testing.T) {
 // with it). ctrl+c stays the deliberate kill; the popup grid keeps q/esc-quit.
 func TestSidebarEscDoesNotQuit(t *testing.T) {
 	sb := Model{sidebar: true, rows: rowsWith("a")}
+	sb.actionErr, sb.note = errStub("stale refusal"), "stale note"
 	for _, k := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
-		_, cmd := sb.Update(k)
+		nm, cmd := sb.Update(k)
 		if cmd != nil {
 			if _, quit := cmd().(tea.QuitMsg); quit {
 				t.Fatalf("sidebar quit on %q — must be a no-op", k.String())
 			}
+		}
+		// ...and DISMISS the persistent message lines (which otherwise never
+		// clear in a pane that never quits — Lukas).
+		if g := nm.(Model); g.ActionErr() != nil || g.note != "" {
+			t.Fatalf("%q should dismiss actionErr+note, got err=%v note=%q", k.String(), g.ActionErr(), g.note)
 		}
 	}
 	_, cmd := sb.Update(tea.KeyMsg{Type: tea.KeyCtrlC})

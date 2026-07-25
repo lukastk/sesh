@@ -332,7 +332,22 @@ func ResolveColumnWidths(specs []ColumnWidthSpec) (map[string]int, error) {
 	return out, nil
 }
 
-// activeColumns returns the specs to render: the configured set in colOrder
+// sidebarWideThreshold: a sidebar pane at least this wide (a MAXIMIZED/zoomed
+// sidebar; the normal slot is 38) renders the full grid column set instead of
+// the name-only preset — zoom raises a resize, so the swap is automatic.
+const sidebarWideThreshold = 80
+
+// effectiveColumnNames is the column set for THIS render: the configured set —
+// except a WIDE sidebar (maximized), which adaptively uses its grid set (the
+// same columns the normal grid would show; see WithSidebarWideColumns).
+func (m *Model) effectiveColumnNames() []string {
+	if m.sidebar && len(m.sidebarWideColumns) > 0 && m.width >= sidebarWideThreshold {
+		return m.sidebarWideColumns
+	}
+	return m.columns
+}
+
+// activeColumns returns the specs to render: the effective set in the user's
 // order, with the ID column joining when toggled on (`i`) even if not configured.
 func (m *Model) activeColumns() []colSpec {
 	spec := map[string]colSpec{}
@@ -342,7 +357,7 @@ func (m *Model) activeColumns() []colSpec {
 	// Render in the USER's configured order (--columns / [tui] columns), not a
 	// fixed built-in order. The `i` ID toggle prepends ID when it isn't already
 	// configured (so it appears without disturbing the chosen order).
-	names := append([]string(nil), m.columns...)
+	names := append([]string(nil), m.effectiveColumnNames()...)
 	if m.showID && !m.columnsHasID() {
 		names = append([]string{ColID}, names...)
 	}
@@ -356,7 +371,7 @@ func (m *Model) activeColumns() []colSpec {
 }
 
 func (m *Model) columnsHasID() bool {
-	for _, n := range m.columns {
+	for _, n := range m.effectiveColumnNames() {
 		if n == ColID {
 			return true
 		}

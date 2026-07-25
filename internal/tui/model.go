@@ -88,7 +88,10 @@ func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
 func builtinViewAdmits(view View, row api.ThreadRow) bool {
 	switch view {
 	case ViewActive:
-		return (!row.Archived || row.Head == api.Headful) && !row.OnHold
+		// A FLAGGED thread is ALWAYS shown (Lukas): the flag means "needs your
+		// attention", and attention beats archived/on-hold parking — unflagging
+		// (or the auto-flag policy) is what returns it to hiding.
+		return row.Flagged || ((!row.Archived || row.Head == api.Headful) && !row.OnHold)
 	case ViewHold:
 		return !row.Archived && row.OnHold
 	case ViewArchived:
@@ -153,6 +156,10 @@ type Model struct {
 	// sidebar (`tui --sidebar`): persistent-pane mode — nav hands focus to the
 	// sibling pane instead of quitting. See WithSidebar.
 	sidebar bool
+	// sidebarWideColumns: the grid column set a MAXIMIZED (zoomed, ≥
+	// sidebarWideThreshold cols) sidebar renders instead of the name-only
+	// preset. Empty = never adapt. See WithSidebarWideColumns.
+	sidebarWideColumns []string
 	// followResolver resolves — AT FOLLOW TIME — the machine whose work server
 	// the sidebar's SIBLING pane currently shows (the cockpit window's machine).
 	// When set, MOVING the selection follows: after the cursor rests
@@ -409,6 +416,16 @@ func New(socketPath string, allMachines bool) Model {
 // else (views, filter, actions, mouse) is the same TUI.
 func (m Model) WithSidebar() Model {
 	m.sidebar = true
+	return m
+}
+
+// WithSidebarWideColumns gives the sidebar its MAXIMIZED column set: when the
+// pane is at least sidebarWideThreshold cols wide (the cockpit's zoom toggle),
+// these columns — the same set the normal grid would show — replace the
+// name-only preset; shrinking back swaps the preset back in. Zoom raises a
+// resize event, so the adaptation needs no extra wiring.
+func (m Model) WithSidebarWideColumns(names []string) Model {
+	m.sidebarWideColumns = append([]string(nil), names...)
 	return m
 }
 
@@ -1828,10 +1845,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.promptCursor = len(m.promptInput)
 		}
 	case "tab":
-		// Open the VIEW PICKER preselecting the NEXT view — tab+enter reproduces
-		// the old cycle in two taps, while the list shows where you're going.
+		// Open the VIEW PICKER on the CURRENT view (Lukas — preselecting the
+		// next one was disorienting; advancing is one more tab).
 		m.viewPicker = true
-		m.viewPickerCursor = (int(m.view) + 1) % m.viewCount()
+		m.viewPickerCursor = int(m.view)
 	case "i":
 		m.showID = !m.showID
 	case "w":

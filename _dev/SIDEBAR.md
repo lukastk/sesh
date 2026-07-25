@@ -92,8 +92,16 @@ the myvault pad "Herdr vs sesh - migration assessment".
   window and puts the sidebar in the current one, focused. Windows created
   AFTER a show have no slot until the next toggle cycle (the myrig phase's
   mastermaint self-heal owns that).
+- **Maximize-adaptive columns**: a sidebar pane >= 80 cols (sidebarWideThreshold
+  — the cockpit's prefix+z zoom, pinned to the sidebar by myrig sidebar-zoom.sh)
+  renders the FULL grid column set (config-resolved exactly like the normal
+  grid, moves included; WithSidebarWideColumns) and swaps back to name-only on
+  restore. Zoom raises a resize, so no extra wiring. An explicit --columns pins
+  the set and disables adaptation.
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
-  offline handling, `?` keymap.
+  offline handling, `?` keymap. (Tab view picker opens on the CURRENT view; the
+  default `active` view ALWAYS shows flagged threads — archived/on-hold
+  included.)
 
 Nav routing needs no new carrier: a sidebar pane is a real pane on the master
 server, so `sesh tmux nav` takes the master path (marker-client based, H8/H10);

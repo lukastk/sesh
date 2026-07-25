@@ -158,11 +158,12 @@ func claimThreadDetails(t *testing.T) {
 	}
 }
 
-// nextView advances the grid one view: Tab opens the view PICKER preselecting
-// the next view, Enter applies it (tab+enter ≡ the pre-picker single Tab; the
-// apply's fetch runs and feeds back via runSpecial, exactly as before).
+// nextView advances the grid one view: Tab opens the view PICKER on the
+// CURRENT view, a second Tab advances one, Enter applies (the apply's fetch
+// runs and feeds back via runSpecial).
 func nextView(t *testing.T, m tui.Model) tui.Model {
 	t.Helper()
+	m = runSpecial(t, m, tea.KeyTab)
 	m = runSpecial(t, m, tea.KeyTab)
 	return runSpecial(t, m, tea.KeyEnter)
 }

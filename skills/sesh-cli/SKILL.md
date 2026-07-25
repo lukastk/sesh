@@ -255,7 +255,9 @@ moves coalesce into a single catch-up nav, so held arrows degrade gracefully.
 **esc/q are no-ops in sidebar mode** — a persistent pane must not die to a stray
 keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job).
 Entering a thread from `/` search exits search (query cleared, cursor on the entered
-thread) — the sidebar returns to the whole ambient list. Follow
+thread) — the sidebar returns to the whole ambient list. A **maximized** sidebar
+(pane >= 80 cols — the cockpit zoom toggle) adaptively renders the FULL grid column
+set (the same columns the normal grid shows) and swaps back to name-only on restore. Follow
 crosses machines: the master window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never
@@ -276,12 +278,12 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
 tab          view PICKER: a popup listing every view (active / on hold / archived /
-             all / custom [[tui.views]]) preselecting the next one — tab/↑/↓ move
+             all / custom [[tui.views]]) opening on the CURRENT one — tab/↑/↓ move
              (wrap), enter or a mouse click applies, esc cancels; the wheel moves
-             the selection. tab+enter reproduces the old blind cycle.
+             the selection.
              The default `active` view shows every non-archived thread PLUS archived
              threads that are still headful (a live pane, glyph `⊘`), and hides on-hold
-             threads — i.e. `(not archived OR headful) AND not on hold`. So an archived
+             threads — i.e. `flagged OR ((not archived OR headful) AND not on hold)`. A FLAGGED thread is ALWAYS shown — even archived or on hold (attention beats parking; unflagging re-hides it). So an archived
              thread stays visible while its agent is running and drops out once it goes
              headless. (`tui --cursor` / the cockpit prefix+a preselect the current
              thread; if it is hidden by the default view — e.g. a headless archived

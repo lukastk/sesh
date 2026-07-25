@@ -239,24 +239,25 @@ func TestSidebarFollow(t *testing.T) {
 }
 
 // TestViewPicker (Lukas): Tab opens a view PICKER instead of blind-cycling —
-// it preselects the NEXT view (tab+enter ≡ the old single tab), tab/↑/↓ move
-// with wrap, Enter applies (cursor reset + fetch), Esc cancels, the wheel moves
-// the selection, and a mouse click on a view line applies it directly.
+// it opens ON the current view (preselecting the next was disorienting),
+// tab/↑/↓ move with wrap, Enter applies (cursor reset + fetch), Esc cancels,
+// the wheel moves the selection, and a mouse click on a view line applies it.
 func TestViewPicker(t *testing.T) {
 	m := Model{rows: rowsWith("a")}
 
 	nm, _ := m.Update(keyMsg("tab"))
 	m = nm.(Model)
-	if !m.viewPicker || m.viewPickerCursor != int(ViewHold) {
-		t.Fatalf("tab should open the picker preselecting the NEXT view: open=%v cursor=%d", m.viewPicker, m.viewPickerCursor)
+	if !m.viewPicker || m.viewPickerCursor != int(ViewActive) {
+		t.Fatalf("tab should open the picker ON the current view: open=%v cursor=%d", m.viewPicker, m.viewPickerCursor)
 	}
 	// tab advances inside the picker; shift+tab/up go back; both wrap.
 	nm, _ = m.Update(keyMsg("tab"))
 	m = nm.(Model)
-	if m.viewPickerCursor != int(ViewArchived) {
+	if m.viewPickerCursor != int(ViewHold) {
 		t.Fatalf("tab in picker should advance, cursor=%d", m.viewPickerCursor)
 	}
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	nm, _ = m.Update(keyMsg("tab"))
+	nm, _ = nm.(Model).Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = nm.(Model)
 	if m.viewPickerCursor != int(ViewHold) {
 		t.Fatalf("up in picker should go back, cursor=%d", m.viewPickerCursor)
@@ -283,7 +284,7 @@ func TestViewPicker(t *testing.T) {
 	m = nm.(Model)
 	nm, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	m = nm.(Model)
-	if m.viewPickerCursor != int(ViewAll) {
+	if m.viewPickerCursor != int(ViewArchived) {
 		t.Fatalf("wheel down should advance the picker cursor, got %d", m.viewPickerCursor)
 	}
 	nm, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 1, Y: 2 + int(ViewAll)})
@@ -345,5 +346,39 @@ func TestSidebarFilterEnterExitsSearch(t *testing.T) {
 	np, pcmd := p.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if pcmd == nil || !np.(Model).filtering {
 		t.Fatalf("popup filter enter changed: cmd=%v filtering=%v", pcmd, np.(Model).filtering)
+	}
+}
+
+// TestSidebarWideColumns (Lukas): a MAXIMIZED sidebar (>= sidebarWideThreshold
+// cols — the cockpit zoom toggle) renders the full grid column set instead of
+// the name-only preset; shrinking back restores the preset. No wide set / not
+// sidebar mode = never adapts.
+func TestSidebarWideColumns(t *testing.T) {
+	m := Model{sidebar: true, columns: SidebarColumns(), sidebarWideColumns: DefaultColumns}
+	m.width = 38
+	if got := m.effectiveColumnNames(); len(got) != 1 || got[0] != ColName {
+		t.Fatalf("narrow sidebar should render the name-only preset, got %v", got)
+	}
+	m.width = sidebarWideThreshold + 40
+	if got := m.effectiveColumnNames(); len(got) != len(DefaultColumns) {
+		t.Fatalf("maximized sidebar should render the grid set, got %v", got)
+	}
+	if specs := m.activeColumns(); len(specs) != len(DefaultColumns) {
+		t.Fatalf("activeColumns should follow the adaptive set, got %d specs", len(specs))
+	}
+	m.width = 38
+	if got := m.effectiveColumnNames(); len(got) != 1 {
+		t.Fatalf("shrinking back should restore the preset, got %v", got)
+	}
+	// No wide set configured (explicit --columns) or not sidebar: never adapts.
+	pinned := Model{sidebar: true, columns: []string{ColName}}
+	pinned.width = 200
+	if got := pinned.effectiveColumnNames(); len(got) != 1 {
+		t.Fatalf("without a wide set the sidebar must never adapt, got %v", got)
+	}
+	grid := Model{columns: []string{ColName}, sidebarWideColumns: DefaultColumns}
+	grid.width = 200
+	if got := grid.effectiveColumnNames(); len(got) != 1 {
+		t.Fatalf("the normal grid must never adapt, got %v", got)
 	}
 }

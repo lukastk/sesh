@@ -8,28 +8,34 @@ import (
 )
 
 // TestActiveViewAdmitsArchivedHeadful proves the default `active` view predicate:
-// (not archived OR headful) AND not on hold. An archived thread stays visible while
-// it is still headful (a live pane) and drops out once it goes headless; on-hold
-// threads are excluded regardless of head.
+// flagged OR ((not archived OR headful) AND not on hold). An archived thread stays
+// visible while it is still headful (a live pane) and drops out once it goes
+// headless; on-hold threads are excluded regardless of head — but a FLAGGED thread
+// is ALWAYS shown (needs-attention beats archived/on-hold parking; unflagging
+// returns it to hiding).
 func TestActiveViewAdmitsArchivedHeadful(t *testing.T) {
 	cases := []struct {
 		name     string
 		archived bool
 		head     api.Head
 		onHold   bool
+		flagged  bool
 		want     bool
 	}{
-		{"live non-archived idle", false, api.Headless, false, true},
-		{"live non-archived headful", false, api.Headful, false, true},
-		{"archived + headful (still running) -> shown", true, api.Headful, false, true},
-		{"archived + headless (parked) -> hidden", true, api.Headless, false, false},
-		{"archived + headful but on hold -> hidden", true, api.Headful, true, false},
-		{"non-archived headful on hold -> hidden", false, api.Headful, true, false},
-		{"non-archived headless on hold -> hidden", false, api.Headless, true, false},
+		{"live non-archived idle", false, api.Headless, false, false, true},
+		{"live non-archived headful", false, api.Headful, false, false, true},
+		{"archived + headful (still running) -> shown", true, api.Headful, false, false, true},
+		{"archived + headless (parked) -> hidden", true, api.Headless, false, false, false},
+		{"archived + headful but on hold -> hidden", true, api.Headful, true, false, false},
+		{"non-archived headful on hold -> hidden", false, api.Headful, true, false, false},
+		{"non-archived headless on hold -> hidden", false, api.Headless, true, false, false},
+		{"FLAGGED archived headless -> SHOWN", true, api.Headless, false, true, true},
+		{"FLAGGED on hold -> SHOWN", false, api.Headless, true, true, true},
+		{"FLAGGED archived + on hold -> SHOWN", true, api.Headless, true, true, true},
 	}
 	for _, c := range cases {
-		// Archived is on the embedded Thread; OnHold is the derived field on ThreadRow.
-		row := api.ThreadRow{Thread: api.Thread{Archived: c.archived}, Head: c.head, OnHold: c.onHold}
+		// Archived/Flagged are on the embedded Thread; OnHold is derived on ThreadRow.
+		row := api.ThreadRow{Thread: api.Thread{Archived: c.archived, Flagged: c.flagged}, Head: c.head, OnHold: c.onHold}
 		if got := builtinViewAdmits(ViewActive, row); got != c.want {
 			t.Errorf("%s: builtinViewAdmits(active)=%v, want %v", c.name, got, c.want)
 		}

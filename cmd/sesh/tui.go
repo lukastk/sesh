@@ -58,34 +58,50 @@ func runTUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	var wantCols []string
+	// gridColumnSet resolves the NORMAL grid's set (config-or-default + the
+	// [[tui.column]] moves) — the wide grid's columns, also handed to the
+	// sidebar as its MAXIMIZED set (see below).
+	gridColumnSet := func() ([]string, error) {
+		var want []string
+		if tcfg != nil && len(tcfg.Columns) > 0 {
+			want = tcfg.Columns
+		}
+		out, err := tui.ResolveColumns(want)
+		if err != nil {
+			return nil, err
+		}
+		if tcfg != nil && len(tcfg.ColumnMoves) > 0 {
+			var moves []tui.ColumnMove
+			for _, mv := range tcfg.ColumnMoves {
+				moves = append(moves, tui.ColumnMove{Name: mv.Name, After: mv.After, Before: mv.Before, Position: mv.Position})
+			}
+			if out, err = tui.ApplyColumnMoves(out, moves); err != nil {
+				return nil, err
+			}
+		}
+		return out, nil
+	}
+	var cols, sidebarWide []string
 	switch {
 	case *columnsFlag != "":
-		wantCols = strings.Split(*columnsFlag, ",")
-	case *sidebarFlag:
-		wantCols = tui.SidebarColumns()
-	case tcfg != nil && len(tcfg.Columns) > 0:
-		wantCols = tcfg.Columns
-	}
-	cols, err := tui.ResolveColumns(wantCols)
-	if err != nil {
-		return fmt.Errorf("tui columns: %w", err)
-	}
-	// [[tui.column]] moves reposition individual columns over the base set — but
-	// NOT over the sidebar preset: a move can insert/anchor columns the name-only
-	// preset deliberately omits (it would widen the pane or refuse loudly on a
-	// missing anchor). An explicit --columns keeps the moves as usual.
-	if *sidebarFlag && *columnsFlag == "" && tcfg != nil {
-		tcfgMovesOff := *tcfg // shallow copy just to drop the moves for this launch
-		tcfgMovesOff.ColumnMoves = nil
-		tcfg = &tcfgMovesOff
-	}
-	if tcfg != nil && len(tcfg.ColumnMoves) > 0 {
-		var moves []tui.ColumnMove
-		for _, mv := range tcfg.ColumnMoves {
-			moves = append(moves, tui.ColumnMove{Name: mv.Name, After: mv.After, Before: mv.Before, Position: mv.Position})
+		// An explicit --columns pins the set in BOTH modes (no sidebar
+		// width-adaptation — the user chose their columns).
+		if cols, err = tui.ResolveColumns(strings.Split(*columnsFlag, ",")); err != nil {
+			return fmt.Errorf("tui columns: %w", err)
 		}
-		if cols, err = tui.ApplyColumnMoves(cols, moves); err != nil {
+	case *sidebarFlag:
+		// The sidebar renders the NAME-only preset at slot width ([tui]
+		// columns / [[tui.column]] moves are wide-grid tuning and don't apply)
+		// — but a MAXIMIZED sidebar (the cockpit zoom) adaptively renders the
+		// full grid set, resolved here exactly as the normal grid would.
+		if cols, err = tui.ResolveColumns(tui.SidebarColumns()); err != nil {
+			return fmt.Errorf("tui columns: %w", err)
+		}
+		if sidebarWide, err = gridColumnSet(); err != nil {
+			return fmt.Errorf("tui columns: %w", err)
+		}
+	default:
+		if cols, err = gridColumnSet(); err != nil {
 			return fmt.Errorf("tui columns: %w", err)
 		}
 	}
@@ -245,6 +261,9 @@ func runTUI(args []string) error {
 	}
 	if *sidebarFlag {
 		m = m.WithSidebar()
+		if len(sidebarWide) > 0 {
+			m = m.WithSidebarWideColumns(sidebarWide)
+		}
 		// Selection-FOLLOW needs to know which machine the sibling attach pane
 		// shows. $SESH_TUI_MASTER_MACHINE, when the spawner bakes it, PINS it
 		// (a per-window spawner's contract; also the master-cursor carrier,

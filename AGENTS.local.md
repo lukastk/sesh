@@ -1,5 +1,43 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H58 — phantom BUSY from an Esc'd claude turn: authority STALENESS BOUND (2026-07-25, sesh ff8e65f; NO schema change; deployed ALL FIVE)
+Lukas: thread ab9d5a3a (dagster-netrun, claude on mymain) showed busy while "very idle".
+DIAGNOSIS TRAIL (worth remembering as a recipe): grid said busy but `thread status --id` said
+IDLE → the maintained snapshot disagreed with the on-demand probe → checked the row's
+`state_authority` = **reported** → a stuck AUTHORITY entry (schema 43's in-agent reporter
+overrides the content-diff), NOT the diff. The marked pane was byte-stable across captures.
+Transcript tail (~/.claude/projects/<cwd-slug>/<agent-session-id>.jsonl) showed the last turn
+ended with **"[Request interrupted by user]"** (Esc, 12:08) — and **claude's Stop hook does NOT
+fire on a user interrupt**, so integrations/claude/sesh-agent-state.sh reported turn_started
+with no turn_ended; authority is bounded only by PANE liveness and the idle claude's pane
+lives on ⇒ busy pinned until the thread's next prompt. (The 12:12 away_summary fired no Stop
+either.) IMMEDIATE UNSTICK: `sesh thread report-state --id <id> --event release --source
+sesh:manual-unstick` (seq defaults to unix-nanos so it always beats the stored seq; release
+deletes the entry; next tick publishes heuristic idle).
+FIX (conferred; Lukas picked the daemon staleness bound over hook-side Notification mapping):
+maintainer drops a reported-BUSY, NON-blocked entry when the pane content changed ZERO times
+for authorityStaleBound (2min) AND the report is ≥ that old (the report-age guard keeps a fresh
+turn_started on a long-frozen pane alive until its first render). Rationale: a real in-flight
+claude/pi turn ANIMATES every second (spinner/elapsed timer) — a frozen pane contradicts the
+report. Drop is LOUD (log names thread/source/ages) + VISIBLE (state_authority reported→
+heuristic). Mechanics: liveState.lastChange = when pane bytes last differed — deliberately
+separate from lastActive, which the authority path BUMPS every tick while reported-busy (using
+lastActive would defeat the bound). BLOCKED entries exempt (a question/permission prompt is
+genuinely mid-turn with a static pane) — RESIDUAL GAP: Esc-ing OUT of a permission/question
+prompt can still pin blocked-busy until the next prompt (accepted; rarer than Esc-ing a turn).
+The bound also catches the late-PostToolUse race (unblocked landing after Stop's turn_ended
+re-pins busy with a later seq — PostToolUse maps to unblocked ⇒ busy=true).
+TESTS: TestStaleReportedBusy predicate truth table; TestMaintainerDropsStaleReportedBusy =
+real maintainer + real tmux pane occupied by an argv0-"claude" SYMLINK TO SLEEP (gotcha: a
+shebang script reads as argv0 "sh" and misses agentRe — symlink keeps argv0) with injectable
+m.staleBound=2s: pins fresh → drops past bound → blocked stays pinned. thread.state-authority
+cells (claude+pi × local+remote, real agents) stay green — real turns animate, bound never
+fires. SKILL state-authority paragraph updated.
+DEPLOY (binary + daemon restart, NO schema change): all five at ff8e65f (mymain native+
+supervisorctl; macbook/macstudio homebrew go + supervisorctl; ideapad native + supervisorctl;
+termux plain go build + explicit-pid kill + setsid-nohup, pid 9327). Verified the netrun
+thread reads idle/heuristic.
+
 ## H57 — the PERSISTENT SIDEBAR (issue #8 sesh half): `tui --sidebar` + traveling-slot cockpit rig + Tab view picker (2026-07-24/25, branch ui-sidebar merged c843a5d; NO schema change, binary-only; deployed ALL FIVE, no restarts; myrig phase PENDING)
 Issue #8 design-first: conferred (AskUserQuestion) → tmux-layered, plain thread list,
 desktops only; then SIX live iterations with Lukas on his macbook master. Design doc

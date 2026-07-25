@@ -112,6 +112,39 @@ DEPLOY: merged --no-ff c843a5d, binary-only ALL FIVE (mymain native; macbook/mac
 /opt/homebrew/bin/go; ideapad native; termux plain go build CGO=1) — no daemon
 restarts, schema stays 45. The Tab picker is now LIVE in the normal TUI fleet-wide.
 
+## H60 — "codex doesn't flag": mechanism was HEALTHY, the ATTENDED GATE was the culprit — and Lukas REMOVED the gate entirely (2026-07-25, sesh a3cb29d, myrig ae78f1b; NO schema change; daemon RESTART all five)
+Lukas: codex threads (corkboard 9331d905, then 547230fa) neither flag nor toast on turn
+end. DIAGNOSIS (long, with one nasty trap): env ✓ (SESH_THREAD_ID/SESH_BIN in the codex
+process), config ✓ (notify= line predates process start), version 0.145.0 (updated from
+0.142.5 since H50 — codex now has an app-server architecture; logs moved into
+CODEX_HOME/logs_2.sqlite, no more log files). Manual fire of the notify script → flagged
+✓. THE TRAP: **a sesh codex SPAWN re-materializes <SESH_HOME>/codex-notify.sh, silently
+WIPING any debug tap in it** — my first scratch spawn destroyed the tap, and every
+"codex never invokes notify" probe result after it was VOID (raw-tmux probes also
+self-gate silently: no SESH_THREAD_ID → exit 0). A clean re-test (spawn FIRST, tap
+AFTER, then drive the turn) proved the live chain fully healthy: invoked + report rc=0 +
+flagged "turn ended". ⇒ his threads simply always hit the H48-style attended gate:
+input in that session <60s before the fast reply landed. Bisect scaffolding that's
+reusable: isolated CODEX_HOME probes with tmux + config copies (/tmp/cxbisect-*),
+tapped scripts logging invocation+rc.
+RULING (Lukas): "Even attended threads should trigger notifications and flagging.
+That feature should be removed." DONE both sides:
+- sesh a3cb29d: attendedNow/flagAttendedWindow DELETED; autoFlagTrigger loses the
+  attachment/activity/now params (turn-end + stall flag unconditionally; heuristic
+  edges still gated by [flags] heuristic_agents; stall latch unchanged); the codex
+  turn_ended_no_authority path AutoFlags without consulting the snapshot. The H48
+  attachment/activity plumbing (snapshot field + hook env) STAYS — only flag policy
+  stopped reading it. Truth table rewritten; all six thread.flagged cells green;
+  daemon -race clean.
+- myrig ae78f1b: sesh-notify drops its belt-and-braces attended gate — the
+  notify-flagged toast fires on every flag edge; SESH_NOTIFY stays the only gate.
+CONSEQUENCE (told Lukas): actively conversing with a thread now flags it on every
+reply; the flag just STAYS set during a conversation (no repeated edges while
+flagged), so one toast per unflag-cycle, and rows stay ⚑ in active until manually
+cleared. DEPLOY: rebuild + daemon RESTART all five (schema stays 45); myrig pull all
+five; macbook sidebar respawned; the diagnostic tap stripped from mymain's
+codex-notify.sh and /tmp probe debris removed.
+
 ## H59 — sidebar/TUI polish batch: picker-on-current, flagged-ALWAYS-in-active, maximize-adaptive sidebar columns (+prefix+z), selection glyph CHIPS (2026-07-25, sesh f55cf5b+9c23cae, myrig fc51a3b; NO schema change, binary-only; deployed ALL FIVE)
 Four asks from Lukas post-#8-close. NB a CONCURRENT session took H58 + pushed sesh
 ff8e65f/6661218 (authority staleness bound, daemon change, THEY deployed+restarted) —

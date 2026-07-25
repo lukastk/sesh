@@ -74,6 +74,28 @@ DEPLOY: merged --no-ff c843a5d, binary-only ALL FIVE (mymain native; macbook/mac
 /opt/homebrew/bin/go; ideapad native; termux plain go build CGO=1) — no daemon
 restarts, schema stays 45. The Tab picker is now LIVE in the normal TUI fleet-wide.
 
+### H57 follow-up — sidebar polish + the myrig phase LANDED; port-to-sesh DECLINED (2026-07-25, sesh cc69e8f, myrig a05b793; deployed ALL FIVE)
+Same-day iterations after the merge: filter-Enter in sidebar mode EXITS search
+(nav captures the FILTERED selection FIRST — clearing reshapes the visible set
+under the cursor — then query cleared + cursor re-landed on the entered thread;
+popup untouched; sesh cc69e8f, fleet-uniform binary). prefix+v = plain pane
+cycle (`select-pane -t :.+`, alias of prefix+o — Lukas simplified it from an
+earlier focus-the-sidebar script). MYRIG PERMANENCE (a05b793): the transient
+rig became home/.sesh/myrig/sidebar-{swap,toggle}.sh (symlinked) + conf
+set-hook/bind b/bind v + mmt-start/mmt-ensure run `sidebar-toggle.sh ensure`;
+the swap hook now LAZILY provisions a slot in windows born after the last
+toggle (closes the new-window gap). Scripts no-op on termux
+(SESH_MACHINE/TERMUX_VERSION guards); socket from $SESH_MASTER_SOCKET; sidebar
+spawns from ~/.local/bin/sesh. macbook's transient rig (tmp scripts,
+sesh-sidebar binary) removed; running masters re-sourced (mymain, macbook,
+termux — termux self-guards); macstudio/ideapad have no master. PORT-TO-SESH
+DECLINED (Lukas asked "worth it?"; my earlier lean reversed on honest sizing):
+~60 lines of on-demand shell vs a daemon reconciler continuously acting on the
+live cockpit — revisit triggers recorded in _dev/SIDEBAR.md. **THE INTENT
+CONTRACT is cross-repo**: sesh internal/tui declareSidebarIntent writes
+@sesh-sidebar-intent=follow|enter; myrig sidebar-swap.sh consumes-and-clears —
+renaming it breaks both repos (documented both ends). Issue #8 CLOSED.
+
 ## H56 — remote-action lag KILLED (H55's A+D+C shipped): keypress optimism w/ per-action revert + full-uuid resolve fast path + post-write mesh nudge (2026-07-24, sesh 436dd31 api 44→45, NO store migration; deployed ALL FIVE)
 Lukas approved H55's recommendation verbatim ("Okay do that (A+D+C)"); E/F not built.
 - A — KEYPRESS OPTIMISM, PER-ACTION REVERT (internal/tui/model.go, the H36-item-3 debt):

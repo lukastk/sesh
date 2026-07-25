@@ -100,12 +100,25 @@ server, so `sesh tmux nav` takes the master path (marker-client based, H8/H10);
 the in-client carve-out only applies when the TUI runs inside the WORK socket,
 which also works (a work-server sidebar navs in place and stays open).
 
-## Policy (myrig, after Lukas tests — NOT in this branch)
+## Policy (myrig — LANDED, myrig a05b793, 2026-07-25)
 
-- Master conf/mastermaint: spawn `sesh tui --sidebar` in a left split of each
-  master window; self-heal like the attach panes; a toggle binding (show/hide =
-  kill-pane/split); skip on termux. Optionally bake `SESH_TUI_MASTER_MACHINE`
-  for the start-cursor preselect.
+- `home/.sesh/myrig/sidebar-swap.sh` (the after-select-window hook; lazily
+  provisions a slot in windows born after the last toggle) +
+  `sidebar-toggle.sh` (prefix+b; `ensure` mode used by mmt-start/mmt-ensure) +
+  conf binds (`b` toggle, `v` = pane cycle, alias of prefix+o). Scripts no-op
+  on termux. The sidebar spawns from `~/.local/bin/sesh` (the deployed binary).
+- **PORT-TO-SESH DECISION (with Lukas): not now.** The machinery is ~60 lines
+  of on-demand shell; a sesh port means a daemon-side mastermaint reconciler
+  acting continuously on the live cockpit — worse risk/effort ratio than the
+  benefits (self-heal ≈ one keypress a month; protocol locality; cells).
+  Revisit if: the intent contract drifts and bites, the scripts accrete real
+  logic, window churn makes slots annoying, or another surface wants a sidebar.
+- **THE INTENT CONTRACT (cross-repo, breaking-change-sensitive):** sesh's TUI
+  (internal/tui declareSidebarIntent) writes the master-server global option
+  `@sesh-sidebar-intent` = `follow` | `enter` before a window-switching nav;
+  myrig's sidebar-swap.sh consumes-and-clears it. Renaming/repurposing the
+  option changes BOTH repos. The pane markers `@sesh-sidebar` /
+  `@sesh-sidebar-slot` are myrig-internal (sesh never reads them).
 
 ## Testing this branch without touching the live setup
 

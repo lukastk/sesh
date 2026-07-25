@@ -3528,8 +3528,24 @@ func (m Model) View() string {
 		if selected {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			line := mark + HeadGlyph(row) + BusyGlyph(row) + desc + att + arch + flag + " " + m.renderCells(vcols, vwidths, tr, nil, false)
-			b.WriteString(styleSelected.Render("> "+line) + "\n")
+			// The GUTTER ATTENTION GLYPHS keep their tint though (Lukas): each tinted
+			// glyph renders as its colour COMPOSED WITH reverse — under reverse the
+			// foreground becomes the cell's visible background, so ▶/↓/⚑ show as
+			// coloured chips inside the unbroken selection band.
+			seg := func(s string) string { return styleSelected.Render(s) }
+			gl := func(g, name string, on bool) string {
+				if st, ok := m.glyphColors[name]; ok && on {
+					return st.Reverse(true).Render(g)
+				}
+				return seg(g)
+			}
+			line := seg("> "+mark+HeadGlyph(row)) +
+				gl(BusyGlyph(row), GlyphBusy, row.Busy == api.BusyBusy) +
+				gl(desc, GlyphDescendant, descRun[row.ID]) +
+				seg(att+arch) +
+				gl(flag, GlyphFlag, row.Flagged) +
+				seg(" "+m.renderCells(vcols, vwidths, tr, nil, false))
+			b.WriteString(line + "\n")
 		} else {
 			// Running-state glyphs render tinted ([[tui.glyph_color]]; default bright
 			// green — ▶ this thread's turn, ↓ a descendant's); the selected branch

@@ -115,10 +115,15 @@ func TestViewTintsRunningGlyphs(t *testing.T) {
 		t.Errorf("descendant-running row's ↓ should be tinted: %q", line)
 	}
 
-	m.cursor = 2 // select worker: its ▶ must lose the tint (reverse video wins)
+	// Select worker: its ▶ KEEPS the tint, composed WITH reverse — the glyph
+	// renders as a coloured chip inside the selection band (Lukas; originally
+	// the selected row dropped tints entirely). The glyph-adjacent SGR must
+	// carry BOTH the reverse attribute (7) and a colour parameter.
+	m.cursor = 2
 	view = m.View()
-	if line := rowLineLocal(view, "worker"); tinted("▶").MatchString(line) {
-		t.Errorf("selected row's ▶ must NOT be tinted: %q", line)
+	selTinted := regexp.MustCompile(`\x1b\[(?:7;[0-9;]+|[0-9;]+;7[;m])[0-9;]*m?▶`)
+	if line := rowLineLocal(view, "worker"); !selTinted.MatchString(line) {
+		t.Errorf("selected row's ▶ must keep its tint composed with reverse: %q", line)
 	}
 
 	// Cleared glyph colours ([[tui.glyph_color]] with empty color) → no tint.

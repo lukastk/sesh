@@ -253,7 +253,9 @@ stays in the sidebar — Enter/click is what commits focus. A local preview cost
 tmux switch (one warm daemon call, no subprocess); while one is in flight further
 moves coalesce into a single catch-up nav, so held arrows degrade gracefully.
 **esc/q are no-ops in sidebar mode** — a persistent pane must not die to a stray
-keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job). Follow
+keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job).
+Entering a thread from `/` search exits search (query cleared, cursor on the entered
+thread) — the sidebar returns to the whole ambient list. Follow
 crosses machines: the master window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never

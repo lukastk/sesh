@@ -313,3 +313,37 @@ func TestSidebarColumnsPreset(t *testing.T) {
 		t.Fatalf("sidebar preset = %v, want [%s]", cols, ColName)
 	}
 }
+
+// TestSidebarFilterEnterExitsSearch (Lukas): in SIDEBAR mode, Enter in filter
+// mode navs the FILTERED selection but then LEAVES search entirely (query
+// cleared, cursor re-landed on the entered thread in the full list) — the TUI
+// persists, so staying narrowed to a stale query reads as broken. The popup
+// grid is untouched (it quits on nav anyway).
+func TestSidebarFilterEnterExitsSearch(t *testing.T) {
+	rows := []api.ThreadRow{
+		{Thread: api.Thread{ID: "alpha", Name: "alpha", Machine: "m", SessionName: "s_a"}, Head: api.Headful},
+		{Thread: api.Thread{ID: "docs", Name: "docs", Machine: "m", SessionName: "s_d"}, Head: api.Headful},
+	}
+	m := Model{sidebar: true, machine: "m", rows: rows, machines: []api.MachineView{{Machine: "m", Self: true, Reachable: true}}}
+	m.filtering = true
+	m.filter, m.filterCaret = "doc", 3
+	nm, cmd := m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if cmd == nil {
+		t.Fatalf("filter enter produced no nav cmd")
+	}
+	if got.filtering || got.filter != "" {
+		t.Fatalf("sidebar filter enter must exit search and clear the query: filtering=%v filter=%q", got.filtering, got.filter)
+	}
+	if row, ok := got.Selected(); !ok || row.ID != "docs" {
+		t.Fatalf("cursor should land on the entered thread in the full list, got %v", row.ID)
+	}
+
+	// Popup grid: enter navs, filter state untouched (the TUI quits on success).
+	p := Model{rows: rows}
+	p.filtering, p.filter = true, "doc"
+	np, pcmd := p.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if pcmd == nil || !np.(Model).filtering {
+		t.Fatalf("popup filter enter changed: cmd=%v filtering=%v", pcmd, np.(Model).filtering)
+	}
+}

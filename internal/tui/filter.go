@@ -292,6 +292,23 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		return m, nil
 	case "enter":
+		// SIDEBAR mode: entering a thread from search must LEAVE search — the
+		// TUI persists (unlike the popup, which quits on nav), and coming back
+		// to a sidebar still narrowed to a stale query reads as broken (Lukas).
+		// The filter is CLEARED (not applied-and-kept): the search was a jump,
+		// the ambient list should be whole again. Order is load-bearing: the
+		// nav cmd captures the FILTERED selection first, then the filter drops
+		// and the cursor re-lands on that same thread in the full list.
+		if m.sidebar {
+			row, ok := m.Selected()
+			cmd := m.navSelected()
+			m.filtering, m.filter, m.filterCaret = false, "", 0
+			if ok {
+				m.positionCursorOn(row.ID)
+			}
+			m.clampCursor()
+			return m, cmd
+		}
 		return m, m.navSelected()
 	case "ctrl+y":
 		// Toggle whether child threads are included in the filter results.

@@ -77,6 +77,11 @@ the myvault pad "Herdr vs sesh - migration assessment".
   Enter-only.
 - **A single mouse click enters** (focus handoff included) — the sidebar is a
   jump list, no select-then-double-click; clicking the ▸/▾ marker still folds.
+- **Filter Enter leaves search** (sidebar only): entering a thread from `/`
+  search navs the filtered selection, then EXITS filter mode with the query
+  cleared and the cursor on the entered thread in the full list — the TUI
+  persists, so staying narrowed to a stale query read as broken (Lukas). The
+  popup grid is untouched (it quits on nav).
 - **esc/q are no-ops in sidebar mode** (Lukas hit Esc and the pane vanished,
   taking the traveling slot with it): a persistent pane must not die to a stray
   keystroke. ctrl+c stays the deliberate kill. Hide/show is the cockpit

@@ -56,12 +56,17 @@ the myvault pad "Herdr vs sesh - migration assessment".
   the sibling pane navs to it while focus STAYS in the sidebar, so you can keep
   arrowing; Enter (or a single click) is what commits focus to the thread pane.
   Follow policy (deliberate no-op skips, never errors): live HEADFUL threads
-  only (a preview must never revive a dead thread), the sibling window's OWN
-  machine only (a preview must never switch master windows — Enter still does
-  the full cross-machine switch), reachable owner, deduped against the thread
-  already shown. The sibling machine comes from `$SESH_TUI_MASTER_MACHINE`
-  (spawner-baked) or the sidebar's own WINDOW NAME (cockpit windows are named
-  by machine); unresolvable = follow disabled, Enter-only.
+  only (a preview must never revive a dead thread), reachable owner, deduped
+  against the thread already shown. Follow CROSSES machines (revised — with the
+  traveling sidebar the window switch brings the sidebar along, so the original
+  same-machine guard became obsolete): before a window-switching nav the TUI
+  declares an INTENT (`@sesh-sidebar-intent` = follow|enter, a global option on
+  the master server) that the swap hook consumes — "follow" keeps focus ON the
+  sidebar after the swap (the user is mid-arrowing), "enter" focuses the attach
+  pane, no intent (a manual prefix+N switch) leaves focus alone. The sibling
+  machine comes from `$SESH_TUI_MASTER_MACHINE` (spawner-baked) or the
+  sidebar's own WINDOW NAME resolved live; unresolvable = follow disabled,
+  Enter-only.
 - **A single mouse click enters** (focus handoff included) — the sidebar is a
   jump list, no select-then-double-click; clicking the ▸/▾ marker still folds.
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,

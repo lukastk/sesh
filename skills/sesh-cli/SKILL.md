@@ -248,12 +248,14 @@ thread does not quit the TUI**: the nav happens and focus hands to the sibling p
 the same tmux window, so the sidebar stays ambiently visible beside the agent. A
 **single mouse click enters a thread** (the sidebar is a jump list — no
 select-then-double-click; clicking the ▸/▾ marker still just folds). **Moving the
-selection FOLLOWS**: once the cursor rests (~300ms) the sibling pane previews the
-selected thread while focus stays in the sidebar — Enter/click is what commits focus.
-Follow previews only live headful threads on the window's own machine (it never
-revives a dead thread and never switches master windows; Enter still does both); the
-window's machine comes from $SESH_TUI_MASTER_MACHINE or the tmux window name. Every
-other key/view/action works exactly as in the normal grid.
+selection FOLLOWS**: once the cursor rests (~300ms) the cockpit previews the selected
+thread while focus stays in the sidebar — Enter/click is what commits focus. Follow
+crosses machines: the master window switches and the traveling sidebar rides along
+(an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
+focuses the attach pane instead). It previews only live headful threads (it never
+revives a dead one — Enter still does); the sibling machine resolves live from the
+tmux window name ($SESH_TUI_MASTER_MACHINE pins it for static spawners). Every other
+key/view/action works exactly as in the normal grid.
 
 Keymap (normal mode):
 

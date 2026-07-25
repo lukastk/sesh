@@ -472,9 +472,13 @@ func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
 // followNav navs the SIBLING pane to row without touching focus: the master nav
 // path only (never --in-client — an in-client switch would move the whole view
 // away from the sidebar), no revive (followEligible guarantees a live session).
-// The sibling machine is resolved HERE, at exec time: a row on any other
-// machine is a silent deliberate no-op (following it would switch master
-// windows out from under the user; Enter still does that switch on purpose).
+// A row on ANOTHER machine follows too — the nav switches the master window and
+// the traveling-sidebar hook brings the sidebar along; the "follow" INTENT
+// declared beforehand (see declareSidebarIntent) tells the hook to keep focus
+// ON the sidebar after the swap, so the user keeps arrowing. (Originally
+// cross-machine was excluded; the traveling sidebar made it coherent — Lukas.)
+// An unresolvable sibling machine ("") means no readable cockpit context: skip
+// (a follow without a master to drive would only spray errors while arrowing).
 // Success reports navDoneMsg{follow: true}, which records lastFollowedID and
 // deliberately skips the focus handoff.
 func (m Model) followNav(row api.ThreadRow) tea.Cmd {
@@ -483,17 +487,47 @@ func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 		if resolve == nil {
 			return nil
 		}
-		if wm := resolve(); wm == "" || wm != row.Machine {
-			return nil // not the sibling window's machine — preview must not window-switch
+		wm := resolve()
+		if wm == "" {
+			return nil // no cockpit context — deliberate no-op
+		}
+		if wm != row.Machine {
+			// The nav will switch master windows: tell the hook this is a
+			// FOLLOW so it keeps focus on the traveling sidebar.
+			declareSidebarIntent("follow")
 		}
 		target := row.Machine + ":" + row.SessionName
 		cmd := exec.Command(bin, "tmux", "nav", "--to", target, "--thread", row.ID)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
+			clearSidebarIntent() // the switch didn't happen — don't leave a stale intent
 			return actionMsg{err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
 		return navDoneMsg{name: rowDisplayName(row), id: row.ID, follow: true}
 	}
+}
+
+// declareSidebarIntent records — as a global option on the sidebar's own tmux
+// server ($TMUX-resolved) — WHY the upcoming master window switch is happening:
+// "follow" (keep focus on the traveling sidebar after the swap) or "enter"
+// (focus the attach pane). The traveling-sidebar hook consumes-and-clears it;
+// without an intent (a manual prefix+N switch) the hook leaves focus alone.
+// Outside tmux this is a no-op; a failed set is best-effort (the hook then
+// just leaves focus where tmux put it — the pre-intent behavior, not wrongness).
+func declareSidebarIntent(intent string) {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	exec.Command("tmux", "set-option", "-g", "@sesh-sidebar-intent", intent).Run() //nolint:errcheck — best-effort, see above
+}
+
+// clearSidebarIntent removes a declared-but-unconsumed intent (nav failed: no
+// window switch happened, so the next MANUAL switch must not act on it).
+func clearSidebarIntent() {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	exec.Command("tmux", "set-option", "-gu", "@sesh-sidebar-intent").Run() //nolint:errcheck
 }
 
 // focusSiblingPane hands the tmux focus from the sidebar's pane to the OTHER pane
@@ -2195,6 +2229,7 @@ func (m Model) navSelected() tea.Cmd {
 		return nil
 	}
 	bin, env := m.binaryPath, m.navEnv
+	sidebar, resolve := m.sidebar, m.followResolver
 	local := m.machine != "" && row.Machine == m.machine
 	// A LOCAL thread, when we're inside its work socket's tmux, switches the current
 	// client in place (no master). Otherwise: the full master nav path.
@@ -2263,9 +2298,22 @@ func (m Model) navSelected() tea.Cmd {
 				args = append(args, "--client", m.clientName)
 			}
 		}
+		// A sidebar ENTER that switches master windows: tell the traveling-
+		// sidebar hook to focus the ATTACH pane after it swaps the sidebar in
+		// (the sibling handoff below also fires — same target, either order).
+		declaredIntent := false
+		if sidebar && !useInClient && resolve != nil {
+			if wm := resolve(); wm != "" && wm != row.Machine {
+				declareSidebarIntent("enter")
+				declaredIntent = true
+			}
+		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
+			if declaredIntent {
+				clearSidebarIntent() // no switch happened — don't leave a stale intent
+			}
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
 		return navDoneMsg{name: rowDisplayName(row), id: row.ID}

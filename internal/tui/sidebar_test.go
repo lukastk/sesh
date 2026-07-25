@@ -76,6 +76,10 @@ func TestSidebarSingleClickEnters(t *testing.T) {
 // or switch master windows), and disabled entirely without a known sibling
 // machine.
 func TestSidebarFollow(t *testing.T) {
+	// followNav declares the window-switch intent via the AMBIENT $TMUX; scrub it
+	// so running the cmds below can never write options on the developer's own
+	// live tmux server.
+	t.Setenv("TMUX", "")
 	row := func(id string, head api.Head, machine string) api.ThreadRow {
 		return api.ThreadRow{Thread: api.Thread{ID: id, Name: id, Machine: machine, SessionName: "s_" + id}, Head: head}
 	}
@@ -120,22 +124,23 @@ func TestSidebarFollow(t *testing.T) {
 	if _, ok := m.followEligible(m.followSeq); ok {
 		t.Fatalf("a headless row must not follow (would revive)")
 	}
-	// A cross-machine row must NEVER follow (would switch master windows).
-	// The machine check happens at EXEC time via the live resolver (the
-	// traveling sidebar's window can change between arm and fire): a
-	// REACHABLE row on another machine passes eligibility but its followNav
-	// command resolves the sibling machine, sees the mismatch, and no-ops
-	// (nil msg — nothing execs). This one's owner is offline too, so
-	// eligibility also refuses it.
+	// An UNREACHABLE owner must not follow (eligibility).
 	m.cursor = 2
 	if _, ok := m.followEligible(m.followSeq); ok {
 		t.Fatalf("an unreachable row must not follow")
 	}
+	// A REACHABLE row on ANOTHER machine DOES follow (the traveling sidebar
+	// comes along on the window switch — Lukas; originally excluded). The cmd
+	// really attempts the nav: with a bogus binary that surfaces as a loud
+	// actionMsg error — proof it exec'd rather than silently skipping.
 	crossRow := row("far2", api.Headful, "elsewhere")
-	if msg := m.followNav(crossRow)(); msg != nil {
-		t.Fatalf("followNav to another machine must be a silent no-op, got %T", msg)
+	if msg := m.followNav(crossRow)(); msg == nil {
+		t.Fatalf("followNav to another machine must attempt the nav (traveling sidebar), got nil")
+	} else if _, isAct := msg.(actionMsg); !isAct {
+		t.Fatalf("expected the attempted nav's result, got %T", msg)
 	}
-	// A resolver that reads an UNKNOWN window (renamed / not a machine) skips too.
+	// A resolver that reads an UNKNOWN window (renamed / no cockpit context)
+	// still skips — there is no master to drive.
 	m5 := base()
 	m5.followResolver = func() string { return "" }
 	if msg := m5.followNav(row("live", api.Headful, "mymain"))(); msg != nil {

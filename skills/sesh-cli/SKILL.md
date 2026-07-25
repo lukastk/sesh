@@ -248,8 +248,10 @@ thread does not quit the TUI**: the nav happens and focus hands to the sibling p
 the same tmux window, so the sidebar stays ambiently visible beside the agent. A
 **single mouse click enters a thread** (the sidebar is a jump list — no
 select-then-double-click; clicking the ▸/▾ marker still just folds). **Moving the
-selection FOLLOWS**: once the cursor rests (~300ms) the cockpit previews the selected
-thread while focus stays in the sidebar — Enter/click is what commits focus. Follow
+selection FOLLOWS immediately**: the cockpit previews the selected thread while focus
+stays in the sidebar — Enter/click is what commits focus. A local preview costs ~a
+tmux switch (one warm daemon call, no subprocess); while one is in flight further
+moves coalesce into a single catch-up nav, so held arrows degrade gracefully. Follow
 crosses machines: the master window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never

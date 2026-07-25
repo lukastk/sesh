@@ -68,13 +68,14 @@ func TestSidebarSingleClickEnters(t *testing.T) {
 	}
 }
 
-// TestSidebarFollow (Lukas): moving the selection FOLLOWS — the sibling pane
-// navs to the selected thread while focus stays in the sidebar; Enter is what
-// commits focus. This pins the policy truth table: debounced (a stale seq is
-// dropped), dedup'd (the already-shown thread re-navs nothing), live headful
-// same-machine reachable rows only (a preview must never revive a dead thread
-// or switch master windows), and disabled entirely without a known sibling
-// machine.
+// TestSidebarFollow (Lukas): moving the selection FOLLOWS — the cockpit navs
+// to the selected thread while focus stays in the sidebar; Enter is what
+// commits focus. Fire-immediately + coalesce (no debounce): a move fires the
+// nav at once; moves while one runs are swallowed and the COMPLETION re-arms
+// for wherever the cursor is then. Policy: dedup against the shown thread,
+// live headful reachable rows only (a preview must never revive), cross-
+// machine allowed (the traveling sidebar rides the switch), disabled without
+// cockpit context.
 func TestSidebarFollow(t *testing.T) {
 	// followNav declares the window-switch intent via the AMBIENT $TMUX; scrub it
 	// so running the cmds below can never write options on the developer's own
@@ -94,83 +95,114 @@ func TestSidebarFollow(t *testing.T) {
 		return m
 	}
 
-	// Arrow-down arms a debounce tick; the settled tick on a live same-machine
-	// row yields a follow cmd.
+	// The fixture leaves cursor 0 on an eligible row: pressing DOWN moves onto
+	// the headless row (ineligible -> nil cmd), pressing UP back onto the live
+	// row fires a follow IMMEDIATELY (non-nil cmd) and latches in-flight.
 	m := base()
 	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = nm.(Model)
+	if cmd != nil {
+		t.Fatalf("moving onto a HEADLESS row must not follow (would revive)")
+	}
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = nm.(Model)
 	if cmd == nil {
-		t.Fatalf("moving the selection in sidebar mode should arm the follow debounce")
+		t.Fatalf("moving onto a live row must fire the follow immediately (no debounce)")
 	}
-	if m.cursor != 1 {
-		t.Fatalf("cursor = %d, want 1", m.cursor)
+	if !m.followInFlight {
+		t.Fatalf("firing a follow must latch in-flight")
 	}
-	m.cursor = 0 // put it on the live row for the eligibility checks below
-	if _, ok := m.followEligible(m.followSeq); !ok {
-		t.Fatalf("live headful same-machine row must be follow-eligible")
+	// Moves while one runs are swallowed (no queued navs)...
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(Model)
+	if cmd != nil {
+		t.Fatalf("a move during an in-flight follow must not fire another nav")
 	}
-	// A STALE seq (the user kept moving) is dropped.
-	if _, ok := m.followEligible(m.followSeq - 1); ok {
-		t.Fatalf("a stale debounce tick must not follow")
+	// ...and the COMPLETION re-arms for wherever the cursor is now. Here the
+	// cursor sits on the headless row -> the coalesce is an eligible-gated
+	// no-op; move it to the eligible row first to see it fire.
+	m.cursor = 0
+	nm, cmd = m.Update(followDoneMsg{id: "other", name: "other"})
+	m = nm.(Model)
+	if cmd == nil || !m.followInFlight {
+		t.Fatalf("completion with the cursor on an eligible unseen row must coalesce-fire (cmd=%v inflight=%v)", cmd, m.followInFlight)
 	}
-	// Dedup: the thread the sibling already shows re-navs nothing.
-	m.lastFollowedID = "live"
-	if _, ok := m.followEligible(m.followSeq); ok {
+	if m.lastFollowedID != "other" {
+		t.Fatalf("completion did not record lastFollowedID")
+	}
+	// A failed follow surfaces loudly AND records the attempted target — the
+	// retry-loop guard: with the cursor still on the failing row, the coalesce
+	// must NOT refire the same broken nav (error -> re-arm -> error forever);
+	// moving away and back retries deliberately.
+	m2 := base() // cursor 0 = "live", the row whose nav failed
+	m2.followInFlight = true
+	nm2, cmd2 := m2.Update(followDoneMsg{id: "live", err: errStub("nav broke")})
+	g2 := nm2.(Model)
+	if g2.ActionErr() == nil || g2.lastFollowedID != "live" || g2.followInFlight || cmd2 != nil {
+		t.Fatalf("failed follow: err=%v last=%q inflight=%v cmd=%v — want loud, recorded, no refire", g2.ActionErr(), g2.lastFollowedID, g2.followInFlight, cmd2)
+	}
+
+	// Eligibility table (armFollow-level policy).
+	e := base()
+	if _, ok := e.followEligible(); !ok {
+		t.Fatalf("live headful reachable row must be follow-eligible")
+	}
+	e.lastFollowedID = "live" // dedup: the thread the cockpit already shows
+	if _, ok := e.followEligible(); ok {
 		t.Fatalf("the already-shown thread must not re-follow")
 	}
-	m.lastFollowedID = ""
-	// A headless row must NEVER follow (a preview must not revive).
-	m.cursor = 1
-	if _, ok := m.followEligible(m.followSeq); ok {
+	e.lastFollowedID = ""
+	e.cursor = 1 // headless
+	if _, ok := e.followEligible(); ok {
 		t.Fatalf("a headless row must not follow (would revive)")
 	}
-	// An UNREACHABLE owner must not follow (eligibility).
-	m.cursor = 2
-	if _, ok := m.followEligible(m.followSeq); ok {
+	e.cursor = 2 // unreachable owner
+	if _, ok := e.followEligible(); ok {
 		t.Fatalf("an unreachable row must not follow")
 	}
+
 	// A REACHABLE row on ANOTHER machine DOES follow (the traveling sidebar
-	// comes along on the window switch — Lukas; originally excluded). The cmd
-	// really attempts the nav: with a bogus binary that surfaces as a loud
-	// actionMsg error — proof it exec'd rather than silently skipping.
-	crossRow := row("far2", api.Headful, "elsewhere")
-	if msg := m.followNav(crossRow)(); msg == nil {
-		t.Fatalf("followNav to another machine must attempt the nav (traveling sidebar), got nil")
-	} else if _, isAct := msg.(actionMsg); !isAct {
-		t.Fatalf("expected the attempted nav's result, got %T", msg)
+	// rides the window switch). The cmd really attempts the nav: with a bogus
+	// binary that surfaces as a loud followDoneMsg error — proof it exec'd
+	// rather than silently skipping.
+	if msg := base().followNav(row("far2", api.Headful, "elsewhere"))(); true {
+		fd, ok := msg.(followDoneMsg)
+		if !ok || fd.err == nil {
+			t.Fatalf("followNav to another machine must attempt the nav, got %#v", msg)
+		}
 	}
-	// A resolver that reads an UNKNOWN window (renamed / no cockpit context)
-	// still skips — there is no master to drive.
+	// The LOCAL fast path goes through the daemon client, not a subprocess: a
+	// nil client + a same-window local row falls into the fast path guard...
+	// (the real daemon call is proven by the sidebar-nav-stays claim); an
+	// unresolvable window ("" — no cockpit context) skips entirely.
 	m5 := base()
 	m5.followResolver = func() string { return "" }
-	if msg := m5.followNav(row("live", api.Headful, "mymain"))(); msg != nil {
-		t.Fatalf("an unresolvable sibling machine must skip the follow, got %T", msg)
+	if msg := m5.followNav(row("live", api.Headful, "mymain"))(); msg.(followDoneMsg).err != nil || msg.(followDoneMsg).id != "" {
+		t.Fatalf("an unresolvable sibling machine must skip the follow, got %#v", msg)
 	}
 	// No known sibling machine = follow disabled entirely (armFollow returns nil).
-	m2 := base()
-	m2.followResolver = nil
-	if cmd := m2.armFollow(); cmd != nil {
+	m6 := base()
+	m6.followResolver = nil
+	if cmd := m6.armFollow(); cmd != nil {
 		t.Fatalf("follow must be disabled without a known sibling machine")
 	}
 	// Not in sidebar mode: arrows never arm a follow.
-	m3 := base()
-	m3.sidebar = false
-	if cmd := m3.armFollow(); cmd != nil {
+	m7 := base()
+	m7.sidebar = false
+	if cmd := m7.armFollow(); cmd != nil {
 		t.Fatalf("the normal grid must never follow")
 	}
 
-	// The follow's navDoneMsg records the shown thread and does NOT hand focus
-	// (no cmd at all — focus stays in the sidebar); an ENTER navDoneMsg still
-	// hands focus (non-nil cmd; TMUX scrubbed so it no-ops here).
-	t.Setenv("TMUX", "")
-	m4 := base()
-	nm4, cmd4 := m4.Update(navDoneMsg{name: "live", id: "live", follow: true})
-	g4 := nm4.(Model)
-	if cmd4 != nil {
-		t.Fatalf("a follow nav must not run a focus handoff")
+	// An ENTER navDoneMsg records the shown thread and hands focus (non-nil
+	// cmd; TMUX scrubbed so running it here is a no-op).
+	m8 := base()
+	nm8, cmd8 := m8.Update(navDoneMsg{name: "live", id: "live"})
+	g8 := nm8.(Model)
+	if cmd8 == nil {
+		t.Fatalf("an enter nav must hand focus to the sibling pane")
 	}
-	if g4.lastFollowedID != "live" {
-		t.Fatalf("follow did not record lastFollowedID")
+	if g8.lastFollowedID != "live" {
+		t.Fatalf("enter did not record the shown thread")
 	}
 }
 

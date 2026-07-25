@@ -597,28 +597,38 @@ func claimSidebarNavStays(t *testing.T) {
 	// live tmux (the model's nav context is the injected WithTmux, unaffected).
 	t.Setenv("TMUX", "")
 
-	// FOLLOW: arrow onto the second thread; the armed debounce cmd() blocks out
-	// the rest window then yields the tick; feeding it back runs the REAL follow
-	// nav — which must succeed, keep the TUI open, and hand NO focus (nil cmd:
-	// the user is still arrowing in the sidebar).
-	nmF, armed := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	// FOLLOW: give thread B's session a second window and park it there, so the
+	// inner switch has an observable effect (the --thread window landing, the
+	// same observable the nav-window cells own). Arrowing onto B fires the
+	// follow IMMEDIATELY (no debounce) via the FAST PATH — a direct daemon
+	// call (client.TmuxNav on the sandbox daemon, no subprocess) — which must
+	// succeed, land the session on the thread's window, keep the TUI open, and
+	// hand NO focus (the completion only re-arms; the user is still arrowing).
+	sessB := th.SessionName
+	mustTmux(t, local.TmuxSocket, "new-window", "-t", sessB+":", "-n", "scratch")
+	mustTmux(t, local.TmuxSocket, "select-window", "-t", sessB+":scratch")
+	nmF, followCmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = nmF.(tui.Model)
-	if armed == nil {
-		t.Fatalf("arrow move in sidebar mode armed no follow debounce")
-	}
-	nmF2, followCmd := m.Update(armed()) // blocks ~300ms, returns the settled tick
-	m = nmF2.(tui.Model)
 	if followCmd == nil {
-		t.Fatalf("settled follow tick produced no nav command")
+		t.Fatalf("arrow move in sidebar mode fired no follow (must be immediate, no debounce)")
 	}
-	followMsg := followCmd() // the REAL follow nav
+	followMsg := followCmd() // the REAL follow nav (daemon fast path)
 	nmF3, afterFollow := m.Update(followMsg)
 	m = nmF3.(tui.Model)
 	if m.ActionErr() != nil {
 		t.Fatalf("follow nav errored: %v", m.ActionErr())
 	}
 	if afterFollow != nil {
-		t.Fatalf("follow nav must hand no focus and never quit (got a follow-up cmd)")
+		if _, quit := afterFollow().(tea.QuitMsg); quit {
+			t.Fatalf("follow completion must never quit")
+		}
+	}
+	out, err := exec.Command("tmux", "-L", local.TmuxSocket, "display-message", "-t", sessB, "-p", "#{window_index}").Output()
+	if err != nil {
+		t.Fatalf("read work session window: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "0" {
+		t.Errorf("follow did not land the work session on the thread's window (active window %s, want 0)", got)
 	}
 
 	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("enter")})
@@ -631,11 +641,11 @@ func claimSidebarNavStays(t *testing.T) {
 		t.Fatalf("sidebar nav errored: %v", m.ActionErr())
 	}
 	// (a) The nav REALLY happened: the master's active window is the machine window.
-	out, err := exec.Command("tmux", "-L", master, "display-message", "-t", "m", "-p", "#{window_name}").Output()
-	if err != nil {
-		t.Fatalf("read master active window: %v", err)
+	out2, err2 := exec.Command("tmux", "-L", master, "display-message", "-t", "m", "-p", "#{window_name}").Output()
+	if err2 != nil {
+		t.Fatalf("read master active window: %v", err2)
 	}
-	if got := strings.TrimSpace(string(out)); got != local.Machine {
+	if got := strings.TrimSpace(string(out2)); got != local.Machine {
 		t.Errorf("master active window = %q after sidebar nav, want %q (nav did not land)", got, local.Machine)
 	}
 	// (b) The TUI STAYS: no quit follows a successful sidebar nav.

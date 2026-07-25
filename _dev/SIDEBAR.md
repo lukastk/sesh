@@ -51,10 +51,18 @@ the myvault pad "Herdr vs sesh - migration assessment".
   the handoff on our window is then a harmless no-op that leaves the attach pane
   active for the next visit. A single-pane window (standalone testing) is a
   no-op, not an error.
-- **Selection FOLLOW** (Lukas, testing v1): moving the selection (arrows/j/k,
-  ^j/^k, wheel) PREVIEWS the thread — after the cursor rests (300ms debounce)
-  the sibling pane navs to it while focus STAYS in the sidebar, so you can keep
-  arrowing; Enter (or a single click) is what commits focus to the thread pane.
+- **Selection FOLLOW** (Lukas, testing v1; latency reworked same session):
+  moving the selection (arrows/j/k, ^j/^k, wheel) PREVIEWS the thread
+  IMMEDIATELY — no debounce: the nav fires on the move; while one is in flight
+  further moves are swallowed and the COMPLETION re-arms for wherever the
+  cursor is then (fire-immediately + coalesce — single moves preview at nav
+  cost, held arrows degrade to previewing the rows each nav catches up to,
+  never a queued nav per row; a failed target is recorded so it can't retry-
+  loop while still selected). The LOCAL same-window preview is ONE warm daemon
+  call (client.TmuxNav — no `sesh` subprocess, no master-window select), ~a
+  tmux switch; other cases take the full subprocess master nav. Focus STAYS in
+  the sidebar; Enter (or a single click) is what commits focus to the thread
+  pane.
   Follow policy (deliberate no-op skips, never errors): live HEADFUL threads
   only (a preview must never revive a dead thread), reachable owner, deduped
   against the thread already shown. Follow CROSSES machines (revised — with the

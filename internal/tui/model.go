@@ -166,9 +166,13 @@ type Model struct {
 	// to re-cache on. A static spawner ($SESH_TUI_MASTER_MACHINE) uses a
 	// constant resolver; the cockpit uses a live window-name read.
 	followResolver func() string
-	// followSeq invalidates stale follow debounce ticks (a later move bumps it);
-	// lastFollowedID dedups so resting on the already-shown thread re-navs nothing.
-	followSeq      int
+	// followInFlight: a follow nav is currently running. Selection moves while
+	// one runs don't queue navs — the completion handler re-arms for wherever
+	// the cursor is THEN (fire-immediately + coalesce: single moves preview at
+	// nav cost with no debounce; held arrows degrade to previewing the rows the
+	// nav keeps catching up to). lastFollowedID dedups so landing on the
+	// already-shown thread re-navs nothing.
+	followInFlight bool
 	lastFollowedID string
 	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
 	// hide the last-known threads of a mesh machine that is currently unreachable.
@@ -422,38 +426,34 @@ func (m Model) WithSidebarFollowResolver(fn func() string) Model {
 	return m
 }
 
-// followDebounce is how long the selection must REST before the sidebar follows
-// it: long enough that holding an arrow key doesn't fire a nav per row, short
-// enough to feel immediate once you stop.
-const followDebounce = 300 * time.Millisecond
-
-// followTickMsg fires after followDebounce; a stale seq (the selection moved
-// again) is dropped.
-type followTickMsg struct{ seq int }
-
-// armFollow schedules a selection-follow after the debounce (sidebar mode with a
-// known sibling machine only — nil otherwise, so call sites can return it
-// unconditionally). Each USER selection move re-arms; fetch-driven cursor moves
-// (reanchor/preselect) deliberately do not.
+// armFollow fires a selection-follow IMMEDIATELY when the selected row is
+// eligible and no follow is already running (sidebar mode with a known sibling
+// machine only — nil otherwise, so call sites can return it unconditionally).
+// There is deliberately NO debounce: a single move previews at nav cost
+// (~tens of ms locally); while a nav is in flight further moves return nil and
+// the completion handler (followDoneMsg) calls armFollow again, coalescing a
+// held-arrow burst into "preview wherever the cursor is when each nav lands"
+// instead of queueing one nav per row. Each USER selection move arms;
+// fetch-driven cursor moves (reanchor/preselect) deliberately do not.
 func (m *Model) armFollow() tea.Cmd {
-	if !m.sidebar || m.followResolver == nil {
+	if !m.sidebar || m.followResolver == nil || m.followInFlight {
 		return nil
 	}
-	m.followSeq++
-	seq := m.followSeq
-	return tea.Tick(followDebounce, func(time.Time) tea.Msg { return followTickMsg{seq: seq} })
+	row, ok := m.followEligible()
+	if !ok {
+		return nil
+	}
+	m.followInFlight = true
+	return m.followNav(row)
 }
 
 // followEligible reports whether the selected row is one the sidebar should
-// follow to, applying the model-side follow policy: only after the debounce
-// settled (seq current), only a not-already-shown thread, only a LIVE headful
-// session (a preview must never revive), and only a reachable owner. The
-// SIBLING-MACHINE check (a preview must never switch master windows) happens
-// inside followNav's command, where the resolver reads the machine LIVE — the
-// traveling sidebar's window can have changed since any earlier read. All skips
-// are deliberate policy no-ops, not errors — Enter still takes the full path.
-func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
-	if !m.sidebar || m.followResolver == nil || seq != m.followSeq {
+// follow to, applying the model-side follow policy: only a not-already-shown
+// thread, only a LIVE headful session (a preview must never revive), and only
+// a reachable owner. All skips are deliberate policy no-ops, not errors —
+// Enter still takes the full path.
+func (m Model) followEligible() (api.ThreadRow, bool) {
+	if !m.sidebar || m.followResolver == nil {
 		return api.ThreadRow{}, false
 	}
 	row, ok := m.Selected()
@@ -469,27 +469,53 @@ func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
 	return row, true
 }
 
-// followNav navs the SIBLING pane to row without touching focus: the master nav
-// path only (never --in-client — an in-client switch would move the whole view
-// away from the sidebar), no revive (followEligible guarantees a live session).
-// A row on ANOTHER machine follows too — the nav switches the master window and
-// the traveling-sidebar hook brings the sidebar along; the "follow" INTENT
-// declared beforehand (see declareSidebarIntent) tells the hook to keep focus
-// ON the sidebar after the swap, so the user keeps arrowing. (Originally
-// cross-machine was excluded; the traveling sidebar made it coherent — Lukas.)
+// followDoneMsg reports a completed follow nav (success or failure). Its
+// handler clears the in-flight latch and RE-ARMS — the coalescing half of the
+// no-debounce design: if the selection moved while this nav ran, the next
+// preview fires immediately for wherever the cursor is now.
+type followDoneMsg struct {
+	id   string
+	name string
+	err  error
+}
+
+// followNav navs the cockpit's THREAD pane to row without touching focus, no
+// revive (followEligible guarantees a live session). Two paths:
+//
+//   - FAST PATH — the row lives on the sidebar's CURRENT window's machine AND
+//     that is the local machine: the whole nav reduces to the INNER switch on
+//     the local work server, done as ONE warm daemon call (client.TmuxNav on
+//     the unix socket — no `sesh` subprocess, no master-window select; the
+//     client is already viewing this window). This is the "arrow between my
+//     own machine's threads" case and lands in ~a tmux switch.
+//   - SUBPROCESS PATH — anything else: the full `sesh tmux nav` master path
+//     (window select + routed inner switch; never --in-client — an in-client
+//     switch would move the whole view away from the sidebar). A row on
+//     ANOTHER machine than the current window follows too — the nav switches
+//     the master window and the traveling-sidebar hook brings the sidebar
+//     along; the "follow" INTENT declared beforehand (declareSidebarIntent)
+//     tells the hook to keep focus ON the sidebar so the user keeps arrowing.
+//
 // An unresolvable sibling machine ("") means no readable cockpit context: skip
 // (a follow without a master to drive would only spray errors while arrowing).
-// Success reports navDoneMsg{follow: true}, which records lastFollowedID and
-// deliberately skips the focus handoff.
 func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 	bin, env, resolve := m.binaryPath, m.navEnv, m.followResolver
+	client, localMachine := m.client, m.machine
 	return func() tea.Msg {
 		if resolve == nil {
-			return nil
+			return followDoneMsg{}
 		}
 		wm := resolve()
 		if wm == "" {
-			return nil // no cockpit context — deliberate no-op
+			return followDoneMsg{} // no cockpit context — deliberate no-op
+		}
+		if wm == row.Machine && row.Machine == localMachine && client != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := client.TmuxNav(ctx, api.NavRequest{Session: row.SessionName, Origin: localMachine, ThreadID: row.ID}); err != nil {
+				return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %w", row.SessionName, err)}
+			}
+			return followDoneMsg{id: row.ID, name: rowDisplayName(row)}
 		}
 		if wm != row.Machine {
 			// The nav will switch master windows: tell the hook this is a
@@ -501,9 +527,9 @@ func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			clearSidebarIntent() // the switch didn't happen — don't leave a stale intent
-			return actionMsg{err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
+			return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return navDoneMsg{name: rowDisplayName(row), id: row.ID, follow: true}
+		return followDoneMsg{id: row.ID, name: rowDisplayName(row)}
 	}
 }
 
@@ -978,26 +1004,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmPatch(msg.seq)
 		return m, nil
-	case followTickMsg:
-		// The selection rested: follow it in the sibling pane (policy gates in
-		// followEligible; a stale seq means the user kept moving — drop it).
-		if row, ok := m.followEligible(msg.seq); ok {
-			return m, m.followNav(row)
+	case followDoneMsg:
+		// A follow nav finished. Clear the latch, record what the cockpit now
+		// shows, then RE-ARM: if the selection moved while this nav ran, the
+		// next preview fires immediately for wherever the cursor is now (the
+		// coalescing half of the no-debounce design; armFollow's eligibility
+		// dedup makes this a no-op when the cursor didn't move).
+		m.followInFlight = false
+		if msg.err != nil {
+			m.actionErr = msg.err
 		}
-		return m, nil
+		if msg.id != "" {
+			// Recorded on FAILURE too: the coalesce below re-arms, and without
+			// this a still-selected failing target would refire the same broken
+			// nav forever (error -> re-arm -> eligible -> error ...). Recording
+			// the ATTEMPT makes the dedup break the loop; moving away and back
+			// retries deliberately.
+			m.lastFollowedID = msg.id
+		}
+		cmd := m.armFollow()
+		return m, cmd
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us).
 		// SIDEBAR mode: the TUI is a persistent pane BESIDE the thread, not a
-		// popup covering it — stay open. A FOLLOW nav keeps focus here (the user
-		// is arrowing through the list); an ENTER nav hands focus to the sibling
-		// (attach) pane so the user lands typing at the agent. Otherwise quit so
-		// the TUI (and the popup hosting it) gets out of the way.
+		// popup covering it — stay open, note the entry, and hand focus to the
+		// sibling (attach) pane so the user lands typing at the agent.
+		// Otherwise quit so the TUI (and the popup hosting it) gets out of the way.
 		if m.sidebar {
 			if msg.id != "" {
-				m.lastFollowedID = msg.id // either flavor: the sibling now shows it
-			}
-			if msg.follow {
-				return m, nil
+				m.lastFollowedID = msg.id // the cockpit now shows it — no follow needed
 			}
 			if msg.name != "" {
 				m.note = fmt.Sprintf("entered %q", msg.name)
@@ -1619,17 +1654,15 @@ func bptr(b bool) *bool     { return &b }
 // thread id so the attach lands on the WINDOW holding its pane.
 type attachMsg struct{ target, thread string }
 
-// navDoneMsg reports a successful nav: the user is where they asked to be, so the
-// TUI quits — except in SIDEBAR mode, where the TUI is a persistent pane: it stays
-// running and hands focus to its sibling (attach) pane instead. A FOLLOW nav
-// (selection-follow, follow=true) additionally skips the focus handoff — the user
-// is still driving the sidebar. (A FAILED nav stays an actionMsg with the error,
-// keeping the TUI open either way.) name labels the entered thread for the
-// sidebar's note line; id feeds lastFollowedID.
+// navDoneMsg reports a successful ENTER nav: the user is where they asked to
+// be, so the TUI quits — except in SIDEBAR mode, where the TUI is a persistent
+// pane: it stays running and hands focus to its sibling (attach) pane instead.
+// (A FAILED nav stays an actionMsg with the error, keeping the TUI open either
+// way; follow navs report followDoneMsg.) name labels the entered thread for
+// the sidebar's note line; id feeds lastFollowedID.
 type navDoneMsg struct {
-	name   string
-	id     string
-	follow bool
+	name string
+	id   string
 }
 
 // machineReachable reports whether `machine` was reachable at the last mesh read. This

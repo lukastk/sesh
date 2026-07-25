@@ -1,5 +1,79 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H57 — the PERSISTENT SIDEBAR (issue #8 sesh half): `tui --sidebar` + traveling-slot cockpit rig + Tab view picker (2026-07-24/25, branch ui-sidebar merged c843a5d; NO schema change, binary-only; deployed ALL FIVE, no restarts; myrig phase PENDING)
+Issue #8 design-first: conferred (AskUserQuestion) → tmux-layered, plain thread list,
+desktops only; then SIX live iterations with Lukas on his macbook master. Design doc
+_dev/SIDEBAR.md is the reference (kept current through every pivot). Mechanism all in
+sesh; the cockpit rig on macbook is TRANSIENT (hook+toggle scripts in /tmp, tmux
+bind/hook on the live server — dies with the master; myrig phase makes it real).
+- MODE (`sesh tui --sidebar`): NAME-only column preset (SidebarColumns; [tui] columns +
+  [[tui.column]] moves deliberately skipped — wide-grid tuning; explicit --columns wins);
+  nav DOESN'T QUIT — focus hands to the sibling pane (focusSiblingPane: plain `tmux
+  select-pane -t :.+` via the pane's own $TMUX); SINGLE click enters (jump list; fold
+  marker still folds); esc/q NO-OPS (Lukas hit Esc, the pane died and took the traveling
+  slot — ctrl+c stays the deliberate kill); NO "entered" note (the switched pane IS the
+  feedback).
+- LAYOUT SAGA (the awkwardness ladder): per-window sidebars (4 copies, state doesn't
+  travel) → join-pane traveling REJECTED pre-build (systematic ±38-col resize churn =
+  inner reflow on every switch) → **TRAVELING over FIXED SLOTS**: every master window
+  keeps a permanent 38-col left slot (blank `sleep` placeholder pane, @sesh-sidebar-slot
+  marker); ONE sidebar (@sesh-sidebar) swap-panes into the active window's slot via an
+  after-select-window hook — same-size swap ⇒ ZERO resizes. GOTCHAS: parked windows sit
+  at detached-default 80x24 until visited — PRE-resize-window them to the client size or
+  the first visit rescales the slot; capture split-window's pane id via -P -F
+  '#{pane_id}' (matching pane_current_command races the shell startup); macOS: never
+  overwrite a running binary in place (.new+mv) — an in-place build once made the next
+  spawn die silently.
+- FOLLOW (the headline): moving the selection PREVIEWS the thread, focus STAYS in the
+  sidebar; Enter/click commits focus. Latency reworked twice on Lukas's feel: 300ms
+  debounce → FIRE-IMMEDIATELY + COALESCE (followInFlight latch; completion re-arms for
+  the current cursor; a FAILED target records lastFollowedID too or error→re-arm→
+  still-selected loops the broken nav forever — caught by the unit test) + LOCAL FAST
+  PATH (row on the current window's machine == local machine ⇒ ONE warm client.TmuxNav
+  {Session,Origin,ThreadID} on the unix socket — no subprocess, no master select; ~a
+  tmux switch). Cross-machine follow WORKS (the traveling sidebar rides the window
+  switch — the original same-machine guard became obsolete): sesh declares
+  @sesh-sidebar-intent=follow|enter (global option on the master server,
+  declareSidebarIntent, cleared on nav failure) and the swap hook consumes-and-clears:
+  follow→select the sidebar (keep arrowing), enter→select the attach, absent (manual
+  prefix+N)→leave focus alone. Policy: live HEADFUL only (preview never revives),
+  reachable owner, dedup, sibling machine from $SESH_TUI_MASTER_MACHINE (pinned) else
+  the WINDOW NAME resolved LIVE per follow (followResolver func — a same-size swap
+  raises no resize event to re-cache on; window-name also feeds WithMasterCursor start
+  preselect).
+- TAB VIEW PICKER (all TUI modes, not just sidebar): Tab opens a popup listing every
+  view, PRESELECTING THE NEXT (tab+enter ≡ old cycle); tab/↑↓ wrap, enter applies,
+  esc cancels, wheel moves, CLICK applies (rows at line 2 — viewPickerRowAtY mirrors);
+  filter-mode Tab same (dispatches above filter, filter survives); tickets-view tab
+  untouched. Conformance nextView(t,m) helper replaced 15 KeyTab sites.
+- TESTS: sidebar_test.go (nav-no-quit, esc-guard, single-click, follow truth table incl.
+  the retry-loop guard + in-flight swallow + coalesce, picker, preset); claim
+  sidebar-nav-stays (registered AND declared): real daemon + 2 real pi + real master —
+  one arrow press drives the REAL fast-path client.TmuxNav (thread session parked on a
+  2nd window lands back on the thread's window = the H8 --thread observable), then enter
+  = subprocess master path (master window switch + no quit); claim scrubs $TMUX before
+  running cmds so focus/intent writes can NEVER touch the developer's live server (same
+  in units — followNav writes tmux options via ambient $TMUX!). view-cycle-tab claim
+  rewritten for the picker incl. real click-apply. Anti-gaming neuters each round.
+  REPAIRED stale claim en route: action-mutate-remote still expected the pre-H54 archive
+  confirm. FULL TUI claims 64/64 green at merge.
+- MACBOOK RIG (transient): slots+markers in all 4 windows, /tmp/sesh-sidebar-swap.sh
+  (after-select-window hook: swap + width-enforce + intent consume),
+  /tmp/sesh-sidebar-toggle.sh on prefix+b — HIDE removes sidebar AND all slots (full
+  width back; leaving blank slots read as "still there" — Lukas), SHOW rebuilds slots
+  everywhere + sidebar in the current window focused; revives a dead pane. Test binary
+  ~/.local/bin/sesh-sidebar (now == main).
+- MYRIG PHASE (pending, the follow-up): conf-owned hook + prefix+b toggle + mastermaint
+  slot self-heal (new windows have no slot until a toggle cycle) + termux excluded. NB
+  Lukas asked whether the myrig cockpit layer should move INTO sesh — assessment given
+  (see issue #8 / the session): keep personal policy (bindings/menus/styling) in myrig,
+  move the STRUCTURAL sidebar machinery (hook/toggle/slots, the intent protocol's
+  consumer) into sesh as mastermaint + a `sesh master sidebar` verb so the intent
+  protocol lives in one repo and gets conformance cells.
+DEPLOY: merged --no-ff c843a5d, binary-only ALL FIVE (mymain native; macbook/macstudio
+/opt/homebrew/bin/go; ideapad native; termux plain go build CGO=1) — no daemon
+restarts, schema stays 45. The Tab picker is now LIVE in the normal TUI fleet-wide.
+
 ## H56 — remote-action lag KILLED (H55's A+D+C shipped): keypress optimism w/ per-action revert + full-uuid resolve fast path + post-write mesh nudge (2026-07-24, sesh 436dd31 api 44→45, NO store migration; deployed ALL FIVE)
 Lukas approved H55's recommendation verbatim ("Okay do that (A+D+C)"); E/F not built.
 - A — KEYPRESS OPTIMISM, PER-ACTION REVERT (internal/tui/model.go, the H36-item-3 debt):

@@ -474,9 +474,8 @@ func (m Model) followEligible() (api.ThreadRow, bool) {
 // no-debounce design: if the selection moved while this nav ran, the next
 // preview fires immediately for wherever the cursor is now.
 type followDoneMsg struct {
-	id   string
-	name string
-	err  error
+	id  string
+	err error
 }
 
 // followNav navs the cockpit's THREAD pane to row without touching focus, no
@@ -515,7 +514,7 @@ func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 			if err := client.TmuxNav(ctx, api.NavRequest{Session: row.SessionName, Origin: localMachine, ThreadID: row.ID}); err != nil {
 				return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %w", row.SessionName, err)}
 			}
-			return followDoneMsg{id: row.ID, name: rowDisplayName(row)}
+			return followDoneMsg{id: row.ID}
 		}
 		if wm != row.Machine {
 			// The nav will switch master windows: tell the hook this is a
@@ -529,7 +528,7 @@ func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 			clearSidebarIntent() // the switch didn't happen — don't leave a stale intent
 			return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return followDoneMsg{id: row.ID, name: rowDisplayName(row)}
+		return followDoneMsg{id: row.ID}
 	}
 }
 
@@ -1033,9 +1032,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sidebar {
 			if msg.id != "" {
 				m.lastFollowedID = msg.id // the cockpit now shows it — no follow needed
-			}
-			if msg.name != "" {
-				m.note = fmt.Sprintf("entered %q", msg.name)
 			}
 			return m, focusSiblingPane()
 		}
@@ -1656,13 +1652,12 @@ type attachMsg struct{ target, thread string }
 
 // navDoneMsg reports a successful ENTER nav: the user is where they asked to
 // be, so the TUI quits — except in SIDEBAR mode, where the TUI is a persistent
-// pane: it stays running and hands focus to its sibling (attach) pane instead.
-// (A FAILED nav stays an actionMsg with the error, keeping the TUI open either
-// way; follow navs report followDoneMsg.) name labels the entered thread for
-// the sidebar's note line; id feeds lastFollowedID.
+// pane: it stays running and hands focus to its sibling (attach) pane instead,
+// with no note (the switched pane IS the feedback — Lukas). (A FAILED nav
+// stays an actionMsg with the error, keeping the TUI open either way; follow
+// navs report followDoneMsg.) id feeds lastFollowedID.
 type navDoneMsg struct {
-	name string
-	id   string
+	id string
 }
 
 // machineReachable reports whether `machine` was reachable at the last mesh read. This
@@ -2349,7 +2344,7 @@ func (m Model) navSelected() tea.Cmd {
 			}
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return navDoneMsg{name: rowDisplayName(row), id: row.ID}
+		return navDoneMsg{id: row.ID}
 	}
 }
 

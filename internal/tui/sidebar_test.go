@@ -11,21 +11,21 @@ import (
 
 // TestSidebarNavDoesNotQuit (issue #8): in SIDEBAR mode a successful nav keeps
 // the TUI running (it is a persistent pane beside the thread, not a popup over
-// it) and notes what was entered; the normal mode still quits so the popup gets
-// out of the way.
+// it) and shows NO note — the switched pane is the feedback (Lukas); the
+// normal mode still quits so the popup gets out of the way.
 func TestSidebarNavDoesNotQuit(t *testing.T) {
 	t.Setenv("TMUX", "") // focusSiblingPane must no-op outside tmux (unit context)
 
 	sb := Model{sidebar: true}
-	nm, cmd := sb.Update(navDoneMsg{name: "worker"})
+	nm, cmd := sb.Update(navDoneMsg{id: "worker"})
 	got := nm.(Model)
 	if cmd != nil {
 		if _, quit := cmd().(tea.QuitMsg); quit {
 			t.Fatalf("sidebar nav QUIT the TUI — a persistent pane must stay open")
 		}
 	}
-	if !strings.Contains(got.note, `entered "worker"`) {
-		t.Errorf("sidebar nav note %q missing the entered-thread feedback", got.note)
+	if got.note != "" {
+		t.Errorf("sidebar nav must set no note (the switched pane is the feedback), got %q", got.note)
 	}
 
 	// Normal (popup) mode: unchanged — a successful nav quits.
@@ -122,7 +122,7 @@ func TestSidebarFollow(t *testing.T) {
 	// cursor sits on the headless row -> the coalesce is an eligible-gated
 	// no-op; move it to the eligible row first to see it fire.
 	m.cursor = 0
-	nm, cmd = m.Update(followDoneMsg{id: "other", name: "other"})
+	nm, cmd = m.Update(followDoneMsg{id: "other"})
 	m = nm.(Model)
 	if cmd == nil || !m.followInFlight {
 		t.Fatalf("completion with the cursor on an eligible unseen row must coalesce-fire (cmd=%v inflight=%v)", cmd, m.followInFlight)
@@ -196,7 +196,7 @@ func TestSidebarFollow(t *testing.T) {
 	// An ENTER navDoneMsg records the shown thread and hands focus (non-nil
 	// cmd; TMUX scrubbed so running it here is a no-op).
 	m8 := base()
-	nm8, cmd8 := m8.Update(navDoneMsg{name: "live", id: "live"})
+	nm8, cmd8 := m8.Update(navDoneMsg{id: "live"})
 	g8 := nm8.(Model)
 	if cmd8 == nil {
 		t.Fatalf("an enter nav must hand focus to the sibling pane")

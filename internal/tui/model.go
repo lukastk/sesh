@@ -3528,14 +3528,16 @@ func (m Model) View() string {
 		if selected {
 			// The selected row uses reverse video; matched-rune styling AND per-column
 			// colour inside it would reset the reverse — selection is the dominant cue.
-			// The GUTTER ATTENTION GLYPHS keep their tint though (Lukas): each tinted
-			// glyph renders as its colour COMPOSED WITH reverse — under reverse the
-			// foreground becomes the cell's visible background, so ▶/↓/⚑ show as
-			// coloured chips inside the unbroken selection band.
+			// The GUTTER ATTENTION GLYPHS keep their tint though (Lukas): the glyph's
+			// colour is declared as the BACKGROUND and composed with reverse — the
+			// terminal's reverse swap then draws the GLYPH in the colour while the
+			// cell's visible background stays the band's (default-fg), so ▶/↓/⚑
+			// render coloured on an unbroken selection band. (Colour-as-foreground +
+			// reverse gave the opposite: a coloured cell with a band-coloured glyph.)
 			seg := func(s string) string { return styleSelected.Render(s) }
 			gl := func(g, name string, on bool) string {
 				if st, ok := m.glyphColors[name]; ok && on {
-					return st.Reverse(true).Render(g)
+					return lipgloss.NewStyle().Background(st.GetForeground()).Reverse(true).Render(g)
 				}
 				return seg(g)
 			}

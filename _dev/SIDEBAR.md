@@ -9,9 +9,21 @@ the myvault pad "Herdr vs sesh - migration assessment".
 1. **Substrate: tmux-layered.** No native PTY multiplexer. sesh ships the render
    mode (`sesh tui --sidebar`); myrig's master cockpit owns the layout. The
    which-client law, nav, adopt, clipboard relay and the phone cockpit all stay.
-2. **Placement: one sidebar pane per MASTER WINDOW** (the cockpit keeps its
-   window-per-machine shape). A narrow left pane (~35 cols) beside the ssh/attach
-   pane, spawned/healed by the myrig master layer. No cockpit restructure.
+2. **Placement: ONE TRAVELING sidebar over fixed slots** (revised 2026-07-25 —
+   per-window sidebars felt awkward: four copies of the same list, cursor/view
+   state not traveling). The cockpit keeps its window-per-machine shape; every
+   master window keeps a PERMANENT 38-col left slot. The single real sidebar
+   occupies the active window's slot; the other windows hold an inert blank
+   placeholder pane. An `after-select-window` tmux hook `swap-pane`s the sidebar
+   with the newly-active window's placeholder — swap exchanges SAME-SIZED panes,
+   so no pane ever resizes: no inner-session reflow, no agent redraw (the flaw
+   that killed the join-pane variant). Same process = cursor/filter/view travel;
+   the sibling machine is re-resolved LIVE per follow (followResolver — a swap
+   raises no resize event to re-cache on). Worst-case artifact: a one-beat blank
+   slot before a late hook lands. Escalation path if that blink annoys in
+   practice: revert to per-window (hiccup-free, state diverges), or the
+   single-window swap-pane cockpit (zero artifacts + single state, but rewrites
+   master nav/markers/mastermaint — a deliberate later project).
 3. **Refresh: accept active mesh cadence on desktop masters** (they run active or
    hooks-pinned anyway); the termux master simply doesn't spawn a sidebar (mobile
    data — the H44 rationing stays intact). Poll stays the TUI's normal 3s +

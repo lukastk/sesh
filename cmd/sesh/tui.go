@@ -246,21 +246,19 @@ func runTUI(args []string) error {
 	if *sidebarFlag {
 		m = m.WithSidebar()
 		// Selection-FOLLOW needs to know which machine the sibling attach pane
-		// shows: $SESH_TUI_MASTER_MACHINE when the spawner bakes it (the myrig
-		// conf; also the master-cursor carrier, handled above), else the
-		// sidebar's own WINDOW NAME — the cockpit names master windows after
-		// their machines (mastermaint), so a sidebar split into one inherits its
-		// target. Unresolvable (not in tmux / renamed window that matches no
-		// machine) just disables follow — Enter still navs everything.
-		fm := os.Getenv("SESH_TUI_MASTER_MACHINE")
-		if fm == "" {
-			fm = sidebarWindowName()
-			if fm != "" {
-				m = m.WithMasterCursor(fm) // start with the cursor on the shown thread, like prefix+s
-			}
-		}
-		if fm != "" {
+		// shows. $SESH_TUI_MASTER_MACHINE, when the spawner bakes it, PINS it
+		// (a per-window spawner's contract; also the master-cursor carrier,
+		// handled above). Otherwise resolve the sidebar's own WINDOW NAME — the
+		// cockpit names master windows after their machines (mastermaint) — and
+		// resolve it LIVE at each follow: the TRAVELING sidebar is swapped
+		// between windows by a tmux hook, so the sibling machine changes under
+		// the same process. Unresolvable (not in tmux / renamed window matching
+		// no machine) just disables/skips follow — Enter still navs everything.
+		if fm := os.Getenv("SESH_TUI_MASTER_MACHINE"); fm != "" {
 			m = m.WithSidebarFollow(fm)
+		} else if wn := sidebarWindowName(); wn != "" {
+			m = m.WithMasterCursor(wn) // start with the cursor on the shown thread, like prefix+s
+			m = m.WithSidebarFollowResolver(sidebarWindowName)
 		}
 	}
 	if *filter {

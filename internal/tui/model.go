@@ -153,14 +153,19 @@ type Model struct {
 	// sidebar (`tui --sidebar`): persistent-pane mode — nav hands focus to the
 	// sibling pane instead of quitting. See WithSidebar.
 	sidebar bool
-	// followMachine: the machine whose work server the sidebar's SIBLING pane
-	// shows (the cockpit window's machine; from $SESH_TUI_MASTER_MACHINE or the
-	// window name). When set, MOVING the selection follows: after the cursor
-	// rests (followDebounce) the sibling pane navs to the selected thread while
-	// focus STAYS in the sidebar — Enter is what commits focus. Follow never
-	// revives (live headful threads only) and never switches master windows
-	// (same-machine rows only); empty = follow disabled, Enter-only.
-	followMachine string
+	// followResolver resolves — AT FOLLOW TIME — the machine whose work server
+	// the sidebar's SIBLING pane currently shows (the cockpit window's machine).
+	// When set, MOVING the selection follows: after the cursor rests
+	// (followDebounce) the sibling pane navs to the selected thread while focus
+	// STAYS in the sidebar — Enter is what commits focus. Follow never revives
+	// (live headful threads only) and never switches master windows (the
+	// resolver's machine only); nil = follow disabled, Enter-only. It is a
+	// FUNCTION, not a cached value, because the TRAVELING sidebar is swapped
+	// between master windows by a tmux hook — the sibling machine changes under
+	// the same process, and a swap of same-sized panes raises no resize event
+	// to re-cache on. A static spawner ($SESH_TUI_MASTER_MACHINE) uses a
+	// constant resolver; the cockpit uses a live window-name read.
+	followResolver func() string
 	// followSeq invalidates stale follow debounce ticks (a later move bumps it);
 	// lastFollowedID dedups so resting on the already-shown thread re-navs nothing.
 	followSeq      int
@@ -403,10 +408,17 @@ func (m Model) WithSidebar() Model {
 	return m
 }
 
-// WithSidebarFollow sets the machine the sidebar's sibling pane shows, enabling
-// selection-follow (see followMachine).
+// WithSidebarFollow enables selection-follow against a FIXED sibling machine
+// (a spawner that pins it via $SESH_TUI_MASTER_MACHINE; tests/claims).
 func (m Model) WithSidebarFollow(machine string) Model {
-	m.followMachine = machine
+	return m.WithSidebarFollowResolver(func() string { return machine })
+}
+
+// WithSidebarFollowResolver enables selection-follow with a LIVE sibling-machine
+// resolver, called at each follow attempt (the traveling sidebar — see
+// followResolver).
+func (m Model) WithSidebarFollowResolver(fn func() string) Model {
+	m.followResolver = fn
 	return m
 }
 
@@ -424,7 +436,7 @@ type followTickMsg struct{ seq int }
 // unconditionally). Each USER selection move re-arms; fetch-driven cursor moves
 // (reanchor/preselect) deliberately do not.
 func (m *Model) armFollow() tea.Cmd {
-	if !m.sidebar || m.followMachine == "" {
+	if !m.sidebar || m.followResolver == nil {
 		return nil
 	}
 	m.followSeq++
@@ -433,13 +445,15 @@ func (m *Model) armFollow() tea.Cmd {
 }
 
 // followEligible reports whether the selected row is one the sidebar should
-// follow to, applying the follow policy: only after the debounce settled (seq
-// current), only a not-already-shown thread, only a LIVE headful session (a
-// preview must never revive), only the sibling window's own machine (a preview
-// must never switch master windows), and only a reachable owner. All skips are
-// deliberate policy no-ops, not errors — Enter still takes the full path.
+// follow to, applying the model-side follow policy: only after the debounce
+// settled (seq current), only a not-already-shown thread, only a LIVE headful
+// session (a preview must never revive), and only a reachable owner. The
+// SIBLING-MACHINE check (a preview must never switch master windows) happens
+// inside followNav's command, where the resolver reads the machine LIVE — the
+// traveling sidebar's window can have changed since any earlier read. All skips
+// are deliberate policy no-ops, not errors — Enter still takes the full path.
 func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
-	if !m.sidebar || m.followMachine == "" || seq != m.followSeq {
+	if !m.sidebar || m.followResolver == nil || seq != m.followSeq {
 		return api.ThreadRow{}, false
 	}
 	row, ok := m.Selected()
@@ -449,7 +463,7 @@ func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
 	if row.Head != api.Headful || row.SessionName == "" {
 		return api.ThreadRow{}, false
 	}
-	if row.Machine != m.followMachine || !m.machineReachable(row.Machine) {
+	if !m.machineReachable(row.Machine) {
 		return api.ThreadRow{}, false
 	}
 	return row, true
@@ -458,11 +472,20 @@ func (m Model) followEligible(seq int) (api.ThreadRow, bool) {
 // followNav navs the SIBLING pane to row without touching focus: the master nav
 // path only (never --in-client — an in-client switch would move the whole view
 // away from the sidebar), no revive (followEligible guarantees a live session).
+// The sibling machine is resolved HERE, at exec time: a row on any other
+// machine is a silent deliberate no-op (following it would switch master
+// windows out from under the user; Enter still does that switch on purpose).
 // Success reports navDoneMsg{follow: true}, which records lastFollowedID and
 // deliberately skips the focus handoff.
 func (m Model) followNav(row api.ThreadRow) tea.Cmd {
-	bin, env := m.binaryPath, m.navEnv
+	bin, env, resolve := m.binaryPath, m.navEnv, m.followResolver
 	return func() tea.Msg {
+		if resolve == nil {
+			return nil
+		}
+		if wm := resolve(); wm == "" || wm != row.Machine {
+			return nil // not the sibling window's machine — preview must not window-switch
+		}
 		target := row.Machine + ":" + row.SessionName
 		cmd := exec.Command(bin, "tmux", "nav", "--to", target, "--thread", row.ID)
 		cmd.Env = append(os.Environ(), env...)

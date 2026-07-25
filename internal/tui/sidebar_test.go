@@ -80,7 +80,7 @@ func TestSidebarFollow(t *testing.T) {
 		return api.ThreadRow{Thread: api.Thread{ID: id, Name: id, Machine: machine, SessionName: "s_" + id}, Head: head}
 	}
 	base := func() Model {
-		m := Model{sidebar: true, followMachine: "mymain", machine: "mymain",
+		m := Model{sidebar: true, followResolver: func() string { return "mymain" }, machine: "mymain",
 			machines: []api.MachineView{{Machine: "mymain", Self: true, Reachable: true}, {Machine: "peer", Reachable: false}},
 			rows: []api.ThreadRow{
 				row("live", api.Headful, "mymain"),
@@ -120,15 +120,30 @@ func TestSidebarFollow(t *testing.T) {
 	if _, ok := m.followEligible(m.followSeq); ok {
 		t.Fatalf("a headless row must not follow (would revive)")
 	}
-	// A cross-machine row must NEVER follow (would switch master windows) —
-	// and this one's owner is offline too.
+	// A cross-machine row must NEVER follow (would switch master windows).
+	// The machine check happens at EXEC time via the live resolver (the
+	// traveling sidebar's window can change between arm and fire): a
+	// REACHABLE row on another machine passes eligibility but its followNav
+	// command resolves the sibling machine, sees the mismatch, and no-ops
+	// (nil msg — nothing execs). This one's owner is offline too, so
+	// eligibility also refuses it.
 	m.cursor = 2
 	if _, ok := m.followEligible(m.followSeq); ok {
-		t.Fatalf("a cross-machine row must not follow")
+		t.Fatalf("an unreachable row must not follow")
+	}
+	crossRow := row("far2", api.Headful, "elsewhere")
+	if msg := m.followNav(crossRow)(); msg != nil {
+		t.Fatalf("followNav to another machine must be a silent no-op, got %T", msg)
+	}
+	// A resolver that reads an UNKNOWN window (renamed / not a machine) skips too.
+	m5 := base()
+	m5.followResolver = func() string { return "" }
+	if msg := m5.followNav(row("live", api.Headful, "mymain"))(); msg != nil {
+		t.Fatalf("an unresolvable sibling machine must skip the follow, got %T", msg)
 	}
 	// No known sibling machine = follow disabled entirely (armFollow returns nil).
 	m2 := base()
-	m2.followMachine = ""
+	m2.followResolver = nil
 	if cmd := m2.armFollow(); cmd != nil {
 		t.Fatalf("follow must be disabled without a known sibling machine")
 	}

@@ -58,8 +58,11 @@ type customView struct {
 	pred Predicate
 }
 
-func (m Model) viewName() string {
-	switch m.view {
+func (m Model) viewName() string { return m.viewNameAt(int(m.view)) }
+
+// viewNameAt names the i-th view (built-ins then [[tui.views]] customs).
+func (m Model) viewNameAt(i int) string {
+	switch View(i) {
 	case ViewActive:
 		return "active"
 	case ViewHold:
@@ -69,8 +72,8 @@ func (m Model) viewName() string {
 	case ViewAll:
 		return "all"
 	}
-	if i := int(m.view - viewBuiltins); i >= 0 && i < len(m.customViews) {
-		return m.customViews[i].name
+	if c := i - int(viewBuiltins); c >= 0 && c < len(m.customViews) {
+		return m.customViews[c].name
 	}
 	return "?"
 }
@@ -147,6 +150,30 @@ type Model struct {
 	allMachines bool
 	view        View
 	showID      bool // `i` toggles an ID column (tid8) — the only id surface in the TUI
+	// sidebar (`tui --sidebar`): persistent-pane mode — nav hands focus to the
+	// sibling pane instead of quitting. See WithSidebar.
+	sidebar bool
+	// followResolver resolves — AT FOLLOW TIME — the machine whose work server
+	// the sidebar's SIBLING pane currently shows (the cockpit window's machine).
+	// When set, MOVING the selection follows: after the cursor rests
+	// (followDebounce) the sibling pane navs to the selected thread while focus
+	// STAYS in the sidebar — Enter is what commits focus. Follow never revives
+	// (live headful threads only) and never switches master windows (the
+	// resolver's machine only); nil = follow disabled, Enter-only. It is a
+	// FUNCTION, not a cached value, because the TRAVELING sidebar is swapped
+	// between master windows by a tmux hook — the sibling machine changes under
+	// the same process, and a swap of same-sized panes raises no resize event
+	// to re-cache on. A static spawner ($SESH_TUI_MASTER_MACHINE) uses a
+	// constant resolver; the cockpit uses a live window-name read.
+	followResolver func() string
+	// followInFlight: a follow nav is currently running. Selection moves while
+	// one runs don't queue navs — the completion handler re-arms for wherever
+	// the cursor is THEN (fire-immediately + coalesce: single moves preview at
+	// nav cost with no debounce; held arrows degrade to previewing the rows the
+	// nav keeps catching up to). lastFollowedID dedups so landing on the
+	// already-shown thread re-navs nothing.
+	followInFlight bool
+	lastFollowedID string
 	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
 	// hide the last-known threads of a mesh machine that is currently unreachable.
 	// Their owner can't be reached, so every action on them would hang on the routing
@@ -252,6 +279,13 @@ type Model struct {
 	maxColWidth bool
 	colMax      map[string]int
 
+	// viewPicker: Tab opens a picker POPUP listing every view (built-ins +
+	// [[tui.views]]) instead of blind-cycling — navigate with tab/↑/↓ (tab
+	// preserves the old tap-tap rhythm: it opens preselecting the NEXT view, so
+	// tab+enter ≡ the old single tab), Enter applies, Esc cancels, a mouse
+	// click applies directly, the wheel moves the selection.
+	viewPicker       bool
+	viewPickerCursor int
 	// helpPopup: `?` opens a full-screen takeover showing the complete keymap
 	// (the bottom line only carries the "? keys" hint); helpOffset scrolls it
 	// when the binding list overflows the terminal height.
@@ -366,6 +400,178 @@ func New(socketPath string, allMachines bool) Model {
 	return Model{client: client.New(socketPath), allMachines: allMachines, binaryPath: bin,
 		tmux: os.Getenv("TMUX"), columns: append([]string(nil), DefaultColumns...), userHome: home,
 		scrollDivV: 1, scrollDivH: 1, hideOffline: true, maxColWidth: true}
+}
+
+// WithSidebar puts the TUI in SIDEBAR mode (`tui --sidebar`, issue #8): a
+// persistent narrow pane beside the cockpit's attach pane. The one behavioural
+// difference from the normal grid is that a successful nav does NOT quit — the
+// sidebar stays and hands focus to its sibling pane (see navDoneMsg). Everything
+// else (views, filter, actions, mouse) is the same TUI.
+func (m Model) WithSidebar() Model {
+	m.sidebar = true
+	return m
+}
+
+// WithSidebarFollow enables selection-follow against a FIXED sibling machine
+// (a spawner that pins it via $SESH_TUI_MASTER_MACHINE; tests/claims).
+func (m Model) WithSidebarFollow(machine string) Model {
+	return m.WithSidebarFollowResolver(func() string { return machine })
+}
+
+// WithSidebarFollowResolver enables selection-follow with a LIVE sibling-machine
+// resolver, called at each follow attempt (the traveling sidebar — see
+// followResolver).
+func (m Model) WithSidebarFollowResolver(fn func() string) Model {
+	m.followResolver = fn
+	return m
+}
+
+// armFollow fires a selection-follow IMMEDIATELY when the selected row is
+// eligible and no follow is already running (sidebar mode with a known sibling
+// machine only — nil otherwise, so call sites can return it unconditionally).
+// There is deliberately NO debounce: a single move previews at nav cost
+// (~tens of ms locally); while a nav is in flight further moves return nil and
+// the completion handler (followDoneMsg) calls armFollow again, coalescing a
+// held-arrow burst into "preview wherever the cursor is when each nav lands"
+// instead of queueing one nav per row. Each USER selection move arms;
+// fetch-driven cursor moves (reanchor/preselect) deliberately do not.
+func (m *Model) armFollow() tea.Cmd {
+	if !m.sidebar || m.followResolver == nil || m.followInFlight {
+		return nil
+	}
+	row, ok := m.followEligible()
+	if !ok {
+		return nil
+	}
+	m.followInFlight = true
+	return m.followNav(row)
+}
+
+// followEligible reports whether the selected row is one the sidebar should
+// follow to, applying the model-side follow policy: only a not-already-shown
+// thread, only a LIVE headful session (a preview must never revive), and only
+// a reachable owner. All skips are deliberate policy no-ops, not errors —
+// Enter still takes the full path.
+func (m Model) followEligible() (api.ThreadRow, bool) {
+	if !m.sidebar || m.followResolver == nil {
+		return api.ThreadRow{}, false
+	}
+	row, ok := m.Selected()
+	if !ok || row.ID == m.lastFollowedID {
+		return api.ThreadRow{}, false
+	}
+	if row.Head != api.Headful || row.SessionName == "" {
+		return api.ThreadRow{}, false
+	}
+	if !m.machineReachable(row.Machine) {
+		return api.ThreadRow{}, false
+	}
+	return row, true
+}
+
+// followDoneMsg reports a completed follow nav (success or failure). Its
+// handler clears the in-flight latch and RE-ARMS — the coalescing half of the
+// no-debounce design: if the selection moved while this nav ran, the next
+// preview fires immediately for wherever the cursor is now.
+type followDoneMsg struct {
+	id  string
+	err error
+}
+
+// followNav navs the cockpit's THREAD pane to row without touching focus, no
+// revive (followEligible guarantees a live session). Two paths:
+//
+//   - FAST PATH — the row lives on the sidebar's CURRENT window's machine AND
+//     that is the local machine: the whole nav reduces to the INNER switch on
+//     the local work server, done as ONE warm daemon call (client.TmuxNav on
+//     the unix socket — no `sesh` subprocess, no master-window select; the
+//     client is already viewing this window). This is the "arrow between my
+//     own machine's threads" case and lands in ~a tmux switch.
+//   - SUBPROCESS PATH — anything else: the full `sesh tmux nav` master path
+//     (window select + routed inner switch; never --in-client — an in-client
+//     switch would move the whole view away from the sidebar). A row on
+//     ANOTHER machine than the current window follows too — the nav switches
+//     the master window and the traveling-sidebar hook brings the sidebar
+//     along; the "follow" INTENT declared beforehand (declareSidebarIntent)
+//     tells the hook to keep focus ON the sidebar so the user keeps arrowing.
+//
+// An unresolvable sibling machine ("") means no readable cockpit context: skip
+// (a follow without a master to drive would only spray errors while arrowing).
+func (m Model) followNav(row api.ThreadRow) tea.Cmd {
+	bin, env, resolve := m.binaryPath, m.navEnv, m.followResolver
+	client, localMachine := m.client, m.machine
+	return func() tea.Msg {
+		if resolve == nil {
+			return followDoneMsg{}
+		}
+		wm := resolve()
+		if wm == "" {
+			return followDoneMsg{} // no cockpit context — deliberate no-op
+		}
+		if wm == row.Machine && row.Machine == localMachine && client != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := client.TmuxNav(ctx, api.NavRequest{Session: row.SessionName, Origin: localMachine, ThreadID: row.ID}); err != nil {
+				return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %w", row.SessionName, err)}
+			}
+			return followDoneMsg{id: row.ID}
+		}
+		if wm != row.Machine {
+			// The nav will switch master windows: tell the hook this is a
+			// FOLLOW so it keeps focus on the traveling sidebar.
+			declareSidebarIntent("follow")
+		}
+		target := row.Machine + ":" + row.SessionName
+		cmd := exec.Command(bin, "tmux", "nav", "--to", target, "--thread", row.ID)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			clearSidebarIntent() // the switch didn't happen — don't leave a stale intent
+			return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
+		}
+		return followDoneMsg{id: row.ID}
+	}
+}
+
+// declareSidebarIntent records — as a global option on the sidebar's own tmux
+// server ($TMUX-resolved) — WHY the upcoming master window switch is happening:
+// "follow" (keep focus on the traveling sidebar after the swap) or "enter"
+// (focus the attach pane). The traveling-sidebar hook consumes-and-clears it;
+// without an intent (a manual prefix+N switch) the hook leaves focus alone.
+// Outside tmux this is a no-op; a failed set is best-effort (the hook then
+// just leaves focus where tmux put it — the pre-intent behavior, not wrongness).
+func declareSidebarIntent(intent string) {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	exec.Command("tmux", "set-option", "-g", "@sesh-sidebar-intent", intent).Run() //nolint:errcheck — best-effort, see above
+}
+
+// clearSidebarIntent removes a declared-but-unconsumed intent (nav failed: no
+// window switch happened, so the next MANUAL switch must not act on it).
+func clearSidebarIntent() {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	exec.Command("tmux", "set-option", "-gu", "@sesh-sidebar-intent").Run() //nolint:errcheck
+}
+
+// focusSiblingPane hands the tmux focus from the sidebar's pane to the OTHER pane
+// of its window (the attach pane the nav just changed), via the sidebar's own
+// inherited $TMUX/$TMUX_PANE (a plain `tmux` exec resolves both). A single-pane
+// window (standalone testing) or a client that nav moved to ANOTHER window makes
+// this a harmless no-op on our window — the select still leaves the attach pane
+// active for the next visit. Only a real exec failure is surfaced.
+func focusSiblingPane() tea.Cmd {
+	return func() tea.Msg {
+		if os.Getenv("TMUX") == "" {
+			return nil // not in tmux (unit tests / odd launch): nothing to focus
+		}
+		cmd := exec.Command("tmux", "select-pane", "-t", ":.+")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{err: fmt.Errorf("sidebar focus handoff: %v: %s", err, strings.TrimSpace(string(out)))}
+		}
+		return nil
+	}
 }
 
 // WithShowOffline sets whether an OFFLINE mesh machine's stale threads are shown by
@@ -623,18 +829,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// While the Tab view picker is up: the wheel moves its selection, a left
+		// click on a view line applies it directly (click outside the list is a
+		// no-op — the popup stays, esc dismisses).
+		if m.viewPicker {
+			n := m.viewCount()
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.viewPickerCursor = (m.viewPickerCursor - 1 + n) % n
+			case tea.MouseButtonWheelDown:
+				m.viewPickerCursor = (m.viewPickerCursor + 1) % n
+			case tea.MouseButtonLeft:
+				if msg.Action == tea.MouseActionPress {
+					if i, ok := m.viewPickerRowAtY(msg.Y); ok {
+						return m.applyPickedView(i)
+					}
+				}
+			}
+			return m, nil
+		}
+		var wheelFollow tea.Cmd
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			if msg.Shift {
 				m.wheelPanH(-1)
 			} else {
 				m.wheelMoveV(-1)
+				wheelFollow = m.armFollow() // sidebar: the wheel moves the selection too
 			}
 		case tea.MouseButtonWheelDown:
 			if msg.Shift {
 				m.wheelPanH(1)
 			} else {
 				m.wheelMoveV(1)
+				wheelFollow = m.armFollow()
 			}
 		case tea.MouseButtonWheelLeft:
 			m.wheelPanH(-1)
@@ -647,7 +875,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleLeftClick(msg)
 			}
 		}
-		return m, nil
+		return m, wheelFollow
 	case meshMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
@@ -775,10 +1003,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmPatch(msg.seq)
 		return m, nil
+	case followDoneMsg:
+		// A follow nav finished. Clear the latch, record what the cockpit now
+		// shows, then RE-ARM: if the selection moved while this nav ran, the
+		// next preview fires immediately for wherever the cursor is now (the
+		// coalescing half of the no-debounce design; armFollow's eligibility
+		// dedup makes this a no-op when the cursor didn't move).
+		m.followInFlight = false
+		if msg.err != nil {
+			m.actionErr = msg.err
+		}
+		if msg.id != "" {
+			// Recorded on FAILURE too: the coalesce below re-arms, and without
+			// this a still-selected failing target would refire the same broken
+			// nav forever (error -> re-arm -> eligible -> error ...). Recording
+			// the ATTEMPT makes the dedup break the loop; moving away and back
+			// retries deliberately.
+			m.lastFollowedID = msg.id
+		}
+		cmd := m.armFollow()
+		return m, cmd
 	case navDoneMsg:
-		// The selected thread is now on screen (the client switched under us) —
-		// quit so the TUI (and the popup hosting it) gets out of the way. Staying
-		// open would leave the TUI covering the very thread the user entered.
+		// The selected thread is now on screen (the client switched under us).
+		// SIDEBAR mode: the TUI is a persistent pane BESIDE the thread, not a
+		// popup covering it — stay open, note the entry, and hand focus to the
+		// sibling (attach) pane so the user lands typing at the agent.
+		// Otherwise quit so the TUI (and the popup hosting it) gets out of the way.
+		if m.sidebar {
+			if msg.id != "" {
+				m.lastFollowedID = msg.id // the cockpit now shows it — no follow needed
+			}
+			return m, focusSiblingPane()
+		}
 		return m, tea.Quit
 	case attachMsg:
 		// Quit so the terminal is restored, then runTUI execs the attach.
@@ -1394,9 +1650,15 @@ func bptr(b bool) *bool     { return &b }
 // thread id so the attach lands on the WINDOW holding its pane.
 type attachMsg struct{ target, thread string }
 
-// navDoneMsg reports a successful nav: the user is where they asked to be, so the
-// TUI quits. (A FAILED nav stays an actionMsg with the error, keeping the TUI open.)
-type navDoneMsg struct{}
+// navDoneMsg reports a successful ENTER nav: the user is where they asked to
+// be, so the TUI quits — except in SIDEBAR mode, where the TUI is a persistent
+// pane: it stays running and hands focus to its sibling (attach) pane instead,
+// with no note (the switched pane IS the feedback — Lukas). (A FAILED nav
+// stays an actionMsg with the error, keeping the TUI open either way; follow
+// navs report followDoneMsg.) id feeds lastFollowedID.
+type navDoneMsg struct {
+	id string
+}
 
 // machineReachable reports whether `machine` was reachable at the last mesh read. This
 // machine (self, or an empty machine id) is always reachable. A machine not present in
@@ -1471,6 +1733,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpPopup {
 		return m.handleHelpKey(msg)
 	}
+	if m.viewPicker {
+		return m.handleViewPickerKey(msg)
+	}
 	if m.uuidPopup {
 		return m.handleUUIDKey(msg)
 	}
@@ -1503,18 +1768,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
 	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
-	case "q", "esc", "ctrl+c":
+	// SIDEBAR mode: esc/q are NO-OPS — a persistent cockpit pane must not die to a
+	// stray keystroke (its pane would vanish and take the traveling slot with it;
+	// hide/show is the cockpit toggle's job). ctrl+c stays as the deliberate kill.
+	case "q", "esc":
+		if m.sidebar {
+			return m, nil
+		}
+		return m, tea.Quit
+	case "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
 		m.moveCursor(-1) // wraps (fzf --cycle feel), over the VISIBLE (filtered) rows
 		m.ensureCursorVisible()
+		cmd := m.armFollow() // sidebar: preview the selection in the sibling pane once it rests
+		return m, cmd
 	case "down", "j":
 		m.moveCursor(1)
 		m.ensureCursorVisible()
+		cmd := m.armFollow()
+		return m, cmd
 	case "ctrl+k":
 		m.scrollRows(-m.halfPage()) // scroll the viewport up a half-page (cursor follows into view)
+		cmd := m.armFollow()
+		return m, cmd
 	case "ctrl+j":
 		m.scrollRows(m.halfPage())
+		cmd := m.armFollow()
+		return m, cmd
 	case "/":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
@@ -1547,9 +1828,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.promptCursor = len(m.promptInput)
 		}
 	case "tab":
-		m.view = (m.view + 1) % View(m.viewCount())
-		m.cursor = 0
-		return m, m.fetch()
+		// Open the VIEW PICKER preselecting the NEXT view — tab+enter reproduces
+		// the old cycle in two taps, while the list shows where you're going.
+		m.viewPicker = true
+		m.viewPickerCursor = (int(m.view) + 1) % m.viewCount()
 	case "i":
 		m.showID = !m.showID
 	case "w":
@@ -1983,6 +2265,7 @@ func (m Model) navSelected() tea.Cmd {
 		return nil
 	}
 	bin, env := m.binaryPath, m.navEnv
+	sidebar, resolve := m.sidebar, m.followResolver
 	local := m.machine != "" && row.Machine == m.machine
 	// A LOCAL thread, when we're inside its work socket's tmux, switches the current
 	// client in place (no master). Otherwise: the full master nav path.
@@ -2051,12 +2334,25 @@ func (m Model) navSelected() tea.Cmd {
 				args = append(args, "--client", m.clientName)
 			}
 		}
+		// A sidebar ENTER that switches master windows: tell the traveling-
+		// sidebar hook to focus the ATTACH pane after it swaps the sidebar in
+		// (the sibling handoff below also fires — same target, either order).
+		declaredIntent := false
+		if sidebar && !useInClient && resolve != nil {
+			if wm := resolve(); wm != "" && wm != row.Machine {
+				declareSidebarIntent("enter")
+				declaredIntent = true
+			}
+		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
+			if declaredIntent {
+				clearSidebarIntent() // no switch happened — don't leave a stale intent
+			}
 			return actionMsg{err: fmt.Errorf("nav %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
 		}
-		return navDoneMsg{}
+		return navDoneMsg{id: row.ID}
 	}
 }
 
@@ -2698,7 +2994,7 @@ var helpBindings = []struct{ key, desc string }{
 	{"^h/^l", "pan columns"},
 	{"enter", "enter the thread (revives a dead one)"},
 	{"/", "filter mode (fuzzy)"},
-	{"tab", "cycle views (active / on hold / archived / all)"},
+	{"tab", "view picker (tab/↑↓ move · enter apply · esc cancel · click a view)"},
 	{"f", "toggle the needs-attention flag ⚑"},
 	{"ctrl+f", "toggle auto-flagging (⌀ when disabled)"},
 	{"h", "hold until tomorrow / release"},
@@ -2811,6 +3107,71 @@ func (m Model) helpView() string {
 }
 
 // handleHelpKey: ↑/↓ (and j/k, ^j/^k) scroll the keymap; esc/q/?/enter close.
+// handleViewPickerKey drives the Tab view picker: tab/↓/j advance (wrap),
+// shift+tab/↑/k go back, Enter applies the highlighted view, esc/q/ctrl+c
+// cancel. Applying resets the cursor and refetches, exactly as the old blind
+// cycle did.
+func (m Model) handleViewPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	n := m.viewCount()
+	switch msg.String() {
+	case "tab", "down", "j":
+		m.viewPickerCursor = (m.viewPickerCursor + 1) % n
+	case "shift+tab", "up", "k":
+		m.viewPickerCursor = (m.viewPickerCursor - 1 + n) % n
+	case "enter":
+		return m.applyPickedView(m.viewPickerCursor)
+	case "esc", "q", "ctrl+c":
+		m.viewPicker = false
+	}
+	return m, nil
+}
+
+// applyPickedView switches to view i, closes the picker, and refetches.
+func (m Model) applyPickedView(i int) (tea.Model, tea.Cmd) {
+	m.viewPicker = false
+	if i < 0 || i >= m.viewCount() {
+		return m, nil
+	}
+	m.view = View(i)
+	m.cursor = 0
+	return m, m.fetch()
+}
+
+// viewPickerView renders the Tab view picker: one view per line, the selection
+// marked, the active view annotated. The layout is deliberately fixed — title +
+// blank, rows from line 2 — because the mouse handler maps click Y back to a
+// row (viewPickerRowAtY must mirror this).
+func (m Model) viewPickerView() string {
+	var b strings.Builder
+	b.WriteString(styleHeader.Render("view · tab/↑↓ move · enter apply · esc cancel") + "\n\n")
+	for i := 0; i < m.viewCount(); i++ {
+		marker := "  "
+		if i == m.viewPickerCursor {
+			marker = "> "
+		}
+		line := marker + m.viewNameAt(i)
+		if View(i) == m.view {
+			line += "  (current)"
+		}
+		if i == m.viewPickerCursor {
+			b.WriteString(styleSelected.Render(line) + "\n")
+		} else {
+			b.WriteString(line + "\n")
+		}
+	}
+	return b.String()
+}
+
+// viewPickerRowAtY maps a click's terminal row to a picker index (mirrors
+// viewPickerView's fixed layout: rows start at line 2). ok=false outside.
+func (m Model) viewPickerRowAtY(y int) (int, bool) {
+	i := y - 2
+	if i < 0 || i >= m.viewCount() {
+		return 0, false
+	}
+	return i, true
+}
+
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "?", "enter":
@@ -3011,6 +3372,9 @@ func (m Model) View() string {
 	}
 	if m.helpPopup {
 		return m.helpView() // full-screen takeover: the complete keymap
+	}
+	if m.viewPicker {
+		return m.viewPickerView() // full-screen takeover: pick a view (Tab)
 	}
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("sesh — live threads · ["+m.viewName()+"]") + "\n")

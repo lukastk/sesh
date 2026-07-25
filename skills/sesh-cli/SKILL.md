@@ -241,6 +241,26 @@ a machine with `boxyard` on the daemon's PATH).
 `sesh tui` opens the live cross-machine thread grid (`--all-machines` to fan out). It is a
 thin client — it **emits** actions by driving the CLI verbs, never reimplementing them.
 
+**Sidebar mode** (`sesh tui --sidebar`): the persistent-pane variant for a cockpit — a
+narrow NAME-only column preset (the state gutter carries the rest; `[tui] columns` and
+`[[tui.column]]` moves don't apply, an explicit `--columns` wins), and **entering a
+thread does not quit the TUI**: the nav happens and focus hands to the sibling pane in
+the same tmux window, so the sidebar stays ambiently visible beside the agent. A
+**single mouse click enters a thread** (the sidebar is a jump list — no
+select-then-double-click; clicking the ▸/▾ marker still just folds). **Moving the
+selection FOLLOWS immediately**: the cockpit previews the selected thread while focus
+stays in the sidebar — Enter/click is what commits focus. A local preview costs ~a
+tmux switch (one warm daemon call, no subprocess); while one is in flight further
+moves coalesce into a single catch-up nav, so held arrows degrade gracefully.
+**esc/q are no-ops in sidebar mode** — a persistent pane must not die to a stray
+keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job). Follow
+crosses machines: the master window switches and the traveling sidebar rides along
+(an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
+focuses the attach pane instead). It previews only live headful threads (it never
+revives a dead one — Enter still does); the sibling machine resolves live from the
+tmux window name ($SESH_TUI_MASTER_MACHINE pins it for static spawners). Every other
+key/view/action works exactly as in the normal grid.
+
 Keymap (normal mode):
 
 ```
@@ -253,7 +273,10 @@ enter        nav: switch your tmux client to the thread (or attach from a plain 
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
              target; ^y toggles searching child threads — off by default; esc applies)
-tab          cycle views (active / on hold / archived / all / custom [[tui.views]]).
+tab          view PICKER: a popup listing every view (active / on hold / archived /
+             all / custom [[tui.views]]) preselecting the next one — tab/↑/↓ move
+             (wrap), enter or a mouse click applies, esc cancels; the wheel moves
+             the selection. tab+enter reproduces the old blind cycle.
              The default `active` view shows every non-archived thread PLUS archived
              threads that are still headful (a live pane, glyph `⊘`), and hides on-hold
              threads — i.e. `(not archived OR headful) AND not on hold`. So an archived

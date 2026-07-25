@@ -35,8 +35,9 @@ func (m *Model) resetClickTracking() {
 // details, confirm/prompt/tag/uuid popups, move mode) own the screen, so a stray click
 // there is ignored rather than reaching the grid underneath.
 func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.ticketMode != ticketNone || m.detailsPopup || m.helpPopup || m.confirming != confirmNone ||
-		m.prompting != promptNone || m.tagPopup || m.uuidPopup || m.reordering {
+	if m.ticketMode != ticketNone || m.detailsPopup || m.helpPopup || m.viewPicker ||
+		m.confirming != confirmNone || m.prompting != promptNone || m.tagPopup ||
+		m.uuidPopup || m.reordering {
 		return m, nil
 	}
 	idx, ok := m.rowAtY(msg.Y)
@@ -54,6 +55,21 @@ func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.foldSelected(!m.isExpanded(tr.row.ID))
 		m.resetClickTracking()
 		return m, nil
+	}
+
+	// SIDEBAR mode: a SINGLE click enters the thread (Lukas: select-then-double-click
+	// is the popup's ergonomics; a persistent sidebar is a jump list — one click, one
+	// nav, focus hands to the agent pane and the sidebar stays). Fold-marker clicks
+	// (above) still just fold. Same offline-owner gate as the enter key.
+	if m.sidebar {
+		m.resetClickTracking()
+		if !m.machineReachable(tr.row.Machine) {
+			m.note = ""
+			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", tr.row.Machine, offlineRowLabel(tr.row))
+			return m, nil
+		}
+		cmd := m.navSelected()
+		return m, cmd
 	}
 
 	// Double click on the SAME row within the window ENTERS it — the same compose as the

@@ -337,9 +337,12 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, nil
 	case "tab":
-		m.view = (m.view + 1) % View(m.viewCount())
-		m.cursor = 0
-		return m, m.fetch()
+		// Same as normal mode: open the view PICKER (preselecting the next view).
+		// It dispatches above the filter, so its keys work mid-filter and the
+		// filter state survives the switch.
+		m.viewPicker = true
+		m.viewPickerCursor = (int(m.view) + 1) % m.viewCount()
+		return m, nil
 	case "backspace":
 		r := []rune(m.filter)
 		if m.filterCaret > 0 && m.filterCaret <= len(r) {

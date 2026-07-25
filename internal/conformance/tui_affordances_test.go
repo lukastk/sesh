@@ -158,6 +158,15 @@ func claimThreadDetails(t *testing.T) {
 	}
 }
 
+// nextView advances the grid one view: Tab opens the view PICKER preselecting
+// the next view, Enter applies it (tab+enter ≡ the pre-picker single Tab; the
+// apply's fetch runs and feeds back via runSpecial, exactly as before).
+func nextView(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+	m = runSpecial(t, m, tea.KeyTab)
+	return runSpecial(t, m, tea.KeyEnter)
+}
+
 // runSpecial sends a non-rune key (esc/tab/enter/backspace/...) and, like runKey,
 // executes any returned command and feeds its message back.
 func runSpecial(t *testing.T, m tui.Model, kt tea.KeyType) tui.Model {
@@ -237,9 +246,9 @@ func claimViewCycleTab(t *testing.T) {
 	// absence alone is trivially true pre-publish and races the maintainer (this claim
 	// flaked exactly that way once). Three Tabs from active reaches [all].
 	var view string
-	m = runSpecial(t, m, tea.KeyTab) // -> [on hold]
-	m = runSpecial(t, m, tea.KeyTab) // -> [archived]
-	m = runSpecial(t, m, tea.KeyTab) // -> [all]
+	m = nextView(t, m) // -> [on hold]
+	m = nextView(t, m) // -> [archived]
+	m = nextView(t, m) // -> [all]
 	if !waitUntil(25*time.Second, func() bool {
 		m, view = render(t, m)
 		return strings.Contains(view, "stayme") && strings.Contains(view, "parkme")
@@ -250,7 +259,7 @@ func claimViewCycleTab(t *testing.T) {
 		t.Errorf("title missing [all]: %q", firstLine(view))
 	}
 
-	m = runSpecial(t, m, tea.KeyTab) // wraps -> [active]
+	m = nextView(t, m) // wraps -> [active]
 	view = m.View()
 	if !strings.Contains(view, "[active]") {
 		t.Errorf("title missing [active]: %q", firstLine(view))
@@ -259,7 +268,7 @@ func claimViewCycleTab(t *testing.T) {
 		t.Errorf("active view rows wrong (want stayme only):\n%s", view)
 	}
 
-	m = runSpecial(t, m, tea.KeyTab) // -> [on hold] (empty — neither thread is held)
+	m = nextView(t, m) // -> [on hold] (empty — neither thread is held)
 	view = m.View()
 	if !strings.Contains(view, "[on hold]") {
 		t.Errorf("on-hold view title missing [on hold]: %q", firstLine(view))
@@ -268,7 +277,7 @@ func claimViewCycleTab(t *testing.T) {
 		t.Errorf("on-hold view should be empty (neither thread is held):\n%s", view)
 	}
 
-	m = runSpecial(t, m, tea.KeyTab) // -> archived
+	m = nextView(t, m) // -> archived
 	view = m.View()
 	if !strings.Contains(view, "[archived]") {
 		t.Errorf("archived view title missing [archived]: %q", firstLine(view))
@@ -277,10 +286,39 @@ func claimViewCycleTab(t *testing.T) {
 		t.Errorf("archived view rows wrong (want parkme only):\n%s", view)
 	}
 
-	m = runSpecial(t, m, tea.KeyTab) // -> all
-	m = runSpecial(t, m, tea.KeyTab) // -> back to active
+	m = nextView(t, m) // -> all
+	m = nextView(t, m) // -> back to active
 	if m.CurrentView() != tui.ViewActive {
 		t.Errorf("view did not cycle back to active, got %v", m.CurrentView())
+	}
+
+	// The PICKER itself: Tab opens a popup listing every view with the current
+	// one annotated; Esc cancels without switching; a mouse CLICK on a view line
+	// applies it directly (rows render from line 2 — the click contract).
+	m = runSpecial(t, m, tea.KeyTab)
+	pv := m.View()
+	for _, want := range []string{"active", "on hold", "archived", "all", "(current)"} {
+		if !strings.Contains(pv, want) {
+			t.Errorf("view picker missing %q:\n%s", want, pv)
+		}
+	}
+	m = runSpecial(t, m, tea.KeyEsc)
+	if m.CurrentView() != tui.ViewActive || strings.Contains(m.View(), "(current)") {
+		t.Errorf("esc should cancel the picker and keep [active], got %v", m.CurrentView())
+	}
+	m = runSpecial(t, m, tea.KeyTab) // reopen
+	// Click the "archived" line: index 2 → terminal row 2+2.
+	nm, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 3, Y: 4})
+	m = nm.(tui.Model)
+	if cmd != nil {
+		nm2, _ := m.Update(cmd()) // the apply's fetch
+		m = nm2.(tui.Model)
+	}
+	if m.CurrentView() != tui.ViewArchived {
+		t.Errorf("clicking the archived line should apply it, got %v", m.CurrentView())
+	}
+	if !strings.Contains(m.View(), "[archived]") {
+		t.Errorf("clicked view not applied: %q", firstLine(m.View()))
 	}
 	_ = act
 }
@@ -356,7 +394,7 @@ func claimActionHold(t *testing.T) {
 	}
 
 	// The `on hold` view (one Tab from active) shows it.
-	m = runSpecial(t, m, tea.KeyTab) // active -> on hold
+	m = nextView(t, m) // active -> on hold
 	if !waitUntil(15*time.Second, func() bool {
 		var v string
 		m, v = render(t, m)
@@ -373,8 +411,8 @@ func claimActionHold(t *testing.T) {
 	}
 
 	// H opens the explicit-date prompt; submitting a date parks it to that date.
-	m = runSpecial(t, m, tea.KeyTab) // on hold -> archived
-	m = runSpecial(t, m, tea.KeyTab) // archived -> all (holdme is visible here)
+	m = nextView(t, m) // on hold -> archived
+	m = nextView(t, m) // archived -> all (holdme is visible here)
 	m, _ = renderUntilRow(t, m, "holdme")
 	m = runKey(t, m, "H")
 	if !m.Prompting() {
@@ -421,7 +459,7 @@ func claimViewHold(t *testing.T) {
 	}
 
 	// The `on hold` view (one Tab) is the complement: parked shown, working hidden.
-	m = runSpecial(t, m, tea.KeyTab)
+	m = nextView(t, m)
 	if !waitUntil(10*time.Second, func() bool {
 		m, view = render(t, m)
 		return strings.Contains(view, "[on hold]") && strings.Contains(view, "parked")
@@ -459,8 +497,8 @@ func claimViewArchivedOrder(t *testing.T) {
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	// Reach the archived view: Tab twice (active -> on hold -> archived).
-	m = runSpecial(t, m, tea.KeyTab)
-	m = runSpecial(t, m, tea.KeyTab)
+	m = nextView(t, m)
+	m = nextView(t, m)
 	var view string
 	if !waitUntil(25*time.Second, func() bool {
 		m, view = render(t, m)

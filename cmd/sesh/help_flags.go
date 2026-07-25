@@ -519,6 +519,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--cursor", "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)"},
 		{"--filter", "start in filter mode (type-to-narrow immediately)"},
 		{"--expand", "start with tree nodes expanded (default from [tui] expand_children in config.toml)"},
+		{"--sidebar", "persistent-pane mode for the cockpit: narrow name-only column preset ([tui] columns/[[tui.column]] don't apply; an explicit --columns wins), and entering a thread keeps the TUI open — focus hands to the sibling pane instead of quitting"},
 		{"--columns", "comma-separated visible columns (default from [tui] columns in config.toml)"},
 		{"--editor", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},

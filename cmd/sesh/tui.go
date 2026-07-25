@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,22 @@ import (
 	"github.com/lukastk/sesh/internal/tmux"
 	"github.com/lukastk/sesh/internal/tui"
 )
+
+// sidebarWindowName reads the tmux window name the sidebar pane lives in, via
+// its own inherited $TMUX/$TMUX_PANE (a plain `tmux` exec resolves the right
+// server). "" when not inside tmux or unreadable — never an error: it only
+// feeds the optional follow/start-cursor affordances.
+func sidebarWindowName() string {
+	pane := os.Getenv("TMUX_PANE")
+	if os.Getenv("TMUX") == "" || pane == "" {
+		return ""
+	}
+	out, err := exec.Command("tmux", "display-message", "-t", pane, "-p", "#{window_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // runTUI launches the live thread grid. It is a thin client over the local
 // daemon's HTTP+JSON surface (use --all-machines to fan out across the mesh).
@@ -28,12 +45,15 @@ func runTUI(args []string) error {
 	expand := fs.Bool("expand", false, "start with tree nodes expanded (default from [tui] expand_children)")
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	editorFlag := fs.String("editor", "", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)")
+	sidebarFlag := fs.Bool("sidebar", false, "persistent-pane mode: narrow name-only layout, and entering a thread keeps the TUI open (focus hands to the sibling pane) instead of quitting")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	cfg := config.Load()
-	// Column set precedence: --columns flag > [tui] columns config > built-in
-	// default. Unknown names are loud at every level.
+	// Column set precedence: --columns flag > sidebar preset (when --sidebar) >
+	// [tui] columns config > built-in default. Unknown names are loud at every
+	// level. The sidebar preset outranks the config columns because those are
+	// tuned for the wide grid, not a ~35-col pane.
 	tcfg, err := config.LoadTUI(cfg.Home)
 	if err != nil {
 		return err
@@ -42,6 +62,8 @@ func runTUI(args []string) error {
 	switch {
 	case *columnsFlag != "":
 		wantCols = strings.Split(*columnsFlag, ",")
+	case *sidebarFlag:
+		wantCols = tui.SidebarColumns()
 	case tcfg != nil && len(tcfg.Columns) > 0:
 		wantCols = tcfg.Columns
 	}
@@ -49,7 +71,15 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui columns: %w", err)
 	}
-	// [[tui.column]] moves reposition individual columns over the base set.
+	// [[tui.column]] moves reposition individual columns over the base set — but
+	// NOT over the sidebar preset: a move can insert/anchor columns the name-only
+	// preset deliberately omits (it would widen the pane or refuse loudly on a
+	// missing anchor). An explicit --columns keeps the moves as usual.
+	if *sidebarFlag && *columnsFlag == "" && tcfg != nil {
+		tcfgMovesOff := *tcfg // shallow copy just to drop the moves for this launch
+		tcfgMovesOff.ColumnMoves = nil
+		tcfg = &tcfgMovesOff
+	}
 	if tcfg != nil && len(tcfg.ColumnMoves) > 0 {
 		var moves []tui.ColumnMove
 		for _, mv := range tcfg.ColumnMoves {
@@ -212,6 +242,24 @@ func runTUI(args []string) error {
 	// ASYNCHRONOUSLY after the first render, so prefix+s startup is never delayed.
 	if mm := os.Getenv("SESH_TUI_MASTER_MACHINE"); mm != "" {
 		m = m.WithMasterCursor(mm)
+	}
+	if *sidebarFlag {
+		m = m.WithSidebar()
+		// Selection-FOLLOW needs to know which machine the sibling attach pane
+		// shows. $SESH_TUI_MASTER_MACHINE, when the spawner bakes it, PINS it
+		// (a per-window spawner's contract; also the master-cursor carrier,
+		// handled above). Otherwise resolve the sidebar's own WINDOW NAME — the
+		// cockpit names master windows after their machines (mastermaint) — and
+		// resolve it LIVE at each follow: the TRAVELING sidebar is swapped
+		// between windows by a tmux hook, so the sibling machine changes under
+		// the same process. Unresolvable (not in tmux / renamed window matching
+		// no machine) just disables/skips follow — Enter still navs everything.
+		if fm := os.Getenv("SESH_TUI_MASTER_MACHINE"); fm != "" {
+			m = m.WithSidebarFollow(fm)
+		} else if wn := sidebarWindowName(); wn != "" {
+			m = m.WithMasterCursor(wn) // start with the cursor on the shown thread, like prefix+s
+			m = m.WithSidebarFollowResolver(sidebarWindowName)
+		}
 	}
 	if *filter {
 		m = m.WithFilterStart()

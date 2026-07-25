@@ -85,8 +85,8 @@ func claimFilterRank(t *testing.T) {
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
-	sb.newHeadlessThread(t, "pi", "xdocsx")    // 'docs' mid-word
-	sb.newHeadlessThread(t, "pi", "my-docs")   // 'docs' at a boundary -> better
+	sb.newHeadlessThread(t, "pi", "xdocsx")  // 'docs' mid-word
+	sb.newHeadlessThread(t, "pi", "my-docs") // 'docs' at a boundary -> better
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	if !waitUntilT(t, func() bool { m, _ = render(t, m); return len(m.Rows()) == 2 }) {
 		t.Fatalf("rows never appeared")
@@ -260,7 +260,7 @@ func claimCustomViews(t *testing.T) {
 		if strings.Contains(m.View(), "[ticketed]") {
 			break
 		}
-		m = runSpecial(t, m, tea.KeyTab)
+		m = nextView(t, m)
 		m, _ = render(t, m)
 	}
 	if !strings.Contains(m.View(), "[ticketed]") {

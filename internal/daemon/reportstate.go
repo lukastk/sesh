@@ -70,20 +70,12 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		return http.StatusConflict, fmt.Errorf("report-state: thread %s is a %s node — it runs no agent", th.ID, th.AgentKind)
 	}
 	if req.Event == api.ReportTurnEndedNoAuthority {
-		// codex's notify path: evaluate auto-flagging (with the same
-		// unattended gate the maintainer applies) and touch NOTHING else — in
-		// particular no authority entry, which would pin idle through real
-		// turns for a turn-end-only reporter.
-		attended := false
-		if d.maint != nil {
-			if snap, ok := d.maint.stateOf(req.ThreadID); ok {
-				attended = attendedNow(snap.Attachment, snap.AttachedActivityUnix, nowUnix)
-			}
-		}
-		if !attended {
-			if _, ferr := d.store.AutoFlag(req.ThreadID, "turn ended"); ferr != nil {
-				return http.StatusInternalServerError, ferr
-			}
+		// codex's notify path: flag the turn end — attended or not (the gate
+		// was removed 2026-07-25) — and touch NOTHING else: in particular no
+		// authority entry, which would pin idle through real turns for a
+		// turn-end-only reporter.
+		if _, ferr := d.store.AutoFlag(req.ThreadID, "turn ended"); ferr != nil {
+			return http.StatusInternalServerError, ferr
 		}
 		return 0, nil
 	}

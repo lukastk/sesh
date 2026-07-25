@@ -395,16 +395,16 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	} else {
 		snap.StateAuthority = api.AuthorityHeuristic
 	}
-	// Auto-flagging (autoflag.go): an unattended turn end, or an unanswered
-	// question/approval stall (the reporter's blocked state — daemon-internal
-	// since 44), flags the thread. The store's AutoFlag respects flag_disabled
-	// + already-flagged atomically; the record read next tick carries the flag
-	// into the published snapshot (≤ one tick of lag).
+	// Auto-flagging (autoflag.go): a turn end, or an unanswered question/
+	// approval stall (the reporter's blocked state — daemon-internal since 44),
+	// flags the thread — attended or not (the gate was removed 2026-07-25).
+	// The store's AutoFlag respects flag_disabled + already-flagged atomically;
+	// the record read next tick carries the flag into the published snapshot
+	// (≤ one tick of lag).
 	stalled := hasAuth && auth.blocked
 	if reason, flag := autoFlagTrigger(st.snap.Busy, snap.Busy,
 		snap.StateAuthority, m.d.heuristicFlagAllowed(th.AgentKind),
-		stalled, auth.blockedReason, st.stallFlagged,
-		snap.Attachment, snap.AttachedActivityUnix, now.Unix()); flag {
+		stalled, auth.blockedReason, st.stallFlagged); flag {
 		if _, err := m.d.store.AutoFlag(th.ID, reason); err == nil && stalled {
 			st.stallFlagged = true
 		}

@@ -77,7 +77,8 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   - **busy**: `▶` busy (mid-turn) / `·` idle.
   - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your
     attention. Auto-set when a turn ends or the agent stalls on a
-    question/approval while you weren't watching; NEVER auto-cleared (unflag
+    question/approval — attended or not (the unattended-only gate was removed
+    2026-07-25); NEVER auto-cleared (unflag
     with `f` or `thread flag --off`). `⌀` = auto-flagging **disabled** for
     this thread (e.g. children a parent thread monitors). A flagged child
     stays VISIBLE under a collapsed parent (fold-piercing) — a flag never

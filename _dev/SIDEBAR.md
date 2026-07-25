@@ -77,6 +77,13 @@ the myvault pad "Herdr vs sesh - migration assessment".
   Enter-only.
 - **A single mouse click enters** (focus handoff included) — the sidebar is a
   jump list, no select-then-double-click; clicking the ▸/▾ marker still folds.
+- **esc/q are no-ops in sidebar mode** (Lukas hit Esc and the pane vanished,
+  taking the traveling slot with it): a persistent pane must not die to a stray
+  keystroke. ctrl+c stays the deliberate kill. Hide/show is the cockpit
+  TOGGLE's job (myrig binding; transient rig: prefix+b runs a toggle script
+  that respawn-panes the slot between `sleep` placeholder and the sidebar in
+  place — same pane id and geometry, markers swapped, so the traveling hook
+  keeps working).
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
   offline handling, `?` keymap.
 

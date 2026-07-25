@@ -1768,7 +1768,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
 	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
-	case "q", "esc", "ctrl+c":
+	// SIDEBAR mode: esc/q are NO-OPS — a persistent cockpit pane must not die to a
+	// stray keystroke (its pane would vanish and take the traveling slot with it;
+	// hide/show is the cockpit toggle's job). ctrl+c stays as the deliberate kill.
+	case "q", "esc":
+		if m.sidebar {
+			return m, nil
+		}
+		return m, tea.Quit
+	case "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
 		m.moveCursor(-1) // wraps (fzf --cycle feel), over the VISIBLE (filtered) rows

@@ -39,6 +39,38 @@ func TestSidebarNavDoesNotQuit(t *testing.T) {
 	}
 }
 
+// TestSidebarEscDoesNotQuit (Lukas — "if I press Esc on the sidebar, it
+// disappears"): esc/q are no-ops in sidebar mode — a persistent cockpit pane
+// must not die to a stray keystroke (its pane would take the traveling slot
+// with it). ctrl+c stays the deliberate kill; the popup grid keeps q/esc-quit.
+func TestSidebarEscDoesNotQuit(t *testing.T) {
+	sb := Model{sidebar: true, rows: rowsWith("a")}
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
+		_, cmd := sb.Update(k)
+		if cmd != nil {
+			if _, quit := cmd().(tea.QuitMsg); quit {
+				t.Fatalf("sidebar quit on %q — must be a no-op", k.String())
+			}
+		}
+	}
+	_, cmd := sb.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatalf("ctrl+c produced no command")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Fatalf("ctrl+c must still quit the sidebar (the deliberate kill)")
+	}
+	// The popup grid keeps q/esc-quit (pinned live by claimQuitEsc too).
+	popup := Model{rows: rowsWith("a")}
+	_, cmd = popup.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatalf("popup esc produced no command")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Fatalf("popup esc must quit")
+	}
+}
+
 // TestSidebarSingleClickEnters (Lukas): in SIDEBAR mode ONE click on a row
 // enters it (non-nil nav cmd, cursor moved) — the sidebar is a jump list, not a
 // select-then-double-click grid; the offline gate still refuses instantly; the

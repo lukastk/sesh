@@ -80,10 +80,13 @@ the myvault pad "Herdr vs sesh - migration assessment".
 - **esc/q are no-ops in sidebar mode** (Lukas hit Esc and the pane vanished,
   taking the traveling slot with it): a persistent pane must not die to a stray
   keystroke. ctrl+c stays the deliberate kill. Hide/show is the cockpit
-  TOGGLE's job (myrig binding; transient rig: prefix+b runs a toggle script
-  that respawn-panes the slot between `sleep` placeholder and the sidebar in
-  place — same pane id and geometry, markers swapped, so the traveling hook
-  keeps working).
+  TOGGLE's job (myrig binding; transient rig: prefix+b). The toggle's HIDE
+  removes the sidebar AND every placeholder slot — full width everywhere, a
+  deliberate one-time resize (leaving the blank slots behind read as "the pane
+  is still there" — Lukas); SHOW rebuilds the 38-col slot in every master
+  window and puts the sidebar in the current one, focused. Windows created
+  AFTER a show have no slot until the next toggle cycle (the myrig phase's
+  mastermaint self-heal owns that).
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
   offline handling, `?` keymap.
 

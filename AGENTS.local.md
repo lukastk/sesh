@@ -112,6 +112,34 @@ DEPLOY: merged --no-ff c843a5d, binary-only ALL FIVE (mymain native; macbook/mac
 /opt/homebrew/bin/go; ideapad native; termux plain go build CGO=1) — no daemon
 restarts, schema stays 45. The Tab picker is now LIVE in the normal TUI fleet-wide.
 
+## H59 — sidebar/TUI polish batch: picker-on-current, flagged-ALWAYS-in-active, maximize-adaptive sidebar columns (+prefix+z), selection glyph CHIPS (2026-07-25, sesh f55cf5b+9c23cae, myrig fc51a3b; NO schema change, binary-only; deployed ALL FIVE)
+Four asks from Lukas post-#8-close. NB a CONCURRENT session took H58 + pushed sesh
+ff8e65f/6661218 (authority staleness bound, daemon change, THEY deployed+restarted) —
+fetch+rebase caught it mid-push; my batch is TUI-only so binary-only deploy composes
+(running daemons keep their restarted ff8e65f code).
+- PICKER opens ON the CURRENT view (preselect-next was disorienting). Conformance
+  nextView helper = tab+tab+enter now.
+- ACTIVE VIEW: `flagged OR ((!archived || headful) && !onHold)` — a FLAGGED thread
+  ALWAYS shows (attention beats parking; manual unflag re-hides). Optimistic hides
+  compose free via leavesViewWith/builtinViewAdmits. Truth table extended.
+- MAXIMIZE-ADAPTIVE sidebar columns: pane >= sidebarWideThreshold(80) → the FULL grid
+  set (config [tui] columns + [[tui.column]] moves, resolved via runTUI's new shared
+  gridColumnSet closure; WithSidebarWideColumns; effectiveColumnNames swaps per
+  render — zoom raises a resize, zero extra wiring; explicit --columns pins/disables).
+  myrig fc51a3b: prefix+z → sidebar-zoom.sh = zoom PINNED to the @sesh-sidebar pane
+  from anywhere (resize-pane -Z -t; falls back to default zoom when no sidebar).
+  LIVE-PROVEN macbook: zoomed=1 + sidebar active, restore clean.
+- SELECTION CHIPS: gutter glyph tints (▶/↓/⚑) now SURVIVE selection — each tinted
+  glyph renders its [[tui.glyph_color]] style COMPOSED WITH Reverse(true): under
+  reverse the fg becomes the visible cell BACKGROUND → a coloured chip inside an
+  unbroken reverse band (H49's drop-tint-on-selected reversed). Column colours (TKT!
+  red) still yield to the band — chips are for the 1-cell attention glyphs only.
+  TestViewTintsRunningGlyphs re-pinned to the new contract (SGR carries 7 AND colour).
+- Earlier same batch (already in H57 follow-up flow): prefix+v simplified to plain
+  `select-pane -t :.+` (alias of prefix+o).
+DEPLOY: binary-only all five at 9c23cae (no restarts; H58's daemons untouched);
+macbook sidebar respawned. myrig render+source-file all five at fc51a3b.
+
 ### H57 follow-up — sidebar polish + the myrig phase LANDED; port-to-sesh DECLINED (2026-07-25, sesh cc69e8f, myrig a05b793; deployed ALL FIVE)
 Same-day iterations after the merge: filter-Enter in sidebar mode EXITS search
 (nav captures the FILTERED selection FIRST — clearing reshapes the visible set

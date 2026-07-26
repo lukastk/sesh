@@ -266,6 +266,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--seq", "strictly-increasing per-thread sequence; stale seqs are refused (default: current unix nanos)"},
 		{"--reason", "optional description carried by a blocked event (e.g. the permission prompt's message)"},
+		{"--agent-session", "the agent's OWN conversation id, if the reporter knows it (codex's notify payload thread-id); stamped onto the thread record"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread hold": {

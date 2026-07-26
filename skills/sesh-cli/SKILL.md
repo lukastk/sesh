@@ -596,7 +596,11 @@ not fire on a user interrupt/Esc; the thread would otherwise show busy until
 its next prompt). Blocked (question/approval) reports are exempt — those panes
 are legitimately static. codex threads stay heuristic for busy (no
 turn-start surface), but their `notify` hook — wired into the codex config by
-sesh at spawn — still reports turn ENDS for flagging.
+sesh at spawn — still reports turn ENDS for flagging, and since schema 46 that
+report also carries codex's OWN session id, which the daemon stamps onto the
+thread record (codex mints its id on its first turn — without this a headed
+codex thread could not be forked while live, and reviving it fell back to a
+cwd+time rollout guess that could land on a same-cwd sibling's conversation).
 
 **Flags (`sesh thread flag`).** The flag is the "look at this thread" marker:
 the daemon auto-flags when a turn ends or the agent stalls on a question /

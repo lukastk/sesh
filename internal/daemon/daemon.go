@@ -198,6 +198,16 @@ func (d *Daemon) Serve() error {
 	if err != nil {
 		return fmt.Errorf("daemon: listen %s: %w", d.cfg.SocketPath(), err)
 	}
+	// Refresh the materialized codex-notify reporter so a binary upgrade
+	// reaches ALREADY-LIVE codex panes (codex re-reads the file each turn
+	// end); spawns also rewrite it, but waiting for the next spawn would
+	// leave running threads reporting the old shape. Fatal on failure: the
+	// home is writable (the store just opened in it), so an error here means
+	// the daemon could not do what every codex spawn requires anyway.
+	if _, err := agents.WriteCodexNotifyScript(d.cfg.Home); err != nil {
+		ln.Close()
+		return fmt.Errorf("daemon: %w", err)
+	}
 	d.ln = ln
 	d.started = time.Now()
 	d.maint.start()     // begin keeping local thread state fresh in the background

@@ -500,6 +500,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.codex-session-capture",
+		Description: "schema 46 (ticket 49d4299b): codex's late-minted session id is stamped onto the record by the notify reporter at each turn end — fork works on a LIVE headed codex thread, and killing+reviving two same-cwd codex threads lands each on its OWN conversation (no cwd+time discovery mis-landing); LOCAL-only by design (owner-side reporter + disk, like thread.adopt)",
+		Agents:      []Agent{Codex},
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.backup",
 		Description: "backup/restore/copy: sha256-idempotent transcript backups into portable SQLite; restore --to-dir (all agents) / --native (claude; others reported Unsupported); copy composes them; remote = routed",
 		Agents:      agentic,

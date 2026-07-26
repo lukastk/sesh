@@ -214,3 +214,70 @@ func TestAuthorityClearedByLiveness(t *testing.T) {
 		t.Fatalf("headless row carries state_authority %q, want unset", snap.StateAuthority)
 	}
 }
+
+// TestReportStateStampsAgentSession pins the schema-46 session-id capture
+// (ticket 49d4299b): a report carrying agent_session_id stamps the thread
+// record (the authoritative capture for codex's late-minted id — including on
+// turn_ended_no_authority, the codex notify event, which otherwise returns
+// early); a matching id is a no-op; a DIFFERING stored id is corrected (the
+// live pane's reporter is the thread's conversation — this self-heals a past
+// mis-discovery); reports without the field never touch the stored id.
+func TestReportStateStampsAgentSession(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "sesh.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	d := &Daemon{store: st}
+	if err := st.InsertThread(api.Thread{ID: "tid-cx", Machine: "test", SessionName: "s", AgentKind: "codex"}); err != nil {
+		t.Fatalf("InsertThread: %v", err)
+	}
+	storedID := func() string {
+		t.Helper()
+		th, err := st.GetThread("tid-cx")
+		if err != nil {
+			t.Fatalf("GetThread: %v", err)
+		}
+		return th.AgentSessionID
+	}
+
+	// The codex path: turn_ended_no_authority + agent_session_id stamps.
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-cx", Source: "sesh:codex-notify", Event: api.ReportTurnEndedNoAuthority,
+		Seq: 1, AgentSessionID: "codex-session-1",
+	}, 1000); err != nil {
+		t.Fatalf("stamp report: %v", err)
+	}
+	if got := storedID(); got != "codex-session-1" {
+		t.Fatalf("stored id = %q, want codex-session-1", got)
+	}
+
+	// Same id again: no-op, no error.
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-cx", Source: "sesh:codex-notify", Event: api.ReportTurnEndedNoAuthority,
+		Seq: 2, AgentSessionID: "codex-session-1",
+	}, 1001); err != nil {
+		t.Fatalf("idempotent report: %v", err)
+	}
+
+	// A report WITHOUT the field leaves the stored id alone.
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-cx", Source: "sesh:codex-notify", Event: api.ReportTurnEndedNoAuthority, Seq: 3,
+	}, 1002); err != nil {
+		t.Fatalf("field-less report: %v", err)
+	}
+	if got := storedID(); got != "codex-session-1" {
+		t.Fatalf("field-less report changed the stored id to %q", got)
+	}
+
+	// A differing id corrects the record (e.g. a stale mis-discovered stamp).
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-cx", Source: "sesh:codex-notify", Event: api.ReportTurnEndedNoAuthority,
+		Seq: 4, AgentSessionID: "codex-session-2",
+	}, 1003); err != nil {
+		t.Fatalf("correcting report: %v", err)
+	}
+	if got := storedID(); got != "codex-session-2" {
+		t.Fatalf("stored id = %q, want the corrected codex-session-2", got)
+	}
+}

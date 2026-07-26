@@ -54,10 +54,16 @@ func EnsureCodexTrust(codexHome, cwd string) error {
 // DiscoverCodexSession finds the codex session id for a thread by walking codex's
 // rollout files under <codexHome>/sessions and returning the id of the NEWEST
 // rollout whose recorded cwd matches and which was created at/after afterUnix
-// (the thread's spawn time). codex mints its id on the first turn, so this is how
-// sesh recovers it for resume. Returns ("", false) if none — e.g. a codex thread
+// (the thread's spawn time). Returns ("", false) if none — e.g. a codex thread
 // that died before its first turn (a legitimate N/A for resume).
-func DiscoverCodexSession(codexHome, cwd string, afterUnix int64) (string, bool, error) {
+//
+// This is the LEGACY fallback for threads whose id was never captured: since
+// schema 46 the codex notify reporter stamps the id authoritatively at each
+// turn end (ticket 49d4299b), and newest-in-cwd is inherently ambiguous when
+// two codex threads share a cwd. exclude lists session ids already claimed by
+// OTHER threads — a session provably belonging to someone else must never be
+// "discovered" (it would silently resume the wrong conversation).
+func DiscoverCodexSession(codexHome, cwd string, afterUnix int64, exclude map[string]bool) (string, bool, error) {
 	root := filepath.Join(codexHome, "sessions")
 	type cand struct {
 		id   string
@@ -77,7 +83,7 @@ func DiscoverCodexSession(codexHome, cwd string, afterUnix int64) (string, bool,
 			return nil
 		}
 		id, rcwd := codexRolloutMeta(p)
-		if id == "" || rcwd != cwd {
+		if id == "" || rcwd != cwd || exclude[id] {
 			return nil
 		}
 		if name > best.name { // iso-ts prefix => lexical sort is chronological

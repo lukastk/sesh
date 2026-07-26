@@ -44,6 +44,24 @@ func (d *Daemon) prepCodexEnv(kind agents.Kind, env map[string]string, cwd strin
 	return nil
 }
 
+// claimedAgentSessions returns every agent session id already recorded on a
+// thread OTHER than excludeThreadID (archived included — an archived thread
+// still owns its conversation). Fed to DiscoverCodexSession so the legacy
+// cwd+time fallback can never "discover" a sibling's conversation.
+func (d *Daemon) claimedAgentSessions(excludeThreadID string) (map[string]bool, error) {
+	threads, err := d.store.ListThreads(true)
+	if err != nil {
+		return nil, err
+	}
+	claimed := map[string]bool{}
+	for _, th := range threads {
+		if th.ID != excludeThreadID && th.AgentSessionID != "" {
+			claimed[th.AgentSessionID] = true
+		}
+	}
+	return claimed, nil
+}
+
 // handleThreadResume revives an IDLE thread into a pane (the unified model:
 // "dead" and "headless" are not modes — an idle thread is a durable conversation,
 // and this is its pane-shaped revival; `headful` is the same operation). It
@@ -119,15 +137,21 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 	}
 	kind := agents.Kind(thread.AgentKind)
 	sessionID := thread.AgentSessionID
-	// codex mints its session id on the first turn; recover it from rollouts, and if
-	// there is none (no turn ever) it legitimately cannot be revived => N/A.
+	// Legacy fallback (pre-46 threads only — the codex notify reporter stamps
+	// the id at each turn end now): recover the late-minted id from rollouts,
+	// never one another thread already claims; none (no turn ever) => N/A.
 	if kind == agents.Codex && sessionID == "" {
 		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix)
+		claimed, err := d.claimedAgentSessions(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix, claimed)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

@@ -118,9 +118,11 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 	}
 
 	// A HEADED-BORN codex thread began its conversation in a pane, but codex mints
-	// its session id itself — recover it from the rollouts (same as revive) so the
-	// turn CONTINUES that conversation instead of silently starting a fresh one.
-	// No rollout = no turn ever ran in the pane = nothing to continue: loud N/A.
+	// its session id itself — recover it from the rollouts (the legacy fallback,
+	// same as revive; since schema 46 the notify reporter stamps it at each turn
+	// end) so the turn CONTINUES that conversation instead of silently starting a
+	// fresh one. No rollout = no turn ever ran in the pane = nothing to continue:
+	// loud N/A. Sessions claimed by OTHER threads are never discovered.
 	sessionID, started := thread.AgentSessionID, thread.HeadlessStarted
 	if thread.AgentKind == string(agents.Codex) && started && sessionID == "" {
 		releaseSlot := func() {
@@ -128,7 +130,13 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 			delete(d.hlInFlight, req.ID)
 			d.hlMu.Unlock()
 		}
-		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix)
+		claimed, err := d.claimedAgentSessions(req.ID)
+		if err != nil {
+			releaseSlot()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix, claimed)
 		if err != nil {
 			releaseSlot()
 			writeError(w, http.StatusInternalServerError, err.Error())

@@ -46,6 +46,16 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		writeError(w, http.StatusInternalServerError, "fork: resolve source session: "+err.Error())
 		return
 	}
+	// A codex thread with no captured session id is indistinguishable from
+	// turn-less here (TranscriptPath("") is found=false), and the generic
+	// message below misled for a headed codex source WITH turns. Since schema
+	// 46 the notify reporter stamps the id at each turn end, so this is the
+	// legacy/never-reported case — name the real state and the way out.
+	if kind == agents.Codex && srcSession == "" {
+		writeError(w, http.StatusConflict,
+			"fork: codex thread has no captured session id (codex mints it on its first turn; sesh records it at each turn end) — run one turn, or stop+revive the thread, then fork")
+		return
+	}
 	srcPath, found, err := agents.TranscriptPath(kind, srcSession, src.Cwd, homes)
 	if err != nil || !found {
 		writeError(w, http.StatusConflict, "fork: source thread has no transcript on disk (no turn yet)")

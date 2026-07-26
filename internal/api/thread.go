@@ -593,6 +593,12 @@ type ReportStateRequest struct {
 	// Reason optionally describes a `blocked` event (e.g. the permission
 	// prompt's message). Ignored for other events.
 	Reason string `json:"reason,omitempty"`
+	// AgentSessionID is the agent's OWN conversation id, when the reporter
+	// knows it (schema 46: codex's notify payload carries it as "thread-id").
+	// The daemon stamps it onto the thread record — the authoritative capture
+	// for codex, whose id is minted on the first turn and was otherwise only
+	// recovered by ambiguous cwd+time rollout discovery at revive time.
+	AgentSessionID string `json:"agent_session_id,omitempty"`
 }
 
 // Reporter event vocabulary. `release` withdraws the reporter's authority

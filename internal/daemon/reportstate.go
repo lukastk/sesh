@@ -12,6 +12,7 @@ package daemon
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -68,6 +69,22 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 	}
 	if api.NonAgentKind(th.AgentKind) {
 		return http.StatusConflict, fmt.Errorf("report-state: thread %s is a %s node — it runs no agent", th.ID, th.AgentKind)
+	}
+	// Schema 46: a reporter that knows the agent's own conversation id stamps
+	// it here — the authoritative capture for codex's late-minted id (before
+	// this, a headed codex thread's id was only recovered by ambiguous
+	// cwd+time rollout discovery at revive, which mis-lands when two codex
+	// threads share a cwd — ticket 49d4299b). The live pane's reporter IS the
+	// thread's conversation, so a differing stored id (a past mis-discovery,
+	// or the agent starting a new conversation in place) is corrected, loudly.
+	if req.AgentSessionID != "" && req.AgentSessionID != th.AgentSessionID {
+		if th.AgentSessionID != "" {
+			log.Printf("report-state: thread %s agent session id corrected %s -> %s (reported by %s; the stored id was stale or mis-discovered)",
+				th.ID, th.AgentSessionID, req.AgentSessionID, req.Source)
+		}
+		if serr := d.store.SetThreadAgentSession(th.ID, req.AgentSessionID); serr != nil {
+			return http.StatusInternalServerError, fmt.Errorf("report-state: stamp agent session id: %w", serr)
+		}
 	}
 	if req.Event == api.ReportTurnEndedNoAuthority {
 		// codex's notify path: flag the turn end — attended or not (the gate

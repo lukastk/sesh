@@ -986,6 +986,7 @@ func threadReportState(cfg config.Config, args []string) error {
 	source := fs.String("source", "", "reporter identity (e.g. sesh:pi-ext)")
 	seq := fs.Int64("seq", 0, "strictly-increasing per-thread sequence (default: current unix nanos)")
 	reason := fs.String("reason", "", "optional description for a blocked event (the prompt's message)")
+	agentSession := fs.String("agent-session", "", "the agent's own conversation id, if the reporter knows it (codex notify payload thread-id); the daemon stamps it onto the thread record")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1008,6 +1009,7 @@ func threadReportState(cfg config.Config, args []string) error {
 	}
 	return daemonClient(cfg).ThreadReportState(context.Background(), api.ReportStateRequest{
 		ThreadID: rid, Source: *source, Event: *event, Seq: s, Reason: *reason,
+		AgentSessionID: *agentSession,
 	})
 }
 

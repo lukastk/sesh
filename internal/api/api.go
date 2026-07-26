@@ -258,7 +258,20 @@ package api
 // a pre-45 daemon 404s and the CLI drops the hint (freshness then degrades to
 // the normal cadence, the pre-45 behavior; the routed command itself already
 // succeeded). Unknown machine / self are loud 4xx — a typo must not no-op.
-const SchemaVersion = 45
+//
+// 46: CODEX SESSION-ID CAPTURE (ticket 49d4299b). ReportStateRequest gains
+// agent_session_id: a reporter that knows the agent's OWN conversation id
+// (codex's notify payload carries it as "thread-id") sends it with any event,
+// and the owning daemon stamps it onto the thread record. Before this, a
+// HEADED codex thread never captured its (late-minted) session id, so forking
+// it 409'd misleadingly and reviving it fell back to cwd+time rollout
+// discovery — which silently resumes the WRONG conversation when two codex
+// threads share a cwd. Discovery stays as the fallback for threads with no
+// post-46 turn, now excluding session ids already claimed by other threads.
+// Additive and mixed-mesh safe: report-state is owner-local (the reporter
+// talks to its own machine's daemon); a pre-46 daemon simply ignores the
+// unknown JSON field (the pre-46 behavior).
+const SchemaVersion = 46
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

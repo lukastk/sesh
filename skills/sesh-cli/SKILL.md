@@ -666,6 +666,10 @@ label = 'mysetup/{rel}'
 columns = ["machine","agent","name","cwd","tags","notify"]
 all_machines = true              # default `sesh tui` to the cross-machine view (= --all-machines)
 show_offline = true              # show OFFLINE machines' threads by default (else hidden; `o` toggles)
+expand_children = true           # tree nodes start EXPANDED (default false: children collapsed; = --expand)
+[[tui.column]]                   # MOVE one column relative to an anchor, on top of the base set —
+name   = "notify"                #   so you can reposition a column without enumerating them all
+before = "machine"               #   (or `after = "..."`)
 [[tui.column_color]]             # NAME blue / CWD green / ticket_input red by default; override here
 name = "cwd"
 color = "green"
@@ -717,6 +721,25 @@ would, while raw attachment over-suppresses (cockpit clients park on
 sessions) — a notify hook should skip only when attached AND (recent input OR
 a recent attachment flip), failing open when the vars are absent. Under
 `SESH_STATE_AUTHORITY=reported` the edge is exact (a real turn boundary).
+
+### `ui_config.toml` — the app's preferences (a SECOND file)
+
+`<SESH_HOME>/ui_config.toml` is separate from `config.toml`: it holds preferences for the
+**sesh-ui app**, which the daemon stores and serves over `GET`/`POST /v1/ui-config`. sesh
+does not otherwise interpret them, and the CLI/TUI ignores the file entirely. It lives in
+`SESH_HOME` so it follows whichever daemon a client connects to (per-machine).
+
+```toml
+collapse_parents = true          # parent threads start COLLAPSED in the app's tree (default true)
+cwd_roots = ["~/mysetup", "~/dev"]   # "default parent folders" the new-thread modal quick-picks
+                                     #   from (listed per target machine via GET /v1/fs/list)
+transcript_prefetch_secs = 10    # background transcript prefetch cadence; 0 disables
+master_command = "mmt-start"     # what the app's Master mode runs in a pty ($SHELL -lc); empty = unconfigured
+default_agent = "claude"         # new-thread modal preselections
+default_machine = "macbook"
+default_chat_view = "terminal"   # terminal | transcript | rpc
+[[cwd_label]]                    # display transform for the cwd quick-pick (same rule language as config.toml)
+```
 
 ## Common flags & environment
 

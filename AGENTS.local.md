@@ -1,5 +1,43 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H61 — codex lifecycle EXPERIMENT (Lukas's ask): compact/fork/revive — 2 real bugs found, NO code change; ticket 49d4299b (triage)
+Lukas: "any issues with sesh and codex, especially after you compact... if you fork and kill
+both and reattach, do they land on the right thread?" Ran a fully ISOLATED live experiment
+(codex-cli 0.145.0, GPT-5.6 Sol; sandbox SESH_HOME/CODEX_HOME [auth.json copied]/sockets
+cx-work+cx-master, SESH_* stripped, deployed binary; codeword-recall as the continuity probe;
+sandbox torn down after).
+VERIFIED FINE: (a) codex **/compact is IN-PLACE** — same session id, same rollout file (14→19
+lines), NO drift (unlike claude; ResolveCurrentSession's identity-for-codex assumption HOLDS);
+(b) `codex resume` **appends in place** (no new rollout file, id stable across repeated
+kill/revive); (c) compact→stop→headful recalls pre+post-compact codewords; (d) fork mechanics +
+kill-both/revive-both land correctly WHEN both ids are stamped (branch codewords stayed
+isolated); (e) turn-less codex revive still N/As correctly (0.145 writes the rollout only at
+FIRST TURN, not launch — filename ts ≈ launch is just the minted session ts).
+TWO REAL BUGS (shared root cause: a HEADED codex thread's agent_session_id is NEVER stamped —
+only revive/headless-turn stamp it, so it sits "" through any number of headed turns):
+1. **Fork of a live headed codex thread 409s** "no transcript on disk (no turn yet)" —
+   misleading; transcript exists, TranscriptPath(kind,"") is the failure. Works only after one
+   stop→revive cycle. (TUI `F` on a codex row hits this too. The green fork cells never caught
+   it — they fork headless-started sources, which are always stamped.)
+2. **THE BAD ONE — revive discovery mis-lands with two codex threads in ONE cwd** (both
+   unstamped = the default): kill both, revive the OLDER → DiscoverCodexSession picks the
+   NEWEST same-cwd rollout → resumes the WRONG conversation + permanently stamps the wrong id;
+   reviving the second lands BOTH threads on the SAME codex session (two codex processes
+   appending to one rollout — cross-contamination visible in the notify payload's
+   input-messages), the older conversation ORPHANED on disk (recovery: thread adopt
+   --agent codex --session-id <id>). Silent-wrong-behavior class (the --machine X failure).
+FIX PATH (proven viable, not built): codex's notify payload CARRIES the session id —
+`{"type":"agent-turn-complete","thread-id":"<rollout id>","turn-id":...,"cwd":...}` (verified
+via a tap on the materialized codex-notify.sh; remember H60: any codex SPAWN re-materializes
+that script and WIPES taps — tap only while the target thread is already live). codex-notify.sh
+already reports turn_ended_no_authority with $SESH_THREAD_ID → extend it to pass thread-id and
+stamp agent_session_id on first report; discovery becomes a legacy fallback. Ticket 49d4299b
+(triage) has the full spec + matrix-cell asks.
+EXPERIMENT GOTCHAS: `thread send --wait` has NO --until flag (that's `thread wait`); --timeout
+wants a duration ("120s"). Sending "/compact" via thread send triggers the slash command fine.
+Codex renders resumed history in the TUI, so codeword RECALL (a real turn) is the honest probe,
+not the rendered backlog.
+
 ## H58 — phantom BUSY from an Esc'd claude turn: authority STALENESS BOUND (2026-07-25, sesh ff8e65f; NO schema change; deployed ALL FIVE)
 Lukas: thread ab9d5a3a (dagster-netrun, claude on mymain) showed busy while "very idle".
 DIAGNOSIS TRAIL (worth remembering as a recipe): grid said busy but `thread status --id` said

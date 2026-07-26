@@ -358,7 +358,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// dispatches above the filter, so its keys work mid-filter and the
 		// filter state survives the switch.
 		m.viewPicker = true
-		m.viewPickerCursor = int(m.view)
+		m.viewPickerCursor = m.viewPos(m.view)
 		return m, nil
 	case "backspace":
 		r := []rune(m.filter)

@@ -88,10 +88,11 @@ func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
 func builtinViewAdmits(view View, row api.ThreadRow) bool {
 	switch view {
 	case ViewActive:
-		// A FLAGGED thread is ALWAYS shown (Lukas): the flag means "needs your
-		// attention", and attention beats archived/on-hold parking — unflagging
-		// (or the auto-flag policy) is what returns it to hiding.
-		return row.Flagged || ((!row.Archived || row.Head == api.Headful) && !row.OnHold)
+		// HOLD BEATS FLAG (Lukas, 2026-07-26): an on-hold thread NEVER shows in
+		// active — putting a thread on hold must actually park it, flag or not
+		// (its ⚑ still shows in the `on hold` view). A flag still overrides the
+		// archived-hiding for non-held threads ("needs your attention").
+		return (row.Flagged || !row.Archived || row.Head == api.Headful) && !row.OnHold
 	case ViewHold:
 		return !row.Archived && row.OnHold
 	case ViewArchived:
@@ -450,6 +451,10 @@ func (m Model) WithSidebarFilterStyle(style string) Model {
 // the model so the filter-exit restore can put it back (see syncFilterStyleCmd).
 type filterStyleSavedMsg struct{ saved string }
 
+// filterStyleRestoredMsg signals the filter-exit restore completed (so the
+// model can force the same repaint the enter path does).
+type filterStyleRestoredMsg struct{}
+
 // syncFilterStyleCmd emits a pane-tint command when the sidebar's filter INPUT
 // mode just toggled (wasFiltering != m.filtering). Entering saves the current
 // window-active-style and swaps in the filter tint; leaving restores the saved
@@ -493,7 +498,7 @@ func exitFilterStyleCmd(saved string) tea.Cmd {
 		} else {
 			exec.Command("tmux", "set-option", "-p", "-t", pane, "window-active-style", saved).Run() //nolint:errcheck — cosmetic
 		}
-		return nil
+		return filterStyleRestoredMsg{}
 	}
 }
 
@@ -1157,10 +1162,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case filterStyleSavedMsg:
-		// Remember the pre-filter pane tint so the filter-exit restore can put
-		// it back (the focus tint the cockpit set).
+		// The filter tint is now on the pane (option set). Remember the
+		// pre-filter tint for the exit restore, then force a FULL repaint:
+		// tmux only re-paints default-bg cells with a new window-active-style on
+		// a full redraw (a focus change or a clear), NOT on a mid-focus option
+		// change — so without this the pane keeps its old paint and the tint
+		// never visibly appears.
 		m.sidebarSavedActiveStyle = msg.saved
-		return m, nil
+		return m, tea.ClearScreen
+	case filterStyleRestoredMsg:
+		// Focus tint restored on the pane — force the same full repaint.
+		return m, tea.ClearScreen
 	case tea.KeyMsg:
 		// Detect a sidebar filter INPUT-mode transition centrally: whatever
 		// handler the key runs through, if it flipped m.filtering we swap the

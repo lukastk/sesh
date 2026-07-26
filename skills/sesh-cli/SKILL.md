@@ -597,13 +597,15 @@ starts/ends EXACTLY — the snapshot's `state_authority` field says which
 mechanism decided (`reported` or `heuristic`; absent for headless threads).
 Reporters use `sesh thread report-state` — a mechanism verb you normally never
 type: stale `--seq` values are refused, and authority is dropped automatically
-when the thread's pane dies. A reported-busy entry is ALSO dropped (loudly, in
-the daemon log) when the pane has been byte-stable for 2 minutes and the report
-is at least that old — a real in-flight turn animates the TUI every second, so
-a frozen pane means the turn's end was never reported (claude's Stop hook does
-not fire on a user interrupt/Esc; the thread would otherwise show busy until
-its next prompt). Blocked (question/approval) reports are exempt — those panes
-are legitimately static. codex threads stay heuristic for busy (no
+when the thread's pane dies. Two SYMMETRIC staleness bounds drop a report the
+pane contradicts (loudly, in the daemon log, degrading to `heuristic` so it is
+visible): a reported-BUSY on a pane byte-stable for 2 minutes (the lost-turn_end
+class — claude's Stop hook does not fire on a user interrupt/Esc, which would
+otherwise pin busy until the next prompt), and a reported-IDLE on a pane that
+has been ANIMATING for 2 minutes (the reporter isn't tracking turns — a session
+that predates the reporter hooks, or hooks that stopped firing — which would
+otherwise mask a running turn as idle). Blocked (question/approval) reports are
+exempt from the busy bound — those panes are legitimately static. codex threads stay heuristic for busy (no
 turn-start surface), but their `notify` hook — wired into the codex config by
 sesh at spawn — still reports turn ENDS for flagging, and since schema 46 that
 report also carries codex's OWN session id, which the daemon stamps onto the

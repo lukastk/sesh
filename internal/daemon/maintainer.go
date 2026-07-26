@@ -59,8 +59,14 @@ type liveState struct {
 	// capture counts, so a freshly observed pane is never instantly "frozen").
 	// Unlike lastActive it is never bumped by reported authority — it is the
 	// evidence the authority staleness bound checks reports against.
-	lastChange      time.Time
-	hasActiveTicket bool // any bound ticket is `active` (set per tick from the digest)
+	lastChange time.Time
+	// heuristicBusySince is when the CURRENT content-diff busy streak began
+	// (zero when the heuristic reads idle). It is the mirror of lastChange: the
+	// evidence the reported-IDLE staleness bound checks against — a pane
+	// animating continuously for the bound while the report still says idle
+	// means the reporter is stale/dead.
+	heuristicBusySince time.Time
+	hasActiveTicket    bool // any bound ticket is `active` (set per tick from the digest)
 	// stallFlagged latches "this stall episode already auto-flagged" so a
 	// manual unflag is not re-flagged every tick while the SAME prompt sits
 	// open; reset when the stall clears. Maintainer-goroutine only.
@@ -120,6 +126,22 @@ func staleReportedBusy(lastChange time.Time, reportedAtUnix int64, now time.Time
 		return false
 	}
 	return now.Sub(lastChange) >= bound && now.Unix()-reportedAtUnix >= int64(bound/time.Second)
+}
+
+// staleReportedIdle is the mirror of staleReportedBusy: a reported-IDLE authority
+// entry is contradicted by the pane when the content-diff has read busy
+// CONTINUOUSLY for at least bound (the pane is animating — a running turn) AND
+// the report itself is at least bound old. A working reporter fires turn_started
+// within a second or two of a turn's animation, so a pane animating for the whole
+// bound while the report still says idle means the reporter is stale or dead (a
+// session predating the hooks, or a reporter that died mid-session) — the daemon
+// must then trust the heuristic instead of masking a live turn as idle. A zero
+// heuristicBusySince (pane not currently animating) proves nothing.
+func staleReportedIdle(heuristicBusySince time.Time, reportedAtUnix int64, now time.Time, bound time.Duration) bool {
+	if heuristicBusySince.IsZero() {
+		return false
+	}
+	return now.Sub(heuristicBusySince) >= bound && now.Unix()-reportedAtUnix >= int64(bound/time.Second)
 }
 
 func newMaintainer(d *Daemon) *maintainer {
@@ -358,8 +380,12 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 	st.changes = pruned
 	if len(st.changes) >= busyChangesNeeded {
 		snap.Busy = api.BusyBusy
+		if st.heuristicBusySince.IsZero() {
+			st.heuristicBusySince = now // a new content-diff busy streak began
+		}
 	} else {
 		snap.Busy = api.BusyIdle
+		st.heuristicBusySince = time.Time{} // streak broken
 	}
 	// State authority (schema 43): a live in-agent reporter's turn state
 	// OVERRIDES the content-diff for the busy axis — the report is exact where
@@ -381,6 +407,20 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		// mid-turn with a static pane).
 		log.Printf("maintainer: thread %s reported busy by %s %ds ago but its pane has been byte-stable for %ds — dropping stale authority (lost turn_ended, e.g. an interrupted turn)",
 			th.ID, auth.source, now.Unix()-auth.reportedAtUnix, int(now.Sub(st.lastChange)/time.Second))
+		m.d.clearAuthority(th.ID)
+		hasAuth = false
+	}
+	if hasAuth && !auth.busy &&
+		staleReportedIdle(st.heuristicBusySince, auth.reportedAtUnix, now, m.staleBound) {
+		// The MIRROR of the reported-busy bound above: the pane has been
+		// animating (content-diff busy) for the whole bound while the report
+		// still claims idle. A live reporter fires turn_started within a second
+		// or two of a turn's animation, so this means the reporter is stale or
+		// dead — a session that predates the reporter hooks, or one whose hooks
+		// stopped firing. Trust the heuristic instead of masking a running turn
+		// as idle. Drop LOUDLY and degrade — visible via state_authority.
+		log.Printf("maintainer: thread %s reported idle by %s %ds ago but its pane has been animating for %ds — dropping stale authority (reporter not tracking turns, e.g. a session predating the hooks)",
+			th.ID, auth.source, now.Unix()-auth.reportedAtUnix, int(now.Sub(st.heuristicBusySince)/time.Second))
 		m.d.clearAuthority(th.ID)
 		hasAuth = false
 	}

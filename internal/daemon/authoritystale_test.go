@@ -37,6 +37,32 @@ func TestStaleReportedBusy(t *testing.T) {
 	}
 }
 
+// TestStaleReportedIdle pins the MIRROR predicate: a reported-idle is stale only
+// when the pane has been animating (heuristic busy) for at least the bound AND
+// the report is at least that old; a pane not currently animating proves nothing
+// (a legit idle), and a fresh report survives a brief post-turn animation.
+func TestStaleReportedIdle(t *testing.T) {
+	now := time.Now()
+	bound := 2 * time.Minute
+	cases := []struct {
+		name       string
+		busySince  time.Time
+		reportedAt int64
+		want       bool
+	}{
+		{"animating for bound, old report -> stale", now.Add(-3 * time.Minute), now.Add(-3 * time.Minute).Unix(), true},
+		{"animating for bound, FRESH report -> not stale (just ended, pane settling)", now.Add(-3 * time.Minute), now.Unix(), false},
+		{"animating briefly, old report -> not stale (turn just starting / typing)", now.Add(-time.Second), now.Add(-10 * time.Minute).Unix(), false},
+		{"pane not animating -> proves nothing (legit idle)", time.Time{}, now.Add(-10 * time.Minute).Unix(), false},
+		{"exactly at the bound -> stale", now.Add(-bound), now.Add(-bound).Unix(), true},
+	}
+	for _, c := range cases {
+		if got := staleReportedIdle(c.busySince, c.reportedAt, now, bound); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestMaintainerDropsStaleReportedBusy drives the REAL maintainer against a
 // REAL tmux pane (a static process argv0-named "claude" so AgentUnderPane
 // resolves it — this is a daemon-internal test outside the matrix; the honest
@@ -145,5 +171,124 @@ func TestMaintainerDropsStaleReportedBusy(t *testing.T) {
 	m.tick()
 	if sn := snapOf(); sn.Busy != api.BusyBusy || sn.StateAuthority != api.AuthorityReported {
 		t.Fatalf("blocked past bound: busy=%s authority=%s, want busy/reported (blocked exempt)", sn.Busy, sn.StateAuthority)
+	}
+}
+
+// TestMaintainerDropsStaleReportedIdle is the MIRROR of the reported-busy drop:
+// a REAL maintainer against a REAL tmux pane that ANIMATES (an argv0-"claude"
+// symlink to sh running a timestamp loop, so the content-diff reads busy and
+// AgentUnderPane resolves it headful). A reported turn_ended (idle) wins BRIEFLY
+// while fresh (a real turn's pane settles for a moment), then — once the pane has
+// animated for the whole bound while the report still says idle — the entry is
+// dropped and busy degrades to the heuristic (busy) VISIBLY (state_authority
+// reported->heuristic). This is the reporter-not-tracking-turns class (a session
+// predating the hooks): a stale reported-idle must never mask a running turn.
+func TestMaintainerDropsStaleReportedIdle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	shBin, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "sesh.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	// A fake agent named "claude" (a symlink to sh — a shebang script would read
+	// as argv0 "sh" and miss the agent regex) running an animating loop, so the
+	// pane content genuinely changes every tick (a real in-flight turn).
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.Symlink(shBin, bin); err != nil {
+		t.Fatal(err)
+	}
+
+	sock := "seshidle-test-" + strings.ReplaceAll(t.Name(), "/", "_")
+	raw := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sock}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	// Loop printing a changing counter so capture-pane differs every tick.
+	loop := "i=0; while :; do echo tick=$i; i=$((i+1)); sleep 0.2; done"
+	if _, err := raw("-f", "/dev/null", "new-session", "-d", "-s", "anim", "-x", "80", "-y", "20", bin+" -c '"+loop+"'"); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	defer exec.Command("tmux", "-L", sock, "kill-server").Run() //nolint:errcheck
+
+	const tid = "tid-stale-idle"
+	if err := st.InsertThread(api.Thread{ID: tid, Machine: "test", SessionName: "anim", AgentKind: "claude", Cwd: "/tmp"}); err != nil {
+		t.Fatalf("InsertThread: %v", err)
+	}
+	pane, err := raw("list-panes", "-t", "anim", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("pane id: %v", err)
+	}
+	if _, err := raw("set-option", "-p", "-t", pane, "@sesh-thread-id", tid); err != nil {
+		t.Fatalf("mark pane: %v", err)
+	}
+
+	d := &Daemon{store: st, tmux: tmux.NewServer(sock)}
+	m := newMaintainer(d)
+	m.staleBound = 2 * time.Second // injectable: no real 2-minute wait needed
+
+	snapOf := func() api.ThreadSnapshot {
+		t.Helper()
+		sn, ok := m.stateOf(tid)
+		if !ok {
+			t.Fatalf("thread has no maintained state")
+		}
+		return sn
+	}
+
+	// Build up the content-diff busy streak: tick repeatedly (~0.35s apart) until
+	// the heuristic reads busy (the animating pane changes every tick).
+	busy := false
+	for i := 0; i < 12 && !busy; i++ {
+		m.tick()
+		busy = snapOf().Busy == api.BusyBusy
+		if !busy {
+			time.Sleep(350 * time.Millisecond)
+		}
+	}
+	if !busy {
+		t.Fatalf("baseline: animating pane never read heuristic-busy")
+	}
+	if sn := snapOf(); sn.StateAuthority != api.AuthorityHeuristic {
+		t.Fatalf("baseline: authority=%s, want heuristic (no report yet)", sn.StateAuthority)
+	}
+
+	// A FRESH reported turn_ended (idle) wins over the animating pane briefly —
+	// a real turn's pane can still settle for a moment after the report.
+	if code, err := d.reportState(api.ReportStateRequest{ThreadID: tid, Event: api.ReportTurnEnded, Source: "sesh:claude-hook", Seq: 1}, time.Now().Unix()); err != nil {
+		t.Fatalf("reportState: %d %v", code, err)
+	}
+	m.tick()
+	if sn := snapOf(); sn.Busy != api.BusyIdle || sn.StateAuthority != api.AuthorityReported {
+		t.Fatalf("fresh idle report: busy=%s authority=%s, want idle/reported", sn.Busy, sn.StateAuthority)
+	}
+
+	// Keep the pane animating past the bound; the report is now old too. The
+	// stale reported-idle is dropped and busy degrades to the heuristic (busy).
+	deadline := time.Now().Add(3 * time.Second)
+	var sn api.ThreadSnapshot
+	for time.Now().Before(deadline) {
+		m.tick()
+		sn = snapOf()
+		if sn.StateAuthority == api.AuthorityHeuristic {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if sn.Busy != api.BusyBusy || sn.StateAuthority != api.AuthorityHeuristic {
+		t.Fatalf("past bound: busy=%s authority=%s, want busy/heuristic (stale reported-idle dropped)", sn.Busy, sn.StateAuthority)
+	}
+	if _, still := d.reportedState(tid); still {
+		t.Fatalf("authority entry still present after the stale-idle drop")
 	}
 }

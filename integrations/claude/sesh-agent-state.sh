@@ -4,15 +4,21 @@
 # content-diff heuristic (schema 43, issue #4 — see _dev/STATE_AUTHORITY.md).
 #
 # Registration (policy, lives in myrig's claude settings): run this script for
-# the UserPromptSubmit and Stop hook events. Hook input arrives as JSON on
-# stdin (hook_event_name, session_id, ...).
+# the UserPromptSubmit / Stop / PostToolUse / PreToolUse / Notification hook
+# events. Hook input arrives as JSON on stdin (hook_event_name, session_id, ...).
+#
+# It also carries claude's live `session_id` as --agent-session so the daemon
+# stamps it onto the thread record every turn (schema 46). claude mints a NEW
+# session id on compaction/rewind, so the record's spawn-time id drifts stale;
+# stamping the live id each turn keeps `thread resume`/reopen landing on the
+# session claude is ACTUALLY in, instead of relying on the fragile leaf resolver.
 #
 # Self-gating: outside a sesh thread (no SESH_THREAD_ID in the environment —
 # claude sessions sesh spawned or register-then-exec'd have it) this does
 # nothing. Subagent hook invocations (agent_id present) are skipped — only the
-# MAIN conversation's turns are thread state. SubagentStop is never mapped:
-# claude recap/away-summary turns can emit it after the main turn already
-# stopped (the herdr claude-integration lesson).
+# MAIN conversation's turns are thread state (and only its session id is
+# stamped). SubagentStop is never mapped: claude recap/away-summary turns can
+# emit it after the main turn already stopped (the herdr claude-integration lesson).
 #
 # ALWAYS exits 0: a nonzero Stop hook would block claude from stopping, and a
 # reporting failure must never break the agent. The daemon side stays honest —
@@ -28,6 +34,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 
 input="$(cat 2>/dev/null || true)"
 
+# Emit TAB-separated: <event>\t<reason>\t<session_id>. Empty event => no report.
 out="$(printf '%s' "$input" | python3 -c '
 import json, sys
 
@@ -37,7 +44,10 @@ except Exception:
     sys.exit(0)
 if h.get("agent_id"):  # subagent invocation, not the main turn
     sys.exit(0)
+sid = str(h.get("session_id", "") or "").replace("\t", " ").replace("\n", " ")
 name = h.get("hook_event_name", "")
+event = ""
+reason = ""
 if name == "PreToolUse":
     # AskUserQuestion = the agent is stalled on a QUESTION (verified live:
     # PreToolUse fires with the full question JSON exactly when the prompt
@@ -50,31 +60,36 @@ if name == "PreToolUse":
             q = str(qs[0].get("question", "")) if qs else ""
         except Exception:
             q = ""
-        print("blocked\t" + (q or "agent asked a question").replace("\n", " ")[:200])
-    sys.exit(0)
-if name == "Notification":
+        event = "blocked"
+        reason = (q or "agent asked a question")
+elif name == "Notification":
     # Notification carries permission requests, question prompts AND idle
     # reminders ("Claude is waiting for your input"); the permission match
-    # covers the approval prompts (and backstops AskUserQuestion, whose
-    # message also says "needs your permission"). Evidence-based message
-    # match — the only signal claude exposes here.
+    # covers the approval prompts (and backstops AskUserQuestion, whose message
+    # also says "needs your permission"). Evidence-based message match — the
+    # only signal claude exposes here.
     msg = str(h.get("message", "") or "")
     if "permission" in msg.lower():
-        print("blocked\t" + msg.replace("\n", " ")[:200])
+        event = "blocked"
+        reason = msg
+else:
+    # PostToolUse = a tool completed, i.e. any permission/question stall
+    # resolved and the turn is running again.
+    event = {"UserPromptSubmit": "turn_started", "Stop": "turn_ended", "PostToolUse": "unblocked"}.get(name, "")
+if not event:
     sys.exit(0)
-# PostToolUse = a tool completed, i.e. any permission/question stall resolved
-# and the turn is running again.
-print({"UserPromptSubmit": "turn_started", "Stop": "turn_ended", "PostToolUse": "unblocked"}.get(name, ""))
+reason = reason.replace("\t", " ").replace("\n", " ")[:200]
+print(event + "\t" + reason + "\t" + sid)
 ' 2>/dev/null || true)"
 
-event="${out%%$(printf '\t')*}"
-reason="${out#*$(printf '\t')}"
-[ "$reason" = "$out" ] && reason=""
+event="$(printf '%s' "$out" | cut -f1)"
+reason="$(printf '%s' "$out" | cut -f2)"
+sid="$(printf '%s' "$out" | cut -f3)"
 
 [ -n "$event" ] || exit 0
-if [ -n "$reason" ]; then
-	"$SESH_CMD" thread report-state --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event" --reason "$reason" >/dev/null 2>&1 || true
-else
-	"$SESH_CMD" thread report-state --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event" >/dev/null 2>&1 || true
-fi
+# Build argv so the optional --reason / --agent-session are only passed when set.
+set -- --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event"
+[ -n "$reason" ] && set -- "$@" --reason "$reason"
+[ -n "$sid" ] && set -- "$@" --agent-session "$sid"
+"$SESH_CMD" thread report-state "$@" >/dev/null 2>&1 || true
 exit 0

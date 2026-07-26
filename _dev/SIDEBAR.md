@@ -92,6 +92,14 @@ the myvault pad "Herdr vs sesh - migration assessment".
   window and puts the sidebar in the current one, focused. Windows created
   AFTER a show have no slot until the next toggle cycle (the myrig phase's
   mastermaint self-heal owns that).
+- **Filter-mode pane tint** (`--sidebar-filter-style`, e.g. `bg=#3a1620`): while
+  the sidebar is in filter INPUT mode its pane wears a distinct tmux
+  window-active-style (a dark red) so it's unmistakable that keystrokes go to
+  the filter, not to the many action bindings (Lukas). Reuses the same
+  pane-tint mechanism as the cockpit's focus tint: on filter enter the current
+  active style is saved + swapped to the filter tint, on exit restored (so the
+  focus tint the cockpit set survives). Transition detected centrally in Update
+  (any handler that flips m.filtering); tmux-only, sidebar-only.
 - **Maximize-adaptive columns**: a sidebar pane >= 80 cols (sidebarWideThreshold
   — the cockpit's prefix+z zoom, pinned to the sidebar by myrig sidebar-zoom.sh)
   renders the FULL grid column set (config-resolved exactly like the normal

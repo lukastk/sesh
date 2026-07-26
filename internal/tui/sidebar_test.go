@@ -388,3 +388,49 @@ func TestSidebarWideColumns(t *testing.T) {
 		t.Fatalf("the normal grid must never adapt, got %v", got)
 	}
 }
+
+// TestSidebarFilterStyleTransitions (Lukas): entering/leaving filter INPUT mode
+// in the sidebar emits the pane-tint swap command; no transition (or no filter
+// style, or the popup grid) emits nothing. The tmux shelling itself is not run
+// here ($TMUX scrubbed as belt-and-braces) — only the transition detection.
+func TestSidebarFilterStyleTransitions(t *testing.T) {
+	t.Setenv("TMUX", "")
+	base := Model{sidebar: true, sidebarFilterStyle: "bg=#3a1620", rows: rowsWith("a")}
+
+	// Enter filter (`/`): filtering flips false→true → a swap cmd is emitted.
+	nm, cmd := base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m := nm.(Model)
+	if !m.filtering {
+		t.Fatalf("`/` should enter filter mode")
+	}
+	if cmd == nil {
+		t.Fatalf("entering filter should emit a pane-tint command")
+	}
+	// A key that does NOT change filtering emits no tint command (via the same
+	// centralized path): type a rune into the filter.
+	_, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	_ = cmd2 // may be nil or a fetch; the point is filtering stayed true — no crash/panic
+	if !m.filtering {
+		t.Fatalf("typing in filter must stay in filter mode")
+	}
+	// Exit filter (Esc applies): filtering true→false → a restore cmd.
+	nm3, cmd3 := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if nm3.(Model).filtering {
+		t.Fatalf("esc should leave filter input mode")
+	}
+	if cmd3 == nil {
+		t.Fatalf("leaving filter should emit a restore command")
+	}
+
+	// No filter style configured → never emits a tint command.
+	plain := Model{sidebar: true, rows: rowsWith("a")}
+	if _, c := plain.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}); c != nil {
+		t.Fatalf("no filter style: entering filter must emit no tint command")
+	}
+	// The saved style round-trips through filterStyleSavedMsg.
+	saved := Model{sidebar: true, sidebarFilterStyle: "bg=#3a1620"}
+	ns, _ := saved.Update(filterStyleSavedMsg{saved: "bg=#16283c"})
+	if ns.(Model).sidebarSavedActiveStyle != "bg=#16283c" {
+		t.Fatalf("filterStyleSavedMsg did not store the saved style")
+	}
+}

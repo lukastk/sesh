@@ -160,6 +160,15 @@ type Model struct {
 	// sidebarWideThreshold cols) sidebar renders instead of the name-only
 	// preset. Empty = never adapt. See WithSidebarWideColumns.
 	sidebarWideColumns []string
+	// sidebarFilterStyle: a tmux window-active-style string (e.g. "bg=#3a1620")
+	// applied to the sidebar's own pane WHILE it is in filter INPUT mode, as an
+	// unmistakable "typing goes to the filter, not to actions" cue. Empty =
+	// off. On filter enter the current active style is saved
+	// (sidebarSavedActiveStyle) and swapped to this; on exit it is restored —
+	// so the focus tint set by the cockpit is preserved. See WithSidebarFilterStyle
+	// + syncFilterStyleCmd. Only meaningful in sidebar mode inside tmux.
+	sidebarFilterStyle      string
+	sidebarSavedActiveStyle string
 	// followResolver resolves — AT FOLLOW TIME — the machine whose work server
 	// the sidebar's SIBLING pane currently shows (the cockpit window's machine).
 	// When set, MOVING the selection follows: after the cursor rests
@@ -427,6 +436,65 @@ func (m Model) WithSidebar() Model {
 func (m Model) WithSidebarWideColumns(names []string) Model {
 	m.sidebarWideColumns = append([]string(nil), names...)
 	return m
+}
+
+// WithSidebarFilterStyle sets the tmux window-active-style the sidebar's pane
+// wears WHILE filtering (a dark-red "you're typing into the filter" cue). See
+// the sidebarFilterStyle field.
+func (m Model) WithSidebarFilterStyle(style string) Model {
+	m.sidebarFilterStyle = style
+	return m
+}
+
+// filterStyleSavedMsg carries the pane's pre-filter window-active-style back to
+// the model so the filter-exit restore can put it back (see syncFilterStyleCmd).
+type filterStyleSavedMsg struct{ saved string }
+
+// syncFilterStyleCmd emits a pane-tint command when the sidebar's filter INPUT
+// mode just toggled (wasFiltering != m.filtering). Entering saves the current
+// window-active-style and swaps in the filter tint; leaving restores the saved
+// value. nil when not in sidebar mode, no filter style is configured, or the
+// state did not change — so the caller can batch it unconditionally.
+func (m Model) syncFilterStyleCmd(wasFiltering bool) tea.Cmd {
+	if !m.sidebar || m.sidebarFilterStyle == "" || m.filtering == wasFiltering {
+		return nil
+	}
+	if m.filtering {
+		return enterFilterStyleCmd(m.sidebarFilterStyle)
+	}
+	return exitFilterStyleCmd(m.sidebarSavedActiveStyle)
+}
+
+// enterFilterStyleCmd reads the pane's current window-active-style (returned via
+// filterStyleSavedMsg for the later restore) and swaps in the filter tint.
+// Outside tmux it is a no-op.
+func enterFilterStyleCmd(filterStyle string) tea.Cmd {
+	return func() tea.Msg {
+		pane := os.Getenv("TMUX_PANE")
+		if os.Getenv("TMUX") == "" || pane == "" {
+			return nil
+		}
+		saved, _ := exec.Command("tmux", "show-options", "-pqv", "-t", pane, "window-active-style").Output()
+		exec.Command("tmux", "set-option", "-p", "-t", pane, "window-active-style", filterStyle).Run() //nolint:errcheck — cosmetic
+		return filterStyleSavedMsg{saved: strings.TrimSpace(string(saved))}
+	}
+}
+
+// exitFilterStyleCmd restores the saved window-active-style (unsetting the pane
+// override when the saved value was empty, so no stale filter tint lingers).
+func exitFilterStyleCmd(saved string) tea.Cmd {
+	return func() tea.Msg {
+		pane := os.Getenv("TMUX_PANE")
+		if os.Getenv("TMUX") == "" || pane == "" {
+			return nil
+		}
+		if saved == "" {
+			exec.Command("tmux", "set-option", "-p", "-u", "-t", pane, "window-active-style").Run() //nolint:errcheck — cosmetic
+		} else {
+			exec.Command("tmux", "set-option", "-p", "-t", pane, "window-active-style", saved).Run() //nolint:errcheck — cosmetic
+		}
+		return nil
+	}
 }
 
 // WithSidebarFollow enables selection-follow against a FIXED sibling machine
@@ -1088,8 +1156,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadTickets(m.ticketThread)
 		}
 		return m, nil
+	case filterStyleSavedMsg:
+		// Remember the pre-filter pane tint so the filter-exit restore can put
+		// it back (the focus tint the cockpit set).
+		m.sidebarSavedActiveStyle = msg.saved
+		return m, nil
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		// Detect a sidebar filter INPUT-mode transition centrally: whatever
+		// handler the key runs through, if it flipped m.filtering we swap the
+		// pane tint to (or from) the dark-red filter cue.
+		wasFiltering := m.filtering
+		res, cmd := m.handleKey(msg)
+		if nm, ok := res.(Model); ok {
+			if sc := nm.syncFilterStyleCmd(wasFiltering); sc != nil {
+				return nm, tea.Batch(cmd, sc)
+			}
+		}
+		return res, cmd
 	}
 	return m, nil
 }

@@ -521,6 +521,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--filter", "start in filter mode (type-to-narrow immediately)"},
 		{"--expand", "start with tree nodes expanded (default from [tui] expand_children in config.toml)"},
 		{"--sidebar", "persistent-pane mode for the cockpit: narrow name-only column preset ([tui] columns/[[tui.column]] don't apply; an explicit --columns wins), and entering a thread keeps the TUI open — focus hands to the sibling pane instead of quitting"},
+		{"--sidebar-filter-style", "tmux window-active-style applied to the sidebar's pane WHILE it is in filter input mode (e.g. \"bg=#3a1620\") — a visual cue that keystrokes go to the filter, not to actions; restored on filter exit. Only with --sidebar, inside tmux."},
 		{"--columns", "comma-separated visible columns (default from [tui] columns in config.toml)"},
 		{"--editor", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},

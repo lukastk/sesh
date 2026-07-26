@@ -260,7 +260,10 @@ instead they DISMISS the ✗ error / note lines, which otherwise persist until t
 next action (indefinitely, in a pane that never quits). A successful nav or follow
 also clears a stale error.
 Entering a thread from `/` search exits search (query cleared, cursor on the entered
-thread) — the sidebar returns to the whole ambient list. A **maximized** sidebar
+thread) — the sidebar returns to the whole ambient list. While in filter INPUT mode
+the sidebar pane can wear a distinct tmux tint (`--sidebar-filter-style`, e.g. a dark
+red) as an unmistakable "keystrokes go to the filter, not to actions" cue — restored
+on filter exit. A **maximized** sidebar
 (pane >= 80 cols — the cockpit zoom toggle) adaptively renders the FULL grid column
 set (the same columns the normal grid shows) and swaps back to name-only on restore. Follow
 crosses machines: the master window switches and the traveling sidebar rides along

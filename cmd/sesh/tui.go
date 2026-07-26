@@ -46,6 +46,7 @@ func runTUI(args []string) error {
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	editorFlag := fs.String("editor", "", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)")
 	sidebarFlag := fs.Bool("sidebar", false, "persistent-pane mode: narrow name-only layout, and entering a thread keeps the TUI open (focus hands to the sibling pane) instead of quitting")
+	sidebarFilterStyle := fs.String("sidebar-filter-style", "", "tmux window-active-style applied to the sidebar's pane WHILE filtering (e.g. \"bg=#3a1620\"), a visual cue that keystrokes go to the filter; only with --sidebar, in tmux")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -263,6 +264,9 @@ func runTUI(args []string) error {
 		m = m.WithSidebar()
 		if len(sidebarWide) > 0 {
 			m = m.WithSidebarWideColumns(sidebarWide)
+		}
+		if *sidebarFilterStyle != "" {
+			m = m.WithSidebarFilterStyle(*sidebarFilterStyle)
 		}
 		// Selection-FOLLOW needs to know which machine the sibling attach pane
 		// shows. $SESH_TUI_MASTER_MACHINE, when the spawner bakes it, PINS it

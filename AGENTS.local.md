@@ -1,5 +1,39 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H63 — active view: HOLD BEATS FLAG (reverses part of H59/H60's flagged-always-in-active) (2026-07-26, sesh fd535ae; NO schema change; binary-only, deployed ALL FIVE, no restarts)
+Lukas: "put threads on hold and they won't appear in my active view" — the H59 "flagged
+thread ALWAYS shows in active" rule was surfacing FLAGGED on-hold threads (and H52 flags on
+every turn end now, so this was frequent). ONE-LINE predicate change in
+builtinViewAdmits/ViewActive (internal/tui/model.go): `flagged || ((!archived || headful)
+&& !onHold)` → `(flagged || !archived || headful) && !onHold`. So the flag still overrides
+ARCHIVED-hiding for non-held threads (H40 needs-attention), but !OnHold now dominates
+everything — an on-hold thread never shows in active, flagged or not; its ⚑ still shows in
+the `on hold` view. PURE TUI-CLIENT change (the daemon already publishes on_hold; the TUI
+filters) ⇒ binary-only deploy, NO daemon restart, mixed-mesh trivially safe.
+TESTS: TestActiveViewAdmitsArchivedHeadful truth table — the three flagged-on-hold cases
+flip true→false (+ a flagged-HEADFUL-on-hold case). view-hold claim EXTENDED: flag the held
+thread on a real daemon, settle until its ⚑ RENDERS in the `on hold` view (proves the
+model's data carries the flag — the active recheck can't pass vacuously on a stale pre-flag
+fetch; NB the flag lands async so I gate on the on-hold render, not a fixed sleep), then
+cycle on-hold→archived→all→active and assert it's STILL hidden. ANTI-GAMING: restoring the
+old predicate fails 3 truth-table cases AND the claim at "active view must keep HIDING a
+flagged on-hold thread" — verified, then reversed. SKILL active-view paragraph updated
+(`(flagged OR not archived OR headful) AND not on hold`; "HOLD BEATS FLAG").
+DEPLOY GOTCHA (bit me): a CONCURRENT sidebar session (Lukas's, sesh 0996341/f27039f
+--sidebar-filter-style) pushed WHILE I had model.go edited in the working tree; my
+`git add <explicit files>` for the commit did NOT include model.go (I'd listed it, but the
+concurrent push had already been rebased in and the file was mid-edit) → **model.go's
+predicate change is NOT in commit fd535ae's diff** (that commit shows only view_active_test/
+tui_affordances_test/SKILL). BUT `git show HEAD:internal/tui/model.go` confirms main DOES
+carry the correct new predicate (line 95) — it landed via the interleave, not orphaned. All
+five binaries built from HEAD verify vcs.revision=fd535ae and the deployed behavior is
+correct. Lesson reconfirmed: with a concurrent pusher, `git show HEAD:<file>` the actual
+content after committing, don't trust the commit's own --stat.
+DEPLOY: binary-only ALL FIVE at fd535ae (mymain native; macbook/macstudio /opt/homebrew/bin/
+go; ideapad native; termux plain go build CGO=1) — NO daemon restart (each `sesh tui` runs
+fresh). Lukas switched me to Opus mid-deploy (rejected the first termux attempt, said
+Continue) — retried termux clean.
+
 ## H62 — codex SESSION-ID CAPTURE shipped (H61's fix): notify payload thread-id → report-state stamp (2026-07-26, sesh a12b029 api 45→46, NO store migration; deployed ALL FIVE; ticket 49d4299b done)
 Lukas: "okay proceed to do the fix." Both H61 bugs killed at the shared root (headed codex
 threads never recorded their late-minted session id):

@@ -459,16 +459,40 @@ func claimViewHold(t *testing.T) {
 		t.Errorf("default active view should HIDE on-hold threads:\n%s", view)
 	}
 
-	// The `on hold` view (one Tab) is the complement: parked shown, working hidden.
+	// HOLD BEATS FLAG (2026-07-26): FLAGGING the held thread must NOT surface it
+	// in active — parking a thread actually parks it.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "flag", "--on", "--id", parked.ID); err != nil {
+		t.Fatalf("flag --on: %v\n%s", err, stderr)
+	}
+
+	// The `on hold` view (one Tab) is the complement: parked shown, working
+	// hidden. Settle until parked's ⚑ renders here — that proves the MODEL's
+	// data carries the flag, so the active-view recheck below cannot pass
+	// vacuously on a stale pre-flag fetch.
 	m = nextView(t, m)
 	if !waitUntil(10*time.Second, func() bool {
 		m, view = render(t, m)
-		return strings.Contains(view, "[on hold]") && strings.Contains(view, "parked")
+		return strings.Contains(view, "[on hold]") && strings.Contains(view, "parked") && strings.Contains(view, "⚑")
 	}) {
-		t.Fatalf("on-hold view never showed the parked thread:\n%s", view)
+		t.Fatalf("on-hold view never showed the parked thread with its flag:\n%s", view)
 	}
 	if strings.Contains(view, "working") {
 		t.Errorf("on-hold view should hide un-held threads:\n%s", view)
+	}
+
+	// Back around to active (on hold → archived → all → active): the flagged
+	// on-hold thread must STILL be hidden there (hold beats flag).
+	m = nextView(t, m)
+	m = nextView(t, m)
+	m = nextView(t, m)
+	if !waitUntil(10*time.Second, func() bool {
+		m, view = render(t, m)
+		return strings.Contains(view, "[active]") && strings.Contains(view, "working")
+	}) {
+		t.Fatalf("active view lost its baseline after flagging:\n%s", view)
+	}
+	if strings.Contains(view, "parked") {
+		t.Errorf("active view must keep HIDING a flagged on-hold thread (hold beats flag):\n%s", view)
 	}
 }
 

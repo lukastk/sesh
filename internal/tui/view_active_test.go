@@ -8,11 +8,11 @@ import (
 )
 
 // TestActiveViewAdmitsArchivedHeadful proves the default `active` view predicate:
-// flagged OR ((not archived OR headful) AND not on hold). An archived thread stays
+// (flagged OR not archived OR headful) AND not on hold. An archived thread stays
 // visible while it is still headful (a live pane) and drops out once it goes
-// headless; on-hold threads are excluded regardless of head — but a FLAGGED thread
-// is ALWAYS shown (needs-attention beats archived/on-hold parking; unflagging
-// returns it to hiding).
+// headless; a FLAGGED thread overrides archived-hiding (needs-attention) — but
+// HOLD BEATS FLAG (Lukas, 2026-07-26): an on-hold thread is excluded no matter
+// what, so parking a thread actually parks it (its ⚑ shows in `on hold`).
 func TestActiveViewAdmitsArchivedHeadful(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -30,8 +30,9 @@ func TestActiveViewAdmitsArchivedHeadful(t *testing.T) {
 		{"non-archived headful on hold -> hidden", false, api.Headful, true, false, false},
 		{"non-archived headless on hold -> hidden", false, api.Headless, true, false, false},
 		{"FLAGGED archived headless -> SHOWN", true, api.Headless, false, true, true},
-		{"FLAGGED on hold -> SHOWN", false, api.Headless, true, true, true},
-		{"FLAGGED archived + on hold -> SHOWN", true, api.Headless, true, true, true},
+		{"FLAGGED on hold -> HIDDEN (hold beats flag)", false, api.Headless, true, true, false},
+		{"FLAGGED archived + on hold -> HIDDEN (hold beats flag)", true, api.Headless, true, true, false},
+		{"FLAGGED headful on hold -> HIDDEN (hold beats flag)", false, api.Headful, true, true, false},
 	}
 	for _, c := range cases {
 		// Archived/Flagged are on the embedded Thread; OnHold is derived on ThreadRow.

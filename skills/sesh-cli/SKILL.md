@@ -291,7 +291,10 @@ tab          view PICKER: a popup listing every view (active / on hold / archive
              the selection.
              The default `active` view shows every non-archived thread PLUS archived
              threads that are still headful (a live pane, glyph `⊘`), and hides on-hold
-             threads — i.e. `flagged OR ((not archived OR headful) AND not on hold)`. A FLAGGED thread is ALWAYS shown — even archived or on hold (attention beats parking; unflagging re-hides it). So an archived
+             threads — i.e. `(flagged OR not archived OR headful) AND not on hold`.
+             A FLAGGED thread overrides the archived-hiding (attention wins; unflagging
+             re-hides it), but HOLD BEATS FLAG: an on-hold thread never shows in active,
+             flagged or not — its ⚑ is visible in the `on hold` view. So an archived
              thread stays visible while its agent is running and drops out once it goes
              headless. (`tui --cursor` / the cockpit prefix+a preselect the current
              thread; if it is hidden by the default view — e.g. a headless archived

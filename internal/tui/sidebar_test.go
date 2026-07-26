@@ -434,3 +434,50 @@ func TestSidebarFilterStyleTransitions(t *testing.T) {
 		t.Fatalf("filterStyleSavedMsg did not store the saved style")
 	}
 }
+
+// TestViewOrderPositioning (Lukas): a [[tui.views]] custom view with position=N
+// lands at that 1-based slot in the Tab/picker order (interleaved with the
+// built-ins); unpositioned customs append after the built-ins as before.
+func TestViewOrderPositioning(t *testing.T) {
+	pred, err := CompilePredicate("flagged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// flagged at position 2, plus an unpositioned "mine".
+	m := Model{}.WithViews([]customView{
+		{name: "flagged", pred: pred, position: 2},
+		{name: "mine", pred: pred},
+	})
+	// Display order should be: active, flagged, on hold, archived, all, mine.
+	wantNames := []string{"active", "flagged", "on hold", "archived", "all", "mine"}
+	if m.viewCount() != len(wantNames) {
+		t.Fatalf("viewCount=%d, want %d", m.viewCount(), len(wantNames))
+	}
+	for pos, want := range wantNames {
+		if got := m.viewNameAt(int(m.viewAt(pos))); got != want {
+			t.Errorf("display position %d = %q, want %q", pos, got, want)
+		}
+	}
+	// Picker opens on the CURRENT view's display POSITION: active(view 0)=pos 0.
+	if p := m.viewPos(ViewActive); p != 0 {
+		t.Errorf("active display position = %d, want 0", p)
+	}
+	// The flagged custom is view index viewBuiltins+0; its display position is 1.
+	flaggedView := View(int(viewBuiltins) + 0)
+	if p := m.viewPos(flaggedView); p != 1 {
+		t.Errorf("flagged display position = %d, want 1 (second)", p)
+	}
+	// Applying the picker's second entry switches to the flagged view.
+	nm, _ := m.applyPickedView(int(m.viewAt(1)))
+	if got := nm.(Model).view; got != flaggedView {
+		t.Errorf("applying picker position 1 selected view %d, want the flagged custom %d", got, flaggedView)
+	}
+
+	// No positions → natural order (built-ins then customs), unchanged.
+	plain := Model{}.WithViews([]customView{{name: "mine", pred: pred}})
+	for pos, want := range []string{"active", "on hold", "archived", "all", "mine"} {
+		if got := plain.viewNameAt(int(plain.viewAt(pos))); got != want {
+			t.Errorf("no-position order pos %d = %q, want %q", pos, got, want)
+		}
+	}
+}

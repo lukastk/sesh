@@ -670,6 +670,7 @@ color = "2"                      # a name, a 0-255 number, or #rrggbb; empty cle
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
 filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/flagged/flagdisabled/ticketed
+position = 2                     # optional: 1-based slot in the Tab/picker order among the built-ins (active/on hold/archived/all); omit/0 = appended after the built-ins
 
 [defaults]
 notifications = true

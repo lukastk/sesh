@@ -13,8 +13,9 @@ mouse_scroll_v = 3
 mouse_scroll_h = 2
 
 [[tui.views]]
-name   = "ticketed"
-filter = "ticketed and not archived"
+name     = "ticketed"
+filter   = "ticketed and not archived"
+position = 2
 
 [[tui.column_color]]
 name  = "cwd"
@@ -32,6 +33,9 @@ color = "green"
 	}
 	if len(c.Views) != 1 || len(c.ColumnColors) != 1 {
 		t.Errorf("views/colors did not coexist with [tui] scalars: %d views, %d colors", len(c.Views), len(c.ColumnColors))
+	}
+	if c.Views[0].Position != 2 {
+		t.Errorf("view position not parsed: got %d, want 2", c.Views[0].Position)
 	}
 
 	// Unset → defaults to 1.

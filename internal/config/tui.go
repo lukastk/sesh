@@ -110,6 +110,12 @@ func scrollDiv(v int) int {
 type TUIView struct {
 	Name   string `toml:"name"`
 	Filter string `toml:"filter"`
+	// Position, when >0, places this view at that 1-based slot in the Tab/picker
+	// order (interleaved with the built-ins active/on hold/archived/all) — e.g.
+	// position=2 puts it second, right after `active`. Omitted/0 = appended after
+	// the built-ins (the default). Multiple positioned views insert in ascending
+	// position order.
+	Position int `toml:"position"`
 }
 
 // ColumnColor tints one column. Color is a name (green/blue/…), a 0-255 palette

@@ -109,7 +109,7 @@ func runTUI(args []string) error {
 	var views []tui.ViewSpec
 	if tcfg != nil {
 		for _, v := range tcfg.Views {
-			views = append(views, tui.ViewSpec{Name: v.Name, Filter: v.Filter})
+			views = append(views, tui.ViewSpec{Name: v.Name, Filter: v.Filter, Position: v.Position})
 		}
 	}
 	compiled, err := tui.CompileViews(views)

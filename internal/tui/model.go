@@ -56,6 +56,9 @@ const (
 type customView struct {
 	name string
 	pred Predicate
+	// position, when >0, places this view at that 1-based slot in the display
+	// (Tab/picker) order among the built-ins; 0 = appended (see buildViewOrder).
+	position int
 }
 
 func (m Model) viewName() string { return m.viewNameAt(int(m.view)) }
@@ -103,14 +106,89 @@ func builtinViewAdmits(view View, row api.ThreadRow) bool {
 	return false
 }
 
-// WithViews installs the compiled custom views (see CompileViews).
+// WithViews installs the compiled custom views (see CompileViews) and computes
+// the display (Tab/picker) order from their positions.
 func (m Model) WithViews(views []customView) Model {
 	m.customViews = views
+	m.viewOrder = buildViewOrder(views)
 	return m
 }
 
-// ViewSpec is one [[tui.views]] entry as the caller hands it over.
-type ViewSpec struct{ Name, Filter string }
+// buildViewOrder returns the display order of ALL views (built-ins + customs) as
+// a sequence of view indices. Base order = the built-ins followed by unpositioned
+// customs (in config order); positioned customs are then inserted at their 1-based
+// slots, in ascending position order (clamped into range).
+func buildViewOrder(customs []customView) []View {
+	base := make([]View, 0, int(viewBuiltins)+len(customs))
+	for b := 0; b < int(viewBuiltins); b++ {
+		base = append(base, View(b))
+	}
+	type positioned struct {
+		idx View
+		pos int
+	}
+	var placed []positioned
+	for i, c := range customs {
+		vi := View(int(viewBuiltins) + i)
+		if c.position > 0 {
+			placed = append(placed, positioned{vi, c.position})
+		} else {
+			base = append(base, vi)
+		}
+	}
+	sort.SliceStable(placed, func(a, b int) bool { return placed[a].pos < placed[b].pos })
+	for _, p := range placed {
+		at := p.pos - 1
+		if at < 0 {
+			at = 0
+		}
+		if at > len(base) {
+			at = len(base)
+		}
+		base = append(base[:at], append([]View{p.idx}, base[at:]...)...)
+	}
+	return base
+}
+
+// orderedViews is the display order of all views; the natural 0..count-1 order
+// when none was built (models constructed without WithViews, or with no custom
+// views). Length always equals viewCount.
+func (m Model) orderedViews() []View {
+	if len(m.viewOrder) == m.viewCount() {
+		return m.viewOrder
+	}
+	out := make([]View, m.viewCount())
+	for i := range out {
+		out[i] = View(i)
+	}
+	return out
+}
+
+// viewAt returns the view at display position pos (0-based); ViewActive when out
+// of range. viewPos is its inverse: the display position of view v.
+func (m Model) viewAt(pos int) View {
+	o := m.orderedViews()
+	if pos < 0 || pos >= len(o) {
+		return ViewActive
+	}
+	return o[pos]
+}
+
+func (m Model) viewPos(v View) int {
+	for i, x := range m.orderedViews() {
+		if x == v {
+			return i
+		}
+	}
+	return 0
+}
+
+// ViewSpec is one [[tui.views]] entry as the caller hands it over. Position (>0)
+// places the view at that 1-based slot in the Tab/picker order (0 = appended).
+type ViewSpec struct {
+	Name, Filter string
+	Position     int
+}
 
 // CompileViews compiles [[tui.views]] specs (loud on a broken name/filter).
 func CompileViews(specs []ViewSpec) ([]customView, error) {
@@ -119,11 +197,14 @@ func CompileViews(specs []ViewSpec) ([]customView, error) {
 		if sp.Name == "" || sp.Filter == "" {
 			return nil, fmt.Errorf("[tui.views] entry %d: name and filter are both required", i+1)
 		}
+		if sp.Position < 0 {
+			return nil, fmt.Errorf("[tui.views] %q: position must be >= 1 (1 = first), or 0/omitted to append", sp.Name)
+		}
 		pred, err := CompilePredicate(sp.Filter)
 		if err != nil {
 			return nil, fmt.Errorf("[tui.views] %q: %w", sp.Name, err)
 		}
-		out = append(out, customView{name: sp.Name, pred: pred})
+		out = append(out, customView{name: sp.Name, pred: pred, position: sp.Position})
 	}
 	return out, nil
 }
@@ -254,9 +335,14 @@ type Model struct {
 	tagPopupRow    api.ThreadRow
 	tagPopupCursor int
 
-	// customViews are the compiled [[tui.views]] entries (after the built-ins
-	// in the Tab cycle).
+	// customViews are the compiled [[tui.views]] entries (indexed after the
+	// built-ins; a custom view's index is int(viewBuiltins)+its config position).
 	customViews []customView
+	// viewOrder is the DISPLAY order of all views (built-ins + customs) in the
+	// Tab/picker, honoring each custom view's `position`. Empty = the natural
+	// index order. viewPickerCursor is a position into this order, not a raw
+	// view index. See buildViewOrder / orderedViews.
+	viewOrder []View
 
 	// Tree fold state: per-node overrides + the configured default (children
 	// start collapsed unless [tui] expand_children / --expand).
@@ -932,7 +1018,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonLeft:
 				if msg.Action == tea.MouseActionPress {
 					if i, ok := m.viewPickerRowAtY(msg.Y); ok {
-						return m.applyPickedView(i)
+						return m.applyPickedView(int(m.viewAt(i)))
 					}
 				}
 			}
@@ -1950,7 +2036,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Open the VIEW PICKER on the CURRENT view (Lukas — preselecting the
 		// next one was disorienting; advancing is one more tab).
 		m.viewPicker = true
-		m.viewPickerCursor = int(m.view)
+		m.viewPickerCursor = m.viewPos(m.view)
 	case "i":
 		m.showID = !m.showID
 	case "w":
@@ -3238,7 +3324,7 @@ func (m Model) handleViewPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab", "up", "k":
 		m.viewPickerCursor = (m.viewPickerCursor - 1 + n) % n
 	case "enter":
-		return m.applyPickedView(m.viewPickerCursor)
+		return m.applyPickedView(int(m.viewAt(m.viewPickerCursor)))
 	case "esc", "q", "ctrl+c":
 		m.viewPicker = false
 	}
@@ -3264,12 +3350,13 @@ func (m Model) viewPickerView() string {
 	var b strings.Builder
 	b.WriteString(styleHeader.Render("view · tab/↑↓ move · enter apply · esc cancel") + "\n\n")
 	for i := 0; i < m.viewCount(); i++ {
+		v := m.viewAt(i) // display position i -> the view shown there
 		marker := "  "
 		if i == m.viewPickerCursor {
 			marker = "> "
 		}
-		line := marker + m.viewNameAt(i)
-		if View(i) == m.view {
+		line := marker + m.viewNameAt(int(v))
+		if v == m.view {
 			line += "  (current)"
 		}
 		if i == m.viewPickerCursor {

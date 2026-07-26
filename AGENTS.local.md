@@ -1,5 +1,58 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H64 — phantom IDLE-while-running: stale reported-IDLE now dropped on an ANIMATING pane (H58's mirror) + the root cause = a session PREDATING the reporter hooks (2026-07-26, sesh 26ca34f; NO schema change; daemon RESTART all five; thread ab9d5a3a again)
+Lukas: thread ab9d5a3a (dagster-netrun, claude/mymain — the H58 thread) showed IDLE while
+actively running, and didn't FLAG at turn end. This is the INVERSE of H58 (which was
+busy-while-idle). DIAGNOSIS (live repro, worth the recipe):
+- Snapshot said busy=idle + state_authority=**reported**, but the PANE showed
+  `✽ Orbiting… still thinking with xhigh effort` (clearly busy). So a REPORTED entry was
+  overriding the content-diff — and it said idle.
+- Scoped a temp tap into integrations/claude/sesh-agent-state.sh (case "$SESH_THREAD_ID" in
+  ab9d5a3a*) logging the hook_event_name; sent a `test`. Tap stayed **EMPTY across turns**
+  incl. active tool use, and after a turn ended state_authority stayed heuristic (never
+  flipped back to reported) → **claude is NOT invoking the reporter hooks for this session
+  at all.** ROOT CAUSE: the claude PROCESS started **Jul 22 16:56** (ps -o lstart on the
+  `claude --session-id … --dangerously-skip-permissions` pid), one day BEFORE the reporter
+  hooks were added to settings.json (myrig f064857 Jul 23 15:55). **Claude Code loads hooks
+  at session start — no mid-session hot-reload** — so this 4-day session has no reporter.
+  (Also its env lacks SESH_BIN, added Jul 23 — the hook's PATH fallback to `sesh` would
+  work, but it's moot since the hook isn't invoked.)
+- So a STALE reported-idle entry (origin: some earlier report; never updated since the
+  reporter is dead) sat forever: nothing sends turn_started (→busy) or release, the pane is
+  alive so the pane-liveness bound never clears it, and H58's staleness bound only drops
+  reported-BUSY on a FROZEN pane — there was NO mirror for reported-IDLE on an ANIMATING
+  pane. The maintainer kept preferring stale-idle over the heuristic → pinned idle while
+  running. No flag either: a flag needs a busy→idle EDGE; stuck-idle never has a busy phase.
+- PROOF: `report-state --event release` → fell to heuristic → busy tracked perfectly (busy
+  while thinking, idle when done). The heuristic was never broken; the stale authority
+  shadowed it.
+FIX (sesh 26ca34f, the H58 MIRROR, agreed w/ Lukas): liveState.heuristicBusySince (when the
+current content-diff busy streak began; zeroed when it breaks) + staleReportedIdle predicate
+symmetric to staleReportedBusy (pane animating for the whole bound AND report ≥ bound old).
+refreshThread drops a reported-idle the animating pane contradicts, LOUDLY, degrading to
+heuristic (state_authority reported→heuristic). Reuses m.staleBound (2m). Tests:
+TestStaleReportedIdle truth table; TestMaintainerDropsStaleReportedIdle (REAL maintainer +
+REAL tmux pane animated by an argv0-"claude" symlink→sh running a counter loop — a static
+sleep won't animate, `yes` goes byte-stable after the screen fills, so a changing-counter
+loop is the honest animator; AND the symlink keeps argv0=claude so AgentUnderPane resolves
+it headful). Anti-gaming: `if false &&` the drop → maintainer test red at "busy=idle
+authority=reported". state-authority conformance cells (claude+pi × local+remote, REAL
+agents) stay green — a working reporter reports busy during turns so the idle bound never
+fires. SKILL documents both symmetric bounds.
+KEY LIMITATION (told Lukas): this keeps BUSY correct when a reporter dies, but does NOT
+restore FLAGS — heuristic busy→idle edges don't flag claude (H47 false-edge avoidance is by
+design), and after the drop the thread is on the heuristic. FLAGS require a LIVE reporter.
+For ab9d5a3a specifically the real fix is to RESTART the claude session (stop→headful,
+resumes intact) so it loads the hooks — offered, Lukas's call (it was mid-work). Every
+NORMALLY-spawned thread already reports fine; this was a one-off session predating the hooks.
+Also: the 2m bound means the busy self-heal is slow for short turns on a dead reporter (a
+short turn never sustains 2m of animation) — a longer turn heals it once, and a dead
+reporter won't recreate the entry, so it stays on heuristic after. DEPLOY (daemon change, NO
+schema bump — state_authority already exists; rebuild + RESTART all five): mymain native +
+supervisorctl; macbook/macstudio /opt/homebrew/bin/go + supervisorctl; ideapad native +
+supervisorctl; termux plain go build + explicit-pid kill (4709) + setsid-nohup (pid 12892).
+All five vcs.revision=26ca34f, schema 46. Reverted the temp hook tap (git clean).
+
 ## H63 — active view: HOLD BEATS FLAG (reverses part of H59/H60's flagged-always-in-active) (2026-07-26, sesh fd535ae; NO schema change; binary-only, deployed ALL FIVE, no restarts)
 Lukas: "put threads on hold and they won't appear in my active view" — the H59 "flagged
 thread ALWAYS shows in active" rule was surfacing FLAGGED on-hold threads (and H52 flags on

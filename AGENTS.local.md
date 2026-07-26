@@ -1,5 +1,60 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H65 — "missing turns on close+reopen" (claude AND codex): root cause = claude AGENT-TEAMS bg agents + session-id drift; fixes = disable agent-teams (myrig) + claude session-id STAMPING (2026-07-26, sesh bed6171 + myrig 03941ec; NO schema change; hook-only + config, deployed ALL FIVE)
+Lukas: closing thread ab9d5a3a (dagster-netrun) with `x` and reopening lost "a lot of turns"
+— often, both claude and codex. LONG diagnosis; the REAL cause only surfaced at the end.
+DIAGNOSIS TRAIL:
+- `x` = stop runtime (KillPane), reopen = revive → `claude --resume <record's id>`. The record
+  pinned 9063203c (the spawn --session-id); the user's recent work was in a DIFFERENT file
+  0207aa9c (more/newer msgs, its own aiTitle "Evaluate Netrun as Dagster wrapper"). The leaf
+  resolver couldn't bridge them (different first-message uuids → different conversation-root),
+  so revive resumed 9063203c = missing everything in 0207aa9c.
+- The two files SHARED 693 message uuids for 4 days, then DIVERGED today 19:24. THE REVEAL:
+  reviving 0207aa9c 409'd — `Session 0207aa9c is currently running as a background agent (bg)`.
+  0207aa9c was a claude **agent-teams BACKGROUND AGENT** (`claude bg-pty-host …/pty/
+  0207aa9c.sock`, child of `claude daemon run`), spawned by the experimental feature (env
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1, "← 2 agents" in the pane). **bg agents run under
+  claude's machine-global daemon, OUTSIDE sesh's tmux pane** — so the work migrated into a
+  session sesh can't see or resume (claude blocks two holders). This is the recurring cause.
+RECOVERY (live, with Lukas): (1) killed the bg-agent daemon per the H34 recipe — SIGTERM the
+`claude daemon run` supervisor (pid 2785550) FIRST so it can't resurrect, then SIGKILL the
+surviving `bg-pty-host` for 0207aa9c (3711628); verified the user's INTERACTIVE/sesh claude
+sessions survived (they're plain `claude`, not bg-pty-host children — a fresh daemon
+auto-restarts for others, doesn't hold 0207aa9c). (2) HEADLESS-adopted 0207aa9c as a NEW
+thread 1f7c4a97 (`thread adopt --agent claude --session-id 0207aa9c --cwd …`), then headful
+→ resumed the exact session in a sesh pane, all turns restored. (3) archived the old
+ab9d5a3a (renamed dagster-netrun-old-thread; its 9063203c branch is behind). NB the user's
+`claude --resume 0207aa9c --fork-session` was a red herring — a fork that wrote nothing;
+0207aa9c had all the work.
+FIXES:
+- **myrig 03941ec**: removed CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS from home/.claude/settings.json
+  (`env` block). settings.json is a SYMLINK to the repo → the edit was instantly live on
+  mymain; deployed all five via git pull (each machine's ~/.claude/settings.json symlinks its
+  repo copy). Stops new bg agents from being spawned. Existing sessions keep the env until
+  restarted.
+- **sesh bed6171 (part b, the durable in-pane fix)**: the claude hook (integrations/claude/
+  sesh-agent-state.sh) already gets `session_id` on stdin — now passes `--agent-session
+  <session_id>` every turn; the daemon STAMPS it onto the record (the --agent-session flag +
+  stamp already shipped for codex in H62, schema 46, so NO daemon change). So resume/reopen
+  lands on the session claude is ACTUALLY in after a compaction/rewind fork, instead of the
+  fragile leaf resolver. Script restructured to emit event\treason\tsession_id + build argv
+  with `set --`. IMPORTANT SCOPE: this fixes IN-PANE drift (compaction/rewind); it does NOT
+  fix the bg-agent case (bg agents run outside the pane, so the pane's hook never sees their
+  session) — that's why disabling agent-teams is the real fix for THIS incident. Deploy =
+  git pull the sesh checkout all five (claude re-reads the hook script each event → live
+  hook-enabled sessions pick it up with NO restart; the daemon needs nothing).
+TESTS: internal/agents/claudehook_sh_test.go drives the REAL hook with a fake SESH_BIN —
+UserPromptSubmit/Stop carry --agent-session, session-less payload reports without it, subagent
+(agent_id) reports nothing, AskUserQuestion → blocked+reason+session; anti-gaming: neutering
+the --agent-session line fails it. FLAKE NOTE (re-confirmed): thread.flagged/state-authority
+claude cells PASS in isolation (flagged/claude/local 23s; all 4 serial 88s) but TIME OUT
+under concurrent real-claude load (claude rate-limiting — flagged runs ~5 turns, most
+sensitive). Always confirm claude cells serially (`-parallel 1`), never trust a concurrent-
+batch red. The daemon-stamp path itself is unit-tested since H62 (TestReportStateStampsAgentSession).
+DEPLOY: sesh git pull all five (hook-only, no rebuild/restart); myrig git pull all five
+(settings.json symlink). SKILL state-authority paragraph updated (stamping + the
+agent-teams-outside-the-pane caveat).
+
 ## H64 — phantom IDLE-while-running: stale reported-IDLE now dropped on an ANIMATING pane (H58's mirror) + the root cause = a session PREDATING the reporter hooks (2026-07-26, sesh 26ca34f; NO schema change; daemon RESTART all five; thread ab9d5a3a again)
 Lukas: thread ab9d5a3a (dagster-netrun, claude/mymain — the H58 thread) showed IDLE while
 actively running, and didn't FLAG at turn end. This is the INVERSE of H58 (which was

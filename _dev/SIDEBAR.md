@@ -105,7 +105,11 @@ the myvault pad "Herdr vs sesh - migration assessment".
   renders the FULL grid column set (config-resolved exactly like the normal
   grid, moves included; WithSidebarWideColumns) and swaps back to name-only on
   restore. Zoom raises a resize, so no extra wiring. An explicit --columns pins
-  the set and disables adaptation.
+  the set and disables adaptation. A maximized sidebar also does NOT follow the
+  selection (the sibling preview pane is hidden by the zoom, and a cross-machine
+  follow would switch the master window — dropping the per-window tmux zoom and
+  yanking you out of fullscreen, Lukas 2026-07-26); browse the cross-machine
+  list, Enter commits (and naturally exits fullscreen into the thread).
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
   offline handling, `?` keymap. (Tab view picker opens on the CURRENT view; the
   default `active` view ALWAYS shows flagged threads — archived/on-hold

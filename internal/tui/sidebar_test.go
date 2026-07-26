@@ -481,3 +481,31 @@ func TestViewOrderPositioning(t *testing.T) {
 		}
 	}
 }
+
+// TestSidebarNoFollowWhenMaximized (Lukas): a MAXIMIZED sidebar (>=
+// sidebarWideThreshold cols, the F12/prefix+B fullscreen) must NOT follow —
+// following would preview into the hidden sibling pane and, cross-machine,
+// switch the master window and drop the zoom. At normal width it follows.
+func TestSidebarNoFollowWhenMaximized(t *testing.T) {
+	t.Setenv("TMUX", "")
+	row := api.ThreadRow{Thread: api.Thread{ID: "live", Name: "live", Machine: "mymain", SessionName: "s"}, Head: api.Headful}
+	mk := func(w int) Model {
+		return Model{sidebar: true, width: w, followResolver: func() string { return "mymain" }, machine: "mymain",
+			machines: []api.MachineView{{Machine: "mymain", Self: true, Reachable: true}}, rows: []api.ThreadRow{row}}
+	}
+	// Normal width: an eligible selection arms a follow.
+	narrow := mk(38)
+	if cmd := narrow.armFollow(); cmd == nil {
+		t.Fatalf("a normal-width sidebar should follow an eligible selection")
+	}
+	// Maximized: no follow, even though the selection is eligible.
+	wide := mk(sidebarWideThreshold + 40)
+	if cmd := wide.armFollow(); cmd != nil {
+		t.Fatalf("a maximized sidebar must not follow (would drop the zoom on a cross-machine switch)")
+	}
+	// Exactly at the threshold counts as maximized.
+	thresh := mk(sidebarWideThreshold)
+	if cmd := thresh.armFollow(); cmd != nil {
+		t.Fatalf("width == threshold should count as maximized (no follow)")
+	}
+}

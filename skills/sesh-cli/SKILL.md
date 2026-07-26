@@ -265,7 +265,10 @@ the sidebar pane can wear a distinct tmux tint (`--sidebar-filter-style`, e.g. a
 red) as an unmistakable "keystrokes go to the filter, not to actions" cue — restored
 on filter exit. A **maximized** sidebar
 (pane >= 80 cols — the cockpit zoom toggle) adaptively renders the FULL grid column
-set (the same columns the normal grid shows) and swaps back to name-only on restore. Follow
+set (the same columns the normal grid shows) and swaps back to name-only on restore.
+A maximized sidebar does not follow the selection (the preview pane is hidden and a
+cross-machine follow would switch windows and drop the zoom) — browse the list, Enter
+commits. Follow
 crosses machines: the master window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never

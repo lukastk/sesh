@@ -615,6 +615,17 @@ func (m *Model) armFollow() tea.Cmd {
 	if !m.sidebar || m.followResolver == nil || m.followInFlight {
 		return nil
 	}
+	// Don't follow while the sidebar is MAXIMIZED (fullscreen, ≥
+	// sidebarWideThreshold cols — the cockpit's F12/prefix+B zoom): the sibling
+	// pane the follow would preview into is hidden by the zoom, so following is
+	// pointless, and a CROSS-machine follow would switch the master window —
+	// which drops the zoom (tmux zoom is per-window and doesn't travel with the
+	// swapped sidebar pane), yanking you out of fullscreen (Lukas). So while
+	// maximized you just browse the cross-machine list; Enter still commits (and
+	// naturally exits fullscreen into the thread).
+	if m.width >= sidebarWideThreshold {
+		return nil
+	}
 	row, ok := m.followEligible()
 	if !ok {
 		return nil

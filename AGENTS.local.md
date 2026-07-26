@@ -1,5 +1,44 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H62 — codex SESSION-ID CAPTURE shipped (H61's fix): notify payload thread-id → report-state stamp (2026-07-26, sesh a12b029 api 45→46, NO store migration; deployed ALL FIVE; ticket 49d4299b done)
+Lukas: "okay proceed to do the fix." Both H61 bugs killed at the shared root (headed codex
+threads never recorded their late-minted session id):
+- WIRE: ReportStateRequest.agent_session_id (additive, owner-local — the reporter talks to
+  its own daemon; a pre-46 daemon ignores the unknown field). reportState STAMPS it via
+  SetThreadAgentSession BEFORE the event branches (so the early-returning
+  turn_ended_no_authority codex path gets it); a DIFFERING stored id is CORRECTED with a
+  loud log — the live pane's reporter IS the thread's conversation, which also self-heals
+  past mis-discoveries (and covers codex /new mid-pane). CLI `thread report-state
+  --agent-session` (+help usage/flagDoc; SKILL state-authority paragraph).
+- SCRIPT: embedded codexnotify.sh seds "thread-id" out of the payload (no jq; payload only
+  ever expanded as quoted argv, never shell-re-parsed) and passes --agent-session; id-less
+  payload (older codex) still reports without the flag. Serve() now ALSO rewrites the
+  materialized <SESH_HOME>/codex-notify.sh (the codexnotify.go doc CLAIMED "rewritten on
+  every daemon start" but nothing called it outside spawn — a deploy would have waited for
+  the next codex spawn to reach live panes; fatal on failure, home is store-writable).
+- FALLBACK HARDENED: DiscoverCodexSession gains an exclude set = agent session ids claimed
+  by OTHER threads (claimedAgentSessions, archived included), both call sites (revive +
+  headed-born send-headless). Legacy-only path now (any thread with a post-46 turn is
+  stamped); residual: a same-cwd pair where NEITHER ever reported can still mis-land — gone
+  once each runs one turn. Fork of an unstamped codex source: accurate 409 "no captured
+  session id … run one turn, or stop+revive" (was the misleading "no turn yet").
+- MATRIX: new feature thread.codex-session-capture (codex × Local — owner-side reporter+
+  disk, the thread.adopt precedent). Cell (real codex ~50s): pre-turn fork refusal names
+  the real state → turn stamps id → fork of a LIVE HEADED codex works → second thread SAME
+  cwd, own id → kill both, revive OLDER FIRST (the exact pre-46 mis-landing order) →
+  stored ids unchanged + each recalls ITS codeword, not the other's. ANTI-GAMING: stamp
+  neutered (if false &&) → cell red at "never stamped" → reverse-edited back. Blast radius
+  green: thread.flagged/fork ×2 codex, thread.resume/send.headless ×2 codex, daemon+agents
+  -race, cmd/sesh help meta-tests. Unit: stamp truth table; exclude-set; the REAL embedded
+  script driven by sh with a fake SESH_BIN argv logger (payload w/ id, id-less, foreign type).
+DEPLOY (schema 46 = rebuild + daemon RESTART all five): mymain native+supervisorctl;
+macbook/macstudio /opt/homebrew/bin/go + supervisorctl; ideapad native + supervisorctl;
+termux plain go build + explicit-pid kill (30082) + setsid-nohup relaunch (pid 4709).
+Verified ~/.sesh/codex-notify.sh carries --agent-session on mymain+macbook (the Serve
+refresh working). LIVE SMOKE mymain: scratch headed codex thread stamped
+agent_session_id 019f9d49-… right after its first turn (previously impossible); deleted.
+NB myrig/myagent/sesh-ui need NOTHING (script embedded in sesh; api field request-only).
+
 ## H61 — codex lifecycle EXPERIMENT (Lukas's ask): compact/fork/revive — 2 real bugs found, NO code change; ticket 49d4299b (triage)
 Lukas: "any issues with sesh and codex, especially after you compact... if you fork and kill
 both and reattach, do they land on the right thread?" Ran a fully ISOLATED live experiment

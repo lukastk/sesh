@@ -1,5 +1,60 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H66 — sidebar "clicks don't register": ENTER vs in-flight FOLLOW race (2026-07-27, sesh b27b538; NO schema change; binary-only, deployed ALL FIVE, no restarts)
+Lukas: "sometimes the sidebar gets in a very strange state where it doesn't register my
+clicks... I click a thread, the sidebar briefly shows it's focused then loses it like usual,
+but it doesn't transition — it stays on the thread I was on. But then if I click on the MAIN
+PANE it sometimes does transition to the thread I clicked on previously. Only mmt-kill +
+mmt-start gets out of it."
+DIAGNOSIS TRAIL (several plausible theories killed by measurement — worth the recipe):
+- "briefly focused then loses it" PROVED the click was received AND the nav SUCCEEDED (the
+  focus handoff only runs on navDoneMsg). So NOT a click→row mapping bug. Confirmed anyway
+  by capturing the live 38x52 sidebar pane: title Y=0, header Y=1, first row Y=2 == rowsTop().
+- KILLED: chrome-line WRAPPING desyncing rowAtY/chromeLines at 38 cols. bubbletea v1.3.10's
+  standard_renderer TRUNCATES over-wide lines (`ansi.Truncate(line, r.width, "")`) — it never
+  wraps, so logical lines == physical lines. (It DOES drop lines from the TOP when a frame
+  exceeds r.height — `newLines[len(newLines)-r.height:]` — but chromeLines over-reserves 2 for
+  the ▲/▼ indicators, so the frame can't overflow in practice.) Read the renderer, don't assume.
+- KILLED: a PINNED follow resolver. `ps eww` on the live sidebar pid showed SESH_TUI_MASTER_
+  MACHINE is NOT set → it uses the live sidebarWindowName() per follow. Correct.
+- KILLED: stale `@sesh-sidebar-intent` / missing hooks — `show-options -g | grep sesh` was
+  empty and all three hooks (after-select-window swap, client-attached/resized enforce) present.
+ROOT CAUSE: the sidebar drives the cockpit's thread pane from TWO places — the ambient
+selection FOLLOW (armed by EVERY selection move, incl. every wheel/trackpad notch) and a user
+ENTER (click/Enter). Both shell out `sesh tmux nav`; the pane shows whichever lands LAST;
+NOTHING sequenced them. Click during an in-flight follow (routine right after a trackpad
+scroll; a CROSS-machine follow runs hundreds of ms — Lukas has mymain+macstudio rows) → the
+stale preview lands ON TOP of the click. The existing coalesce then re-armed a follow onto the
+still-selected row and corrected it a nav later = "it transitions a moment later, seemingly
+when I click the main pane" (the main-pane click is COINCIDENTAL, not causal). Measured nav
+sequence: [clicked, preview, clicked].
+FIX (internal/tui, pure client): enterSelected() sequences an enter behind a live follow —
+followInFlight ⇒ hold the clicked ROW in pendingEnter; followDoneMsg dispatches it INSTEAD of
+re-arming (explicit beats ambient) ⇒ [preview, clicked]. BOUNDED by enterQueueGrace 250ms
+(enterGraceMsg keyed by pendingEnterSeq) so a stalled preview can never make the sidebar
+unclickable — the very bug being fixed. navSelected split into navSelected()/navRow(row) so a
+queued enter navs the CLICKED row, not wherever the cursor drifted. All 4 enter call sites bind
+cmd BEFORE returning m (H56 pointer-receiver gotcha; takePendingEnter too). Side effect: a
+click's intent="enter" can no longer clobber an in-flight follow's intent="follow".
+TEST sidebar_race_test.go (outside the matrix): real fake `sesh` ON DISK logging every --to,
+arrow onto a slow row → click the other mid-flight → run the outstanding cmds GENUINELY
+CONCURRENTLY through a faithful mini event loop (one goroutine per cmd, msgs fed back in true
+COMPLETION order — BATCHING THEM HIDES THE INTERLEAVING, my first harness did and passed
+vacuously). Asserts the observable external effect = the nav SEQUENCE: normal follow must be
+exactly [peer:slowpoke peer:clicked]; a 2s stalled follow must still issue the click first.
+ANTI-GAMING: `if true ||` the sequencing guard → red with the EXACT bug signature
+[peer:clicked peer:slowpoke peer:clicked]; reverse-edited back.
+NOT REPRODUCED / still open: the "only mmt-kill+mmt-start gets out of it" part. The model
+self-heals (that's the third nav), so this fix removes the visible misbehaviour but I found no
+sticky state. If it recurs, next suspects: (a) the sidebar pane is a LONG-RUNNING process — it
+keeps whatever binary it was launched with, so a stale sidebar is a real "restart fixes it"
+class; (b) master windows parked at the detached default (live macbook had @0/@1 at 24 rows vs
+@2/@3 at 52) resize proportionally on first visit, and sidebar-enforce.sh only runs on
+client-attached/resized — a window switch isn't covered, so the sidebar can end up oversized
+(≥80 cols ⇒ wide columns AND follow disabled).
+DEPLOY: binary-only ALL FIVE at b27b538, NO daemon restart (no daemon/api/schema change).
+**A running sidebar does NOT pick this up** — prefix+b twice (or mmt-kill/mmt-start) restarts it.
+
 ## H65 — "missing turns on close+reopen" (claude AND codex): root cause = claude AGENT-TEAMS bg agents + session-id drift; fixes = disable agent-teams (myrig) + claude session-id STAMPING (2026-07-26, sesh bed6171 + myrig 03941ec; NO schema change; hook-only + config, deployed ALL FIVE)
 Lukas: closing thread ab9d5a3a (dagster-netrun) with `x` and reopening lost "a lot of turns"
 — often, both claude and codex. LONG diagnosis; the REAL cause only surfaced at the end.

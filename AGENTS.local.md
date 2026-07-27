@@ -1,5 +1,32 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H68 — "clicking still gets caught in weird states": the CORRUPTED RENDER *IS* THE BROKEN CLICKING; fix = wipe the screen on resize (2026-07-27, sesh 878b851; NO schema change; binary-only, deployed ALL FIVE, no restarts)
+Lukas after H67's myrig fix: "the sidebar still gets caught in weird states where the clicking
+no longer works properly."
+THE REFRAME (the insight worth keeping): **a corrupted render IS broken clicking.** rowAtY maps
+a click through the MODEL's geometry, and that geometry is always correct — but when the SCREEN
+no longer matches it, clicks land on rows the user can't see = "it can't see where I'm clicking".
+So H66 (the enter/follow race) and H67 (landing in an over-wide slot) were both real, but the
+thing that made it PERSIST until mmt-kill was stale paint. Don't hunt the click math again —
+`TestRowAtYMatchesRender` now includes a sidebar-geometry case and it's honest.
+ROOT CAUSE: bubbletea's renderer repaints only the lines of the NEW frame on resize
+(WindowSizeMsg → `repaint()`, which just drops its line-diff cache). It TRUNCATES over-wide
+lines it writes, but wrapping that ALREADY HAPPENED (a frame rendered when the pane was wider)
+is invisible to it — those extra physical lines are never erased. A shrink therefore strands the
+old wide output below the new narrow render = the screenshot.
+FIX: on a REAL size change, Update returns `tea.ClearScreen` (= EraseEntireScreen + CursorHome +
+repaint — the full wipe the renderer won't do itself). Unchanged size → nil (not a per-frame
+cost). A sidebar resizes constantly (fullscreen toggle, travelling between master windows, slot
+re-pinning), so this is the difference between self-healing and staying broken.
+TESTS: TestResizeClearsScreen (shrink+grow clear, same-size doesn't; the msg type is UNEXPORTED
+so compare against `tea.ClearScreen()`'s own message with reflect.DeepEqual). ANTI-GAMING:
+return nil instead → red; reversed. TestRowAtYMatchesRender gained a 38-col SIDEBAR case
+carrying a long actionErr + note + OFFLINE peer footer (all wider than the pane) — pins that
+bubbletea truncates rather than wraps them, so rowsTop stays honest.
+NB THE GENERAL LESSON: bubbletea will NOT clean up after a shrink. Any long-lived full-screen
+bubbletea program in a resizable pane needs this.
+DEPLOY: binary-only ALL FIVE (no daemon restart). Running sidebar keeps its old binary.
+
 ## H67 — sidebar CORRUPTED RENDER (stacked half-drawn copies): it LANDED in an over-wide slot (2026-07-27, myrig 356c732; NO sesh change; symlinked scripts = git pull only, no restart)
 Lukas screenshotted the 38-col sidebar column containing TWO overlapping renders: a correct
 narrow one on top, and below it the WIDE (maximized) column set — a cwd column present and a

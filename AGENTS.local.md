@@ -1,5 +1,46 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H67 — sidebar CORRUPTED RENDER (stacked half-drawn copies): it LANDED in an over-wide slot (2026-07-27, myrig 356c732; NO sesh change; symlinked scripts = git pull only, no restart)
+Lukas screenshotted the 38-col sidebar column containing TWO overlapping renders: a correct
+narrow one on top, and below it the WIDE (maximized) column set — a cwd column present and a
+line wrapping mid-word ("scuttlebug-dagster-bu" / "ild scuttlebug-healthcare-dagster <vdn3hk>").
+READING THE SCREENSHOT IS THE DIAGNOSIS: wide column set + wrapping at 38 ⇒ the TUI's m.width
+was ≥ sidebarWideThreshold(80) while the pane was 38. sesh is the VICTIM here (it can only
+believe SIGWINCH) — the bug is in the myrig rig.
+ROOT CAUSE (reproduced): tmux scales panes PROPORTIONALLY on window resize, and a master window
+parked at the detached default (80 cols) has never been sized to the client ⇒ the moment the
+client sizes it, its 38-col slot becomes 38/80*188 ≈ **98 cols**. The traveling sidebar swapped
+into that window LANDS at 98 ⇒ renders the full grid column set; the hook's `resize-pane -x 38`
+then snaps it to 38. bubbletea repaints line-by-line against its OWN model of the screen and has
+no idea the terminal already WRAPPED that wide output, so the wrapped remnants are never erased
+= the stacked corruption. sidebar-enforce.sh existed to pin slots but ran ONLY on
+client-attached/client-resized — never on a window switch — so a drifted slot stayed drifted.
+LIVE EVIDENCE of the sibling hazard: on macbook, window @3 was flagged zoomed=1 around pane %11
+while %11 had ALREADY been swapped into @0, where it reported **188x50 inside a 38-col cell**
+(a zoomed pane's pty is sized to the whole window; swapping it out leaves the old window flagged
+zoomed around it).
+FIXES (sidebar-swap.sh): (1) run the enforce sweep BEFORE picking the target slot (so the
+sidebar can never land wide) and again after; (2) UN-ZOOM the sidebar before it travels when it
+is the zoomed pane (dropping fullscreen on travel is the documented intent — _dev/SIDEBAR.md);
+(3) SERIALIZE with an mkdir lock — the after-select-window hook (async run-shell) and
+sidebar-zoom.sh (which calls this script DIRECTLY when the sidebar is parked elsewhere) can run
+concurrently, and interleaved swaps move the sidebar twice. Stale lock (>1min) reclaimed so it
+can never wedge the cockpit; `-mmin` gets an INTEGER (BSD/macOS find rejects fractions — the
+master usually runs on a Mac). sidebar-enforce.sh: skip only the pane that IS fullscreen
+(zoomed AND active) instead of every pane of a zoomed window — the blanket skip is what let a
+stuck over-wide sidebar survive until mmt-kill.
+RIG (the thing that finally reproduced it — worth reusing): isolated master tmux + a REAL
+ATTACHED CLIENT at 200x50 via a driver tmux (`env -u TMUX tmux -L <sock> attach`), `window-size
+latest`, 3 windows of which 2 are PARKED at the detached default, the swap hook installed, then
+zoom+travel. A DETACHED rig (plain `new-session -x/-y`) reproduces NOTHING — tmux auto-unzooms
+and never proportionally rescales — so the attached client + parked windows are the load-bearing
+ingredients. Assert on `#{window_visible_layout}`: before = parked slots read 98x48, after = every
+slot 38x48 in every window. ANTI-GAMING: removing the enforce sweeps brings the 98-col slots back.
+DEPLOY: myrig scripts are SYMLINKED into ~/.sesh/myrig, and the hook command string is unchanged
+⇒ `git pull` is the whole deploy, no install-home render, no conf re-source, no cockpit restart;
+a live master picks it up on its next window switch (which also self-heals drifted slots).
+Pulled mymain/macbook/macstudio/ideapad (+termux, where the scripts self-guard anyway).
+
 ## H66 — sidebar "clicks don't register": ENTER vs in-flight FOLLOW race (2026-07-27, sesh b27b538; NO schema change; binary-only, deployed ALL FIVE, no restarts)
 Lukas: "sometimes the sidebar gets in a very strange state where it doesn't register my
 clicks... I click a thread, the sidebar briefly shows it's focused then loses it like usual,

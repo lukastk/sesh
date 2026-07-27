@@ -1056,12 +1056,35 @@ func tick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		resized := msg.Width != m.width || msg.Height != m.height
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureCursorVisible() // a resize can shrink the viewport under the cursor
 		if m.hOffset > m.maxHOffset() {
 			m.hOffset = m.maxHOffset()
 		}
-		return m, nil
+		if !resized {
+			return m, nil
+		}
+		// WIPE THE SCREEN on a real size change. bubbletea's renderer repaints
+		// only the lines of the NEW frame (WindowSizeMsg -> repaint(), which
+		// just drops its diff cache) — it cannot know that the PREVIOUS frame,
+		// rendered at a bigger width, was WRAPPED by the terminal into more
+		// physical lines than it counted. Those extra lines are never erased,
+		// so a shrink leaves the old wide output stranded below the new narrow
+		// render: the "corrupted sidebar" of stacked half-drawn copies of the
+		// list (Lukas, 2026-07-27).
+		//
+		// That also silently BREAKS CLICKING, which is how it presents: the
+		// model's row geometry is correct and rowAtY maps faithfully, but the
+		// SCREEN no longer matches it, so clicks land on rows the user cannot
+		// see. Only a full repaint fixes it — previously that meant restarting
+		// the whole cockpit.
+		//
+		// A sidebar gets resized constantly (the cockpit's fullscreen toggle,
+		// travelling between master windows, slot re-pinning), so this is the
+		// difference between self-healing and staying broken. Resizes are rare
+		// enough that an unconditional clear costs nothing.
+		return m, tea.ClearScreen
 	case tea.MouseMsg:
 		// The mouse wheel moves the SELECTION between rows (up/down, like ↑/↓, viewport
 		// following — works even when the grid fits the screen, unlike a viewport-only

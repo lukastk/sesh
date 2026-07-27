@@ -230,6 +230,25 @@ func TestRowAtYMatchesRender(t *testing.T) {
 		m.actionErr = fmt.Errorf("boom")
 		check(t, m)
 	})
+	// SIDEBAR geometry (38 cols): the narrow pane the cockpit runs, carrying the
+	// chrome that actually shows up there — a long action error, a note, and a
+	// long OFFLINE peer footer, every one of them wider than the pane. bubbletea
+	// TRUNCATES over-wide lines rather than wrapping them, so each stays one
+	// line and rowsTop/chromeLines stay honest; this pins that, because if any
+	// of them ever became multi-line the click->row mapping would silently shift
+	// and clicking would land on the wrong thread.
+	t.Run("sidebar-narrow-with-chrome", func(t *testing.T) {
+		m := flatModel(names...)
+		m.width, m.height = 38, 24
+		m.sidebar = true
+		m.actionErr = fmt.Errorf("macstudio is offline — can't reach %q until it reconnects", "some-long-thread-name")
+		m.note = `archived "another-long-thread-name" · U to undo`
+		m.machines = []api.MachineView{
+			{Machine: "mymain", Self: true, Reachable: true},
+			{Machine: "macstudio", Reachable: false, Threads: []api.ThreadSnapshot{{}, {}, {}, {}}},
+		}
+		check(t, m)
+	})
 	t.Run("scrolled", func(t *testing.T) {
 		// A short viewport forces a scroll: put the cursor at the bottom so vOffset > 0
 		// and the "▲ N more" indicator appears above the first visible row.

@@ -8,35 +8,49 @@ import (
 )
 
 // TestActiveViewAdmitsArchivedHeadful proves the default `active` view predicate:
-// (flagged OR not archived OR headful) AND not on hold. An archived thread stays
-// visible while it is still headful (a live pane) and drops out once it goes
-// headless; a FLAGGED thread overrides archived-hiding (needs-attention) — but
-// HOLD BEATS FLAG (Lukas, 2026-07-26): an on-hold thread is excluded no matter
-// what, so parking a thread actually parks it (its ⚑ shows in `on hold`).
+// (flagged OR not archived OR headful OR running) AND not on hold. An archived
+// thread stays visible while it is still headful (a live pane) or RUNNING (a turn
+// in flight — Lukas, 2026-07-27: live work belongs in the active view even on an
+// archived thread, which notably covers HEADLESS turns, ◌▶) and drops out once it
+// is quiet; a FLAGGED thread overrides archived-hiding (needs-attention) — but
+// HOLD BEATS FLAG (Lukas, 2026-07-26) and hold beats RUNNING: an on-hold thread is
+// excluded no matter what, so parking a thread actually parks it (its ⚑ shows in
+// `on hold`).
 func TestActiveViewAdmitsArchivedHeadful(t *testing.T) {
 	cases := []struct {
 		name     string
 		archived bool
 		head     api.Head
+		busy     api.Busy
 		onHold   bool
 		flagged  bool
 		want     bool
 	}{
-		{"live non-archived idle", false, api.Headless, false, false, true},
-		{"live non-archived headful", false, api.Headful, false, false, true},
-		{"archived + headful (still running) -> shown", true, api.Headful, false, false, true},
-		{"archived + headless (parked) -> hidden", true, api.Headless, false, false, false},
-		{"archived + headful but on hold -> hidden", true, api.Headful, true, false, false},
-		{"non-archived headful on hold -> hidden", false, api.Headful, true, false, false},
-		{"non-archived headless on hold -> hidden", false, api.Headless, true, false, false},
-		{"FLAGGED archived headless -> SHOWN", true, api.Headless, false, true, true},
-		{"FLAGGED on hold -> HIDDEN (hold beats flag)", false, api.Headless, true, true, false},
-		{"FLAGGED archived + on hold -> HIDDEN (hold beats flag)", true, api.Headless, true, true, false},
-		{"FLAGGED headful on hold -> HIDDEN (hold beats flag)", false, api.Headful, true, true, false},
+		{"live non-archived idle", false, api.Headless, api.BusyIdle, false, false, true},
+		{"live non-archived headful", false, api.Headful, api.BusyIdle, false, false, true},
+		{"archived + headful (live pane) -> shown", true, api.Headful, api.BusyIdle, false, false, true},
+		{"archived + headless idle (parked) -> hidden", true, api.Headless, api.BusyIdle, false, false, false},
+		{"archived + headful but on hold -> hidden", true, api.Headful, api.BusyIdle, true, false, false},
+		{"non-archived headful on hold -> hidden", false, api.Headful, api.BusyIdle, true, false, false},
+		{"non-archived headless on hold -> hidden", false, api.Headless, api.BusyIdle, true, false, false},
+		{"FLAGGED archived headless -> SHOWN", true, api.Headless, api.BusyIdle, false, true, true},
+		{"FLAGGED on hold -> HIDDEN (hold beats flag)", false, api.Headless, api.BusyIdle, true, true, false},
+		{"FLAGGED archived + on hold -> HIDDEN (hold beats flag)", true, api.Headless, api.BusyIdle, true, true, false},
+		{"FLAGGED headful on hold -> HIDDEN (hold beats flag)", false, api.Headful, api.BusyIdle, true, true, false},
+		// RUNNING (2026-07-27). The load-bearing new case is the first: an
+		// archived thread running a HEADLESS turn was hidden before.
+		{"archived + headless RUNNING -> SHOWN", true, api.Headless, api.BusyBusy, false, false, true},
+		{"archived + headful RUNNING -> shown", true, api.Headful, api.BusyBusy, false, false, true},
+		{"non-archived headless RUNNING -> shown", false, api.Headless, api.BusyBusy, false, false, true},
+		{"RUNNING on hold -> HIDDEN (hold beats running)", false, api.Headless, api.BusyBusy, true, false, false},
+		{"archived RUNNING on hold -> HIDDEN (hold beats running)", true, api.Headless, api.BusyBusy, true, false, false},
+		// An UNKNOWN busy axis (the zero value, "?") is not running: it must not
+		// resurrect an archived thread.
+		{"archived + headless busy-unknown -> hidden", true, api.Headless, api.Busy(""), false, false, false},
 	}
 	for _, c := range cases {
 		// Archived/Flagged are on the embedded Thread; OnHold is derived on ThreadRow.
-		row := api.ThreadRow{Thread: api.Thread{Archived: c.archived, Flagged: c.flagged}, Head: c.head, OnHold: c.onHold}
+		row := api.ThreadRow{Thread: api.Thread{Archived: c.archived, Flagged: c.flagged}, Head: c.head, Busy: c.busy, OnHold: c.onHold}
 		if got := builtinViewAdmits(ViewActive, row); got != c.want {
 			t.Errorf("%s: builtinViewAdmits(active)=%v, want %v", c.name, got, c.want)
 		}

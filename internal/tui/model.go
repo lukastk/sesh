@@ -86,16 +86,21 @@ func (m Model) viewCount() int { return int(viewBuiltins) + len(m.customViews) }
 // builtinViewAdmits reports whether a row belongs in one of the built-in views.
 // (Custom [[tui.views]] use their own predicate instead.) The default `active` view
 // hides on-hold threads and hides archived threads UNLESS they are still headful (a
-// live pane) — so an archived thread stays visible while its agent is running and
-// drops out only once it goes headless. `on hold` shows the parked ones.
+// live pane), RUNNING, or flagged — so an archived thread stays visible while its
+// agent is working and drops out only once it is quiet. `on hold` shows the parked
+// ones.
 func builtinViewAdmits(view View, row api.ThreadRow) bool {
 	switch view {
 	case ViewActive:
-		// HOLD BEATS FLAG (Lukas, 2026-07-26): an on-hold thread NEVER shows in
-		// active — putting a thread on hold must actually park it, flag or not
-		// (its ⚑ still shows in the `on hold` view). A flag still overrides the
-		// archived-hiding for non-held threads ("needs your attention").
-		return (row.Flagged || !row.Archived || row.Head == api.Headful) && !row.OnHold
+		// A RUNNING thread always shows (Lukas, 2026-07-27): a turn in flight is
+		// live work, so it belongs in the active view even when the thread is
+		// archived. Headful already covered a live PANE; this adds the headless
+		// ones (◌▶ — a `delegate`/send-headless turn on an archived thread).
+		//
+		// HOLD BEATS FLAG (Lukas, 2026-07-26) — and hold beats RUNNING too: an
+		// on-hold thread NEVER shows in active, so parking a thread actually
+		// parks it (its ⚑ still shows in the `on hold` view).
+		return (row.Flagged || !row.Archived || row.Head == api.Headful || row.Busy == api.BusyBusy) && !row.OnHold
 	case ViewHold:
 		return !row.Archived && row.OnHold
 	case ViewArchived:

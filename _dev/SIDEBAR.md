@@ -128,8 +128,10 @@ the myvault pad "Herdr vs sesh - migration assessment".
   list, Enter commits (and naturally exits fullscreen into the thread).
 - Everything else is the SAME TUI: filter, views, actions, keypress optimism,
   offline handling, `?` keymap. (Tab view picker opens on the CURRENT view; the
-  default `active` view ALWAYS shows flagged threads — archived/on-hold
-  included.)
+  default `active` view admits a thread that is flagged, not archived, headful,
+  or RUNNING — but NEVER one that is on hold. NB this line used to claim
+  flagged-always-shows "archived/on-hold included", which H63 falsified: hold
+  beats flag.)
 
 Nav routing needs no new carrier: a sidebar pane is a real pane on the master
 server, so `sesh tmux nav` takes the master path (marker-client based, H8/H10);

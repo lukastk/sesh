@@ -68,7 +68,7 @@ func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", tr.row.Machine, offlineRowLabel(tr.row))
 			return m, nil
 		}
-		cmd := m.navSelected()
+		cmd := m.enterSelected()
 		return m, cmd
 	}
 
@@ -83,7 +83,8 @@ func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", tr.row.Machine, offlineRowLabel(tr.row))
 			return m, nil
 		}
-		return m, m.navSelected()
+		cmd := m.enterSelected()
+		return m, cmd
 	}
 	// First click: select and arm the double-click timer.
 	m.lastClickID = tr.row.ID

@@ -264,6 +264,13 @@ type Model struct {
 	// to re-cache on. A static spawner ($SESH_TUI_MASTER_MACHINE) uses a
 	// constant resolver; the cockpit uses a live window-name read.
 	followResolver func() string
+	// pendingEnter: a user ENTER (click / Enter key) that arrived while a
+	// follow nav was still in flight, held until that follow finishes so the
+	// user's nav is the LAST one the cockpit is told to make (see
+	// enterSelected). pendingEnterSeq identifies the current one so a stale
+	// grace tick can't re-fire a superseded enter.
+	pendingEnter    *api.ThreadRow
+	pendingEnterSeq int
 	// followInFlight: a follow nav is currently running. Selection moves while
 	// one runs don't queue navs — the completion handler re-arms for wherever
 	// the cursor is THEN (fire-immediately + coalesce: single moves preview at
@@ -633,6 +640,61 @@ func (m *Model) armFollow() tea.Cmd {
 	m.followInFlight = true
 	return m.followNav(row)
 }
+
+// enterQueueGrace bounds how long a user ENTER will wait behind an ambient
+// follow nav before going out anyway. Long enough to cover a normal follow
+// (a cross-machine master nav is a few hundred ms), short enough that a
+// pathologically slow one can never make the sidebar feel unclickable — the
+// bug this whole mechanism exists to fix.
+const enterQueueGrace = 250 * time.Millisecond
+
+// enterSelected dispatches a user ENTER (click / Enter key) for the current
+// selection — SEQUENCED behind any ambient follow nav that is still running.
+//
+// Both the follow preview and the enter drive the SAME cockpit pane by
+// shelling out `sesh tmux nav`, and the pane shows whichever nav lands LAST.
+// Firing an enter while a follow was in flight therefore raced: the stale
+// preview routinely landed second and won, so the click "didn't take" and the
+// cockpit snapped back to the thread the user had just left (Lukas,
+// 2026-07-27 — common after any trackpad scroll, since every wheel notch arms
+// a follow, and a cross-machine follow runs for hundreds of ms). The old
+// self-correction (followDoneMsg re-arming a follow onto the still-selected
+// row) did eventually land on the clicked thread, which is exactly why it read
+// as "it transitions a moment later, seemingly at random".
+//
+// So: if a follow is in flight, remember the row and let the follow finish —
+// its completion dispatches this enter (followDoneMsg), guaranteeing the
+// user's nav is the last one issued. The wait is bounded by enterQueueGrace so
+// a stalled follow can never swallow a click.
+func (m *Model) enterSelected() tea.Cmd {
+	if !m.followInFlight {
+		return m.navSelected()
+	}
+	row, ok := m.Selected()
+	if !ok {
+		return nil
+	}
+	m.pendingEnter = &row
+	m.pendingEnterSeq++
+	seq := m.pendingEnterSeq
+	return tea.Tick(enterQueueGrace, func(time.Time) tea.Msg { return enterGraceMsg{seq: seq} })
+}
+
+// takePendingEnter pops a queued enter, returning its nav command (nil when
+// there is none).
+func (m *Model) takePendingEnter() tea.Cmd {
+	if m.pendingEnter == nil {
+		return nil
+	}
+	row := *m.pendingEnter
+	m.pendingEnter = nil
+	return m.navRow(row)
+}
+
+// enterGraceMsg fires when a queued enter has waited enterQueueGrace for the
+// in-flight follow. seq identifies WHICH queued enter, so a tick belonging to
+// an already-dispatched (or superseded) one is ignored.
+type enterGraceMsg struct{ seq int }
 
 // followEligible reports whether the selected row is one the sidebar should
 // follow to, applying the model-side follow policy: only a not-already-shown
@@ -1210,7 +1272,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// retries deliberately.
 			m.lastFollowedID = msg.id
 		}
+		// A user ENTER that arrived mid-follow was held back so it lands LAST
+		// (enterSelected) — dispatch it now, and do NOT re-arm a preview: the
+		// explicit command supersedes the ambient one.
+		if cmd := m.takePendingEnter(); cmd != nil {
+			return m, cmd
+		}
 		cmd := m.armFollow()
+		return m, cmd
+	case enterGraceMsg:
+		// The follow this enter was queued behind is taking too long. Let the
+		// click through anyway — a stalled preview must never make the sidebar
+		// feel unclickable. (Stale tick for an already-dispatched enter: ignore.)
+		if m.pendingEnter == nil || msg.seq != m.pendingEnterSeq {
+			return m, nil
+		}
+		// Bind BEFORE returning m: takePendingEnter has a POINTER receiver and
+		// CLEARS the queued enter — `return m, m.takePendingEnter()` has
+		// unspecified operand order and could return the pre-clear copy, so the
+		// follow's completion would dispatch the same enter a second time.
+		cmd := m.takePendingEnter()
 		return m, cmd
 	case navDoneMsg:
 		// The selected thread is now on screen (the client switched under us).
@@ -2195,7 +2276,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.openTicketView(row)
 		}
 	case "enter":
-		return m, m.navSelected()
+		// Bind BEFORE returning m: enterSelected has a POINTER receiver and may
+		// queue the enter (Go's operand evaluation order is unspecified, so
+		// `return m, m.enterSelected()` can return the pre-mutation copy).
+		cmd := m.enterSelected()
+		return m, cmd
 	}
 	return m, nil
 }
@@ -2480,6 +2565,13 @@ func (m Model) navSelected() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	return m.navRow(row)
+}
+
+// navRow is navSelected for an EXPLICIT row rather than the current selection —
+// the queued-enter path (enterSelected) has to nav the row that was clicked,
+// not wherever the cursor has drifted to by the time the nav is dispatched.
+func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 	bin, env := m.binaryPath, m.navEnv
 	sidebar, resolve := m.sidebar, m.followResolver
 	local := m.machine != "" && row.Machine == m.machine

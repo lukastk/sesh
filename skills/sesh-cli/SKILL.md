@@ -254,6 +254,12 @@ selection FOLLOWS immediately**: the cockpit previews the selected thread while 
 stays in the sidebar — Enter/click is what commits focus. A local preview costs ~a
 tmux switch (one warm daemon call, no subprocess); while one is in flight further
 moves coalesce into a single catch-up nav, so held arrows degrade gracefully.
+An **Enter/click always beats an in-flight preview**: clicking while a follow is
+still running holds the enter until that preview lands, so the thread you picked is
+the last one the cockpit is told to show (previously the stale preview could land on
+top of the click, so the click "didn't take" and only corrected itself a nav later).
+A stalled preview can't swallow the click — past a short grace the enter goes out
+anyway.
 **esc/q never quit in sidebar mode** — a persistent pane must not die to a stray
 keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job);
 instead they DISMISS the ✗ error / note lines, which otherwise persist until the

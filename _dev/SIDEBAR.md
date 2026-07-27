@@ -63,6 +63,22 @@ the myvault pad "Herdr vs sesh - migration assessment".
   tmux switch; other cases take the full subprocess master nav. Focus STAYS in
   the sidebar; Enter (or a single click) is what commits focus to the thread
   pane.
+  **An ENTER supersedes an in-flight preview** (Lukas 2026-07-27 — "I click a
+  thread and it doesn't transition; it stays on the one I was on, then
+  sometimes transitions later"). The preview and the enter both drive the SAME
+  cockpit pane through `sesh tmux nav`, and the pane shows whichever nav lands
+  LAST; nothing sequenced them, so a click during a still-running follow
+  (routine after any trackpad scroll — every wheel notch arms one — and a
+  cross-machine follow runs for hundreds of ms) let the stale preview land on
+  top of the click. The old coalesce then re-armed onto the still-selected row
+  and corrected it a nav later, which is exactly why it read as "it transitions
+  a moment later, at random". Now an enter arriving mid-follow is HELD and
+  dispatched by that follow's completion, so the user's nav is always last (nav
+  sequence `preview, clicked` instead of `clicked, preview, clicked`). The wait
+  is bounded by enterQueueGrace (250ms) so a stalled preview can never make the
+  sidebar feel unclickable — past the grace the enter goes out anyway and the
+  re-arm still corrects. Regression guard: TestSidebarEnterSupersedesInFlight
+  Follow drives a real fake `sesh` and asserts the ORDER of navs issued.
   Follow policy (deliberate no-op skips, never errors): live HEADFUL threads
   only (a preview must never revive a dead thread), reachable owner, deduped
   against the thread already shown. Follow CROSSES machines (revised — with the

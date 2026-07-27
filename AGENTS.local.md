@@ -1,5 +1,42 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H69 — THE ACTUAL "clicks stop working" CAUSE: TWO ATTACHED TERMINALS + `window-size latest` silently rescale the sidebar (2026-07-27, myrig 52a4942+5da06d7; NO sesh change; conf = pull + source-file)
+**Lukas found this, not me** ("I'm wondering if it's to do with the fact that I have attached to
+the master tmux in two different terminal emulators? ghostty and wezterm. Although it doesn't
+always end up in this state"). He was exactly right, and it is NOT H66/H67/H68 (all three were
+real but none was THIS). Lesson: when the user offers a hypothesis about their own environment,
+test it FIRST — I burned three rounds on races/paint before doing so.
+LIVE CAPTURE mid-failure (macbook): `list-clients` = /dev/ttys015 **188x51** + /dev/ttys014
+**214x55** (two clients, DIFFERENT sizes), `window-size latest`, and
+`vis={25x50,0,0,11,162x50,26,0,3}` ⇒ **the 38-col sidebar pane was 25 COLS**.
+MECHANISM: under `window-size latest` the window is re-sized to whichever client last received
+**INPUT** — so merely TYPING in the other terminal resizes the window (188↔214) and tmux
+rescales panes **PROPORTIONALLY**, dragging the pinned 38-col slot off its width. NEITHER
+existing hook covers it: `client-resized` doesn't fire (no client changed size) and
+`after-select-window` doesn't fire (no window switch) ⇒ it drifted and STAYED drifted.
+WHY THAT BREAKS CLICKING (no corruption involved — the render was perfectly self-consistent at
+25 cols, bubbletea truncating everything correctly): the sidebar's CLICKABLE REGION is no longer
+where the user aims. At 25 cols a click on a thread NAME (~col 26-38, where it has always been)
+lands in the neighbouring AGENT pane. Drifting the other way past 80 cols also flips sesh into
+its maximized column set. And "not ALWAYS": two terminals of the SAME size resize the window to
+the same geometry, so nothing rescales.
+FIX: hook sidebar-enforce.sh to **`window-resized`** as well. Resizing a PANE doesn't change the
+window size, so enforce can't re-trigger it — converges after one correction.
+RIG (reproduced the live number EXACTLY): one master, TWO attached clients 188x51 + 214x55,
+`window-size latest`, then alternate INPUT between the terminals with NO window switching.
+  no hook: 38 → **25** → 38 → **25** …  (the live value, oscillating with input focus)
+  hooked : 38 → 38 → 38 → 38 …
+GOTCHAS (both bit me):
+- `window-resized` is WINDOW-scoped: it NEVER appears in `show-hooks -g` (session table) — check
+  `show-hooks -gw`. I briefly "concluded" `-g` was silently discarded and shipped a wrong
+  comment; verified properly afterwards that **`-g` and `-gw` both register AND fire**.
+- The H30 pipe-exit trap AGAIN: `tmux set-hook … | head -2 && echo ACCEPTED` reports success
+  unconditionally (a pipeline's status is the LAST command's). Never gate a check on `cmd | head`.
+DEPLOY: conf is symlinked BUT a `set-hook` lives in the running server's state ⇒ pull is NOT
+enough, a running master needs `source-file ~/.sesh/myrig/tmux.master.conf`. Done mymain +
+macbook + macstudio (running masters); ideapad none; termux self-guards. Also ran
+sidebar-enforce.sh once on macbook's live master to pull the stuck 25-col sidebar back to 38.
+
 ## H68 — "clicking still gets caught in weird states": the CORRUPTED RENDER *IS* THE BROKEN CLICKING; fix = wipe the screen on resize (2026-07-27, sesh 878b851; NO schema change; binary-only, deployed ALL FIVE, no restarts)
 Lukas after H67's myrig fix: "the sidebar still gets caught in weird states where the clicking
 no longer works properly."

@@ -778,6 +778,9 @@ func (m Model) followNav(row api.ThreadRow) tea.Cmd {
 		target := row.Machine + ":" + row.SessionName
 		cmd := exec.Command(bin, "tmux", "nav", "--to", target, "--thread", row.ID)
 		cmd.Env = append(os.Environ(), env...)
+		// Distinct from NAV EXEC: an ambient PREVIEW drives the same cockpit
+		// pane as a user enter, so the two must be told apart in the log.
+		debugLog("FOLLOW EXEC --to %s --thread %s (windowMachine=%s)", target, row.ID, wm)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			clearSidebarIntent() // the switch didn't happen — don't leave a stale intent
 			return followDoneMsg{id: row.ID, err: fmt.Errorf("follow %s: %v: %s", target, err, strings.TrimSpace(string(out)))}
@@ -1169,6 +1172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// would silently shift the selection onto a DIFFERENT thread, the
 			// archive/delete-the-wrong-row footgun.
 			anchorID := m.selectedID()
+			fetchBefore := anchorID
 			m.lastErr = nil
 			m.rows = msg.rows
 			m.machines = msg.machines
@@ -1191,6 +1195,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.reanchorCursor(anchorID)
 			}
 			m.ensureCursorVisible() // keep the viewport over the (re-anchored) cursor
+			// A fetch that MOVES the selection is a prime suspect when the cockpit
+			// drifts off the thread the user just picked: the moved selection can
+			// arm an ambient follow, which then navs on top of their choice.
+			if after := m.selectedID(); after != fetchBefore {
+				debugLog("FETCH MOVED CURSOR %s -> %s (preselectID=%s view=%d)", fetchBefore, after, m.preselectID, m.view)
+			}
 		}
 		// Bootstrap the SINGLE poll timer exactly once (on the first successful
 		// fetch). Subsequent meshMsgs — including those from action/reconcile
@@ -2049,6 +2059,13 @@ func requiresReachableOwner(key string) bool {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if debugEnabled() {
+		sel := ""
+		if r, ok := m.Selected(); ok {
+			sel = r.Name
+		}
+		debugLog("KEY %q | cursor=%d %q filtering=%v", msg.String(), m.cursor, sel, m.filtering)
+	}
 	if m.ticketMode != ticketNone {
 		return m.handleTicketKey(msg)
 	}

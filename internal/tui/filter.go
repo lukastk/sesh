@@ -301,7 +301,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// and the cursor re-lands on that same thread in the full list.
 		if m.sidebar {
 			row, ok := m.Selected()
-			cmd := m.enterSelected()
+			cmd := m.navSelected()
 			m.filtering, m.filter, m.filterCaret = false, "", 0
 			if ok {
 				m.positionCursorOn(row.ID)
@@ -309,7 +309,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampCursor()
 			return m, cmd
 		}
-		cmd := m.enterSelected()
+		cmd := m.navSelected()
 		return m, cmd
 	case "ctrl+y":
 		// Toggle whether child threads are included in the filter results.

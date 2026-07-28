@@ -2689,7 +2689,15 @@ func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
-		if out, err := cmd.CombinedOutput(); err != nil {
+		out, err := cmd.CombinedOutput()
+		// Log the nav we actually ran and what it said. A nav can exit 0 having
+		// switched a client the user is not looking at (the master path targets
+		// the marker client for the origin machine, and a work server can carry
+		// several clients on different sessions) — from the outside that is
+		// indistinguishable from "the click did nothing", so record the target.
+		debugLog("NAV EXEC args=%v useInClient=%v intent=%v -> err=%v out=%q",
+			args, useInClient, declaredIntent, err, strings.TrimSpace(string(out)))
+		if err != nil {
 			if declaredIntent {
 				clearSidebarIntent() // no switch happened — don't leave a stale intent
 			}

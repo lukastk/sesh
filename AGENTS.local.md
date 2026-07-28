@@ -1,5 +1,32 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H72 — FOCUS BOUNCE SOLVED: `select-pane -t ":.+"` is a TOGGLE, not "my sibling" (2026-07-28, sesh 2526f00; binary-only; CONFIRMED FIXED by Lukas)
+Symptom (weeks-old, survived H66/H67/H68/H69/H71 and one wrong fix): entering a thread from the
+sidebar moves focus to the thread pane and then it **flicks back to the sidebar**, "a bit random",
+on the Enter key as well as the mouse.
+ROOT CAUSE, and it is one target string: focusSiblingPane used `tmux select-pane -t ':.+'`.
+**`.+` is relative to the window's ACTIVE pane, NOT to the calling pane** — so it is a TOGGLE.
+Sidebar active → lands on the thread pane; thread pane ALREADY active → cycles straight BACK to
+the sidebar. The master's after-select-window hook fires ASYNCHRONOUSLY on the same window switch
+and also focuses the thread pane, so **whenever the hook won that race, focusSiblingPane undid
+it** — hence "random", and hence keyboard too (never a mouse bug).
+PROOF (isolated tmux, same command 3× from the same pane's context):
+  old `select-pane -t ':.+'` : %1 → %0 → %1 → %0  (toggles)
+  new explicit pane id       : %1 → %0 → %0 → %0  (idempotent)
+FIX: select the thread pane EXPLICITLY BY ID — the pane in this window carrying neither
+@sesh-sidebar nor @sesh-sidebar-slot (the same rule the myrig hook uses). Idempotent, so it no
+longer matters whether the TUI or the hook lands first. Logs a FOCUS line under $SESH_TUI_LOG.
+SUPERSEDES the intent-clearing in 0547775 (kept — it fixes a real second-order problem: a
+preview's leftover "follow" being consumed by an unrelated enter) — but that could NEVER have
+fixed the bounce, because with intent=enter the hook focuses the thread pane CORRECTLY and it was
+this toggle that then undid it. I "fixed" the thing racing with the bug instead of the bug.
+**LESSONS:** (a) when two things race, check whether one of them is WRONG ON ITS OWN before
+trying to order them — the toggle was broken with no race at all, on the very first repeat call;
+(b) tmux relative targets (`.+`, `.-`, `:+`) resolve against the CURRENT/ACTIVE object, never the
+caller — never use one where you mean a specific pane; (c) what cracked this and H70 was Lukas's
+PHENOMENOLOGY ("click BELOW a row" = off-by-one; "a bit random ... timing?" = a race), not any
+amount of inspecting tmux state.
+
 ## H71 — **H66/H67/H68/H69 WERE REVERTED** (2026-07-28, sesh 81ee959 + myrig 7821128). Read this BEFORE trusting those four entries.
 Lukas, after a long chase: "I think the last few changes you've made since we started trying to
 fix this have just made it progressively worse." He was right. He chose "revert to baseline, keep
@@ -11,11 +38,17 @@ TUI at all**. It is in the MASTER's own structures (attach panes, marker clients
 which mmt-start rebuilds. H66–H69 were all aimed at the wrong layer. **Do not re-fix the sidebar
 TUI for this symptom without first showing the state survives a `prefix+r`.**
 REVERTED (still in git history, but NOT live): H66 enter/follow sequencing (pendingEnter/
-enterQueueGrace/enterSelected/takePendingEnter/enterGraceMsg); H68 tea.ClearScreen on
-WindowSizeMsg; the unconditional enter-intent declaration; myrig H67 (swap-time enforce sweeps,
-unzoom-before-travel, mkdir lock) and H69 (the window-resized hook). NB the two REMAINING
-tea.ClearScreen calls are the FILTER TINT ones — those predate all this and Lukas confirmed they
-work; don't remove them.
+enterQueueGrace/enterSelected/takePendingEnter/enterGraceMsg); the unconditional enter-intent
+declaration; myrig H67 (swap-time enforce sweeps, unzoom-before-travel, mkdir lock) and H69 (the
+window-resized hook).
+**CORRECTION (same day, sesh 0547775): H68's tea.ClearScreen on WindowSizeMsg was RESTORED and
+IS live.** Reverting it was wrong: the leftover-paint artifact reappeared within the hour of the
+revert and had been absent while it was deployed — Lukas's own A/B. He also clarified it is
+COSMETIC ("does not affect the function of the sidebar... just left-over text that hasn't been
+flushed"), which matches a paint bug exactly. Live geometry was verified consistent at the time
+of his screenshot, so it is stale paint, not a mis-sized pane. TestResizeClearsScreen guards it.
+NB the other tea.ClearScreen calls are the FILTER TINT ones — those predate all this and work;
+don't remove them.
 **KEPT — the only change with a test that fails without it (H70): `View()` returns WITHOUT its
 trailing newline.** That newline made the frame one line taller than the pane whenever BOTH
 scroll indicators showed; bubbletea drops the TOP line to fit, so every click landed one row off
@@ -34,11 +67,7 @@ mmt-start discriminator above. ASK FOR PHENOMENOLOGY AND FOR WHAT DOES/DOESN'T C
 STILL OPEN: (1) clicking degrades over time, cleared only by mmt-start ⇒ look at master state
 (marker clients! mymain's work server carries FIVE clients and `sesh master watchers` lists four
 markers — a nav switches the marker client for the origin, which may not be the one in the window
-being viewed). (2) FOCUS bounces: it reaches the thread pane then returns to the sidebar,
-keyboard AND mouse. That is the intent protocol — focusSiblingPane focuses the agent, then the
-swap hook consumes an intent of "follow" and selects the sidebar back. The ambient selection-
-FOLLOW is implicated in that, in navs overwriting a click, and in intent clobbering; Lukas was
-offered "disable follow" and did not take it, so ASK before removing it.
+being viewed). (2) the FOCUS BOUNCE — **SOLVED, see H72.**
 
 ## H70 — THE REAL CLICK BUG: View()'s TRAILING NEWLINE made the frame 1 line too tall ⇒ bubbletea drops the TOP line ⇒ every click off by one (2026-07-28, sesh 93c18b3 + instrumentation f75c417/866003e; NO schema change; binary-only)
 **This is the one.** H66 (enter/follow race), H67 (over-wide slot), H68 (stale paint), H69 (two

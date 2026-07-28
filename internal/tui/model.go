@@ -1057,6 +1057,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		resized := msg.Width != m.width || msg.Height != m.height
+		debugLog("RESIZE %dx%d (was %dx%d) changed=%v", msg.Width, msg.Height, m.width, m.height, resized)
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureCursorVisible() // a resize can shrink the viewport under the cursor
 		if m.hOffset > m.maxHOffset() {
@@ -1086,6 +1087,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// enough that an unconditional clear costs nothing.
 		return m, tea.ClearScreen
 	case tea.MouseMsg:
+		// Every mouse event that reaches the program, logged before any handling:
+		// this is what distinguishes "tmux never forwarded the click" from "the
+		// click arrived and we mapped it wrong".
+		debugLog("MOUSE action=%v button=%v x=%d y=%d shift=%v", msg.Action, msg.Button, msg.X, msg.Y, msg.Shift)
 		// The mouse wheel moves the SELECTION between rows (up/down, like ↑/↓, viewport
 		// following — works even when the grid fits the screen, unlike a viewport-only
 		// scroll). Horizontal pan (like h/l) comes from a native wheel-left/right OR
@@ -1281,6 +1286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirmPatch(msg.seq)
 		return m, nil
 	case followDoneMsg:
+		debugLog("FOLLOW DONE id=%s err=%v pendingEnter=%v", msg.id, msg.err, m.pendingEnter != nil)
 		// A follow nav finished. Clear the latch, record what the cockpit now
 		// shows, then RE-ARM: if the selection moved while this nav ran, the
 		// next preview fires immediately for wherever the cursor is now (the
@@ -1322,6 +1328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.takePendingEnter()
 		return m, cmd
 	case navDoneMsg:
+		debugLog("NAV DONE id=%s sidebar=%v", msg.id, m.sidebar)
 		// The selected thread is now on screen (the client switched under us).
 		// SIDEBAR mode: the TUI is a persistent pane BESIDE the thread, not a
 		// popup covering it — stay open, note the entry, and hand focus to the

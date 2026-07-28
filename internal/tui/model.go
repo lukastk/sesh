@@ -2608,7 +2608,7 @@ func (m Model) navSelected() tea.Cmd {
 // not wherever the cursor has drifted to by the time the nav is dispatched.
 func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 	bin, env := m.binaryPath, m.navEnv
-	sidebar, resolve := m.sidebar, m.followResolver
+	sidebar := m.sidebar
 	local := m.machine != "" && row.Machine == m.machine
 	// A LOCAL thread, when we're inside its work socket's tmux, switches the current
 	// client in place (no master). Otherwise: the full master nav path.
@@ -2680,12 +2680,22 @@ func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 		// A sidebar ENTER that switches master windows: tell the traveling-
 		// sidebar hook to focus the ATTACH pane after it swaps the sidebar in
 		// (the sibling handoff below also fires — same target, either order).
+		// Declare the ENTER intent UNCONDITIONALLY in sidebar mode — do not try
+		// to predict whether this nav will switch master windows. The intent is
+		// a single shared tmux option, so a "follow" declared by an earlier
+		// preview that did NOT end up switching windows stays set, and is then
+		// consumed by THIS enter's switch — telling the hook to keep focus on
+		// the sidebar exactly when the user asked to be taken to the thread
+		// ("sometimes focus remains on the sidebar", Lukas 2026-07-28; it
+		// happens on the Enter key too, which is why it isn't a mouse bug).
+		// Always writing the latest action's intent means the hook can only
+		// ever act on what the user just did. If no switch happens the entry is
+		// simply left for the next one, where "enter" is the benign default —
+		// and focusSiblingPane below has already done the handoff anyway.
 		declaredIntent := false
-		if sidebar && !useInClient && resolve != nil {
-			if wm := resolve(); wm != "" && wm != row.Machine {
-				declareSidebarIntent("enter")
-				declaredIntent = true
-			}
+		if sidebar && !useInClient {
+			declareSidebarIntent("enter")
+			declaredIntent = true
 		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), env...)
@@ -3931,7 +3941,17 @@ func (m Model) View() string {
 	default:
 		b.WriteString("\n" + m.renderLegend() + "\n")
 	}
-	return b.String()
+	// NO TRAILING NEWLINE. bubbletea splits the view on "\n" and renders one
+	// terminal line per element, so a trailing newline contributes a PHANTOM
+	// empty final line — the frame is one line taller than it looks. Combined
+	// with chromeLines' 2-line reserve for the ▲/▼ indicators being exactly
+	// consumed (a list scrolled to the middle shows BOTH), that made the frame
+	// height+1: bubbletea then drops the TOP line to fit
+	// (newLines[len-height:]), the title vanishes, and every row renders one
+	// line higher than the model believes. Clicks are then off by one — you
+	// have to click one row BELOW the one you want (Lukas, 2026-07-28).
+	// TestViewFitsPaneHeight guards this.
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // detailsView renders the full-screen thread-details takeover (`I`): every field of

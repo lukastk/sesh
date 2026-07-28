@@ -1004,8 +1004,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hOffset > m.maxHOffset() {
 			m.hOffset = m.maxHOffset()
 		}
-		_ = resized // (only the RESIZE diagnostic above uses it)
-		return m, nil
+		if !resized {
+			return m, nil
+		}
+		// WIPE THE SCREEN on a real size change. bubbletea repaints only the
+		// lines of the NEW frame; it cannot know that the PREVIOUS frame, drawn
+		// while the pane was WIDER, was wrapped by the terminal into more
+		// physical lines than it counted. Those extra lines are never erased, so
+		// a shrink strands the old wide output around the new narrow render.
+		//
+		// The sidebar shrinks and grows constantly (the cockpit fullscreen
+		// toggle, travelling between master windows), and each cycle can leave
+		// wrapped debris — which is what Lukas photographed: whole thread rows
+		// rendered as three 38-wide lines each (the maximized column set, wrapped
+		// by tmux) sitting below the correct narrow list.
+		//
+		// EVIDENCE this is the right fix: the artifact was absent while this was
+		// deployed and REAPPEARED within the hour after it was reverted
+		// (2026-07-28) — the user's own A/B.
+		return m, tea.ClearScreen
 	case tea.MouseMsg:
 		// Every mouse event that reaches the program, logged before any handling:
 		// this is what distinguishes "tmux never forwarded the click" from "the
@@ -2591,11 +2608,35 @@ func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 		// A sidebar ENTER that switches master windows: tell the traveling-
 		// sidebar hook to focus the ATTACH pane after it swaps the sidebar in
 		// (the sibling handoff below also fires — same target, either order).
+		// THE FOCUS BOUNCE (Lukas, 2026-07-28: focus reaches the thread pane and
+		// then flicks back to the sidebar, "a bit random ... makes me wonder if
+		// this is a timing thing" — it is).
+		//
+		// Two things set focus after an enter, and they RACE. The TUI's own
+		// focusSiblingPane (on navDoneMsg) focuses the agent pane; the master's
+		// after-select-window hook fires ASYNCHRONOUSLY on the window switch and
+		// focuses whatever the @sesh-sidebar-intent option says. Whichever lands
+		// LAST wins, which is exactly why the outcome looks random.
+		//
+		// The intent is a single shared option, and a PREVIEW leaves one behind:
+		// followNav declares "follow" before its nav, and if that nav doesn't
+		// actually switch windows (a stale window-name read, say) the "follow"
+		// is never consumed — it just sits there. The user's next enter switches
+		// windows, the hook consumes that stale "follow", and selects the
+		// SIDEBAR — undoing the handoff that just happened.
+		//
+		// So an enter CLEARS any pending intent first: a preview's leftover can
+		// no longer be consumed by a user action it has nothing to do with. It
+		// then declares "enter" only when it really expects a switch, so nothing
+		// lingers for the NEXT window change either.
 		declaredIntent := false
-		if sidebar && !useInClient && resolve != nil {
-			if wm := resolve(); wm != "" && wm != row.Machine {
-				declareSidebarIntent("enter")
-				declaredIntent = true
+		if sidebar && !useInClient {
+			clearSidebarIntent()
+			if resolve != nil {
+				if wm := resolve(); wm != "" && wm != row.Machine {
+					declareSidebarIntent("enter")
+					declaredIntent = true
+				}
 			}
 		}
 		cmd := exec.Command(bin, args...)

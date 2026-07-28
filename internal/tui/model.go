@@ -750,19 +750,61 @@ func clearSidebarIntent() {
 	exec.Command("tmux", "set-option", "-gu", "@sesh-sidebar-intent").Run() //nolint:errcheck
 }
 
-// focusSiblingPane hands the tmux focus from the sidebar's pane to the OTHER pane
-// of its window (the attach pane the nav just changed), via the sidebar's own
-// inherited $TMUX/$TMUX_PANE (a plain `tmux` exec resolves both). A single-pane
-// window (standalone testing) or a client that nav moved to ANOTHER window makes
-// this a harmless no-op on our window — the select still leaves the attach pane
-// active for the next visit. Only a real exec failure is surfaced.
+// focusSiblingPane hands the tmux focus from the sidebar to the THREAD pane of
+// its window, via the sidebar's own inherited $TMUX/$TMUX_PANE.
+//
+// It selects that pane EXPLICITLY — by id, choosing the one carrying neither
+// the @sesh-sidebar nor @sesh-sidebar-slot marker — rather than using the
+// relative target ":.+".
+//
+// ":.+" is "the pane after the window's ACTIVE pane", NOT "the pane after ME",
+// so it is a TOGGLE: called while the sidebar is active it lands on the thread
+// pane, but called while the THREAD pane is already active it cycles straight
+// back to the sidebar. That is the focus bounce Lukas reported (focus reaches
+// the thread pane and then flicks back, "a bit random ... makes me wonder if
+// this is a timing thing" — 2026-07-28). It IS timing: the master's
+// after-select-window hook fires asynchronously on the same window switch and
+// also focuses the thread pane, and whenever the hook won the race, this
+// function undid it. Selecting by id is idempotent, so it no longer matters
+// which lands first — and it happens on the Enter key too, which is why this
+// was never a mouse bug.
+//
+// Verified in an isolated tmux: `select-pane -t ':.+'` run twice from the same
+// pane's context alternates %0 -> %1 -> %0.
+//
+// A single-pane window (standalone testing) has nothing to hand to: no-op.
+// Only a real exec failure is surfaced.
 func focusSiblingPane() tea.Cmd {
 	return func() tea.Msg {
 		if os.Getenv("TMUX") == "" {
 			return nil // not in tmux (unit tests / odd launch): nothing to focus
 		}
-		cmd := exec.Command("tmux", "select-pane", "-t", ":.+")
-		if out, err := cmd.CombinedOutput(); err != nil {
+		self := os.Getenv("TMUX_PANE")
+		// The current window's panes (resolved from $TMUX_PANE), with a marker
+		// field that is EMPTY for the thread/attach pane.
+		out, err := exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{@sesh-sidebar}#{@sesh-sidebar-slot}").Output()
+		if err != nil {
+			return actionMsg{err: fmt.Errorf("sidebar focus handoff (list-panes): %w", err)}
+		}
+		target := ""
+		for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			f := strings.Fields(ln)
+			if len(f) == 0 || f[0] == self {
+				continue
+			}
+			if len(f) == 1 { // no marker => the thread pane
+				target = f[0]
+				break
+			}
+			if target == "" {
+				target = f[0] // fallback: some other pane, better than nothing
+			}
+		}
+		if target == "" {
+			return nil // single-pane window: nothing to hand focus to
+		}
+		debugLog("FOCUS handoff self=%s -> %s", self, target)
+		if out, err := exec.Command("tmux", "select-pane", "-t", target).CombinedOutput(); err != nil {
 			return actionMsg{err: fmt.Errorf("sidebar focus handoff: %v: %s", err, strings.TrimSpace(string(out)))}
 		}
 		return nil

@@ -1,5 +1,92 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H71 — **H66/H67/H68/H69 WERE REVERTED** (2026-07-28, sesh 81ee959 + myrig 7821128). Read this BEFORE trusting those four entries.
+Lukas, after a long chase: "I think the last few changes you've made since we started trying to
+fix this have just made it progressively worse." He was right. He chose "revert to baseline, keep
+the proven fix".
+**THE DECISIVE EVIDENCE, and the thing to start from next time:** `prefix+r` — which rebuilds the
+sidebar PROCESS and EVERY slot pane — does **NOT** clear the bad state, but `mmt-start` does.
+⇒ the state that rots is **NOT in the sidebar process, not in slot geometry, and not in the sesh
+TUI at all**. It is in the MASTER's own structures (attach panes, marker clients, window options)
+which mmt-start rebuilds. H66–H69 were all aimed at the wrong layer. **Do not re-fix the sidebar
+TUI for this symptom without first showing the state survives a `prefix+r`.**
+REVERTED (still in git history, but NOT live): H66 enter/follow sequencing (pendingEnter/
+enterQueueGrace/enterSelected/takePendingEnter/enterGraceMsg); H68 tea.ClearScreen on
+WindowSizeMsg; the unconditional enter-intent declaration; myrig H67 (swap-time enforce sweeps,
+unzoom-before-travel, mkdir lock) and H69 (the window-resized hook). NB the two REMAINING
+tea.ClearScreen calls are the FILTER TINT ones — those predate all this and Lukas confirmed they
+work; don't remove them.
+**KEPT — the only change with a test that fails without it (H70): `View()` returns WITHOUT its
+trailing newline.** That newline made the frame one line taller than the pane whenever BOTH
+scroll indicators showed; bubbletea drops the TOP line to fit, so every click landed one row off
+= "I have to click BELOW a row to select it". TestViewFitsPaneHeight guards it.
+KEPT — `$SESH_TUI_LOG` diagnostics (inert unless set) and myrig `prefix+r` / `sidebar-toggle.sh
+refresh` (Lukas asked for it; also the way to pick up a new binary, since a long-running sidebar
+keeps the one it launched with). Kept separately: a8a9256 (active view shows running threads —
+an unrelated explicit request).
+**METHOD LESSON (the expensive one):** each of H66/H67/H69 had a RIG THAT GENUINELY REPRODUCED
+SOMETHING. A reproduction proves a mechanism EXISTS; it does not prove it is the mechanism the
+user is hitting. I kept treating the former as the latter and shipped four behavioural changes to
+a system Lukas depends on. What actually moved things forward: (a) asking him for exact
+phenomenology — "click BELOW a row to select it" is an off-by-one signature and found H70 in
+minutes; (b) his own environment hypothesis (two terminal emulators); (c) the prefix+r-vs-
+mmt-start discriminator above. ASK FOR PHENOMENOLOGY AND FOR WHAT DOES/DOESN'T CLEAR IT FIRST.
+STILL OPEN: (1) clicking degrades over time, cleared only by mmt-start ⇒ look at master state
+(marker clients! mymain's work server carries FIVE clients and `sesh master watchers` lists four
+markers — a nav switches the marker client for the origin, which may not be the one in the window
+being viewed). (2) FOCUS bounces: it reaches the thread pane then returns to the sidebar,
+keyboard AND mouse. That is the intent protocol — focusSiblingPane focuses the agent, then the
+swap hook consumes an intent of "follow" and selects the sidebar back. The ambient selection-
+FOLLOW is implicated in that, in navs overwriting a click, and in intent clobbering; Lukas was
+offered "disable follow" and did not take it, so ASK before removing it.
+
+## H70 — THE REAL CLICK BUG: View()'s TRAILING NEWLINE made the frame 1 line too tall ⇒ bubbletea drops the TOP line ⇒ every click off by one (2026-07-28, sesh 93c18b3 + instrumentation f75c417/866003e; NO schema change; binary-only)
+**This is the one.** H66 (enter/follow race), H67 (over-wide slot), H68 (stale paint), H69 (two
+terminals rescaling the pane) were ALL real defects and all shipped — but NONE of them was the
+thing Lukas kept hitting. What cracked it was asking him for exact phenomenology and getting:
+"I have to click multiple times sometimes to get it to select the row, often I have to click
+**BELOW a row** to select it (so there's a mismatch between where I click and where the row is)."
+**Click-below-to-select is an exact off-by-one signature — ASK FOR THAT KIND OF DETAIL FIRST.**
+ROOT CAUSE: `View()` ended with a trailing "\n". bubbletea splits the view on "\n" and renders
+one terminal line per element, so the trailing newline contributes a **PHANTOM empty final
+line** — the frame is one line taller than it looks. `chromeLines` reserves exactly 2 lines for
+the ▲/▼ indicators, and a list scrolled to the MIDDLE shows BOTH, consuming the whole reserve.
+Frame = height+1 ⇒ bubbletea keeps only the last `height` lines (`newLines[len-height:]`, it
+drops from the TOP) ⇒ the title vanishes, every row renders ONE LINE HIGHER than the model
+believes, and rowAtY (itself correct) maps every click one row off. Measured: "frame is 25 lines
+in a 24-row pane". FIX: `strings.TrimSuffix(b.String(), "\n")`.
+WHY IT SURVIVED FOUR ROUNDS (the important part):
+- It needs BOTH scroll indicators ⇒ a list long enough to scroll AND scrolled into the middle.
+  Lukas's list was 13 rows during the instrumented capture, so the capture looked PERFECTLY
+  HEALTHY (every click mapped right, every nav fired right) and I nearly concluded there was no
+  bug. A clean log is not proof of correctness — it can just mean the trigger wasn't present.
+- `TestRowAtYMatchesRender` (the H41 drift guard) CANNOT see it: it compares logical lines of a
+  render against each other, so an offset applied to the WHOLE frame is invisible. The new
+  `TestViewFitsPaneHeight` measures the frame against the PANE — that is the axis that mattered.
+FOCUS half of the same report ("when I click a thread it should focus its tmux pane, but
+sometimes focus remains on the sidebar — happens on the KEYBOARD too"): the sidebar declared its
+window-switch intent only when it PREDICTED a switch. The intent is ONE shared tmux option, so a
+"follow" declared by a preview that did NOT switch windows stayed set and was consumed by the
+next ENTER's switch → hook keeps focus on the sidebar exactly when the user asked to leave it.
+"It happens on the Enter key too" was the tell that it was never a mouse bug. Now an enter
+ALWAYS writes "enter" (no prediction), so the hook can only act on the latest user action.
+INSTRUMENTATION THAT NOW EXISTS (`$SESH_TUI_LOG=<path>`, internal/tui/debuglog.go): logs MOUSE
+(every event reaching Update — separates "tmux never forwarded it" from "we mapped it wrong"),
+CLICK (every term of rowAtY: x/y, pane size, rowsTop, vOffset, viewport, row count, resolved
+idx+name, or OUTSIDE), SWALLOWED (a modal ate it, naming which — move mode renders almost like
+the normal grid and silently eats every click), RESIZE, NAV EXEC (full argv + output — a nav can
+exit 0 having switched a client nobody is looking at), NAV/FOLLOW DONE. Enable WITHOUT touching
+any script: `tmux -L sesh-master set-environment -g SESH_TUI_LOG /tmp/sesh-sidebar.log` then
+refresh the sidebar. **Reach for this on turn 1 of any "the TUI is behaving oddly" report.**
+ALSO SHIPPED (myrig 8bac108): `sidebar-toggle.sh refresh` + **prefix+r** — kill the sidebar and
+every slot, rebuild at current geometry in one press. This is the answer to "is there a way to
+completely refresh the sidebar" AND the way to pick up a newly deployed binary: **a long-running
+sidebar keeps the binary it was launched with**, which is why TUI fixes repeatedly appeared not
+to have landed. Also REVERTED MY OWN REGRESSION from H67: enforce was pinning slots in windows
+PARKED at 80 cols; tmux's proportional scaling is SELF-INVERSE (a slot left alone at 16 in an
+80-col window returns to exactly 38 at 188), so forcing 38 while parked makes it 89 on arrival —
+pinning everything made the drift WORSE. Enforce now only touches windows sized to a live client.
+
 ## H69 — THE ACTUAL "clicks stop working" CAUSE: TWO ATTACHED TERMINALS + `window-size latest` silently rescale the sidebar (2026-07-27, myrig 52a4942+5da06d7; NO sesh change; conf = pull + source-file)
 **Lukas found this, not me** ("I'm wondering if it's to do with the fact that I have attached to
 the master tmux in two different terminal emulators? ghostty and wezterm. Although it doesn't

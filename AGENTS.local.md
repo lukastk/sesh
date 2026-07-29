@@ -1,5 +1,48 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H73 — GitHub issue #9: daemon API bound by DNS-resolving its OWN tailnet name (NSS shadow → silent mesh partition); fix = `tailnet` SENTINEL bind (2026-07-29, sesh 3a22dae + myrig 2698cbb; NO schema change; deployed ALL FIVE API machines)
+Issue #9 (Lukas): the daemon bound its TCP API via `SESH_API_ADDR=<tailnet name>:7878`,
+resolving its OWN name at startup. On Arch, NSS `myhostname` answers a machine's own
+hostname with its LAN address AHEAD of MagicDNS — so if the system hostname == the tailnet
+name (pocket4 hit this), the daemon binds a LAN IP and drops off the mesh SILENTLY:
+`peer list` reads local config (looks fine), the affected box reaches OUTWARD fine, only
+`sesh mesh` FROM ANOTHER machine shows the missing section. Machines were safe by coincidence
+(mymain=Debian no myhostname; ideapad's hostname≠tailnet name). Same Go-resolver-vs-system
+class as H22/H45, now on the SELF-BIND side.
+SECURITY (Lukas was suspicious of the issue's option-2 `0.0.0.0` — RIGHTLY): the TCP API is
+the FULL router behind ONE shared bearer token, incl. send-headless (agent turns → arbitrary
+shell under [spawn] yolo = RCE) and GET /v1/threads/terminal (a live `tmux attach` pty over a
+websocket). mymain has a PUBLIC IP (eth0 77.42.21.223) — `0.0.0.0` would expose that
+RCE-capable API to the internet behind only the token. REJECTED option 2. The API is
+"designed to live behind Tailscale" (its own code comment). Recommended + shipped option 1+3.
+FIX (sesh 3a22dae, internal/daemon/apiserver.go): new `tailnet` SENTINEL host. When
+SESH_API_ADDR host == "tailnet", the daemon DISCOVERS its own 100.64.0.0/10 (CGNAT) IPv4 by
+scanning net.InterfaceAddrs() — NO DNS, no `tailscale` CLI, no dep, cross-platform. tailnetIPv4()
+is LOUD on 0 matches (tailscaled not up → retried) and >1 (CGNAT-ISP clash → refuse to guess).
+resolveAPIBindAddr runs INSIDE serveAPIWithRetry EACH iteration so a tailnet coming up after
+the daemon (boot ordering, H45 class) is picked up; an explicit IP or hostname still passes
+through unchanged (backward compat). doctor shows the RESOLVED bound addr (new apiBoundAddr),
+not the sentinel string. offTailnetBind(): a bind to 0.0.0.0/:: or a concrete non-tailnet
+non-loopback IP logs a LOUD WARNING (option 3 spirit — turns a silent off-tailnet exposure
+visible; not fatal, an explicit bind is allowed). Peers still REACH by name via MagicDNS
+(peers.json UNCHANGED) — only the self-bind was buggy. TESTS: apiserver_test.go with injectable
+`interfaceAddrs` — tailnetIPv4 truth table (one/zero/multi/edge), resolveAPIBindAddr sentinel-vs-
+passthrough, offTailnetBind classification; anti-gaming: neutering the sentinel branch fails
+"sentinel -> discovered ip:port". Cells green: api.tcp-auth/tcp-parity/daemon.doctor/http-json/
+mesh-read (literal-IP path untouched); daemon -race clean. LIVE-SMOKED on mymain pre-deploy
+(isolated daemon, tailnet:PORT → bound 100.106.17.33:PORT, token 200 / no-token 401).
+myrig 2698cbb: supervisor sesh-daemon.ini SESH_API_ADDR={{tailscale}}:7878 → `tailnet:7878`.
+DEPLOY (NO schema change; daemon restart via supervisor reread+update): ORDER MATTERS — new
+BINARY must land BEFORE the new config on each machine (an OLD binary would try to resolve the
+literal host "tailnet" → fail). Per machine: build+install binary → install-home render → 
+`supervisorctl reread && supervisorctl update sesh-daemon`. Verified BINDS on ALL FIVE API
+machines: mymain 100.106.17.33, macbook 100.114.33.83 (macOS utun — scan works there),
+macstudio 100.125.115.38, ideapad 100.116.77.31 (Arch — the at-risk distro), pocket4
+100.85.205.118 (the issue's machine; sentinel makes it robust regardless of the
+lukas-pocket4 rename workaround, which can now be reverted). termux EXEMPT (inbound-less leaf,
+no SESH_API_ADDR). Mesh healthy after: all peers synced ~1s, no OFFLINE. doctor shows
+"api ok listening on 100.x:7878" everywhere.
+
 ## H72 — FOCUS BOUNCE SOLVED: `select-pane -t ":.+"` is a TOGGLE, not "my sibling" (2026-07-28, sesh 2526f00; binary-only; CONFIRMED FIXED by Lukas)
 Symptom (weeks-old, survived H66/H67/H68/H69/H71 and one wrong fix): entering a thread from the
 sidebar moves focus to the thread pane and then it **flicks back to the sidebar**, "a bit random",

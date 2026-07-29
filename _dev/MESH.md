@@ -318,7 +318,9 @@ merged snapshot incl. a stale/offline machine), reality-anchored as today.
 3. **Phase C** — tailscale TCP listener + token auth (+ optional hub) for mobile.
    ✅ **DONE.** `SESH_API_ADDR` exposes the IDENTICAL full router over TCP behind a
    bearer token (`SESH_API_TOKEN`/`_FILE`); the unix socket stays token-free. Refuses
-   to run exposed without a token. The client is transport-agnostic (`NewRemote`), and
+   to run exposed without a token. Set the host to the `tailnet` sentinel
+   (`tailnet:7878`) so the daemon binds its own discovered 100.64.0.0/10 interface
+   rather than DNS-resolving a name (issue #9); an explicit IP is also accepted. The client is transport-agnostic (`NewRemote`), and
    the CLI targets a remote daemon via `SESH_REMOTE`. Parity is by construction (same
    router) and tested across every layer (`api.tcp-auth`, `api.tcp-parity`). No
    separate hub is needed: a phone pointed at an always-on node's `/v1/mesh` over TCP

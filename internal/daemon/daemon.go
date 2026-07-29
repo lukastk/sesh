@@ -86,10 +86,11 @@ type Daemon struct {
 	// is set. apiStop stops the background bind-retry loop on shutdown. apiBound /
 	// apiBindErr track whether the listener ever actually bound (the retry loop can
 	// spin forever on an unresolvable bind host) so doctor can surface it.
-	apiSrv     *http.Server
-	apiStop    chan struct{}
-	apiBound   atomic.Bool
-	apiBindErr atomic.Value // string: the most recent bind error
+	apiSrv       *http.Server
+	apiStop      chan struct{}
+	apiBound     atomic.Bool
+	apiBindErr   atomic.Value // string: the most recent bind error
+	apiBoundAddr atomic.Value // string: the address actually bound (the `tailnet` sentinel resolves to a concrete IP)
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses

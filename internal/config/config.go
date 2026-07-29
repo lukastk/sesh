@@ -45,11 +45,14 @@ type Config struct {
 	// — sesh writes per-cwd trust there and injects CODEX_HOME into the pane. Empty
 	// = codex's default ~/.codex. Tests point this at an isolated dir.
 	CodexHome string
-	// APIAddr, when set, makes the daemon ALSO listen on this TCP address (e.g. a
-	// tailscale-bound "100.x.x.x:7373"), serving the full HTTP+JSON API for remote
-	// clients (mobile/Obsidian). Empty = unix socket only. APIToken is the bearer
-	// token required on the TCP listener; it MUST be set if APIAddr is (the daemon
-	// refuses to expose an unauthenticated network API).
+	// APIAddr, when set, makes the daemon ALSO listen on this TCP address, serving
+	// the full HTTP+JSON API for remote clients (mobile/Obsidian). Empty = unix
+	// socket only. The host may be an explicit IP ("100.x.x.x:7878") OR the sentinel
+	// "tailnet" ("tailnet:7878"), which the daemon resolves to its own 100.64.0.0/10
+	// interface address at bind time — never DNS-resolving a name (issue #9: NSS could
+	// shadow MagicDNS and silently bind a LAN address). APIToken is the bearer token
+	// required on the TCP listener; it MUST be set if APIAddr is (the daemon refuses
+	// to expose an unauthenticated network API).
 	APIAddr  string
 	APIToken string
 	// RemoteAddr/RemoteToken, when set, make the CLI/TUI target a REMOTE daemon's

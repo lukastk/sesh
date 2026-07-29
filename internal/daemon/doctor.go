@@ -75,7 +75,13 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	// the machine offline. Report the REAL bind state, loudly.
 	if d.cfg.APIAddr != "" {
 		if d.apiBound.Load() {
-			add("api", "ok", "listening on "+d.cfg.APIAddr)
+			// Show the address ACTUALLY bound — the `tailnet` sentinel resolves to a
+			// concrete IP, so "listening on tailnet:7878" would hide what it landed on.
+			bound, _ := d.apiBoundAddr.Load().(string)
+			if bound == "" {
+				bound = d.cfg.APIAddr
+			}
+			add("api", "ok", "listening on "+bound)
 		} else {
 			msg := "configured on " + d.cfg.APIAddr + " but NOT BOUND — cross-machine http access to this daemon is down (bind retries every " + apiBindRetry.String() + ")"
 			if e, _ := d.apiBindErr.Load().(string); e != "" {

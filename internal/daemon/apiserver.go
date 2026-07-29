@@ -13,6 +13,107 @@ import (
 // apiBindRetry is how often the API listener retries a failed bind.
 const apiBindRetry = 5 * time.Second
 
+// tailnetSentinel is the special SESH_API_ADDR host meaning "bind my own tailnet
+// interface" — the daemon DISCOVERS its 100.64.0.0/10 address at bind time rather
+// than DNS-resolving a name (issue #9). Resolving a name to find your own interface
+// is what let NSS `myhostname` shadow MagicDNS and silently bind a LAN address,
+// partitioning the machine from the mesh. myrig sets `SESH_API_ADDR=tailnet:7878`.
+const tailnetSentinel = "tailnet"
+
+// tailnetCGNAT is Tailscale's IPv4 range (100.64.0.0/10, RFC 6598 CGNAT). A node
+// has exactly one address in it; the daemon binds that one.
+var tailnetCGNAT = func() *net.IPNet {
+	_, n, err := net.ParseCIDR("100.64.0.0/10")
+	if err != nil {
+		panic(err) // a compile-time-constant CIDR cannot fail to parse
+	}
+	return n
+}()
+
+// interfaceAddrs is net.InterfaceAddrs, injectable so tests can drive tailnetIPv4
+// without a real tailnet interface.
+var interfaceAddrs = net.InterfaceAddrs
+
+// tailnetIPv4 returns this machine's own tailnet (100.64.0.0/10) IPv4 address by
+// scanning the local interfaces — no DNS, no `tailscale` CLI, no external dep.
+// It is LOUD about the two ways it can be unusable: zero matches (tailscaled not
+// up yet — the caller retries) and, defensively, more than one match (a CGNAT-ISP
+// clash — refuse to guess). This is the reliable "which interface is the tailnet
+// one" answer that DNS name-resolution got wrong.
+func tailnetIPv4() (string, error) {
+	addrs, err := interfaceAddrs()
+	if err != nil {
+		return "", fmt.Errorf("enumerate interfaces: %w", err)
+	}
+	var found []string
+	for _, a := range addrs {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip4 := ip.To4(); ip4 != nil && tailnetCGNAT.Contains(ip4) {
+			found = append(found, ip4.String())
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("no tailnet address (100.64.0.0/10) on any interface — is tailscaled up?")
+	case 1:
+		return found[0], nil
+	default:
+		return "", fmt.Errorf("multiple tailnet addresses %v — refusing to guess; set SESH_API_ADDR to an explicit IP:port", found)
+	}
+}
+
+// resolveAPIBindAddr turns SESH_API_ADDR into the concrete address to bind. The
+// `tailnet` sentinel host is resolved to this machine's own tailnet IP (issue #9);
+// any other host — an explicit IP or a name — is passed through unchanged (a name
+// is still DNS-resolved by net.Listen, the pre-issue-#9 behavior, kept for manual
+// use). Called each retry iteration so a tailnet that comes up after the daemon
+// (boot ordering) is picked up.
+func (d *Daemon) resolveAPIBindAddr() (string, error) {
+	host, port, err := net.SplitHostPort(d.cfg.APIAddr)
+	if err != nil {
+		return "", fmt.Errorf("SESH_API_ADDR=%q: %w", d.cfg.APIAddr, err)
+	}
+	if host != tailnetSentinel {
+		return d.cfg.APIAddr, nil
+	}
+	ip, err := tailnetIPv4()
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(ip, port), nil
+}
+
+// offTailnetBind returns a non-empty reason when a bound address exposes the API
+// OFF the tailnet — 0.0.0.0/:: (all interfaces, LAN+public included) or a concrete
+// non-loopback, non-tailnet IP. The TCP API is the full router behind ONE bearer
+// token (it can run agent turns and open a live terminal), designed to live behind
+// Tailscale; an off-tailnet bind is a real exposure. Pure, so it is unit-tested; a
+// name-based bind returns "" (cannot classify a hostname here — the sentinel is the
+// safe path). Loopback is fine.
+func offTailnetBind(bindAddr string) string {
+	host, _, err := net.SplitHostPort(bindAddr)
+	if err != nil {
+		return ""
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() {
+		return ""
+	}
+	if ip.IsUnspecified() {
+		return "bound to all interfaces (LAN/public included)"
+	}
+	if ip4 := ip.To4(); ip4 != nil && !tailnetCGNAT.Contains(ip4) {
+		return "not a tailnet (100.64.0.0/10) address"
+	}
+	return ""
+}
+
 // startAPI starts the optional TCP API listener — the network surface for remote
 // clients (mobile / Obsidian) and direct cross-machine access. It serves the
 // IDENTICAL full router as the unix socket, wrapped in bearer-token auth, so the
@@ -49,15 +150,25 @@ func (d *Daemon) startAPI() error {
 // and the whole mesh silently showed the machine offline (ticket aeaca0d0).
 func (d *Daemon) serveAPIWithRetry() {
 	for {
-		ln, err := net.Listen("tcp", d.cfg.APIAddr)
+		// Resolve the bind address EACH iteration: the `tailnet` sentinel discovers
+		// the tailnet interface, which may not exist yet at boot (tailscaled coming
+		// up after the daemon) — retrying re-scans until it appears.
+		bindAddr, err := d.resolveAPIBindAddr()
 		if err == nil {
-			d.apiBound.Store(true)
-			log.Printf("daemon: api listening on %s", d.cfg.APIAddr)
-			d.apiSrv.Serve(ln) //nolint:errcheck — returns on Shutdown
-			return
+			var ln net.Listener
+			if ln, err = net.Listen("tcp", bindAddr); err == nil {
+				d.apiBoundAddr.Store(bindAddr)
+				d.apiBound.Store(true)
+				if reason := offTailnetBind(bindAddr); reason != "" {
+					log.Printf("daemon: WARNING api bound %s — %s; the token-authed API (agent turns, live terminal) is designed to live behind Tailscale", bindAddr, reason)
+				}
+				log.Printf("daemon: api listening on %s", bindAddr)
+				d.apiSrv.Serve(ln) //nolint:errcheck — returns on Shutdown
+				return
+			}
 		}
 		d.apiBindErr.Store(err.Error())
-		log.Printf("daemon: api listen %s failed, retrying in %s (the local socket is unaffected): %v", d.cfg.APIAddr, apiBindRetry, err)
+		log.Printf("daemon: api bind for SESH_API_ADDR=%q failed, retrying in %s (the local socket is unaffected): %v", d.cfg.APIAddr, apiBindRetry, err)
 		select {
 		case <-time.After(apiBindRetry):
 		case <-d.apiStop:

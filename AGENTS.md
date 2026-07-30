@@ -1,10 +1,28 @@
 # sesh v2 — agent instructions
 
-You are developing **sesh v2**: one Go binary + per-machine daemon that owns multi-machine coding-agent session management, tmux orchestration, and tickets.
+**sesh v2** is one Go binary + per-machine daemon that owns multi-machine coding-agent session management, tmux orchestration, and tickets.
 
-- **What we are building:** `_dev/SPEC.md` (the design — read it first).
-- **How we build and track it:** `_dev/PLAN.md` (the roadmap + the feature matrix + the testing framework).
+**It is shipped.** v1 is gone; v2 runs in production on all six machines and is what Lukas works in every day. You are almost certainly *extending or fixing* it, not building it — so the bar is "do not regress the fleet", and every change lands against a live system. Treat `_dev/PLAN.md`'s Phase 0 ("build the tracking spine first") as history: the spine exists.
+
 - This file: **the rules you must follow.** They are not optional and they are not negotiable.
+- **`AGENTS.local.md`** — the running engineering log (H-numbered entries: root causes, what was reverted and why, deploy state). **Read the last few entries before starting** — it is the fastest way to find out whether your idea has already been tried and reverted, and it is where you record what you learn.
+
+### `_dev/` — the design corpus
+
+`SPEC.md` and `PLAN.md` are the entry points; the rest are per-feature design records, each written *before* the feature and still the best explanation of why it works the way it does.
+
+| Doc | What it is |
+|---|---|
+| `SPEC.md` | The design. What sesh v2 is and the layer split (`sesh` = mechanism, `myrig` = policy/UX). Read first. |
+| `PLAN.md` | How we build and track it: the feature registry, the matrix harness, the testing framework. |
+| `MESH.md` | Mesh-replicated live state — the cross-machine thread view, sync cadence, delta sync. |
+| `MASTER.md` | The master-tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
+| `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
+| `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
+| `CLI_TUI_FEATURES.md` | The 2026-06-11 CLI/TUI feature batch and its contract. |
+| `PARITY_ROADMAP.md` | The v1-parity contract: every v1 feature, ticked off. |
+| `V1_FEATURE_AUDIT.md` | The v1→v2 audit that produced that roadmap. Historical, but it is the record of what was deliberately *not* ported. |
+| `BACKLOG.md` | Designed but not yet built. Check here before designing something new. |
 
 ---
 
@@ -46,19 +64,23 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
 
 ## Workflow
 
-1. Read `_dev/SPEC.md` and `_dev/PLAN.md` in full before writing code.
-2. Build the feature registry + matrix harness *first* (it is the spine — see `_dev/PLAN.md` Phase 0), so every subsequent feature lands as a visible burndown from yellow to green.
-3. Implement features per the PLAN's sequencing. Each feature: register it → write its matrix tests (they start as `Skip`/red) → implement until green honestly.
-4. Keep the rendered matrix current; when you stop, report the grid state (greens / reds / skips) truthfully in your summary.
+1. Read `_dev/SPEC.md` in full, plus the `_dev/` doc for the area you are touching, plus the recent `AGENTS.local.md` entries. Check `_dev/BACKLOG.md` before designing something new — it may already be designed.
+2. Each feature: **register it → write its matrix tests (they start as `Skip`/red) → implement until green honestly.** The registry and harness already exist (`_dev/PLAN.md` describes them); you are adding rows, not building the spine.
+3. Keep the rendered matrix current; when you stop, report the grid state (greens / reds / skips) truthfully in your summary.
+4. **Deploy is part of the job.** The binary is built per-machine from the clone by myrig, so a merged change is not live until the fleet has it. Say plainly in your summary which machines are running your change and which are not — a partially-deployed fix has burned time here before (see the H-entries in `AGENTS.local.md`).
+5. Record what you learned as the next `H<n>` entry in `AGENTS.local.md` — especially root causes and anything you tried that did **not** work.
 
 ---
 
 ## Test environment notes
 
-- **Lukas runs the LIVE old sesh on these machines.** The conformance suite MUST never
-  touch it: every test isolates `SESH_HOME`, `SESH_TMUX_SOCKET`, `SESH_MASTER_SOCKET`,
-  and `SESH_CODEX_HOME`, and strips any inherited `SESH_*` from the test process env
-  (`sandboxEnv` in the harness). Never leave a socket/home at its default in a test.
+- **Lukas's LIVE sesh — this very binary — is running on these machines, with his real
+  threads in it.** The conformance suite MUST never touch it: every test isolates
+  `SESH_HOME`, `SESH_TMUX_SOCKET`, `SESH_MASTER_SOCKET`, and `SESH_CODEX_HOME`, and
+  strips any inherited `SESH_*` from the test process env (`sandboxEnv` in the harness).
+  Never leave a socket/home at its default in a test. A test that kills panes or wipes a
+  store at the default paths destroys his working state, and you are probably running
+  *inside* one of those threads while you do it.
 
 - **Real cross-host test (`TestRealCrossHost`)** validates genuine multi-machine spawn
   over a real network ssh hop (the one thing the `ssh localhost` matrix cells cannot

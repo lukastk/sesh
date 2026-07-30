@@ -14,10 +14,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -29,18 +27,6 @@ type authorityState struct {
 	seq            int64
 	source         string
 	reportedAtUnix int64
-}
-
-// spawnEnv is the env injected into every spawned/revived/into-pane agent: the
-// thread id (self-identification) and this daemon's own binary path (SESH_BIN)
-// for in-agent state reporters — see agents.EnvSeshBin for why PATH resolution
-// is not trustworthy from inside a pane.
-func (d *Daemon) spawnEnv(id string) map[string]string {
-	env := map[string]string{agents.EnvThreadID: id}
-	if exe, err := os.Executable(); err == nil {
-		env[agents.EnvSeshBin] = exe
-	}
-	return env
 }
 
 func (d *Daemon) routesReportState(mux *http.ServeMux) {

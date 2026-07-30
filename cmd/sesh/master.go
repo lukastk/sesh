@@ -272,13 +272,23 @@ func masterWindow(cfg config.Config, args []string) error {
 // #{client_name} and #{client_pid} — so nav's inner switch can target THIS window's
 // client among many (other masters' windows, direct attaches). Rewritten on every
 // reconnect, so it tracks the supervisor's current attach.
+//
+// The attach is `tmux -u`: tmux flags a client UTF-8 capable ONLY from that client
+// process's LC_ALL/LC_CTYPE/LANG, and an unflagged client has every non-ASCII cell
+// rewritten by tty_check_codeset() into underscores (bar the few that reverse-map to
+// ACS, e.g. U+00B7). Over ssh the remote attach inherits the ssh session's locale —
+// whatever the client machine forwarded. macOS and Termux ship `SendEnv LANG …` in
+// their ssh_config; Arch ships none, so an Arch master rendered ●⏺—§←▶ as `_` in its
+// REMOTE panes while its local ones (no ssh hop, locale inherited directly) were fine.
+// A master window is a channel between two terminals that are always UTF-8, so state
+// that rather than inherit it.
 func workAttach(socket, conf, marker string) string {
 	newSess := fmt.Sprintf(`tmux -L %s new-session -d -s scratch -c "$HOME"`, socket)
 	if conf != "" {
 		newSess = fmt.Sprintf(`tmux -f "%s" -L %s new-session -d -s scratch -c "$HOME"`, conf, socket)
 	}
 	return fmt.Sprintf(
-		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; printf '%%s %%s\n' "$(tty)" "$$" > "%[3]s"; exec tmux -L %[1]s attach`,
+		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; printf '%%s %%s\n' "$(tty)" "$$" > "%[3]s"; exec tmux -u -L %[1]s attach`,
 		socket, newSess, marker)
 }
 

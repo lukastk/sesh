@@ -168,7 +168,9 @@ func tmuxNav(cfg config.Config, args []string) error {
 			return err
 		}
 		sock := shellQuote(peer.TmuxSocket)
-		remote := "env -u TMUX tmux -L " + sock + " attach -t " + shellQuote(session)
+		// `-u` for the same reason as workAttach's: the remote client's UTF-8 flag comes
+		// only from the ssh session's locale, which not every client machine forwards.
+		remote := "env -u TMUX tmux -u -L " + sock + " attach -t " + shellQuote(session)
 		if *thread != "" {
 			// Land on the thread's window: resolve it on the peer (in-shell, no extra
 			// round-trip) and select it before attaching. S holds the session literal so
@@ -177,7 +179,7 @@ func tmuxNav(cfg config.Config, args []string) error {
 			remote = "S=" + shellQuote(session) + "; " +
 				"w=$(tmux -L " + sock + " list-panes -s -t \"=$S\" -f " + filter + " -F '#{window_index}' 2>/dev/null | head -n1); " +
 				"[ -n \"$w\" ] && tmux -L " + sock + " select-window -t \"=$S:$w\" 2>/dev/null; " +
-				"env -u TMUX tmux -L " + sock + " attach -t \"$S\""
+				"env -u TMUX tmux -u -L " + sock + " attach -t \"$S\""
 		}
 		sshArgs := append([]string{"ssh", "-t", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
 		sshArgs = append(sshArgs, peer.SSH, remote)

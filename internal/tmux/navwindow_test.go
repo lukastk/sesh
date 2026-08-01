@@ -1,8 +1,11 @@
 package tmux
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -124,10 +127,10 @@ func TestSendTextMultilinePreservesNewlines(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	// Enable bracketed paste in the proxy shell (deterministic regardless of bash default).
 	raw("send-keys", "-t", pane, "-l", "bind 'set enable-bracketed-paste on'") //nolint:errcheck
-	raw("send-keys", "-t", pane, "Enter")                                       //nolint:errcheck
+	raw("send-keys", "-t", pane, "Enter")                                      //nolint:errcheck
 	time.Sleep(300 * time.Millisecond)
-	raw("send-keys", "-t", pane, "-l", "clear")  //nolint:errcheck
-	raw("send-keys", "-t", pane, "Enter")        //nolint:errcheck
+	raw("send-keys", "-t", pane, "-l", "clear") //nolint:errcheck
+	raw("send-keys", "-t", pane, "Enter")       //nolint:errcheck
 	time.Sleep(300 * time.Millisecond)
 
 	srv := NewServer(sock)
@@ -149,6 +152,113 @@ func TestSendTextMultilinePreservesNewlines(t *testing.T) {
 	// would run as a command and bash would print "not found".
 	if strings.Contains(capt, "not found") {
 		t.Errorf("multi-line text was EXECUTED (newlines submitted as Enter); pane:\n%s", capt)
+	}
+}
+
+// TestSendTextConcurrentMultilineDoesNotCrossTargets reproduces the production
+// ticket-send race against a real tmux server. Every multiline send needs its own
+// buffer: sharing one named buffer lets a concurrent set-buffer overwrite another
+// prompt before paste-buffer consumes it, or delete the buffer out from under the
+// other request. Both outcomes are externally visible here as an error or a marker
+// arriving in the wrong pane.
+func TestSendTextConcurrentMultilineDoesNotCrossTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	sock := "seshsend-concurrent-" + strings.ReplaceAll(t.Name(), "/", "_")
+	raw := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sock}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	leftPath := t.TempDir() + "/left.txt"
+	rightPath := t.TempDir() + "/right.txt"
+	if _, err := raw(
+		"-f", "/dev/null", "new-session", "-d", "-s", "sends", "-x", "120", "-y", "40",
+		fmt.Sprintf("cat > %q", leftPath),
+	); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	defer exec.Command("tmux", "-L", sock, "kill-server").Run() //nolint:errcheck
+	if _, err := raw("new-window", "-d", "-t", "sends", fmt.Sprintf("cat > %q", rightPath)); err != nil {
+		t.Fatalf("new-window: %v", err)
+	}
+	leftPane, err := raw("list-panes", "-t", "sends:0", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("left pane id: %v", err)
+	}
+	rightPane, err := raw("list-panes", "-t", "sends:1", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("right pane id: %v", err)
+	}
+	time.Sleep(250 * time.Millisecond)
+
+	const sendsPerPane = 48
+	server := NewServer(sock)
+	start := make(chan struct{})
+	errs := make(chan error, sendsPerPane*2)
+	var group sync.WaitGroup
+	for i := range sendsPerPane {
+		for _, send := range []struct {
+			pane   string
+			prefix string
+		}{
+			{leftPane, "LEFT"},
+			{rightPane, "RIGHT"},
+		} {
+			group.Add(1)
+			go func(index int, pane, prefix string) {
+				defer group.Done()
+				<-start
+				text := fmt.Sprintf("%s_%03d_BEGIN\n%s_%03d_END\n", prefix, index, prefix, index)
+				if err := server.SendText(pane, text, false); err != nil {
+					errs <- err
+				}
+			}(i, send.pane, send.prefix)
+		}
+	}
+	close(start)
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent SendText returned an error: %v", err)
+	}
+
+	var left, right string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		leftBytes, _ := os.ReadFile(leftPath)
+		rightBytes, _ := os.ReadFile(rightPath)
+		left, right = string(leftBytes), string(rightBytes)
+		if strings.Count(left, "LEFT_") == sendsPerPane*2 &&
+			strings.Count(right, "RIGHT_") == sendsPerPane*2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(left, "RIGHT_") || strings.Contains(right, "LEFT_") {
+		t.Fatalf("concurrent multiline sends crossed targets: left=%q right=%q", left, right)
+	}
+	for i := range sendsPerPane {
+		for _, want := range []string{
+			fmt.Sprintf("LEFT_%03d_BEGIN", i),
+			fmt.Sprintf("LEFT_%03d_END", i),
+		} {
+			if !strings.Contains(left, want) {
+				t.Errorf("left pane is missing %q", want)
+			}
+		}
+		for _, want := range []string{
+			fmt.Sprintf("RIGHT_%03d_BEGIN", i),
+			fmt.Sprintf("RIGHT_%03d_END", i),
+		} {
+			if !strings.Contains(right, want) {
+				t.Errorf("right pane is missing %q", want)
+			}
+		}
 	}
 }
 

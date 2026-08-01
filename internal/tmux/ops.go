@@ -2,8 +2,10 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +60,15 @@ func (s *Server) CreatePane(target, dir string) (string, error) {
 // human never types and hits Enter in the same instant either.
 const sendEnterDelay = 250 * time.Millisecond
 
+var sendBufferSequence atomic.Uint64
+
+// nextSendBufferName returns a name unique to this process and SendText call.
+// tmux buffers are shared by the whole server, so a fixed name lets concurrent
+// requests overwrite or delete one another between set-buffer and paste-buffer.
+func nextSendBufferName() string {
+	return fmt.Sprintf("sesh-send-%d-%d", os.Getpid(), sendBufferSequence.Add(1))
+}
+
 // SendText sends literal text to target's pane. If enter is true, a trailing
 // Enter key is sent after (so it submits).
 //
@@ -73,11 +84,14 @@ func (s *Server) SendText(target, text string, enter bool) error {
 		return fmt.Errorf("tmux: send-text: empty target")
 	}
 	if strings.Contains(text, "\n") {
-		const buf = "sesh-send"
+		buf := nextSendBufferName()
 		if _, err := s.run("set-buffer", "-b", buf, text); err != nil {
 			return err
 		}
 		if _, err := s.run("paste-buffer", "-p", "-d", "-b", buf, "-t", target); err != nil {
+			// paste-buffer -d deletes only after a successful paste. Make a best-effort
+			// cleanup on the error path without hiding the original delivery failure.
+			_, _ = s.run("delete-buffer", "-b", buf)
 			return err
 		}
 	} else if _, err := s.run("send-keys", "-t", target, "-l", text); err != nil {

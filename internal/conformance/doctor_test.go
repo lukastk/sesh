@@ -108,6 +108,14 @@ func testDoctor(t *testing.T) {
 		return api.DoctorCheck{}
 	}
 
+	// NO api configured is reported too — it used to emit no line at all, so a
+	// daemon that had LOST SESH_API_ADDR (hand-started without its service
+	// environment) showed a fully green doctor while peers could not reach it and
+	// hid its threads. `sb` above is exactly that daemon: started with no API.
+	if c := apiCheck(sb); c.Status != "warn" || !strings.Contains(c.Detail, "SESH_API_ADDR not set") {
+		t.Errorf("unconfigured api: check = %+v, want warn naming SESH_API_ADDR not set", c)
+	}
+
 	unbound := newSandbox(t, matrix.Local, withAPI("api-unbindable.invalid:7878", "tok"))
 	unbound.startDaemon(t)
 	if c := apiCheck(unbound); c.Status != "fail" || !strings.Contains(c.Detail, "NOT BOUND") {

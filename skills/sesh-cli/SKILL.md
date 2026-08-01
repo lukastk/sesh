@@ -652,6 +652,18 @@ sesh daemon restart       # bounce the daemon (e.g. after a binary update)
 sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, daemon checks)
 ```
 
+**"A machine's threads vanished from my TUI."** Almost always that machine is
+*unreachable*, not thread-less: offline machines' threads are hidden by default
+(`o` in the TUI reveals them, and the footer names the machine). Check `sesh mesh`
+from another machine — the affected box's own view stays green because outbound sync
+keeps working, so diagnose from the OUTSIDE. Then run `sesh doctor` on it and read the
+`api` line: `ok listening on <ip>:<port>` is healthy; `fail … NOT BOUND` means the bind
+keeps failing (DNS/interface — the error is quoted); `warn SESH_API_ADDR not set` means
+the daemon has no TCP API at all, so peers cannot reach it — normal only for an
+inbound-less leaf like termux, and otherwise a daemon started by hand without its
+service environment (fix: `supervisorctl restart sesh-daemon`; the same warning is
+logged at daemon startup).
+
 **Mesh sync cadence (demand-driven).** The background peer sync runs at full pace (~1s)
 only while something is consuming the mesh view — a `sesh tui`/sesh-ui poll or an
 `--all-machines` read — or when `[[hooks]]` are configured (hooks observe remote threads

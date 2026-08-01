@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/lukastk/sesh/internal/config"
@@ -122,5 +123,33 @@ func TestOffTailnetBind(t *testing.T) {
 		if got != c.warn {
 			t.Errorf("offTailnetBind(%q) warned=%v, want %v (reason %q)", c.addr, got, c.warn, offTailnetBind(c.addr))
 		}
+	}
+}
+
+// TestNoAPIWarning pins the loud warning for a daemon running with no TCP API.
+// A configured API is silent; an unconfigured one names the consequence peers see
+// AND the fix; and a daemon started from inside a sesh thread pane (the hand-start
+// that stripped SESH_API_ADDR on mymain) is called out by thread id.
+func TestNoAPIWarning(t *testing.T) {
+	if got := noAPIWarning("tailnet:7878", ""); got != "" {
+		t.Errorf("configured api should warn nothing, got %q", got)
+	}
+	if got := noAPIWarning("tailnet:7878", "tid-1"); got != "" {
+		t.Errorf("configured api should warn nothing even from a thread pane, got %q", got)
+	}
+
+	base := noAPIWarning("", "")
+	for _, want := range []string{"SESH_API_ADDR", "CANNOT REACH IT", "supervisorctl restart sesh-daemon", "termux"} {
+		if !strings.Contains(base, want) {
+			t.Errorf("unconfigured-api warning missing %q: %s", want, base)
+		}
+	}
+	if strings.Contains(base, "sesh thread ") {
+		t.Errorf("no SESH_THREAD_ID in env must not claim a thread-pane start: %s", base)
+	}
+
+	hand := noAPIWarning("", "53c1a2e3-e0f9-4544-86c7-1394eb8ee222")
+	if !strings.Contains(hand, "53c1a2e3-e0f9-4544-86c7-1394eb8ee222") {
+		t.Errorf("thread-pane start must name the thread id: %s", hand)
 	}
 }

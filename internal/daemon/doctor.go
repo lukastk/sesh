@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -89,6 +90,17 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 			}
 			add("api", "fail", msg)
 		}
+	} else {
+		// NO api configured used to emit NO line at all — so a daemon that had lost
+		// SESH_API_ADDR (hand-started without its service environment) showed a fully
+		// green doctor while it sat off the mesh and every other machine hid its
+		// threads. Absence of a check is not evidence of health: say it outright.
+		detail := "SESH_API_ADDR not set — no TCP API: peers CANNOT reach this daemon (its threads show unreachable/hidden on every other machine). " +
+			"Correct only for an inbound-less leaf (e.g. termux); otherwise restart the daemon with its service environment (e.g. `supervisorctl restart sesh-daemon`)."
+		if tid := os.Getenv(agents.EnvThreadID); tid != "" {
+			detail += " NB started from inside sesh thread " + tid + " — a hand-started daemon inherits the pane's environment."
+		}
+		add("api", "warn", detail)
 	}
 
 	// Peers: the mesh sync's last-known reachability (no fresh hop — the live

@@ -7,7 +7,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/lukastk/sesh/internal/agents"
 )
 
 // apiBindRetry is how often the API listener retries a failed bind.
@@ -114,6 +117,37 @@ func offTailnetBind(bindAddr string) string {
 	return ""
 }
 
+// noAPIWarning returns the loud warning for a daemon running with NO TCP API, or
+// "" when one is configured. Pure (env passed in) so it is unit-tested.
+//
+// An unset SESH_API_ADDR is LEGITIMATE for an inbound-less leaf (termux syncs
+// outward only) — so this is a warning, not a refusal. But it is also the exact
+// shape of a real fleet outage, and the failure is INVISIBLE from the affected
+// machine: outbound sync keeps working, so its own `sesh mesh` and `sesh doctor`
+// stay green while every OTHER machine marks it unreachable and (since the
+// offline-hiding default) HIDES its threads in the TUI. That asymmetry let mymain
+// sit off the mesh for 9 hours with nothing anywhere saying so.
+//
+// The usual cause is a hand-started `sesh daemon run`: started from an agent/shell
+// pane it inherits that shell's environment instead of the service manager's, which
+// is where SESH_API_ADDR lives. A daemon started from inside a sesh thread pane
+// carries SESH_THREAD_ID, so say so outright when we can see it.
+func noAPIWarning(apiAddr, threadID string) string {
+	if apiAddr != "" {
+		return ""
+	}
+	msg := "daemon: WARNING SESH_API_ADDR is not set — this daemon serves NO TCP API, so peers CANNOT REACH IT: " +
+		"inbound mesh sync, cross-machine routing and remote clients are all down. Outbound sync still works, so THIS " +
+		"machine's own `sesh mesh`/`sesh doctor` look healthy while every OTHER machine shows it unreachable and hides " +
+		"its threads. Correct ONLY for an inbound-less leaf (e.g. termux); otherwise the daemon was started without its " +
+		"service environment — restart it via the service manager (e.g. `supervisorctl restart sesh-daemon`), not by hand."
+	if threadID != "" {
+		msg += " NB this daemon was started from inside sesh thread " + threadID +
+			" — a `sesh daemon run` launched by hand from an agent pane inherits that pane's environment, which is the usual cause."
+	}
+	return msg
+}
+
 // startAPI starts the optional TCP API listener — the network surface for remote
 // clients (mobile / Obsidian) and direct cross-machine access. It serves the
 // IDENTICAL full router as the unix socket, wrapped in bearer-token auth, so the
@@ -131,6 +165,7 @@ func offTailnetBind(bindAddr string) string {
 // logged loudly.
 func (d *Daemon) startAPI() error {
 	if d.cfg.APIAddr == "" {
+		log.Print(noAPIWarning(d.cfg.APIAddr, os.Getenv(agents.EnvThreadID)))
 		return nil
 	}
 	if d.cfg.APIToken == "" {

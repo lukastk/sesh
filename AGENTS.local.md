@@ -1,5 +1,48 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H75 — mymain SILENTLY OFF THE MESH for 9h: a HAND-STARTED daemon (no `SESH_API_ADDR`) + supervisor FATAL; fix = loud startup warning + a doctor `warn` line where there was NO line at all (2026-08-01, sesh <this commit>; NO schema change; binary + daemon restart)
+Lukas: "I can't see any of my remote threads on mymain in sesh tui — but `ssh-target mymain` works."
+DIAGNOSIS (the discriminating order, worth reusing): `sesh mesh --json` from macbook → mymain
+`reachable=false`, synced **33018s (9.2h) ago** (pocket4 too, but that one was genuinely off — tailscale
+"last seen 9h ago"). `curl mymain:7878` → **connection REFUSED in 45ms** = network path fine, NOTHING
+LISTENING (a timeout would have meant the host/tailnet; the refusal localizes it to the daemon in one
+command). On mymain: daemon RUNNING (uptime 5.7h) but `ss -ltnp | grep 7878` empty, and
+`/proc/<pid>/environ` had **no `SESH_API_ADDR`** while it DID have `SESH_THREAD_ID=53c1a2e3…` (the codex
+`corkboard` thread) ⇒ the daemon was hand-started from an agent pane at 03:13, inheriting that pane's
+env instead of supervisor's ini (which is where `SESH_API_ADDR=tailnet:7878` lives). It held
+`~/.sesh/daemon.sock`, so supervisor's own restarts died 4× with "a live daemon already listens" →
+`startretries=3` exhausted → **`sesh-daemon FATAL`**, nothing self-healing. THE INVISIBILITY IS THE
+POINT (H73's asymmetry again, different cause): outbound sync kept working, so mymain's own `sesh mesh`
+and `sesh doctor` were ALL GREEN — `doctor` emitted **no `api` line at all**, because the check was
+inside `if d.cfg.APIAddr != ""`. Absence of a check read as health. Meanwhile every other machine marked
+it unreachable and the H35 offline-hiding default HID its 293 threads — the user-visible symptom.
+FIX (mymain, live): `kill <explicit pid>` (never `pkill -f` — H22/H74) then `supervisorctl start
+sesh-daemon` → "api listening on 100.106.17.33:7878", all five peers synced ~2s. Also killed a LEAKED
+conformance sandbox daemon (`/tmp/seshsb-bin.2lH/sesh daemon run`) that had been ticking a maintainer
+loop since **Jul 23** — 9 days; isolated SESH_HOME so harmless, but check `pgrep -af 'sesh daemon'` for
+sandbox leftovers after suite runs.
+CODE (Lukas: "make it loud, and caution in AGENTS.md"): `noAPIWarning(apiAddr, threadID)` in
+apiserver.go — PURE (env passed in) like `offTailnetBind`, unit-tested — logged by `startAPI` on the
+previously-silent `APIAddr == ""` early return; it names the consequence peers see, the
+invisible-from-here asymmetry, the termux exception, and the fix, and when `SESH_THREAD_ID` is set it
+says outright that the daemon was hand-started from that thread's pane (in the real incident it would
+have printed the corkboard thread id). doctor.go grows the missing `else`: `api` = **warn** "SESH_API_ADDR
+not set …" instead of no line. NOT fatal and NOT inferred from peers.json: an absent API is LEGITIMATE
+for an inbound-less leaf, and termux has http peers too, so "has http peers ⇒ should be reachable" would
+false-positive — the honest signal is the warning, not a refusal. AGENTS.md gained a hard rule (never
+hand-restart a supervised daemon) + sesh-cli SKILL a "a machine's threads vanished from my TUI"
+troubleshooting paragraph (diagnose from the OUTSIDE; read doctor's api line ok/fail/warn).
+TESTS: unit `TestNoAPIWarning` (silent when configured, names consequence+fix when not, thread id only
+when present). `daemon.doctor` cell EXTENDED to assert the unconfigured daemon (its first sandbox was
+already exactly that) reports `warn`. ANTI-GAMING: neutered the `add("api","warn",…)` → cell RED with
+"no api check in doctor output: [...]" — which is also a verbatim print of the OLD silent behavior —
+then reverse-edited back (never `git checkout`, H44). **GOTCHA that nearly fooled me: the first neutered
+run PASSED because go test replayed a CACHED result; use `-count=1` for every anti-gaming run.**
+PRE-EXISTING RED (not mine, verified on a clean-HEAD worktree): `TestMaintainerDropsStaleReportedBusy`
+fails at "baseline: busy=idle authority=, want idle/heuristic" — the H58 test's argv0-"claude"
+symlink-to-sleep pane is no longer being resolved as an agent on this macbook. Unrelated to this change;
+needs its own look.
+
 ## H74 — GitHub issue #10: thread panes spawned by the boot-started daemon have NO graphical session env; fix = spawnEnv injects the systemd user-manager session env per spawn (2026-07-30, sesh 52c58a9 + myrig 6ad1e88 + myrig f7ceabf; NO schema change; sesh binary deployed ALL SIX machines — macbook came last, a few hours after the rest)
 Root cause chain (found via Lukas's "ii only shows a handful of apps, some in wrong places" on pocket4): the work tmux server starts with sesh-daemon under supervisord at BOOT, before any graphical login, so it holds ZERO session vars (WAYLAND_DISPLAY, DISPLAY, XDG_SESSION_TYPE, XDG_CURRENT_DESKTOP, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, HYPRLAND_INSTANCE_SIGNATURE); every pane inherits the void and Unix env is immutable after exec. `uwsm app` does NOT help — it's systemd-run --scope, caller-env passthrough (verified empirically: it adds nothing from the manager env). From a void pane: Chromium --ozone-platform-hint=auto only picks native Wayland when XDG_SESSION_TYPE=wayland is set; cold-launched `brave --app=URL` windows then come up XWayland with the GENERIC `Brave-browser` class (no pin windowrule matches) and FLOATING (X11 geometry restore) on the focused workspace; Slack/Signal ABORT ("Missing X server or $DISPLAY", SIGTRAP/SIGSEGV coredumps); GTK apps die or come up X11 with a binary-name class. SECOND bug (same script): the official Obsidian CLI at ~/.local/bin/obsidian (14KB) shadows the real app in PATH and no-ops ("unable to find Obsidian") when the app isn't running — fixed myrig-side (f7ceabf: hypr-load-main imports the manager env itself + launches /usr/bin/obsidian). TRAP hit twice during repro: `pkill -f "pattern"` from a compound ssh/zsh -c command matches the CALLER'S OWN cmdline and kills your own shell — use the bracket trick `[p]attern`. ALSO: /proc/PID/environ of Chromium/Electron processes shows a zeroed block (they scrub it post-exec) — env debugging there is a red herring; and the pgrep -f launch-guards in hypr-load-main match any wrapper whose cmdline mentions the app name (my own test harness got skipped launches). CANONICAL SOURCE: uwsm/Hyprland publish the session env to the systemd USER MANAGER activation env at session start (uwsm finalize; UWSM_FINALIZE_VARNAMES includes HYPRLAND_INSTANCE_SIGNATURE; refreshed per compositor start). Reachable from a boot context: `env -i XDG_RUNTIME_DIR=/run/user/<uid> systemctl --user show-environment` works (systemctl --user derives the bus path from XDG_RUNTIME_DIR, no DBUS var needed); fails only when no manager/session = nothing to export (pre-login, headless, termux). FIX A (sesh 52c58a9): spawnEnv — the single seam building the env map injected via tmux -e into EVERY pane (CreateSessionCmd/CreateWindowCmd/SplitWindowCmd) — moved from reportstate.go to new internal/daemon/spawnenv.go; on Linux it runs systemctl --user show-environment PER SPAWN (never cached → compositor restart picked up by next spawn; explicit XDG_RUNTIME_DIR for the call; 2s timeout; error logged; graceful no-op on non-Linux/no-session — legitimate absence), parseSessionEnv whitelists the 9 vars (values are simple; systemd $'...' escaping only appears on OTHER keys). Tests: spawnenv_test.go (whitelist filter, escaped lines, empty values, nil-on-empty). Verified live on pocket4: fresh thread pane carries the full 9-var session env. FIX B (myrig 6ad1e88): home/.myrig/zshenv/^hyprland^session-env.sh — zshenv self-heal for every env-less zsh (ssh, pre-fix thread panes' tool shells, non-daemon panes): imports the same whitelist via while-read (NO eval) gated on a missing var + /run/user/$UID/bus existing (~40ms, env-less shells only). Deployed pocket4+ideapad. NOT retroactive: pre-fix panes keep frozen env until restarted (fundamental). macbook was unreachable (ssh timeout) during the first deploy pass and was deployed a few hours later — all six machines now run the fix.
 ## H73 — GitHub issue #9: daemon API bound by DNS-resolving its OWN tailnet name (NSS shadow → silent mesh partition); fix = `tailnet` SENTINEL bind (2026-07-29, sesh 3a22dae + myrig 2698cbb; NO schema change; deployed ALL FIVE API machines)

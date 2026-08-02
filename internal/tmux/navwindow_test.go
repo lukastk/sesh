@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -152,6 +153,72 @@ func TestSendTextMultilinePreservesNewlines(t *testing.T) {
 	// would run as a command and bash would print "not found".
 	if strings.Contains(capt, "not found") {
 		t.Errorf("multi-line text was EXECUTED (newlines submitted as Enter); pane:\n%s", capt)
+	}
+}
+
+// TestSendTextSingleLineUsesBracketedPaste pins the transport-level half of the
+// long Codex report regression. The real pane requests bracketed paste, records
+// its input bytes, and must receive one explicit paste event followed by Enter
+// (the tty line discipline presents Enter as LF to the reader).
+// A literal send-keys stream can look identical after rendering but leaves a TUI
+// paste detector active when Enter arrives, so asserting the wire bytes matters.
+func TestSendTextSingleLineUsesBracketedPaste(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	sock := "seshsend-single-" + strings.ReplaceAll(t.Name(), "/", "_")
+	raw := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sock}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	defer exec.Command("tmux", "-L", sock, "kill-server").Run() //nolint:errcheck
+
+	const text = "SINGLE_LINE_BRACKETED_REPORT"
+	want := []byte("\x1b[200~" + text + "\x1b[201~\n")
+	inputPath := filepath.Join(t.TempDir(), "input.bin")
+	command := fmt.Sprintf("printf '\\033[?2004hBRACKETED_PASTE_READY\\n'; dd bs=1 count=%d of=%q status=none; sleep 5", len(want), inputPath)
+	if _, err := raw("-f", "/dev/null", "new-session", "-d", "-s", "single", "-x", "100", "-y", "30", command); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	pane, err := raw("list-panes", "-t", "single", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("pane id: %v", err)
+	}
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		capture, _ := raw("capture-pane", "-t", pane, "-p")
+		if strings.Contains(capture, "BRACKETED_PASTE_READY") {
+			ready = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("pane never acknowledged bracketed-paste mode")
+	}
+
+	if err := NewServer(sock).SendText(pane, text, true); err != nil {
+		t.Fatalf("SendText: %v", err)
+	}
+	var got []byte
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got, _ = os.ReadFile(inputPath)
+		if len(got) == len(want) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("pane input = %q, want one bracketed paste then Enter %q", got, want)
 	}
 }
 

@@ -81,7 +81,7 @@ var skipReasons = map[string]string{
 	"thread.adopt":              "a manual real agent adopted with its TRUE session id (argv/socket/rollout, or an explicit --session-id when undetectable); becomes a managed headful thread; non-agent/managed/unknown panes loud",
 	"thread.fork":               "fork@turn-1 carries A not B (real divergence); the branch CONTINUES with memory; the source byte-untouched; loud out-of-range/turn-less",
 	"thread.backup":             "backup→wipe→restore byte-equal per agent; claude native restore + RESUMED memory; idempotent; copy composes; loud guards; remote routed",
-	"thread.subscribe":          "a real turn lands formatted in the subscriber's REAL pane exactly once; cycle refused/--allow-cycle; unsubscribe stops; remote = peer-owned delivery into a local pane",
+	"thread.subscribe":          "a real turn lands formatted and SUBMITTED in the subscriber's REAL agent exactly once; cycle refused/--allow-cycle; unsubscribe stops; remote = peer-owned delivery into a local agent",
 	"thread.transcript":         "real transcript located+read after a real turn (sentinel in lines + last_reply; monotone reply_count; pre-turn loud); remote routed",
 	"thread.delegate":           "real one-shot answer + worker GONE after (ephemeral both directions); --keep = usable thread w/ memory; --sandbox loud until E3",
 	"thread.await":              "blocks until a real turn finishes (reply available on return); remote = NO routing, the mesh carries it; timeout/unknown loud",

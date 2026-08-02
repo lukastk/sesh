@@ -513,7 +513,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.subscribe",
-		Description: "subscriptions: a subscribee's completed turns deliver into subscriber threads (owner-side engine on the eventer; dedup on the monotone reply count; cycle guard + --allow-cycle breaker); remote = cross-machine delivery via the routed send",
+		Description: "subscriptions: a subscribee's completed turns become submitted user turns in subscriber threads (owner-side engine on the eventer; dedup on the monotone reply count; cycle guard + --allow-cycle breaker); remote = cross-machine delivery via the routed send",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
-	"time"
 )
 
 // HasSession reports whether a session by this name exists.
@@ -55,11 +54,6 @@ func (s *Server) CreatePane(target, dir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// sendEnterDelay gives a TUI a moment to register typed text before the Enter
-// that submits it. Without it, some agents (codex) drop the input entirely — a
-// human never types and hits Enter in the same instant either.
-const sendEnterDelay = 250 * time.Millisecond
-
 var sendBufferSequence atomic.Uint64
 
 // nextSendBufferName returns a name unique to this process and SendText call.
@@ -72,18 +66,19 @@ func nextSendBufferName() string {
 // SendText sends literal text to target's pane. If enter is true, a trailing
 // Enter key is sent after (so it submits).
 //
-// Multi-line text is sent as a BRACKETED PASTE (set-buffer + paste-buffer -p) rather
-// than literal send-keys: with `send-keys -l`, each embedded newline reaches the agent's
-// TUI as a submitting Enter, so a multi-paragraph prompt is fired off line-by-line and
-// its structure is lost. The `-p` flag wraps the text in the bracketed-paste escapes
-// (\e[200~…\e[201~), which a modern agent TUI (claude/codex/pi) honors by buffering the
-// whole thing — newlines and all — as one input; the trailing Enter then submits it
-// intact. Single-line text keeps the original send-keys path (no behavior change).
+// Text always goes through set-buffer + paste-buffer -p, never a literal
+// send-keys stream. Besides preserving embedded newlines, this is load-bearing
+// for long single-line prompts: Codex classifies a fast literal key stream as a
+// paste in chunks, and a following Enter can land inside its paste-suppression
+// window after the full draft is already visible. Once a target TUI has
+// requested bracketed-paste mode, -p gives it one explicit paste event that
+// clears that transient state before the trailing Enter. tmux preserves the
+// paste-end -> Enter byte ordering, so no guessed sleep is needed.
 func (s *Server) SendText(target, text string, enter bool) error {
 	if target == "" {
 		return fmt.Errorf("tmux: send-text: empty target")
 	}
-	if strings.Contains(text, "\n") {
+	if text != "" {
 		buf := nextSendBufferName()
 		if _, err := s.run("set-buffer", "-b", buf, text); err != nil {
 			return err
@@ -94,11 +89,8 @@ func (s *Server) SendText(target, text string, enter bool) error {
 			_, _ = s.run("delete-buffer", "-b", buf)
 			return err
 		}
-	} else if _, err := s.run("send-keys", "-t", target, "-l", text); err != nil {
-		return err
 	}
 	if enter {
-		time.Sleep(sendEnterDelay)
 		if _, err := s.run("send-keys", "-t", target, "Enter"); err != nil {
 			return err
 		}

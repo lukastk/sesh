@@ -115,10 +115,16 @@ func (m *Model) visibleMatches() []treeRow {
 		}
 	}
 	if m.filter != "" {
-		// By default a query searches only top-level threads; child threads (those with
-		// a parent) are excluded unless filterChildren is toggled on (^y) — children of a
-		// tree are usually noise when searching by name.
-		if !m.filterChildren {
+		// By default a query searches EVERY thread, nested or not. ^y toggles the
+		// exclusion on to drop child threads, for when a deep tree makes a name
+		// search noisy.
+		//
+		// This defaulted the other way until 2026-08-02 and it was a trap: a uuid
+		// search — an exact, unambiguous identifier — silently returned nothing for
+		// any thread that happened to be a child, and supervisor/worker trees make
+		// most interesting threads children. Search finding less than it was asked
+		// for must be something the user opts INTO.
+		if m.filterExcludeChildren {
 			kept := matched[:0]
 			for _, rm := range matched {
 				if rm.row.Parent != "" {
@@ -312,9 +318,9 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd := m.navSelected()
 		return m, cmd
 	case "ctrl+y":
-		// Toggle whether child threads are included in the filter results.
+		// Toggle whether child threads are excluded from the filter results.
 		// (^y, not ^k — ^k stays the symmetric "move selection up" of ^j.)
-		m.filterChildren = !m.filterChildren
+		m.filterExcludeChildren = !m.filterExcludeChildren
 		m.clampCursor()
 		return m, nil
 	case "up", "ctrl+k":
@@ -398,7 +404,7 @@ func (m *Model) moveCursor(delta int) {
 }
 
 // clampCursor keeps the cursor within the current visible range after the row set
-// changes size (e.g. toggling filterChildren).
+// changes size (e.g. toggling filterExcludeChildren).
 func (m *Model) clampCursor() {
 	n := len(m.visibleMatches())
 	switch {
@@ -420,9 +426,9 @@ func (m *Model) renderFilterPrompt(matched, total int) string {
 	}
 	q := string(r[:m.filterCaret]) + "█" + string(r[m.filterCaret:])
 	left := "> " + q
-	kids := "off"
-	if m.filterChildren {
-		kids = "on"
+	kids := "on"
+	if m.filterExcludeChildren {
+		kids = "off"
 	}
 	right := fmt.Sprintf("%s ^t→%s  ^y children:%s  %d/%d", m.target.label(), m.target.other(), kids, matched, total)
 	gap := m.width - len([]rune(left)) - len([]rune(right))

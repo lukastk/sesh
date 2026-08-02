@@ -295,7 +295,8 @@ mouse click  select the clicked row; DOUBLE-click enters it (= enter); click the
 enter        nav: switch your tmux client to the thread (or attach from a plain shell;
              a headless thread is promoted, a dead one resumed first)
 /            filter mode (fuzzy; ↑/↓ or ^k/^j move the selection; ^t cycles the search
-             target; ^y toggles searching child threads — off by default; esc applies)
+             target; ^y EXCLUDES child threads — off by default, i.e. a query searches
+             every thread, nested or not; esc applies)
 tab          view PICKER: a popup listing every view (active / on hold / archived /
              all / custom [[tui.views]]) opening on the CURRENT one — tab/↑/↓ move
              (wrap), enter or a mouse click applies, esc cancels; the wheel moves

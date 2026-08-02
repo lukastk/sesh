@@ -120,7 +120,14 @@ func claimFilterCaret(t *testing.T) {
 }
 
 // claimFilterTargetUUID: ctrl+t switches the search target — a tid8 query
-// matches ONLY in uuid mode, and the prompt names the active target.
+// matches ONLY in uuid mode, the prompt names the active target, and a FULL uuid
+// finds its thread wherever it sits in the tree (including nested two deep).
+//
+// The nested half is the regression for Lukas's 2026-08-02 report: searching a
+// real thread's full uuid rendered "(no threads)". The uuid matcher was correct;
+// the filter's children-exclusion default dropped the row before it could rank.
+// This claim previously only ever built FLAT threads, which is exactly why it
+// stayed green through the bug — so it now builds a real tree on a real daemon.
 func claimFilterTargetUUID(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -153,6 +160,72 @@ func claimFilterTargetUUID(t *testing.T) {
 	sel, ok := m.Selected()
 	if !ok || sel.ID != betaID {
 		t.Errorf("uuid-target selection = %v, want %s", sel.ID, betaID)
+	}
+
+	// NESTED: build a real 2-deep tree on the daemon (beta under alpha, gamma
+	// under beta) and search gamma's FULL uuid. A uuid is exact and unambiguous,
+	// so it must resolve regardless of depth.
+	var alphaID, gammaID string
+	for _, th := range sb.listThreads(t) {
+		switch th.Name {
+		case "alpha-api":
+			alphaID = th.ID
+		case "gamma-docs":
+			gammaID = th.ID
+		}
+	}
+	if alphaID == "" || gammaID == "" {
+		t.Fatalf("could not resolve alpha/gamma ids (alpha=%q gamma=%q)", alphaID, gammaID)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "reparent", "--id", betaID, "--parent", alphaID); err != nil {
+		t.Fatalf("reparent beta under alpha: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "reparent", "--id", gammaID, "--parent", betaID); err != nil {
+		t.Fatalf("reparent gamma under beta: %v\n%s", err, stderr)
+	}
+	// Settle on the real nesting before asserting (the daemon publishes async);
+	// asserting the search first could pass on a stale still-flat row set.
+	if !waitUntil(10*time.Second, func() bool {
+		return threadParentOf(t, sb, gammaID) == betaID && threadParentOf(t, sb, betaID) == alphaID
+	}) {
+		t.Fatalf("daemon never nested gamma under beta under alpha")
+	}
+
+	// Settle until the MODEL's own row set carries the nesting, not merely until
+	// the daemon does. Waiting on the row COUNT alone would let the assertions
+	// below pass vacuously against a still-flat cached snapshot — in which case
+	// the uuid would match because the row was top-level, proving nothing.
+	m2 := tui.New(sb.Home+"/daemon.sock", false)
+	if !waitUntil(20*time.Second, func() bool {
+		m2, _ = render(t, m2)
+		if len(m2.Rows()) != 3 {
+			return false
+		}
+		for _, r := range m2.Rows() {
+			if r.ID == gammaID {
+				return r.Parent == betaID
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("the TUI row set never showed gamma nested under beta")
+	}
+	m2 = runKey(t, m2, "/")
+	nm2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m2 = nm2.(tui.Model)
+	m2 = typeText(t, m2, gammaID)
+	if !strings.Contains(m2.View(), "1/3") {
+		t.Errorf("full uuid of a 2-deep NESTED thread did not match it (the reported bug):\n%s", m2.View())
+	}
+	if sel, ok := m2.Selected(); !ok || sel.ID != gammaID {
+		t.Errorf("nested uuid search selected %v, want gamma %s\n%s", sel.ID, gammaID, m2.View())
+	}
+	// ^y opts INTO excluding children: the nested target then drops out, proving
+	// the toggle still works and that the match above was not a vacuous pass.
+	nm2, _ = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m2 = nm2.(tui.Model)
+	if !strings.Contains(m2.View(), "0/3") {
+		t.Errorf("^y did not exclude the nested thread from the uuid search:\n%s", m2.View())
 	}
 }
 

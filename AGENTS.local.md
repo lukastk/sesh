@@ -1,5 +1,62 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H80 — TUI SEARCH silently missed every CHILD thread (uuid AND name): the filter's children-exclusion DEFAULT; fix = default to INCLUDING children, ^y now opts INTO the exclusion (2026-08-02, sesh <this commit>; NO schema change; BINARY-ONLY, no daemon restart; NOT YET DEPLOYED)
+Lukas: "check that the uuid search in sesh tui actually works? I tried searching for
+ef79e834-cffd-49d9-b9e7-8683d9916eae which does exist, but it doesn't come up." It did not work, and
+the cause was NOT the uuid machinery.
+ROOT CAUSE: `visibleMatches()` dropped every row with `Parent != ""` whenever a query was active,
+unless ^y (`filterChildren`) was toggled on. `ef79e834` is an ITUC worker nested TWO deep
+(`53c1a2e3 corkboard` → `219068e9 ituc-supervisor` → the target), so it was filtered out before it
+could ever rank. The exclusion applied to the **uuid target too** — and a uuid is an exact,
+unambiguous identifier, so a uuid search returning nothing is simply wrong. The comment justifying it
+("children of a tree are usually noise when searching by name") is defensible for NAME search and
+indefensible for uuid; with supervisor/worker trees, most interesting threads are children, so NAME
+search was equally blind (live: `rededup` → 0 matches before, 1/36 after).
+DISCRIMINATING ORDER (worth reusing): grid-JSON'd the id FIRST — it existed, `archived`/`on_hold`
+both null (so not H63/H40 view filtering) and `parent` non-empty = the answer in one command; then
+`sesh mesh` showed mymain reachable (so NOT the H35 offline-hide); then `fuzzyScore(uuid,uuid)`
+matched in a unit test (so NOT the matcher). Only the children default was left.
+FIX: the field is RENAMED `filterChildren` → **`filterExcludeChildren`** with inverted sense, so the
+**ZERO VALUE is the new default**. This is the load-bearing design choice: setting it in `New()`
+(the `hideOffline`/`maxColWidth` pattern) would leave a struct-literal `Model` — which is how nearly
+every tui unit test builds one — searching DIFFERENTLY from the shipped TUI. H39 already recorded
+that divergence as a footgun; this avoids adding another. `^y` now toggles the exclusion ON (prompt
+renders `children:on` by default). Lukas chose this over my narrower "exempt the uuid target" —
+correctly: it is simpler and it fixes the name-search case too.
+WHY THE CLAIM NEVER CAUGHT IT: `filter-target-uuid` built only FLAT threads (`threeRowModel`), so a
+green cell said nothing about nesting. The claim now reparents beta→alpha and gamma→beta on a REAL
+daemon and searches gamma's FULL uuid. **VACUOUS-PASS TRAP I walked into and had to fix:** my first
+version settled only on `len(Rows())==3`, which was already true from the pre-reparent snapshot — the
+uuid then matched because the row was still top-level, proving nothing (caught because the paired ^y
+assertion failed while the search "passed"). It now settles until the MODEL's own row carries
+`Parent == betaID` before asserting, and asserts ^y makes it disappear again so the match cannot pass
+vacuously. Re-learns the H40 rule: settle on the SPECIFIC state you are testing, not a proxy count.
+TESTS: unit `TestFilterIncludesChildThreadsByDefault` (rewritten contract) + new
+`TestUUIDSearchFindsNestedThread` (the reported shape, 2 deep, plus "an unrelated uuid still matches
+0" so the fix can't degrade into a wildcard). ANTI-GAMING (reverse-edited, never git-checkout — H44;
+`-count=1` — H75): flipping the predicate back turns the units RED naming `uuid search for a 2-deep
+nested thread returned 0 rows` and the claim RED naming `full uuid of a 2-deep NESTED thread did not
+match it (the reported bug)` — the exact user report. GREEN: tui units + `-race`, `go vet ./...`,
+full TUI claims suite serially (157s).
+PRE-EXISTING REDS (verified NOT mine on a clean detached worktree at 9b6da0a, identical messages,
+and STILL red after rebasing onto H79's 02b1e50): `action-fork` — `no transcript on disk for this pi
+conversation`, the pi-transcript class H77 recorded for `thread.model/pi/local`; `uuid-popup-copy` —
+the claim stubs `wl-copy`, a WAYLAND tool, and I am on macOS, so the clipboard tool is never invoked.
+**NB these are TUI CLAIMS, a SEPARATE suite from the 246 matrix cells** — so H79's all-green matrix
+does not cover them, and its Claude-fork fix does not touch `action-fork`, which forks a PI thread.
+Both are macbook-environment reds; neither was repaired here. All 7 filter claims pass on the rebase.
+CONCURRENT SESSION (the recurring lesson, hit again): H79 landed on origin/main while this was in
+flight and ALSO numbered itself H79 — renumbered mine to H80, rebased, kept both entries. Always
+fetch before pushing; the first `git fetch` here failed transiently (exit 128) and a second succeeded,
+so do not read one clean fetch as proof there is nothing upstream — diff HEAD..origin/main.
+LIVE-PROVEN against the real daemon (isolated tmux, read-only, throwaway binary since deleted; never
+pressed Enter — that would revive a live thread): the exact reported uuid renders the worker row at
+default settings, and ^y hides it again; `rededup` name search 1/36 where it was 0.
+DEPLOY: binary-only, NO daemon restart, no schema/API change (pure TUI-client filter). Committed and
+pushed to origin/main; **NOT YET DEPLOYED — the fleet still has the old default**, so search there
+still hides children until each machine rebuilds. A running sidebar keeps the binary it launched with
+(H70), so a deployed machine also needs `prefix+r` (or mmt-kill/mmt-start).
+
 ## H79 — H77's eight baseline reds were two product defects plus stale/racy conformance setup; all 246 cells green (2026-08-02, sesh <this commit>; NO CLI/API/schema change; binary rebuild + supervised daemon restart required; NOT DEPLOYED)
 H77's delivery fix was independently cleared by the parent, committed, deployed on the approved quiescent machines recorded in H77, and then followed by an explicit triage of the eight matrix reds that had reproduced on untouched `8022ed3`. None was caused by bracketed-paste delivery. The eight split into two product defects covering five cells and three fixture defects covering three cells; the honest fixes below restore the original assertions rather than narrowing any matrix axis.
 
@@ -14,6 +71,7 @@ BROAD-GATE FIXTURE FOUND AFTER THE ORIGINAL EIGHT: one full run reached 245/246 
 VERIFICATION: `go test ./internal/fork ./internal/agents/claude ./cmd/sesh -count=1`; every non-conformance package sequentially with and without `-race`; `go vet ./...`; repeated focused real-agent/tmux/SSH cells above; and `git diff --check` all passed. The final uncached `go test ./internal/conformance -count=1 -timeout 60m` passed in 2389.879s. Its persisted honest grid is **246 pass, 0 fail, 0 skip, 0 missing, 0 not-run, plus 2 justified N/A**.
 
 LIVE/DEPLOY: no machine runs H79 yet. Read-only reconfirmation found the supervised mymain daemon RUNNING as PID 2287373 from clean installed revision `6cb3762474ce` (which includes H77/f02 but not H78/H79); no live pane was focused, typed into, captured, or interrupted, and no daemon was restarted. H79 changes no API/wire/schema, so mixed versions are compatible. Safe rollout after active workers are quiescent: build/install natively per machine, restart daemon-backed machines only through their service manager (termux uses its documented explicit-PID leaf recipe), then smoke-test disposable Claude fork divergence and local/remote await. Offline or busy machines must remain explicitly pending.
+
 
 ## H78 — GUTTER GLYPH VOCABULARY: ⌀ flag-disabled was indistinguishable from ⊘ archived (adjacent cells); fix = ⌁ + drop the pin • + a confusable-FAMILY drift guard (2026-08-02, sesh <this commit>; NO schema change; BINARY-ONLY, no daemon restart)
 Lukas: "I think there are some duplicate icons... the icon disabling flagging and the icon for archiving is

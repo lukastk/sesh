@@ -361,11 +361,16 @@ type Model struct {
 	filter      string
 	filterCaret int
 	target      filterTarget
-	// filterChildren: when filtering, whether to include CHILD threads (those with a
-	// parent) in the results. Default false — a query searches only top-level threads;
-	// ^k in the filter prompt toggles it (children of a tree you're navigating are
-	// usually noise when you're searching by name).
-	filterChildren bool
+	// filterExcludeChildren: when filtering, whether to DROP child threads (those
+	// with a parent) from the results. Default false — a query searches every thread,
+	// nested or not; ^y in the filter prompt toggles the exclusion ON when a big tree
+	// makes a name search noisy.
+	//
+	// The sense is deliberately negative so the ZERO VALUE is the default: a
+	// struct-literal Model (as built throughout the unit tests) then behaves like a
+	// real one. Phrasing it positively would need New() to set it, and a literal
+	// Model would silently search differently from the shipped TUI.
+	filterExcludeChildren bool
 
 	// columns is the visible column set (validated names; see columns.go).
 	// userHome powers the CWD column's ~-relative display; cwdLabeler, when set,

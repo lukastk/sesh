@@ -464,10 +464,13 @@ func TestMasterCursorAsyncAndNestedJump(t *testing.T) {
 	}
 }
 
-// TestFilterExcludesChildThreadsByDefault: a filter query searches only top-level
-// threads by default; child threads (Parent != "") are excluded until ^y toggles
-// filterChildren on.
-func TestFilterExcludesChildThreadsByDefault(t *testing.T) {
+// TestFilterIncludesChildThreadsByDefault: a filter query searches EVERY thread,
+// nested or not. ^y opts into excluding child threads (Parent != "") when a deep
+// tree makes a name search noisy.
+//
+// This defaulted the other way until 2026-08-02; see
+// TestUUIDSearchFindsNestedThread for the bug that flipped it.
+func TestFilterIncludesChildThreadsByDefault(t *testing.T) {
 	mm := Model{
 		rows: []api.ThreadRow{
 			{Thread: api.Thread{ID: "p", Name: "alpha-parent"}},
@@ -484,25 +487,67 @@ func TestFilterExcludesChildThreadsByDefault(t *testing.T) {
 		}
 		return out
 	}
-	// Default: child "c" excluded; top-level "p" and "r" kept.
+	// Default (the ZERO VALUE — a struct-literal Model must behave like a real
+	// one): every match is visible, child "c" included.
 	got := ids()
+	if !got["c"] || !got["p"] || !got["r"] {
+		t.Errorf("default filter must INCLUDE the child thread c; visible=%v", got)
+	}
+	// ^y opts into the exclusion: the child drops, top-level rows stay.
+	mm.filterExcludeChildren = true
+	got = ids()
 	if got["c"] {
-		t.Errorf("default filter must EXCLUDE child thread c; visible=%v", got)
+		t.Errorf("filterExcludeChildren=on must drop child thread c; visible=%v", got)
 	}
 	if !got["p"] || !got["r"] {
-		t.Errorf("default filter must keep top-level threads p,r; visible=%v", got)
+		t.Errorf("filterExcludeChildren=on must keep top-level threads p,r; visible=%v", got)
 	}
-	// Toggle on: the child is now included.
-	mm.filterChildren = true
-	got = ids()
-	if !got["c"] || !got["p"] || !got["r"] {
-		t.Errorf("filterChildren=on must include the child; visible=%v", got)
+}
+
+// TestUUIDSearchFindsNestedThread is the regression for Lukas's report
+// (2026-08-02): searching the FULL uuid of a thread nested two deep in a
+// supervisor/worker tree returned "(no threads)". The uuid matcher was fine —
+// the children-exclusion default dropped the row before it could rank. A uuid is
+// an exact, unambiguous identifier, so the search must find it wherever it sits.
+func TestUUIDSearchFindsNestedThread(t *testing.T) {
+	const (
+		rootID  = "53c1a2e3-e0f9-4544-86c7-1394eb8ee222"
+		superID = "219068e9-2521-42ab-aa99-81a20189faca"
+		wantID  = "ef79e834-cffd-49d9-b9e7-8683d9916eae"
+	)
+	mm := Model{
+		rows: []api.ThreadRow{
+			{Thread: api.Thread{ID: rootID, Name: "corkboard"}},
+			{Thread: api.Thread{ID: superID, Name: "ituc-supervisor", Parent: rootID}},
+			{Thread: api.Thread{ID: wantID, Name: "ituc26-rededup-w10", Parent: superID}},
+		},
+		target:   targetUUID,
+		filter:   wantID,
+		expanded: map[string]bool{},
 	}
+	vis := mm.visibleMatches()
+	if len(vis) != 1 || vis[0].row.ID != wantID {
+		t.Fatalf("uuid search for a 2-deep nested thread returned %d rows (want exactly the target %s); got %v",
+			len(vis), wantID, visibleIDs(vis))
+	}
+	// And it must not become a wildcard: an unrelated uuid still matches nothing.
+	mm.filter = "aaaaaaaa-0000-0000-0000-000000000000"
+	if got := mm.visibleMatches(); len(got) != 0 {
+		t.Errorf("unrelated uuid matched %d rows, want 0; got %v", len(got), visibleIDs(got))
+	}
+}
+
+func visibleIDs(vis []treeRow) []string {
+	out := make([]string, 0, len(vis))
+	for _, tr := range vis {
+		out = append(out, tr.row.ID)
+	}
+	return out
 }
 
 // TestFilterChildToggleKeyIsCtrlY proves the ^k/^y rebinding: in filter mode ^k
 // moves the selection UP (the symmetric partner of ^j = down) and ^y toggles the
-// include-children search. The old binding had ^k toggle children, shadowing the
+// child-thread exclusion. The old binding had ^k toggle children, shadowing the
 // move-up key.
 func TestFilterChildToggleKeyIsCtrlY(t *testing.T) {
 	mm := Model{
@@ -522,21 +567,21 @@ func TestFilterChildToggleKeyIsCtrlY(t *testing.T) {
 	if mm.cursor != 0 {
 		t.Errorf("^k should move the selection up to 0, got cursor=%d", mm.cursor)
 	}
-	if mm.filterChildren {
-		t.Errorf("^k must NOT toggle filterChildren")
+	if mm.filterExcludeChildren {
+		t.Errorf("^k must NOT toggle filterExcludeChildren")
 	}
 
 	// ^y toggles children and does NOT move the selection.
 	step(tea.KeyCtrlY)
-	if !mm.filterChildren {
-		t.Errorf("^y should toggle filterChildren on")
+	if !mm.filterExcludeChildren {
+		t.Errorf("^y should toggle filterExcludeChildren on")
 	}
 	if mm.cursor != 0 {
 		t.Errorf("^y must not move the selection, got cursor=%d", mm.cursor)
 	}
 	step(tea.KeyCtrlY)
-	if mm.filterChildren {
-		t.Errorf("^y should toggle filterChildren back off")
+	if mm.filterExcludeChildren {
+		t.Errorf("^y should toggle filterExcludeChildren back off")
 	}
 }
 

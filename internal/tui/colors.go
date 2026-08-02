@@ -74,7 +74,7 @@ func parseColor(s string) (lipgloss.Color, error) {
 const (
 	GlyphBusy       = "busy"
 	GlyphDescendant = "descendant"
-	// GlyphFlag tints the ⚑ needs-attention flag (schema 44); the ⌀
+	// GlyphFlag tints the ⚑ needs-attention flag (schema 44); the ⌁
 	// flag-disabled marker stays plain (it is a suppression state, not an
 	// attention state).
 	GlyphFlag = "flag"

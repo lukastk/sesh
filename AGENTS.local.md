@@ -1,5 +1,49 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H78 — GUTTER GLYPH VOCABULARY: ⌀ flag-disabled was indistinguishable from ⊘ archived (adjacent cells); fix = ⌁ + drop the pin • + a confusable-FAMILY drift guard (2026-08-02, sesh <this commit>; NO schema change; BINARY-ONLY, no daemon restart)
+Lukas: "I think there are some duplicate icons... the icon disabling flagging and the icon for archiving is
+the same." CORRECT, and it was the worst pair in the gutter. `⌀` (U+2300 DIAMETER SIGN, flag-disabled) and
+`⊘` (U+2298 CIRCLED DIVISION SLASH, archived) are DIFFERENT CODEPOINTS but render as the same slashed circle
+in a terminal font — and they occupy DIRECTLY ADJACENT gutter cells, so an archived flag-disabled row read
+as one doubled symbol (`⊘⌀`). Full gutter inventory (cells: `> ` mark head busy desc att arch flag): ↕/• ·
+●◌◇─? · ▶·? · ↓ · * · ⊘ · ⚑⌀. Nothing reused an identical rune for two meanings (`?` is head-unknown AND
+busy-unknown, but that is ONE semantic on two axes — deliberately left).
+CONFERRED (AskUserQuestion, both answered): flag-disabled → **⌁** (U+2301 ELECTRIC ARROW — his pick over my
+recommended ⚐ white flag); **pin marker • REMOVED entirely** ("we don't need an icon for pinned, it's clear
+visually if they are" — pinned rows already render as a block ABOVE the auto block, so POSITION is the
+signal); fold markers ▸/▾ vs busy ▶ left ALONE (his call — different region, different role).
+CODE: FlagGlyph ⌀→⌁ (+ a comment naming the ⊘ adjacency so nobody "tidies" it back); pinMark reduced to the
+move-mode ↕ only (signature now `pinMark(_ api.ThreadRow, moving bool)`); the stale View comment that
+claimed the pin marker was `▏` (it was `•`) fixed; help binding text + colors.go GlyphFlag doc + SKILL
+(glyph list, keymap, manual-ordering paragraph) synced.
+THE DURABLE PART — **TestGutterGlyphsDistinct**, a drift guard, because DISTINCT-RUNE CHECKING WOULD NEVER
+HAVE CAUGHT THIS BUG (⊘ and ⌀ *are* distinct). It collects every gutter glyph and refuses (a) two states
+sharing a rune, (b) two states drawing from the same **confusable FAMILY** — a blocklist of shapes a
+terminal renders alike at one cell: slashed circle `⊘⌀⊗∅Ø⦸`, dot `·•∙‧⋅`, right triangle `▶▸►▹`, vertical
+arrow `↕↑↓⇕`. NB ● is deliberately NOT in the dot family (`●·` is the documented headful-idle signature and
+reads fine). SCOPING DECISIONS written INTO the test rather than silently narrowing it: the NAME-column fold
+markers are out of scope (Lukas signed the ▶/▸ overlap off), and `mark/moving` ↕ has an explicit
+`familyExempt` entry vs "vertical arrow" (transient one-row mode marker, three cells from the persistent ↓).
+**THE EXEMPTION BUG WORTH REMEMBERING:** my first exemption was keyed by STATE alone, so exempting
+`mark/moving` waved it past EVERY family — a neuter setting the move marker to `•` PASSED. Re-keyed to
+`state|family`; the same neuter now fails on the dot family. A per-item exemption must name the ONE rule it
+skips, never "all rules".
+CONFORMANCE: claimActionPin could no longer assert the `•` marker, so it now asserts the honest observable
+the removal leaves — POSITION. It seeds a SECOND thread `aaa-top` that sorts above `pinme` while unpinned,
+asserts that baseline FIRST (a rise proves nothing without it), then that `p` lifts pinme above it and `u`
+drops it back. Strictly stronger than the marker check. action-flag claim's render assertion ⌀→⌁.
+ANTI-GAMING (all reverse-edited, never git-checkout — H44; all with -count=1 — H75): ⌁→⌀ ⇒ guard RED naming
+`[arch/archived ⊘ flag/disabled ⌀]` = the exact reported bug; move-marker→• ⇒ RED on the dot family; a stale
+`familyExempt` key ⇒ RED. GREEN: tui units + -race, cmd/sesh (help meta-tests), FULL TUI claims suite
+serially (142s), thread.pin + thread.divider cells local+remote.
+LIVE-PROVEN in an isolated tmux (own SESH_HOME/sockets, every inherited SESH_* stripped, sandbox daemon
+killed by EXPLICIT pid + tempdir removed; live daemon pid 1223 verified untouched): five threads covering
+every state rendered `⊘ ` / `⊘⌁` / ` ⌁` / ` ⚑` / blank — the archived+flag-disabled row is now two visibly
+different symbols — and a pinned row rose to the top of the `all` view carrying NO marker.
+DEPLOY: **binary-only, NO daemon restart, no schema change** (pure TUI-client render). NOT YET DEPLOYED —
+the fleet still renders ⌀ and •. A running sidebar keeps the binary it launched with (H70), so a deployed
+machine also needs `prefix+r` (or mmt-kill/mmt-start) before the sidebar shows the new glyphs.
+
 ## H77 — long single-line headed sends could fill Codex's composer while their Enter was suppressed (2026-08-01, sesh f02e4d9; NO CLI/API/schema change; binary rebuild + supervised daemon restart required; DEPLOYMENT AUTHORIZED 2026-08-02)
 Lukas reported that several child/supervisor reports during the live ITUC cycle appeared in the parent Codex composer in full but did not start a turn until he focused the pane and pressed Enter. This was NOT H76's concurrent shared-buffer cross-delivery bug: the worktree began clean at `8022ed3`, the installed binary and supervised mymain daemon were exact `dbbc9ce` (`vcs.modified=false`, PID 4136119), and H76's unique buffers were active. No live ITUC pane was captured, focused, typed into, or otherwise used as a reproducer.
 

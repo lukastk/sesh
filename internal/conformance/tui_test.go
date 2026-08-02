@@ -59,7 +59,7 @@ var declaredTUIClaims = []string{
 	"filter-target-uuid",        // ctrl+t toggles the search target to uuid; a tid prefix narrows to exactly that thread
 	"filter-esc-applies",        // Esc APPLIES the filter (stays active, / re-edits); normal-mode Esc still quits
 	"filter-start-flag",         // --filter (the popup binding) opens already filtering
-	"action-flag",               // F toggles the flag on the daemon + ⚑/⌀ render; ^f gates; F re-enables (one rule)
+	"action-flag",               // F toggles the flag on the daemon + ⚑/⌁ render; ^f gates; F re-enables (one rule)
 	"view-flag-pierce",          // a flagged child pierces a collapsed parent; unflagging re-hides it
 	"custom-views",              // a [[tui.views]] predicate view shows exactly its rows against REAL ticket state, both directions
 	"action-hold",               // h parks the thread on the daemon (future on_hold_until) + leaves the active view; h again releases it; H opens the explicit-date prompt
@@ -80,7 +80,7 @@ var declaredTUIClaims = []string{
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ◇ glyph rendered; f refuses too; record untouched
 	"action-new-virtual",        // v opens a name prompt and creates a ROOT virtual group on the daemon (--no-parent beats inference); empty submit cancels; cursor preselects the new row
-	"action-pin",                // p pins the selected top-level thread on the daemon (• marker renders); u un-pins it
+	"action-pin",                // p pins the selected top-level thread on the daemon (row rises above the auto block); u un-pins it
 	"action-reorder",            // m enters move mode; ↑ repositions the pinned row above another on the daemon
 	"action-new-divider",        // D opens a label prompt and creates a real pinned divider on the daemon
 	"column-max-width",          // full-width columns are capped by default (a long NAME truncates); `w` toggles the cap off to show full text; a [[tui.column_width]] override raises the cap (config→render)

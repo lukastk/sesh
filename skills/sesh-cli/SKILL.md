@@ -79,8 +79,10 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
     attention. Auto-set when a turn ends or the agent stalls on a
     question/approval — attended or not (the unattended-only gate was removed
     2026-07-25); NEVER auto-cleared (unflag
-    with `f` or `thread flag --off`). `⌀` = auto-flagging **disabled** for
-    this thread (e.g. children a parent thread monitors). A flagged child
+    with `f` or `thread flag --off`). `⌁` = auto-flagging **disabled** for
+    this thread (e.g. children a parent thread monitors) — deliberately not a
+    slashed circle, so it can't be mistaken for the archived `⊘` in the cell
+    immediately to its left. A flagged child
     stays VISIBLE under a collapsed parent (fold-piercing) — a flag never
     hides inside a fold.
   So `●·` = headful & idle = **needs input** (waiting for you); `●▶` = working in a pane;
@@ -324,7 +326,8 @@ v            new VIRTUAL group (name prompt; empty cancels). Creates a root
              group same-machine threads) and lands the cursor on it — then `P`
              children under it. No selection = the local machine.
 p            pin the selected top-level thread to the TOP of the manual-order block
-             (pinned threads render ABOVE the auto-sorted list, marked `•`)
+             (pinned threads render ABOVE the auto-sorted list — position is the
+             marker; there is no pin glyph)
 u            unpin (remove the manual ordering; the thread rejoins the auto block)
 m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it within the
              block, enter/esc commit-and-exit (an unpinned top-level row is pinned first)
@@ -332,7 +335,7 @@ D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal
              in the pinned block, on the SELECTED row's machine; reposition it with `m`
 n            toggle notify          i          toggle the ID column
 f            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
-ctrl+f       toggle auto-flagging for the thread (⌀ when disabled; also unflags)
+ctrl+f       toggle auto-flagging for the thread (⌁ when disabled; also unflags)
 w            toggle the column-width cap (off = every column grows to its content,
              so clipped text — a long name/cwd — becomes fully visible)
 I            thread details: a read-only popup of ALL of the selected thread's
@@ -376,8 +379,9 @@ resolved per machine (a cross-machine parent's hold is not inherited).
 
 **Manual ordering (pinning + dividers).** Threads are otherwise auto-sorted, but you can
 **pin** top-level threads to a manually-ordered block that renders **above** the
-auto-sorted list. `p` pins the selected thread to the top of the block (pinned rows show
-a `•` marker); `u` unpins it (it rejoins the auto block). `m` enters **move mode** — ↑/↓
+auto-sorted list. `p` pins the selected thread to the top of the block; `u` unpins it (it
+rejoins the auto block). Pinned rows carry **no marker glyph** — their position above the
+auto-sorted block is the signal. `m` enters **move mode** — ↑/↓
 reposition the pinned row within the block, enter/esc exit (a still-unpinned top-level row
 is pinned first). Only **top-level** threads can be pinned; a thread loses its pin when
 **archived** or **reparented under another thread**. `D` spawns a **divider** — a

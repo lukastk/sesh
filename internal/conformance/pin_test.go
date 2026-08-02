@@ -263,21 +263,37 @@ func testDivider(t *testing.T, loc matrix.Locality) {
 	}
 }
 
-// claimActionPin: `p` pins the selected top-level thread on the daemon (its row shows
-// the • marker), and `u` un-pins it — the real optimism→persist path.
+// claimActionPin: `p` pins the selected top-level thread on the daemon and its row
+// rises ABOVE the auto-sorted block; `u` un-pins it and it falls back into place —
+// the real optimism→persist path.
+//
+// The visible proof is POSITION, not a marker glyph: pinned rows carry no marker
+// (see pinMark) — the block placement IS the signal, so that is what this asserts.
+// Two threads are needed for the assertion to mean anything: "pinme" sorts BELOW
+// "aaa-top" while unpinned, so a rise past it can only come from the pin.
 func claimActionPin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
+	sb.newHeadlessThread(t, "pi", "aaa-top") // sorts first while nothing is pinned
 	th := sb.newHeadlessThread(t, "pi", "pinme")
 
 	m := tui.New(sb.Home+"/daemon.sock", false).
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
-	m, _ = renderUntilRow(t, m, "pinme") // single thread => cursor on it
+	m, _ = renderUntilRow(t, m, "pinme")
+	m, _ = renderUntilRow(t, m, "aaa-top")
 
+	// Baseline: pinme renders BELOW aaa-top. Without this the rise proves nothing.
+	var view string
+	m, view = render(t, m)
+	if strings.Index(view, "aaa-top") > strings.Index(view, "pinme") {
+		t.Fatalf("precondition: unpinned, aaa-top must render above pinme:\n%s", view)
+	}
+
+	m = selectRowByName(t, m, "pinme")
 	m = runKey(t, m, "p")
 	if m.ActionErr() != nil {
 		t.Fatalf("pin action errored: %v", m.ActionErr())
@@ -285,20 +301,31 @@ func claimActionPin(t *testing.T) {
 	if !waitUntil(10*time.Second, func() bool { return pinOrderOf(t, sb, th.ID) != nil }) {
 		t.Fatalf("p did not pin the thread on the daemon")
 	}
-	// The pinned marker renders.
-	var view string
-	m, view = render(t, m)
-	if !strings.Contains(view, "•") {
-		t.Errorf("pinned row does not render the • marker:\n%s", view)
+	// The pinned row now renders ABOVE the auto-sorted aaa-top.
+	if !waitUntil(10*time.Second, func() bool {
+		m, view = render(t, m)
+		a, p := strings.Index(view, "aaa-top"), strings.Index(view, "pinme")
+		return a >= 0 && p >= 0 && p < a
+	}) {
+		m, view = render(t, m)
+		t.Errorf("pinned row did not rise above the auto-sorted block:\n%s", view)
 	}
 
-	// u un-pins.
+	// u un-pins: it falls back below aaa-top.
 	m = runKey(t, m, "u")
 	if m.ActionErr() != nil {
 		t.Fatalf("unpin action errored: %v", m.ActionErr())
 	}
 	if !waitUntil(10*time.Second, func() bool { return pinOrderOf(t, sb, th.ID) == nil }) {
 		t.Errorf("u did not un-pin the thread on the daemon")
+	}
+	if !waitUntil(10*time.Second, func() bool {
+		m, view = render(t, m)
+		a, p := strings.Index(view, "aaa-top"), strings.Index(view, "pinme")
+		return a >= 0 && p >= 0 && a < p
+	}) {
+		m, view = render(t, m)
+		t.Errorf("un-pinned row did not fall back into the auto-sorted block:\n%s", view)
 	}
 }
 

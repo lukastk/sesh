@@ -3341,7 +3341,7 @@ var helpBindings = []struct{ key, desc string }{
 	{"/", "filter mode (fuzzy)"},
 	{"tab", "view picker (tab/↑↓ move · enter apply · esc cancel · click a view)"},
 	{"f", "toggle the needs-attention flag ⚑"},
-	{"ctrl+f", "toggle auto-flagging (⌀ when disabled)"},
+	{"ctrl+f", "toggle auto-flagging (⌁ when disabled)"},
 	{"h", "hold until tomorrow / release"},
 	{"H", "hold until a date (prompt)"},
 	{"r", "rename"},
@@ -3587,14 +3587,19 @@ func BusyGlyph(row api.ThreadRow) string {
 // FlagGlyph renders the flagged system's gutter cell (schema 44):
 //
 //	⚑ flagged (needs your attention — auto-set on unattended turn ends and
-//	question stalls, or manually; NEVER auto-cleared)   ⌀ flagging disabled
+//	question stalls, or manually; NEVER auto-cleared)   ⌁ flagging disabled
 //	(auto-flags suppressed — e.g. a parent-monitored child)   ' ' neither
+//
+// The disabled marker is ⌁ (U+2301), deliberately NOT a slashed circle: the
+// ARCHIVED cell right beside it renders ⊘, and ⌀ (the previous marker) is
+// visually indistinguishable from it in a terminal font — an archived
+// flag-disabled row read as one doubled symbol.
 func FlagGlyph(row api.ThreadRow) string {
 	if row.Flagged {
 		return "⚑"
 	}
 	if row.FlagDisabled {
-		return "⌀"
+		return "⌁"
 	}
 	return " "
 }
@@ -3613,17 +3618,17 @@ func ArchivedGlyph(row api.ThreadRow) string {
 }
 
 // pinMark renders the 1-cell manual-ordering marker at the very left of a row: ↕
-// while the row is being MOVED (move mode), • when it's PINNED (in the block above
-// the auto-sorted list), a space otherwise (so columns stay aligned across all rows).
-func pinMark(row api.ThreadRow, moving bool) string {
-	switch {
-	case moving:
+// while the row is being MOVED (move mode), a space otherwise (so columns stay
+// aligned across all rows).
+//
+// PINNED rows carry no marker (Lukas): they already render as a block ABOVE the
+// auto-sorted list, which is the visible signal — a glyph on top of that was
+// redundant, and its • read as a second idle · in the neighbouring busy cell.
+func pinMark(_ api.ThreadRow, moving bool) string {
+	if moving {
 		return "↕"
-	case row.PinOrder != nil:
-		return "•"
-	default:
-		return " "
 	}
+	return " "
 }
 
 // dividerLabel is a divider's display label, falling back to "divider" (for messages
@@ -3848,8 +3853,8 @@ func (m Model) View() string {
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		// A 1-cell manual-ordering marker: ↕ while this row is being moved, ▏ when it's
-		// pinned (in the block above the auto list), a space otherwise (keeps columns aligned).
+		// A 1-cell manual-ordering marker: ↕ while this row is being moved, a space
+		// otherwise (keeps columns aligned; pinned rows are marked by POSITION, not a glyph).
 		mark := pinMark(row, m.reordering && row.ID == m.reorderID)
 		desc := DescendantGlyph(descRun[row.ID])
 		arch := ArchivedGlyph(row)

@@ -17,7 +17,7 @@ func init() {
 
 // claimActionFlag: f toggles the selected thread's flag ON THE DAEMON (record
 // truth, not just the render) and the ⚑ glyph appears; F again clears it; ^f
-// disables auto-flagging (⌀); F on the disabled thread RE-ENABLES + flags —
+// disables auto-flagging (⌁); F on the disabled thread RE-ENABLES + flags —
 // the one-rule semantic, proven against the real store.
 func claimActionFlag(t *testing.T) {
 	if testing.Short() {
@@ -58,7 +58,7 @@ func claimActionFlag(t *testing.T) {
 		t.Fatalf("f never cleared the flag")
 	}
 
-	// ^f: disable auto-flagging → ⌀ renders; then f: re-enables AND flags.
+	// ^f: disable auto-flagging → ⌁ renders; then f: re-enables AND flags.
 	m = runKey(t, m, "ctrl+f")
 	if !waitUntil(10*time.Second, func() bool { _, d := flagState(); return d }) {
 		t.Fatalf("^f never disabled flagging on the daemon")
@@ -66,10 +66,10 @@ func claimActionFlag(t *testing.T) {
 	if !waitUntil(10*time.Second, func() bool {
 		var v string
 		m, v = render(t, m)
-		return strings.Contains(v, "⌀")
+		return strings.Contains(v, "⌁")
 	}) {
 		_, v := render(t, m)
-		t.Fatalf("⌀ never rendered:\n%s", v)
+		t.Fatalf("⌁ never rendered:\n%s", v)
 	}
 	m = runKey(t, m, "f")
 	if !waitUntil(10*time.Second, func() bool {

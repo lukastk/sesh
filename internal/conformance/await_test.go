@@ -8,11 +8,15 @@ package conformance
 // real in-flight turn, and unknown ids are loud.
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
@@ -33,8 +37,9 @@ func testAwaitTurn(t *testing.T, agent string, loc matrix.Locality) {
 
 	// Remote: the thread lives on a PEER; await runs on the LOCAL daemon with
 	// no --machine — the mesh replicates the turn state (the design under test).
-	var sb *Sandbox        // where the thread lives
-	var awaiter Runner     // where await runs
+	var sb *Sandbox    // where the thread lives
+	var awaiter Runner // where await runs
+	var awaitMesh *client.Client
 	if loc == matrix.Remote {
 		ensureSSHLocalhost(t)
 		local := newSandbox(t, matrix.Local)
@@ -46,13 +51,37 @@ func testAwaitTurn(t *testing.T, agent string, loc matrix.Locality) {
 			t.Fatalf("peer add: %v\n%s", err, stderr)
 		}
 		sb, awaiter = peer, local.Runner
+		awaitMesh = client.New(local.Home + "/daemon.sock")
 	} else {
 		sb = newSandbox(t, matrix.Local)
 		sb.startDaemon(t)
 		awaiter = sb.Runner
+		awaitMesh = client.New(sb.Home + "/daemon.sock")
 	}
 
 	th := sb.newHeadlessThread(t, agent, "awaitme")
+	meshState := func(want api.Busy) bool {
+		mesh, err := awaitMesh.Mesh(context.Background())
+		if err != nil {
+			return false
+		}
+		for _, mv := range mesh.Machines {
+			for _, row := range mv.Threads {
+				if row.ID == th.ID && (want == "" || row.Busy == want) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	// A remote await reads the LOCAL replicated mesh. Establish that the thread
+	// has actually published into that view before testing its turn transition;
+	// otherwise an exact UUID can race the peer's first snapshot and the cell is
+	// testing initial replication, not await. Local uses the same observable
+	// condition so both localities follow one sequence.
+	if !waitUntil(15*time.Second, func() bool { return meshState("") }) {
+		t.Fatalf("[%s/%s] awaiter's mesh never observed thread %s", agent, loc, th.ID)
+	}
 
 	// Kick a REAL turn and await it CONCURRENTLY: await must return only after
 	// the turn completes (the reply must already be available the moment it
@@ -63,7 +92,10 @@ func testAwaitTurn(t *testing.T, agent string, loc matrix.Locality) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		time.Sleep(2 * time.Second) // let the turn actually start (idle->busy)
+		if !waitUntil(45*time.Second, func() bool { return meshState(api.BusyBusy) }) {
+			awaitFail = fmt.Errorf("awaiter's mesh never observed the real turn become busy")
+			return
+		}
 		awaitOut, awaitErr, awaitFail = awaiter.Run(t, "await", th.ID, "--timeout", "180s")
 	}()
 	sb.headlessTurn(t, th.ID, "Reply with exactly: AWAITED")
@@ -98,7 +130,9 @@ func testAwaitTurn(t *testing.T, agent string, loc matrix.Locality) {
 		defer close(done)
 		sb.headlessTurn(t, th.ID, "Write a detailed 300-word explanation of how DNS resolution works end to end")
 	}()
-	time.Sleep(2 * time.Second) // in flight
+	if !waitUntil(45*time.Second, func() bool { return meshState(api.BusyBusy) }) {
+		t.Fatal("awaiter mesh never observed the timeout probe turn as busy")
+	}
 	if _, stderr, err := awaiter.Run(t, "await", th.ID, "--timeout", "1s"); err == nil {
 		t.Errorf("await --timeout 1s during a real turn succeeded (must be loud)")
 	} else if !strings.Contains(stderr, "still") {

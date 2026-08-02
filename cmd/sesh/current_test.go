@@ -1,10 +1,27 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"strings"
 	"testing"
+
+	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 )
+
+type fakeMeshThreadClient struct {
+	local []api.Thread
+	mesh  api.MeshSnapshot
+}
+
+func (f fakeMeshThreadClient) ThreadList(context.Context, bool, bool) (api.ThreadListResponse, error) {
+	return api.ThreadListResponse{Threads: f.local}, nil
+}
+
+func (f fakeMeshThreadClient) Mesh(context.Context) (api.MeshSnapshot, error) {
+	return f.mesh, nil
+}
 
 // TestGuardEmptyIDFlag proves the empty-selector footgun guard: an --id that is
 // EXPLICITLY passed but empty (e.g. `--id "$X"` with $X unset) is a loud error,
@@ -104,6 +121,29 @@ func TestResolveIDPrefixFullUUIDSkipsList(t *testing.T) {
 	got, err := resolveIDPrefix(nil, id)
 	if err != nil || got != id {
 		t.Fatalf("full uuid should resolve to itself without a list fetch: got %q, %v", got, err)
+	}
+}
+
+func TestResolveMeshThreadIDValidatesFullUUID(t *testing.T) {
+	remoteID := "95276330-5abf-48e0-8793-d9da5d250446"
+	localID := "11111111-1111-4111-8111-111111111111"
+	c := fakeMeshThreadClient{
+		local: []api.Thread{{ID: localID}},
+		mesh: api.MeshSnapshot{Machines: []api.MachineView{{
+			Machine: "peer",
+			Threads: []api.ThreadSnapshot{{Thread: api.Thread{ID: remoteID}}},
+		}}},
+	}
+
+	if got, err := resolveMeshThreadID(c, config.Config{}, remoteID); err != nil || got != remoteID {
+		t.Fatalf("remote full uuid = (%q, %v), want observed mesh id", got, err)
+	}
+	if got, err := resolveMeshThreadID(c, config.Config{}, localID); err != nil || got != localID {
+		t.Fatalf("local full uuid = (%q, %v), want observed local id", got, err)
+	}
+	unknown := "22222222-2222-4222-8222-222222222222"
+	if _, err := resolveMeshThreadID(c, config.Config{}, unknown); err == nil || !strings.Contains(err.Error(), unknown) {
+		t.Fatalf("unknown full uuid must fail loudly, got %v", err)
 	}
 }
 

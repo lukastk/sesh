@@ -38,10 +38,18 @@ import (
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
-	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/tmux"
 )
+
+type threadListClient interface {
+	ThreadList(context.Context, bool, bool) (api.ThreadListResponse, error)
+}
+
+type meshThreadClient interface {
+	threadListClient
+	Mesh(context.Context) (api.MeshSnapshot, error)
+}
 
 // The empty-selector footgun: resolveThreadID treats an empty selector as "infer
 // the current thread" (the F1 convenience). An OMITTED --id is fine — that IS the
@@ -159,7 +167,7 @@ func resolveThreadID(cfg config.Config, explicit string) (string, error) {
 // passes full row IDs, so every routed TUI action paid it). Nothing is lost:
 // an unknown full uuid still fails LOUDLY, just at the verb itself (the
 // daemon's 404) instead of here.
-func resolveIDPrefix(c *client.Client, ref string) (string, error) {
+func resolveIDPrefix(c threadListClient, ref string) (string, error) {
 	if isFullUUID(ref) {
 		return ref, nil
 	}
@@ -209,7 +217,7 @@ func isFullUUID(s string) bool {
 	return true
 }
 
-func lookupThread(c *client.Client, id string) (api.Thread, bool) {
+func lookupThread(c threadListClient, id string) (api.Thread, bool) {
 	threads, err := listAllThreads(c)
 	if err != nil {
 		return api.Thread{}, false
@@ -222,7 +230,7 @@ func lookupThread(c *client.Client, id string) (api.Thread, bool) {
 	return api.Thread{}, false
 }
 
-func listAllThreads(c *client.Client) ([]api.Thread, error) {
+func listAllThreads(c threadListClient) ([]api.Thread, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	resp, err := c.ThreadList(ctx, true, false) // archived included: inference must see parked threads too
@@ -270,14 +278,22 @@ func shortJoin(ids []string, n int) string {
 // resolveMeshThreadID is resolveThreadID with MESH-wide prefix resolution: an
 // explicit ref may name a thread on any machine (await/watchers work across
 // the mesh by id); inference (env/pane) stays local as always.
-func resolveMeshThreadID(c *client.Client, cfg config.Config, explicit string) (string, error) {
+func resolveMeshThreadID(c meshThreadClient, cfg config.Config, explicit string) (string, error) {
 	if explicit == "" {
 		return resolveThreadID(cfg, "")
 	}
 	// LOCAL list first: it sees just-created threads immediately (the mesh
 	// snapshot lags one maintainer publish) and archived ones; the mesh pass
-	// then covers other machines.
-	if id, err := resolveIDPrefix(c, explicit); err == nil {
+	// then covers other machines. resolveIDPrefix's full-UUID fast path skips
+	// existence checks for ordinary verbs (their owner returns the eventual
+	// 404), but a mesh-read verb has no later owner request: it must actually
+	// observe an exact id here, or a not-yet-replicated remote thread would be
+	// misreported as having "vanished" on the first await poll.
+	if isFullUUID(explicit) {
+		if _, ok := lookupThread(c, explicit); ok {
+			return explicit, nil
+		}
+	} else if id, err := resolveIDPrefix(c, explicit); err == nil {
 		return id, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

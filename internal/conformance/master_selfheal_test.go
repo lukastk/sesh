@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
@@ -27,6 +28,18 @@ func testMasterSelfheal(t *testing.T) {
 	// unreachable; the healer must never force a window for it.
 	if _, stderr, err := self.Runner.Run(t, "peer", "add", "--machine", "ghost", "--ssh", "ghost.invalid", "--home", "/nonexistent", "--binary", "/nonexistent", "--tmux-socket", "ghost"); err != nil {
 		t.Fatalf("peer add ghost: %v\n%s", err, stderr)
+	}
+	// The healer's contract is intentionally keyed to the replicated
+	// Reachable bit, not to whether an explicit master window happened to attach.
+	// Observe that precondition before killing the window; otherwise master up's
+	// explicit --machines can create the initial peer window while the healer
+	// still (correctly) has no reachable peer snapshot from which to desire it.
+	meshClient := client.New(self.Home + "/daemon.sock")
+	if !waitUntil(15*time.Second, func() bool {
+		mv, ok := peerView(t, meshClient, peer.Machine)
+		return ok && mv.Reachable
+	}) {
+		t.Fatalf("peer never became reachable in the self-healer's replicated mesh view")
 	}
 
 	if _, stderr, err := self.Runner.Run(t, "master", "up", "--machines", self.Machine+","+peer.Machine); err != nil {

@@ -365,7 +365,10 @@ func testTmuxNav(t *testing.T) {
 
 	bin := seshBin(t)
 	caller := &localRunner{bin: bin, env: map[string]string{
-		"SESH_HOME":          t.TempDir(),
+		// The real ssh transport creates <home>/ssh-cm/%C plus a temporary
+		// suffix. Keep this fixture under the harness's short home so OpenSSH's
+		// Unix control socket stays below sun_path's 108-byte limit.
+		"SESH_HOME":          shortSandboxHome(t),
 		"SESH_MACHINE":       "navcaller",
 		"SESH_MASTER_SOCKET": master,
 	}}

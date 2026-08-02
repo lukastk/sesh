@@ -52,8 +52,8 @@ func testThreadModel(t *testing.T, agent string) {
 	case "pi", "claude":
 		// stored/override are two models whose transcript fingerprints are
 		// DISJOINT, so each substring can only appear if that exact model ran.
-		stored, storedMark := "anthropic/claude-haiku-4-5", "haiku-4-5"
-		override, overrideMark := "anthropic/claude-3-5-haiku-latest", "3-5-haiku-latest"
+		stored, storedMark := "google/gemini-flash-lite-latest", "gemini-flash-lite-latest"
+		override, overrideMark := "google/gemini-flash-latest", "gemini-flash-latest"
 		if agent == "claude" {
 			stored, storedMark = "haiku", "haiku"
 			override, overrideMark = "sonnet", "sonnet"
@@ -66,6 +66,7 @@ func testThreadModel(t *testing.T, agent string) {
 
 		// Turn 1 uses the thread's pinned model.
 		sb.headlessTurn(t, th.ID, "Reply with exactly: ok")
+		requireSuccessfulModelReply(t, sb, th.ID, agent, stored)
 		tr := sb.transcriptText(t, th.ID)
 		if !strings.Contains(tr, storedMark) {
 			t.Fatalf("[%s] pinned model %q did not run: transcript lacks %q", agent, stored, storedMark)
@@ -83,6 +84,7 @@ func testThreadModel(t *testing.T, agent string) {
 		if !waitUntilReply(sb, t, th.ID) {
 			t.Fatalf("[%s] override turn never completed", agent)
 		}
+		requireSuccessfulModelReply(t, sb, th.ID, agent, override)
 		tr = sb.transcriptText(t, th.ID)
 		if !strings.Contains(tr, overrideMark) {
 			t.Fatalf("[%s] per-turn --model override %q was not honored: transcript lacks %q", agent, override, overrideMark)
@@ -185,4 +187,12 @@ func waitUntilReply(sb *Sandbox, t *testing.T, id string) bool {
 		r := sb.headlessReply(t, id)
 		return !r.Working && r.HaveReply
 	})
+}
+
+func requireSuccessfulModelReply(t *testing.T, sb *Sandbox, id, agent, model string) {
+	t.Helper()
+	r := sb.headlessReply(t, id)
+	if !r.HaveReply || r.Reply == "" || strings.HasPrefix(r.Reply, "ERROR:") {
+		t.Fatalf("[%s] real turn with model %q failed before a transcript could prove model selection: %+v", agent, model, r)
+	}
 }

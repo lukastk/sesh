@@ -17,6 +17,7 @@ import (
 //   - pi: the extension's agent_settled (turn end);
 //   - codex: the notify hook sesh wires into the sandbox codex config at
 //     spawn (turn_ended_no_authority — flag without claiming busy authority).
+//
 // Plus the manual surface on all three: --off clears (nothing auto-clears),
 // --disable suppresses a REAL second turn's auto-flag, --on re-enables and
 // flags (the one-rule semantic).
@@ -100,16 +101,17 @@ func testFlagged(t *testing.T, agent string, loc matrix.Locality) {
 	// surface): an AskUserQuestion prompt must flag the thread MID-STALL with
 	// the question as the reason — waiting for a turn edge would never come.
 	if agent == "claude" {
+		const questionMarker = "SESH_FLAG_QUESTION_7F3A"
 		if _, stderr, err := sb.Runner.Run(t, "thread", "flag", "--off", "--id", th.ID); err != nil {
 			t.Fatalf("flag --off: %v\n%s", err, stderr)
 		}
-		sb.sendKeys(t, pane, "Use the AskUserQuestion tool to ask me whether I prefer red or blue. You must use the AskUserQuestion tool, do not answer yourself.")
+		sb.sendKeys(t, pane, "Use the AskUserQuestion tool now. Ask exactly this question, preserving its marker verbatim: SESH_FLAG_QUESTION_7F3A: Do you prefer red or blue? You must use the tool; do not answer the question yourself.")
 		if !waitUntil(120*time.Second, func() bool {
 			s := sb.threadSnapshot(t, th.ID)
-			return s.Flagged && strings.Contains(s.FlagReason, "red or blue")
+			return s.Flagged && strings.Contains(s.FlagReason, questionMarker)
 		}) {
 			s := sb.threadSnapshot(t, th.ID)
-			t.Fatalf("AskUserQuestion never flagged with the question (flagged=%v reason=%q)", s.Flagged, s.FlagReason)
+			t.Fatalf("AskUserQuestion never flagged with marker %q (flagged=%v reason=%q)", questionMarker, s.Flagged, s.FlagReason)
 		}
 	}
 }

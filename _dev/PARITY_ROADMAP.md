@@ -392,8 +392,11 @@ stays for ACCIDENTAL forks; this is the deliberate verb.
 **Verify:** cells per agent: forked thread continues from the branch point
 (remembers pre-fork sentinel, diverges after); original untouched.
 **SHIPPED 2026-06-10** — fork.go ported near-verbatim (turn boundaries:
-claude/pi assistant-text, codex task_complete; id rewrite preserves key
-order; per-agent timestamped DestPath). Daemon-side newForkedThread on POST
+claude/pi assistant-text, codex task_complete; per-agent timestamped DestPath).
+The session id is rewritten for every agent; Claude additionally re-keys the
+copied top-level `uuid`/`parentUuid`/`logicalParentUuid` graph so an intentional
+sesh branch has a distinct conversation root and cannot be mistaken for
+Claude's native resume/rewind copy lineage. Daemon-side newForkedThread on POST
 /v1/threads {fork_from, message_id}: headless-born, fresh AgentSessionID,
 HeadlessStarted=true (turns RESUME the branch). CLI: agent/cwd default to the
 source's. Cells thread.fork 3×2 (165 total): A-not-B divergence, branch

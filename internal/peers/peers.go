@@ -16,6 +16,42 @@ import (
 	"github.com/lukastk/sesh/internal/config"
 )
 
+// Keepalive cadence for every ssh sesh opens: probe the far end every
+// sshAliveInterval seconds and give up after sshAliveCountMax unanswered probes
+// (~45s to notice). See SSHKeepaliveArgs for why this is not optional.
+const (
+	sshAliveInterval = "15"
+	sshAliveCountMax = "3"
+)
+
+// SSHKeepaliveArgs returns the ssh options that make a DEAD connection actually
+// die. Without them ssh only notices a peer that vanished when it next has bytes
+// to send -- and a master-window attach into an idle work server has none for
+// hours, so a path that dies silently (no FIN, no RST: a laptop sleeping, a
+// network changing under it) leaves ssh blocked forever on a socket nobody is
+// listening to. That is not a hypothetical: it wedged the macbook cockpit after
+// every sleep. The window kept painting its last pre-sleep frame, and because the
+// far side's sshd kept the pty open, the remote tmux still listed that client, so
+// the master-client marker still matched it and `tmux nav` cheerfully switched a
+// dead client and reported success. Nothing recovered it short of rebuilding the
+// whole master (mmt-kill/mmt-start), because `sesh master window`'s supervisor
+// re-establishes only when the attach process EXITS -- which a blocked ssh never
+// does.
+//
+// The OS TCP keepalive is not a backstop worth having here: it is ~2h idle on
+// both macOS and Linux (the same reason the terminal bridge pings its websocket
+// itself -- see internal/daemon/terminal.go).
+//
+// A false positive costs one reconnect (sub-second, via the supervisor's existing
+// backoff) plus a redraw; a missed detection costs a cockpit wedged until the user
+// notices and restarts it. So this deliberately errs toward disconnecting.
+func SSHKeepaliveArgs() []string {
+	return []string{
+		"-o", "ServerAliveInterval=" + sshAliveInterval,
+		"-o", "ServerAliveCountMax=" + sshAliveCountMax,
+	}
+}
+
 // SSHMultiplexArgs returns ssh options that reuse ONE persistent connection per
 // peer (ControlMaster/ControlPersist), so callers piggyback on an already-open
 // master instead of paying a fresh TCP+SSH handshake every invocation. The
@@ -33,10 +69,15 @@ import (
 // per-user, and is already the dir the daemon and CLI agree on (daemon.sock lives
 // there too, so SESH_HOME is already length-constrained), so they still share ONE
 // socket.
+// ConnectTimeout bounds only the HANDSHAKE; the keepalive bounds the rest. A
+// ControlMaster that was established before the machine slept is already past the
+// handshake, so without SSHKeepaliveArgs a routed command riding that dead mux
+// socket hangs with no timeout at all (the nav inner switch over ssh -- cmd/sesh
+// tmux.go -- runs the ssh with no context deadline).
 func SSHMultiplexArgs() []string {
 	dir := filepath.Join(config.ResolveHome(), "ssh-cm")
 	os.MkdirAll(dir, 0o700) //nolint:errcheck — best-effort; ssh falls back to no mux
-	return []string{
+	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "ConnectTimeout=6",
@@ -44,6 +85,7 @@ func SSHMultiplexArgs() []string {
 		"-o", "ControlPath=" + filepath.Join(dir, "%C"),
 		"-o", "ControlPersist=60s",
 	}
+	return append(args, SSHKeepaliveArgs()...)
 }
 
 // Peer is how to reach one remote machine's daemon. Two transports:

@@ -181,7 +181,11 @@ func tmuxNav(cfg config.Config, args []string) error {
 				"[ -n \"$w\" ] && tmux -L " + sock + " select-window -t \"=$S:$w\" 2>/dev/null; " +
 				"env -u TMUX tmux -u -L " + sock + " attach -t \"$S\""
 		}
-		sshArgs := append([]string{"ssh", "-t", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+		// Long-lived interactive attach, same hazard as a master window's: keepalives
+		// so a silently-dead path drops the user back to their shell instead of
+		// freezing the terminal on a stale frame (peers.SSHKeepaliveArgs).
+		sshArgs := append([]string{"ssh", "-t", "-o", "StrictHostKeyChecking=no"}, peers.SSHKeepaliveArgs()...)
+		sshArgs = append(sshArgs, peer.SSHArgs()...)
 		sshArgs = append(sshArgs, peer.SSH, remote)
 		return syscall.Exec(sb, sshArgs, os.Environ())
 	}

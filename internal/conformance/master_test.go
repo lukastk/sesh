@@ -1,12 +1,16 @@
 package conformance
 
 import (
+	"net"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lukastk/sesh/internal/matrix"
+	"github.com/lukastk/sesh/internal/tmux"
 )
 
 func init() {
@@ -60,13 +64,24 @@ func masterSessionNamesOn(socket string) []string {
 // each so each work server has a session to attach into. Returns (self, peer).
 func setupMasterPair(t *testing.T, selfOpts ...sandboxOpt) (self, peer *Sandbox) {
 	t.Helper()
+	return setupMasterPairVia(t, "localhost", "", selfOpts...)
+}
+
+// setupMasterPairVia is setupMasterPair with an explicit ssh destination and port, so a
+// test can put a controllable relay between the master window and the peer's sshd.
+func setupMasterPairVia(t *testing.T, sshDest, port string, selfOpts ...sandboxOpt) (self, peer *Sandbox) {
+	t.Helper()
 	ensureSSHLocalhost(t)
 	self = newSandbox(t, matrix.Local, selfOpts...)
 	self.startDaemon(t)
 	peer = newSandbox(t, matrix.Local)
 	peer.startDaemon(t)
 	bin := seshBin(t)
-	if _, stderr, err := self.Runner.Run(t, "peer", "add", "--machine", peer.Machine, "--ssh", "localhost", "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket); err != nil {
+	add := []string{"peer", "add", "--machine", peer.Machine, "--ssh", sshDest, "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket}
+	if port != "" {
+		add = append(add, "--port", port)
+	}
+	if _, stderr, err := self.Runner.Run(t, add...); err != nil {
 		t.Fatalf("peer add: %v\n%s", err, stderr)
 	}
 	// Headed threads => a real session exists on each work server (so attach succeeds).
@@ -110,15 +125,30 @@ func testMasterUp(t *testing.T) {
 	}
 }
 
-// testMasterReconnect asserts the per-window supervisor self-heals: after the attach
-// is dropped, it re-establishes — for both the local window and the ssh-localhost peer
-// window. The drop is observed (client count really hits 0) before the heal, so a
-// no-op can't pass.
+// masterWedgeHealTimeout bounds the WEDGED-drop heal: ssh's keepalive gives up after
+// peers.SSHKeepaliveArgs' interval × count (~45s), then the supervisor's backoff (≤5s)
+// and a fresh attach. Generous, because the failure it guards against is unbounded.
+const masterWedgeHealTimeout = 120 * time.Second
+
+// testMasterReconnect asserts the per-window supervisor self-heals from BOTH shapes of
+// drop, for the local window and the ssh-localhost peer window:
+//
+//   - CLEAN: the attach exits (detach-client). The drop is observed (client count really
+//     hits 0) before the heal, so a no-op can't pass.
+//   - WEDGED: the connection is blackholed and the attach does NOT exit. This is the
+//     shape that wedged the macbook cockpit after every sleep, and the clean case cannot
+//     stand in for it: the supervisor re-establishes only when the attach process exits,
+//     so with no ssh keepalive it waits forever while the window paints a stale frame and
+//     `tmux nav` keeps "succeeding" against a dead client. Asserted on the MARKER file,
+//     because that is what nav actually resolves.
 func testMasterReconnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	self, peer := setupMasterPair(t)
+	// Reach the peer THROUGH a relay we can blackhole. The clean phase below behaves
+	// identically through it, so both shapes exercise one setup.
+	relay := newBlackholeRelay(t, "127.0.0.1:22")
+	self, peer := setupMasterPairVia(t, "127.0.0.1", relay.Port)
 	if _, stderr, err := self.Runner.Run(t, "master", "up", "--machines", self.Machine+","+peer.Machine); err != nil {
 		t.Fatalf("master up: %v\n%s", err, stderr)
 	}
@@ -143,6 +173,176 @@ func testMasterReconnect(t *testing.T) {
 			t.Errorf("%s window did not reconnect after the drop", m.name)
 		}
 	}
+
+	// --- WEDGED drop (ssh path only: a local attach has no network to lose) ---
+	marker := tmux.MasterClientMarker(peer.Home, self.Machine)
+	before := strings.TrimSpace(readFileString(marker))
+	if before == "" {
+		t.Fatalf("peer window never recorded its client in %s", marker)
+	}
+	if !clientListed(peer.TmuxSocket, before) {
+		t.Fatalf("marker %q does not name a live client on the peer work server before the freeze", before)
+	}
+
+	relay.Freeze()
+
+	// The zombie client stays listed on the peer's work server — its sshd still holds the
+	// pty, and only the far machine's ClientAliveInterval reaps that — so a client-COUNT
+	// assertion would pass vacuously here. The honest observable is the marker naming a
+	// DIFFERENT, live client: that is precisely what nav resolves, i.e. the difference
+	// between the user's next thread selection landing and silently switching a dead one.
+	healed := waitUntil(masterWedgeHealTimeout, func() bool {
+		now := strings.TrimSpace(readFileString(marker))
+		return now != "" && now != before && clientListed(peer.TmuxSocket, now)
+	})
+	if !healed {
+		t.Errorf("peer window did not re-establish after a BLACKHOLED connection: marker %s still %q after %s "+
+			"(the attach never exited, so the supervisor never re-ran — this is the post-sleep cockpit wedge)",
+			marker, strings.TrimSpace(readFileString(marker)), masterWedgeHealTimeout)
+	}
+}
+
+// readFileString reads a file, returning "" when it is missing (a marker the supervisor
+// has not written yet is a legitimate transient state, not an error).
+func readFileString(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// clientListed reports whether "<client_name> <client_pid>" is a current client of the
+// work server on socket — the SAME liveness contract nav's inner switch applies (see
+// tmux.InnerSwitchScript), so this asserts what nav will actually conclude.
+func clientListed(socket, nameAndPID string) bool {
+	out, err := exec.Command("tmux", "-L", socket, "list-clients", "-F", "#{client_name} #{client_pid}").Output()
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(l) == nameAndPID {
+			return true
+		}
+	}
+	return false
+}
+
+// blackholeRelay is a loopback TCP relay whose established connections can be FROZEN:
+// after Freeze() it stops forwarding bytes in both directions on every pair open at that
+// moment and — the whole point — never closes them. No FIN, no RST, just silence. That is
+// what a laptop's ssh connections become when the network dies under them during sleep,
+// and it is the one drop shape `tmux detach-client` can never produce.
+//
+// Connections accepted AFTER Freeze relay normally: the network came back on wake, only
+// the pre-sleep socket is dead. Without that, the supervisor could never reconnect and the
+// test would prove nothing about the fix.
+type blackholeRelay struct {
+	Port string
+
+	mu   sync.Mutex
+	dead []chan struct{}
+	// held keeps every frozen conn referenced: a garbage-collected net.Conn is finalized
+	// CLOSED, which would send exactly the FIN this relay exists to withhold.
+	held []net.Conn
+}
+
+func newBlackholeRelay(t *testing.T, upstream string) *blackholeRelay {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("blackhole relay: listen: %v", err)
+	}
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("blackhole relay: port: %v", err)
+	}
+	r := &blackholeRelay{Port: port}
+	go func() {
+		for {
+			down, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			up, err := net.Dial("tcp", upstream)
+			if err != nil {
+				down.Close() //nolint:errcheck
+				continue
+			}
+			r.pair(down, up)
+		}
+	}()
+	t.Cleanup(func() {
+		ln.Close() //nolint:errcheck
+		r.mu.Lock()
+		held := append([]net.Conn(nil), r.held...)
+		r.mu.Unlock()
+		for _, c := range held {
+			c.Close() //nolint:errcheck
+		}
+		// ssh recorded a host key for [127.0.0.1]:<ephemeral port>; don't leave it in the
+		// developer's known_hosts (a fresh port every run would accumulate forever).
+		exec.Command("ssh-keygen", "-R", "[127.0.0.1]:"+port).Run() //nolint:errcheck
+	})
+	return r
+}
+
+// Freeze blackholes every connection currently open through the relay.
+func (r *blackholeRelay) Freeze() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.dead {
+		close(d)
+	}
+	r.dead = nil
+}
+
+func (r *blackholeRelay) pair(down, up net.Conn) {
+	dead := make(chan struct{})
+	r.mu.Lock()
+	r.dead = append(r.dead, dead)
+	r.held = append(r.held, down, up)
+	r.mu.Unlock()
+	go r.pump(down, up, dead)
+	go r.pump(up, down, dead)
+}
+
+func (r *blackholeRelay) pump(src, dst net.Conn, dead <-chan struct{}) {
+	buf := make([]byte, 32*1024)
+	for {
+		select {
+		case <-dead:
+			return // frozen: stop forwarding and deliberately close NOTHING
+		default:
+		}
+		src.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			select {
+			case <-dead:
+				return
+			default:
+			}
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				closeBoth(src, dst)
+				return
+			}
+		}
+		if rerr != nil {
+			if ne, ok := rerr.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			// A REAL end-of-stream (the clean detach-client phase): propagate the close so
+			// the other end tears down too. Only a freeze withholds it.
+			closeBoth(src, dst)
+			return
+		}
+	}
+}
+
+func closeBoth(a, b net.Conn) {
+	a.Close() //nolint:errcheck
+	b.Close() //nolint:errcheck
 }
 
 // --- raw tmux helpers (assert the observable effect, not sesh's own state) ---

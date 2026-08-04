@@ -320,7 +320,12 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	}
 	marker := tmux.MasterClientMarker(peer.Home, cfg.Machine)
 	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, peer.TmuxConf, marker))
-	sshArgs := append([]string{"-tt", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peer.SSHArgs()...)
+	// Keepalives are load-bearing here, not hygiene: this attach is the process whose
+	// EXIT is the supervisor's only reconnect trigger (see masterWindow), and it can
+	// idle for hours, so a silently-dead path would otherwise strand it forever. See
+	// peers.SSHKeepaliveArgs.
+	sshArgs := append([]string{"-tt", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"}, peers.SSHKeepaliveArgs()...)
+	sshArgs = append(sshArgs, peer.SSHArgs()...)
 	sshArgs = append(sshArgs, peer.SSH, remote)
 	return func() *exec.Cmd {
 		c := exec.Command("ssh", sshArgs...)

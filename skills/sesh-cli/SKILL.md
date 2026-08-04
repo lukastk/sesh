@@ -669,6 +669,20 @@ inbound-less leaf like termux, and otherwise a daemon started by hand without it
 service environment (fix: `supervisorctl restart sesh-daemon`; the same warning is
 logged at daemon startup).
 
+**"The cockpit froze after my laptop slept — I can select threads but nothing opens."**
+A master window is an ssh attach into that machine's work server, and sleep can leave that
+connection dead with no FIN and no RST. ssh notices only when it next has bytes to send,
+which an idle attach never does, so the window keeps painting its last pre-sleep frame.
+Nav still *reports success* — the far side's sshd still holds the pty, so the remote tmux
+still lists that client, the master-client marker still matches it, and `switch-client`
+returns 0 against a client nobody can see. sesh now passes `ServerAliveInterval`
+keepalives on every ssh it opens, so a dead path is dropped within ~45s and the window's
+supervisor re-establishes it by itself. **A running master keeps the binary it was
+launched with**, so after updating sesh you need `mmt-kill && mmt-start` (or
+`sesh master down` + `up`) once before the keepalives are actually in force. If a cockpit
+is wedged right now, that same restart is the recovery — rebuilding the sidebar
+(`prefix+r`) will not help, because the rot is in the window attaches, not the sidebar.
+
 **Mesh sync cadence (demand-driven).** The background peer sync runs at full pace (~1s)
 only while something is consuming the mesh view — a `sesh tui`/sesh-ui poll or an
 `--all-machines` read — or when `[[hooks]]` are configured (hooks observe remote threads

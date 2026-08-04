@@ -1,5 +1,85 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H81 — POST-SLEEP COCKPIT WEDGE (macbook-only): the master window's ssh had NO keepalive, so a silently-dead path never made the attach EXIT — and the supervisor reconnects only on exit; fix = ServerAliveInterval on every ssh sesh opens (2026-08-04, sesh <this commit> + myrig <this commit>; NO schema change; BINARY-ONLY but REQUIRES a master restart to take effect)
+Lukas: "If my computer goes to sleep, my master tmux setup with sesh freezes and a lot of the time it
+never recovers. The sidebar is there and I can try to select different threads but it doesn't open
+anything... The main way I get it to recover is by just restarting it and running `mmt-start`."
+**This is H71's still-open item #1, finally explained.** H71's decisive discriminator (prefix+r does
+NOT clear it, mmt-start does ⇒ the rot is in the MASTER's structures, not the sidebar) was right and
+pointed exactly here: the wedged thing is the per-window **attach process**, which only mmt-kill/
+mmt-start destroys.
+ROOT CAUSE, two halves that combine into a silent failure:
+(a) `masterWindow` (cmd/sesh/master.go) re-establishes ONLY when `cmd.Run()` returns — its comment
+claims it covers "laptop sleep". It doesn't. The ssh was spawned with `-tt -o BatchMode=yes -o
+StrictHostKeyChecking=no` and NOTHING else; there was no `ServerAliveInterval` in sesh, in
+`~/.ssh/config`, or in `/etc/ssh/ssh_config` — verified on macbook AND mymain, both ends. ssh learns
+a peer is gone only when it next has bytes to SEND, and a master attach into an idle work server has
+none for hours. So a path that dies with no FIN and no RST (sleep; network changing underneath)
+leaves ssh blocked forever ⇒ the supervisor never re-runs ⇒ the window paints its last pre-sleep
+frame indefinitely. OS TCP keepalive is not a backstop: ~2h idle on macOS and Linux both.
+(b) NAV STILL REPORTS SUCCESS, which is why there was no error to go on. The far side's sshd keeps
+the pty open, so the remote tmux still lists that client, so `master-client.<origin>` still matches
+it by name AND pid — and that `list-clients` membership is the ENTIRE liveness contract in
+`InnerSwitchScript`/`MarkerClientCurrent`. So nav resolves the dead client, `switch-client -c`
+returns 0, the server-side session really does change, and the bytes go into a dead socket. Exactly
+"I select threads and it doesn't open anything", with a green result.
+WHY MACBOOK ONLY: it is the machine that sleeps (mymain/ideapad/macstudio are always-on). NOT every
+sleep — macOS holds TCP across short sleeps (`TCPKeepAlive=active` in the pmset log; all three of
+that day's inbound connections from mymain/macstudio/termux survived intact), which is precisely
+Lukas's "a lot of the time". DISCRIMINATING EVIDENCE, in the order that cracked it: no keepalive
+anywhere on either end (config, not inference) → `pmset -g log` showed sleep/wake at 17:06→17:08,
+17:35→17:44, 17:59→17:59 with the live master session created 18:00:00, i.e. the mmt-start he ran
+because of this → live `list-clients` + markers + `ps` pairing of every ssh against its far-side
+sshd session. **TIMEZONE TRAP that nearly produced a false positive:** mymain logs `lstart` in UTC
+and macbook in BST, so a genuinely-paired connection looked like an unpaired 1-hour-old orphan. Pair
+ssh processes to sshd sessions by CONVERTING first, or you will "find" wedges that aren't there.
+FIX: `peers.SSHKeepaliveArgs()` (ServerAliveInterval=15, CountMax=3 ⇒ ~45s) as the single source of
+truth, wired into (1) the master-window attach — the load-bearing one, since its EXIT is the
+supervisor's only reconnect trigger; (2) `nav --attach` (same long-lived-interactive hazard);
+(3) `SSHMultiplexArgs` — `ConnectTimeout` bounds only the HANDSHAKE, and a ControlMaster established
+before the sleep is long past that, so a routed command riding a dead mux socket hung with NO
+timeout at all (the nav inner switch over ssh has no context deadline). Deliberately errs toward
+disconnecting: a false positive costs one sub-second reconnect via the existing backoff, a missed
+detection costs a cockpit wedged for hours. myrig adds the same two options to `home/.ssh/config`'s
+`Host *` for every OTHER outbound ssh (interactive `ssh-target` sessions wedge identically);
+command-line `-o` beats the file so sesh and the config never fight (verified with `ssh -G`).
+TEST — the point of the whole entry: `master.reconnect` was GREEN throughout and could never have
+caught this, because it drops the attach with `tmux detach-client` = a CLEAN exit, the one shape the
+supervisor already handled. Its green is what made MASTER.md's "laptop sleep" claim look tested. The
+cell now also does a WEDGED drop: a `blackholeRelay` (in-test loopback TCP relay) that on `Freeze()`
+stops forwarding both directions on the connections open at that moment and **never closes them** —
+no FIN, no RST — while still relaying connections accepted AFTER the freeze (the network came back
+on wake; only the pre-sleep socket is dead — without that the supervisor could never reconnect and
+the test would prove nothing). Two things that would have made it vacuous: (i) it asserts the MARKER
+file now names a DIFFERENT, LIVE client, NOT a client count — the zombie stays listed on the work
+server (only the far machine's sshd reaps that), so a count assertion passes trivially; asserting
+the marker is also asserting exactly what nav resolves, i.e. whether the next thread selection
+lands. (ii) the relay must keep every frozen `net.Conn` REFERENCED — a GC'd net.Conn is finalized
+CLOSED, which would send the very FIN the relay exists to withhold. ANTI-GAMING (reverse-edited,
+never git-checkout — H44; `-count=1` — H75): `SSHKeepaliveArgs` → nil turns the cell RED naming the
+exact user report ("peer window did not re-establish after a BLACKHOLED connection: marker … still
+"/dev/ttys028 39094" after 2m0s — the attach never exited"). Green in 71s, red at the full 131s.
+GREEN: master.up/reconnect/holding, tmux.nav, tmux.nav-in-client, tmux.nav-window, mesh.snapshot
+(+.http), route.parity (+.http); `go vet ./...`; all non-conformance packages plain and `-race`.
+PRE-EXISTING REDS ON MACBOOK (verified NOT mine on a clean detached worktree at 03c2fc7, byte-
+identical messages): `TestMaintainerDropsStaleReportedBusy` "baseline: busy=idle authority=" — the
+H75 red, still unfixed; and THREE nav cells that all need a nested DIRECT `tmux attach` viewer which
+will not materialise on this box — `tmux.nav-in-client-multi/-/local` ("expected 2 work-socket
+clients, got map[]"), `tmux.nav-master-http/-/remote` ("direct client never parked"),
+`tmux.nav-master-multi/-/remote` ("direct client never attached"). H79 got 246 green on another
+machine, so treat these as macbook-environment reds (same class as H80's TUI-claim reds) — but they
+are REAL reds here and nobody has looked at the viewer-attach helper on macOS.
+NOT DONE, deliberately: the far side never reaps the zombie client (no `ClientAliveInterval` in any
+machine's sshd_config), so a stale `master-client.*` marker can outlive its origin — visible as a
+false `sesh master watchers` entry (which feeds mmt-copy-to-master's auto-detect) and as an extra
+client with a stale size on the work server (the H69 sizing class). Harmless for the reported bug,
+because once the origin reconnects it rewrites the marker to the live client. Left alone because it
+means sudo-editing sshd_config + reloading sshd on five machines, which risks locking Lukas out of
+one — his call, not a thing to do unprompted.
+DEPLOY: binary-only, NO daemon restart, no schema/API/CLI change. **But a running master keeps the
+binary its supervisors were launched with, so the fix is inert until `mmt-kill && mmt-start` (the
+H70 lesson, now for the master rather than the sidebar).**
+
 ## H80 — TUI SEARCH silently missed every CHILD thread (uuid AND name): the filter's children-exclusion DEFAULT; fix = default to INCLUDING children, ^y now opts INTO the exclusion (2026-08-02, sesh <this commit>; NO schema change; BINARY-ONLY, no daemon restart; NOT YET DEPLOYED)
 Lukas: "check that the uuid search in sesh tui actually works? I tried searching for
 ef79e834-cffd-49d9-b9e7-8683d9916eae which does exist, but it doesn't come up." It did not work, and

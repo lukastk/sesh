@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/lukastk/sesh/internal/agents/claude"
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/tmux"
@@ -279,5 +281,110 @@ func TestReportStateStampsAgentSession(t *testing.T) {
 	}
 	if got := storedID(); got != "codex-session-2" {
 		t.Fatalf("stored id = %q, want the corrected codex-session-2", got)
+	}
+}
+
+// TestReportStateRefusesForeignSessionStamp reproduces the 2026-08-05
+// corruption in miniature and pins the backstop.
+//
+// A claude BACKGROUND agent runs under claude's machine-global daemon, not the
+// thread's pane, and inherits SESH_THREAD_ID from whatever process started that
+// daemon — so it reports under a FOREIGN thread id. Live, that wrote thread
+// bd2d0b3c's conversation onto thread 86304b66's record: 86304b66 was left
+// pointing at a stranger's transcript and bd2d0b3c at one frozen hours earlier,
+// which is why it could no longer be resumed.
+//
+// The stamp must be refused on the evidence that the reported session's
+// transcript lives under a different cwd — and ONLY the stamp: the lifecycle
+// event still applies, so a thread whose recorded cwd drifts from its agent's
+// real cwd loses auto-correction, never its busy/idle tracking.
+func TestReportStateRefusesForeignSessionStamp(t *testing.T) {
+	claudeHome := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeHome)
+	const (
+		ownCwd     = "/home/u/dev/soogun"
+		foreignCwd = "/home/u/dev/ituc"
+	)
+	writeTranscript := func(cwd, sessionID string) {
+		t.Helper()
+		dir := claude.ProjectDir(claudeHome, cwd)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTranscript(ownCwd, "sess-own")
+	writeTranscript(ownCwd, "sess-own-compacted")
+	writeTranscript(foreignCwd, "sess-foreign")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "sesh.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	d := &Daemon{store: st}
+	if err := st.InsertThread(api.Thread{
+		ID: "tid-own", Machine: "test", SessionName: "s", AgentKind: "claude",
+		Cwd: ownCwd, AgentSessionID: "sess-own",
+	}); err != nil {
+		t.Fatalf("InsertThread: %v", err)
+	}
+	storedID := func() string {
+		t.Helper()
+		th, err := st.GetThread("tid-own")
+		if err != nil {
+			t.Fatalf("GetThread: %v", err)
+		}
+		return th.AgentSessionID
+	}
+	busy := func() bool {
+		t.Helper()
+		d.authMu.Lock()
+		defer d.authMu.Unlock()
+		if a := d.auth["tid-own"]; a != nil {
+			return a.busy
+		}
+		return false
+	}
+
+	// The background agent reports: turn_started carrying ITS OWN session id.
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-own", Source: "sesh:claude-hook", Event: api.ReportTurnStarted,
+		Seq: 1, AgentSessionID: "sess-foreign",
+	}, 1000); err != nil {
+		t.Fatalf("foreign-session report errored: %v", err)
+	}
+	if got := storedID(); got != "sess-own" {
+		t.Fatalf("stored id = %q — a foreign conversation's session id overwrote the record (the 2026-08-05 bug)", got)
+	}
+	// ...but the lifecycle half still landed: we refuse the claim of identity,
+	// not the report.
+	if !busy() {
+		t.Fatal("refusing the stamp also dropped the lifecycle event — busy/idle tracking must survive")
+	}
+
+	// A GENUINE drift (claude compaction mints a new id under the SAME cwd) is
+	// still corrected — the backstop must not break schema 46's whole purpose.
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-own", Source: "sesh:claude-hook", Event: api.ReportTurnStarted,
+		Seq: 2, AgentSessionID: "sess-own-compacted",
+	}, 1001); err != nil {
+		t.Fatalf("same-cwd drift report: %v", err)
+	}
+	if got := storedID(); got != "sess-own-compacted" {
+		t.Fatalf("stored id = %q, want sess-own-compacted — a legitimate compaction drift was refused", got)
+	}
+
+	// A session not yet on disk is a RACE, not a lie: still stamped (fail open).
+	if _, err := d.reportState(api.ReportStateRequest{
+		ThreadID: "tid-own", Source: "sesh:claude-hook", Event: api.ReportTurnStarted,
+		Seq: 3, AgentSessionID: "sess-unwritten",
+	}, 1002); err != nil {
+		t.Fatalf("unwritten-session report: %v", err)
+	}
+	if got := storedID(); got != "sess-unwritten" {
+		t.Fatalf("stored id = %q, want sess-unwritten — a not-yet-written transcript must not be read as foreign", got)
 	}
 }

@@ -19,6 +19,7 @@
 # MAIN conversation's turns are thread state (and only its session id is
 # stamped). SubagentStop is never mapped: claude recap/away-summary turns can
 # emit it after the main turn already stopped (the herdr claude-integration lesson).
+# BACKGROUND sessions are skipped for the same reason, see below.
 #
 # ALWAYS exits 0: a nonzero Stop hook would block claude from stopping, and a
 # reporting failure must never break the agent. The daemon side stays honest —
@@ -28,6 +29,26 @@
 # $SESH_BIN = the spawning daemon's own binary (pane PATH may hold an older
 # installed sesh); PATH fallback only when absent (adopted/pre-43 spawns).
 [ -n "${SESH_THREAD_ID:-}" ] || exit 0
+
+# A BACKGROUND agent (claude's `agents` feature) does NOT run in this thread's
+# tmux pane — it runs under claude's machine-global `claude daemon run`, from a
+# pool of pre-forked spare processes. That daemon is started by whichever claude
+# happens to need it first and INHERITS that process's environment, so every
+# spare carries the SESH_THREAD_ID of an unrelated thread — whichever sesh
+# thread's agent started the daemon. Unix env is frozen at exec, so it can never
+# be corrected. A bg session therefore reports under a FOREIGN thread id, making
+# all of its facts wrong: its busy/idle marks the wrong thread, and its
+# --agent-session stamps the wrong record. Report nothing (same reasoning as the
+# subagent guard).
+#
+# This is not hypothetical: on 2026-08-05 a bg agent hosting thread bd2d0b3c's
+# conversation stamped that conversation's session id onto thread 86304b66's
+# record, leaving bd2d0b3c pointing at a transcript frozen hours earlier and
+# unable to resume ("Session … is currently running as a background agent").
+# The daemon carries an independent backstop (reportstate.go) in case this env
+# var is ever renamed — do not rely on this guard alone.
+[ "${CLAUDE_CODE_SESSION_KIND:-}" != "bg" ] || exit 0
+
 SESH_CMD="${SESH_BIN:-sesh}"
 command -v "$SESH_CMD" >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0

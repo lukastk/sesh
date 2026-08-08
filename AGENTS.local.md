@@ -1,5 +1,80 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H82 — A CLAUDE BACKGROUND AGENT STAMPED ITS CONVERSATION ONTO A DIFFERENT THREAD: bg processes INHERIT SESH_THREAD_ID from whoever started claude's daemon; fix = hook skips bg sessions + daemon refuses a foreign-cwd session stamp (2026-08-06, sesh <this commit>; NO schema/CLI change; binary + supervised daemon restart, and the HOOK is picked up live)
+Lukas: "can you help me find where the sesh bd2d0b3c went? the agent said it had somehow had its sesh
+id changed... I close the session and try to reattach but I'm now getting error messages."
+SYMPTOM: `sesh thread resume` on bd2d0b3c (`ituc-evaluate-board-contract`) failed with sesh's
+confirmAgentLaunched (H34) surfacing claude's own refusal: `Session 9112de36... is currently running
+as a background agent (bg)`. The thread record was intact the whole time — not archived, 10 children.
+ROOT CAUSE, and it is an ENV-INHERITANCE bug, not a sesh-logic bug: claude 2.1.222 runs one
+machine-global `claude daemon run` plus a pool of pre-forked `bg-spare` processes. That daemon is
+started by whichever claude first needs it and inherits THAT process's environment. On mymain it had
+been started by the **soogun-doc** thread's claude (pid 1017217 — visible verbatim in the daemon's own
+`--spawned-by` field), so the daemon AND every spare it forks carry `SESH_THREAD_ID=86304b66`
+(soogun-doc). Unix env is frozen at exec, so it can never be corrected. When the ITUC agent
+self-compacted at 09:43, claude moved the conversation into a bg agent = a claimed spare — which then
+reported to sesh under soogun-doc's id, and H62's stamp rule ("a DIFFERING stored id is CORRECTED")
+wrote the ITUC session `9112de36` onto **soogun-doc's** record. Net: bd2d0b3c kept the stale
+`61ec0ba2` (frozen 19:11) while the live conversation ran to 21:02 in `9112de36`; soogun-doc pointed
+at a stranger's conversation and would have resumed into it.
+DISCRIMINATING ORDER (reusable): grid-JSON'd the id FIRST — it EXISTED, so not H63/H40 view filtering
+and not H35 offline-hiding; then transcript lineage in the project dir showed 61ec0ba2 and 9112de36
+carrying IDENTICAL hourly message counts from 09:43 to 19:11 and only 9112de36 continuing after (two
+files, one conversation = a migration, not a fork); then `claude agents --json` named 9112de36
+`kind: background`; then `/proc/<pid>/environ` of the hosting process gave the whole answer in one
+line. **TRAP:** the hosting pid's `cmdline` still reads `claude bg-spare --bg-spare …` (a spare is
+claimed AFTER exec), so grepping ps for the session id finds NOTHING and the agent looks dead — it is
+not. `claude agents --json` is the only honest inventory; the `rv/<id>.sock` under
+`/tmp/cc-daemon-<uid>/<x>/` is the registration and it ACCEPTS connections even with no pty socket.
+NB `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` was still set in that daemon's env — H65 removed it from
+settings.json, but a daemon started BEFORE that keeps it forever, and 2.1.222 has bg agents as a
+first-class feature regardless. **So H65's fix does not cover this and the SKILL's claim that a bg
+session "is never stamped" was exactly backwards — it is stamped, onto the wrong thread.**
+FIX, two layers because the precise signal is a claude-internal env var:
+(a) HOOK (`integrations/claude/sesh-agent-state.sh`): report NOTHING when `CLAUDE_CODE_SESSION_KIND=bg`
+— same reasoning as the existing subagent guard. A bg session's thread id is foreign, so its busy/idle
+is as wrong as its session stamp; there is nothing it may legitimately say.
+(b) DAEMON BACKSTOP (`reportstate.go` + `claude.ForeignProjectDir`), which survives that env var being
+renamed: claude's project dir is a pure function of cwd, so a reported session whose transcript sits
+under a DIFFERENT project dir than the thread's cwd is HARD PROOF the reporter is not this thread's
+agent. Refuse the stamp, loudly, keep the stored id.
+TWO DESIGN CHOICES THAT ARE THE WHOLE POINT:
+- **One-directional evidence.** Only a positive "foreign" result may refuse. Not-on-disk-yet (a race),
+  under-cwd, and unreadable-home all read as "no contradiction" and still stamp. A false positive
+  costs one un-corrected id (pre-46 behaviour, self-healing); a false negative is corruption.
+- **Refuse the STAMP ONLY, never the lifecycle event.** A thread whose recorded cwd drifts from where
+  its agent actually runs (`thread new --into-pane` on a pane that has since cd'd) would otherwise
+  lose busy/idle tracking too. The evidence is about session ownership; that is all it may veto.
+COVERAGE IS CLAUDE-ONLY, deliberately and documented in the code, not silently narrowed: codex
+rollouts are indexed by session id ALONE (no cwd signal to check against) and pi has no background
+mode and a stable `--session-id`. If either grows one it needs its own arm.
+TESTS: `TestForeignProjectDir` (evidence truth table incl. every must-read-as-no-contradiction case);
+`TestReportStateRefusesForeignSessionStamp` (the incident in miniature — foreign stamp refused, the
+lifecycle half still applied, a SAME-cwd compaction drift still corrected, an unwritten transcript
+still stamped); `TestClaudeHookSkipsBackgroundSession` (every mapped event silent under the bg marker,
+each with a CONTROL run first so an empty log cannot pass vacuously — the H80 lesson).
+ANTI-GAMING (all reverse-edited, never git-checkout — H44; all `-count=1` — H75): hook guard neutered
+=> RED printing the exact bug (`--id tid-inherited … --agent-session bg-sess`); daemon guard `&& false`
+=> RED `stored id = "sess-foreign" — a foreign conversation's session id overwrote the record`;
+evidence scan `&& false` => RED. GREEN: every non-conformance package plain AND `-race`; `go vet`;
+real-agent cells `thread.state-authority` 4/4 (claude+pi x local+remote — proves the hook still
+reports in-pane and the backstop refuses nothing legitimate) and `thread.flagged/claude` 2/2.
+`thread.codex-session-capture` FAILED ONCE then passed 3x — a real-codex flake; codex is logically
+exempt (`kind != Claude` returns before any check), so its stamp path is byte-identical.
+RECOVERY PERFORMED for Lukas before the fix (the runbook if it recurs): the bg agent still holds the
+conversation, so `--fork-session` it. Here, done sesh-natively with no claude run at all: stamp the
+thread with the bg session id, `thread new --fork-from <thread>` (H79's `rewriteClaudeBranch` gives the
+copy a DISTINCT uuid root, so it cannot resolve back into the lock), re-stamp the thread with the
+fork's id, delete the temp fork RECORD (the transcript stays). Verified byte-complete: same 2295 lines,
+1888 messages, same final timestamp. Then `resume` worked and soogun-doc was re-stamped to its real
+session `a14eb8d1`. Cross-checked every thread on the mesh afterwards: none pinned to a live bg session.
+NOT DONE, deliberately: the offending `claude daemon run` (pid 2653752) still carries the stale
+SESH_THREAD_ID and still hosts FOUR live bg agents across three boxes, so killing it is Lukas's call —
+these guards make a future bg agent harmless without it, which is the point.
+DEPLOY: no schema/API/CLI change. The **hook is re-read by claude per event**, so a `git pull` of the
+sesh checkout makes layer (a) live in already-running claude sessions with NO restart (the H65 property).
+Layer (b) is in the daemon => rebuild + supervised restart per machine.
+
 ## H81 — POST-SLEEP COCKPIT WEDGE (macbook-only): the master window's ssh had NO keepalive, so a silently-dead path never made the attach EXIT — and the supervisor reconnects only on exit; fix = ServerAliveInterval on every ssh sesh opens (2026-08-04, sesh <this commit> + myrig <this commit>; NO schema change; BINARY-ONLY but REQUIRES a master restart to take effect)
 Lukas: "If my computer goes to sleep, my master tmux setup with sesh freezes and a lot of the time it
 never recovers. The sidebar is there and I can try to select different threads but it doesn't open

@@ -615,9 +615,17 @@ when the thread's pane dies. The reporter also passes the agent's live
 `--agent-session` id every turn, which the daemon stamps onto the thread record
 (schema 46) — so `resume`/reopen lands on the session claude/codex is ACTUALLY
 in even after a compaction/rewind fork mints a new id, instead of relying on the
-fragile leaf resolver. (Background agents — claude's experimental agent-teams —
-run OUTSIDE the sesh pane, so their session is never stamped and sesh can't
-resume it; that feature is disabled in myrig for this reason.) Two SYMMETRIC staleness bounds drop a report the
+fragile leaf resolver. (**Background agents** — claude's `agents` feature — run
+OUTSIDE the sesh pane, under claude's machine-global daemon, so sesh can't
+resume a conversation while one holds it: `resume` surfaces claude's own
+"currently running as a background agent" refusal, and you either attach via
+`claude agents` or branch a copy. Worse, a bg process INHERITS `SESH_THREAD_ID`
+from whatever started that daemon, so it reports under an unrelated thread's id;
+the hook now reports nothing from a bg session, and the daemon independently
+refuses any `--agent-session` whose transcript lives under a different working
+directory than the thread's — a refusal logged loudly, keeping the stored id.
+Before both guards a bg agent could write its conversation onto a stranger's
+record, stranding the real thread on a stale transcript.) Two SYMMETRIC staleness bounds drop a report the
 pane contradicts (loudly, in the daemon log, degrading to `heuristic` so it is
 visible): a reported-BUSY on a pane byte-stable for 2 minutes (the lost-turn_end
 class — claude's Stop hook does not fire on a user interrupt/Esc, which would

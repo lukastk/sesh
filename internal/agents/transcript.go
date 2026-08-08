@@ -66,6 +66,29 @@ func ResolveCurrentSession(kind Kind, storedID, cwd string, homes Homes) (string
 	return claude.ResolveLeafSession(homes.Claude, cwd, storedID)
 }
 
+// ForeignSessionCwd reports where a reported agent-session id's transcript
+// ACTUALLY lives, when that is demonstrably a DIFFERENT working directory than
+// the thread's cwd — i.e. hard evidence that the reporter is not this thread's
+// agent. Only a true result is evidence; see claude.ForeignProjectDir for why
+// the asymmetry is load-bearing.
+//
+// COVERAGE IS CLAUDE-ONLY, deliberately and not silently:
+//   - claude has background agents, which is the whole reason this exists, and
+//     its transcript path is a pure function of cwd — so the check is exact.
+//   - codex rollouts are indexed by session id ALONE (FindRolloutByID takes no
+//     cwd), so its on-disk layout carries no cwd signal to check against.
+//   - pi sessions are cwd-scoped, but pi has no background-session mode and its
+//     --session-id is stable across resume, so there is no drift to police.
+//
+// Both are therefore unchecked here and rely on the reporter being in-pane.
+// If either grows a detached/background mode, it needs its own arm.
+func ForeignSessionCwd(kind Kind, agentSessionID, cwd string, homes Homes) (string, bool) {
+	if kind != Claude {
+		return "", false
+	}
+	return claude.ForeignProjectDir(homes.Claude, cwd, agentSessionID)
+}
+
 // TranscriptPath resolves a thread conversation's transcript file.
 // found=false means it isn't on disk yet (no turn taken, or another machine's
 // thread) — a legitimate state, not an error.

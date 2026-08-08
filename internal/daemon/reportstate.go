@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
 )
 
@@ -64,12 +65,35 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 	// thread's conversation, so a differing stored id (a past mis-discovery,
 	// or the agent starting a new conversation in place) is corrected, loudly.
 	if req.AgentSessionID != "" && req.AgentSessionID != th.AgentSessionID {
-		if th.AgentSessionID != "" {
-			log.Printf("report-state: thread %s agent session id corrected %s -> %s (reported by %s; the stored id was stale or mis-discovered)",
-				th.ID, th.AgentSessionID, req.AgentSessionID, req.Source)
-		}
-		if serr := d.store.SetThreadAgentSession(th.ID, req.AgentSessionID); serr != nil {
-			return http.StatusInternalServerError, fmt.Errorf("report-state: stamp agent session id: %w", serr)
+		// ...but only when the reporter can actually BE this thread's agent.
+		// A claude BACKGROUND agent runs under claude's machine-global daemon
+		// rather than the thread's pane, and inherits SESH_THREAD_ID from
+		// whatever process started that daemon — so it reports under a foreign
+		// thread id and would otherwise write ITS conversation onto THAT
+		// thread's record. That is exactly what happened on 2026-08-05: thread
+		// 86304b66's record was overwritten with thread bd2d0b3c's session,
+		// leaving bd2d0b3c pinned to a transcript frozen hours earlier and
+		// unresumable. The hook now refuses to report from a bg session, but
+		// that guard keys off a claude-internal env var; this is the backstop
+		// that survives it being renamed.
+		//
+		// Refuses the STAMP ONLY, never the lifecycle event: the evidence is
+		// about session ownership, and a thread whose recorded cwd differs from
+		// the cwd its agent actually runs in (e.g. `thread new --into-pane` on a
+		// pane that has since cd'd) would otherwise lose its busy/idle tracking
+		// too. A refused stamp merely keeps the stored id — the pre-schema-46
+		// behaviour, safe and self-healing; a wrong stamp is corruption.
+		if other, foreign := agents.ForeignSessionCwd(agents.Kind(th.AgentKind), req.AgentSessionID, th.Cwd, agents.ResolveHomes(d.cfg.CodexHome)); foreign {
+			log.Printf("report-state: REFUSED to stamp thread %s (cwd %s) with agent session %s reported by %s — that conversation's transcript lives under project dir %s, a DIFFERENT working directory, so the reporter is not this thread's agent (a claude background agent inherits SESH_THREAD_ID from whatever started claude's daemon). Keeping stored id %q.",
+				th.ID, th.Cwd, req.AgentSessionID, req.Source, other, th.AgentSessionID)
+		} else {
+			if th.AgentSessionID != "" {
+				log.Printf("report-state: thread %s agent session id corrected %s -> %s (reported by %s; the stored id was stale or mis-discovered)",
+					th.ID, th.AgentSessionID, req.AgentSessionID, req.Source)
+			}
+			if serr := d.store.SetThreadAgentSession(th.ID, req.AgentSessionID); serr != nil {
+				return http.StatusInternalServerError, fmt.Errorf("report-state: stamp agent session id: %w", serr)
+			}
 		}
 	}
 	if req.Event == api.ReportTurnEndedNoAuthority {

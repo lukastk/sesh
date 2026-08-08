@@ -74,6 +74,16 @@ these guards make a future bg agent harmless without it, which is the point.
 DEPLOY: no schema/API/CLI change. The **hook is re-read by claude per event**, so a `git pull` of the
 sesh checkout makes layer (a) live in already-running claude sessions with NO restart (the H65 property).
 Layer (b) is in the daemon => rebuild + supervised restart per machine.
+DEPLOY RESULT (2026-08-08, commit e7fd83b): live on ALL SIX machines, every installed binary
+`vcs.revision=e7fd83b` + `vcs.modified=false`. mymain/macbook/macstudio/ideapad/pocket4 rebuilt natively
+(macs via /opt/homebrew/bin/go) and restarted ONLY through supervisor; each `sesh doctor` shows `api
+listening on <tailnet>:7878`. termux rebuilt with PLAIN `go build` (verified CGO_ENABLED=1 / GOOS=android
+per H22), old daemon killed by EXPLICIT pid 2157, relaunched setsid-nohup as pid 28399, schema 46 — logs
+to $HOME since /tmp is unwritable. Mesh healthy after all six restarts (all five peers reachable).
+LIVE-SMOKED against the real supervised mymain daemon: a disposable headless thread with the soogun box
+as cwd, reported with the ITUC session id, was REFUSED with the record byte-unchanged and the loud line
+in the supervisor stderr log; scratch thread deleted. The recovered thread bd2d0b3c stayed headful with
+its agent running across the daemon restart (the daemon never touches the work tmux server).
 
 ## H81 — POST-SLEEP COCKPIT WEDGE (macbook-only): the master window's ssh had NO keepalive, so a silently-dead path never made the attach EXIT — and the supervisor reconnects only on exit; fix = ServerAliveInterval on every ssh sesh opens (2026-08-04, sesh <this commit> + myrig <this commit>; NO schema change; BINARY-ONLY but REQUIRES a master restart to take effect)
 Lukas: "If my computer goes to sleep, my master tmux setup with sesh freezes and a lot of the time it

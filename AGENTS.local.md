@@ -1,5 +1,67 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H83 — termux master cockpit dies ~2min after every `mmt-start`: ANDROID REAPS THE WHOLE COHORT; myrig held NO wake lock (boot script released it 2s in); fix shipped is PARTIAL and known not to be sufficient on its own (2026-08-10, myrig 35e309b; NO sesh change; render-only deploy, ALL SIX)
+Lukas: "My master tmux setup is constantly dying on my termux. Every time I open it, it seems to die
+after around 5 minutes or so."
+MEASURED, not inferred (the method is the reusable part): a 10s sampler on the phone recording
+`ps -e -o pid=,etime=,args=` plus mem/swap. One sample caught the whole thing:
+  19:12:26 total=35  — cockpit healthy, every process aged 01:35
+  19:12:36 total=20  — EVERY cockpit process gone, inside ONE 10s window
+Killed as one cohort: the master tmux server, ALL SIX `sesh master window` supervisors, ALL FIVE peer
+`ssh -tt`, the work server AND its attach. Survivors were exclusively the **setsid-detached** ones
+(sesh daemon, sshd, crond) plus shells started later. Cockpit lifetime: **1m46s**. This is Android
+reaping a process cohort — nothing in tmux or sesh failed, and no sesh code is implicated.
+THREE CONTRIBUTING FACTORS, only one of which is a bug we own:
+(a) **The phone is out of memory.** 11.5GB RAM ~9GB used, **swap 100% EXHAUSTED (5785/5785 MB)**,
+    MemAvailable ~1.3-1.8GB. Under that pressure Termux's forked children are the softest target on
+    the device. This looks like the DOMINANT factor.
+(b) **The cockpit is by far Termux's biggest cohort.** Baseline termux = **12** processes; with the
+    master up = **39-45**. The cockpit alone costs ~14: 1 master server + 1 window supervisor PER
+    MACHINE (six) + 1 `ssh -tt` per peer (five) + work server + attach. `mmt-start --machines a,b`
+    ALREADY EXISTS (mmt-start forwards "$@" to `sesh master up`) — trimming needs NO code change.
+(c) **termux held no wake lock at all** — the only myrig bug here. `home/^termux^.termux/boot/
+    start-sshd` did `termux-wake-lock; sshd; sleep 2; termux-wake-unlock`, and the lock is a single
+    **GLOBAL, NON-REFCOUNTED** flag, so that one unlock disarmed it device-wide — including for the
+    sesh daemon, whose zshenv block acquires a lock *specifically* to stop Android reaping it. The
+    zshenv's own acquisition sits INSIDE `if ! pgrep -f 'sesh daemon run'`, which in steady state
+    never runs because the daemon is already up. Net: no lock, ever.
+FIX SHIPPED (myrig 35e309b): boot script no longer unlocks (with a comment saying why it must not come
+back — removing an unlock reads as a leak unless you know the flag is global); `mmt-start` acquires,
+guarded to termux with sidebar-toggle.sh's detection (`TERMUX_VERSION` or `SESH_MACHINE == termux`)
+and `command -v`-checked. Deliberately NOT put in the zshenv unconditionally: that is a termux-api
+round trip (~100ms+ and extra child processes) on EVERY shell incl. every ssh command, on a system
+already being reaped for having too many processes.
+**HONESTY — THE FIX IS PARTIAL AND I PROVED IT IS NOT SUFFICIENT:** I had accidentally acquired a wake
+lock at 19:02 with a diagnostic, and `termux-battery-status` confirms termux-api is healthy on this
+box, so a lock was almost certainly **held during the 19:12:36 cull**. So (c) removes a real cause and
+is required for the daemon, but on its own it will NOT stop the reaping. Do not report this as fixed.
+Next lever is (a)/(b), which are Lukas's calls: free memory (a reboot; swap is pinned at 100%), and/or
+`mmt-start --machines mymain,macbook` on the phone.
+NOT DETERMINED, and why: Android 12+'s **phantom process killer** (default cap 32 children) could not
+be confirmed or excluded — `settings get global settings_enable_monitor_phantom_procs` throws
+SecurityException (INTERACT_ACROSS_USERS) on Android 16 from termux, `cmd device_config` reports "Can't
+find service", and `logcat` shows ONLY Termux's own app logs without READ_LOGS, so there are no
+am_kill/lmkd records to read. One data point argues against a strict 32-cap being the trigger: a
+40-child test took the total to 53 and they survived well past the cap. Settling it needs adb
+(`adb shell settings put global settings_enable_monitor_phantom_procs false`).
+`oom_score_adj` of the termux daemon reads **0** (foreground class) throughout, with oom_score 668.
+TRAPS HIT (all previously documented, all bit me again):
+- **`pkill -f <pattern>` matched my own ssh shell** and killed it mid-command (H22/H74). The shell's
+  cmdline contains the pattern. Kill by explicit pid.
+- **A backgrounded `&` inside an `ssh-target <m> '...'` command swallows ALL output** — even the
+  foreground echoes before it. Ship the script with `scp` and run it as a file instead.
+- **A heredoc passed through `ssh-target '...'` gets mangled** by the intervening shell layers. Same
+  fix: scp the script.
+- `/proc/loadavg` is **permission denied** on Android (silently emptied my first sampler).
+- My own 40-child phantom test is what reaped **sshd**, costing ~5 minutes of access to the phone;
+  nothing restarts sshd but a Termux session (its zshenv runs it) or a reboot.
+DEPLOY: render-only, NO daemon restart, NO sesh binary change. The boot script is SYMLINKED into the
+repo so on termux a `git pull` is its whole deploy — but it only runs at boot, so the lock was also
+acquired by hand once. shell.sh is RENDERED jinja → install-home on each machine. All six at 35e309b
+(mymain, termux, macbook, macstudio, ideapad, pocket4), `zsh -n` clean, guard verified to fire for
+both termux signals and skip elsewhere. NB install-home takes the FULL comma `$MYRIG_TARGETS` (a lone
+machine name deletes symlinks — H33), and must not be piped to `tail` (H30).
+
 ## H82 — A CLAUDE BACKGROUND AGENT STAMPED ITS CONVERSATION ONTO A DIFFERENT THREAD: bg processes INHERIT SESH_THREAD_ID from whoever started claude's daemon; fix = hook skips bg sessions + daemon refuses a foreign-cwd session stamp (2026-08-06, sesh <this commit>; NO schema/CLI change; binary + supervised daemon restart, and the HOOK is picked up live)
 Lukas: "can you help me find where the sesh bd2d0b3c went? the agent said it had somehow had its sesh
 id changed... I close the session and try to reattach but I'm now getting error messages."

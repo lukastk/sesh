@@ -1,5 +1,89 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H84 — THE termux cockpit killer IDENTIFIED AND FIXED: Android's PHANTOM PROCESS KILLER (cap 32); cause = pocket4 made the fleet SIX machines (2 procs each) so the idle cockpit crossed 32; fix = adb `device_config` bump max_phantom_processes → 2^31-1, all six machines KEPT (2026-08-11, NO code change — device setting; H83's "NOT DETERMINED" is now RESOLVED)
+Follow-up to H83, which shipped the wake-lock fix but stated (correctly) that it was PARTIAL and that
+the phantom process killer "could not be confirmed or excluded" without adb. Lukas rebooted, restarted
+the master, and it was culled AGAIN — so I did the full diagnosis with adb this time. Lukas's constraint:
+"I don't really want to limit the amount of machines my master is connected to" — so `mmt-start
+--machines a,b` (H83's lever) was off the table; the fix had to keep all six windows.
+WHAT H83 GOT RIGHT AND WHAT IT COULDN'T SEE: the cohort-reaping observation (39→20 in one 10s sample,
+only setsid-detached survivors) was correct, but I had FOUR wrong theories before adb, each killed by
+its own evidence — memory pressure (the cockpit died with **4.8GB free / swap 65%**, a healthy phone),
+sleep/network (Tailscale **direct, pong 185ms AT the moment of death**), the wake lock (held since boot,
+didn't save it — exactly as H83 predicted), and H81's ssh keepalives burning CPU (**62→64 CPU ticks in
+8 minutes** — nothing; and mymain's OWN cockpit shows the identical offline-peer ssh churn for 5h with
+no harm, so it is normal fleet-wide behaviour, not a phone regression). All four are recorded here so
+nobody re-runs them.
+THE DISCRIMINATOR I couldn't get until adb: `oom_score_adj` of the dying processes stayed at **50**
+(PERCEPTIBLE_RECENT_FOREGROUND — a PROTECTED class) right through the kill. A process at adj=50 is NOT
+an LMK target. That is the tell: the phantom process killer does NOT consult app adj — it culls an
+app's CHILD processes by COUNT against a fixed cap, independent of memory, priority, sleep, or wake
+locks. Every negative result falls out of that at once.
+DIRECT CONFIRMATION (adb paired over Tailscale — the android-control skill; pairing had lapsed, needed
+a fresh pair + a wireless-debugging OFF/ON toggle before the device left `offline`):
+  `dumpsys activity settings | grep phantom`  →  **max_phantom_processes=32**
+  `dumpsys activity processes | grep PhantomProcessRecord`  →  the cockpit itemised, e.g.
+     `PhantomProcessRecord {…:6980:sesh/u0a440}` — 18 of ~28 phantoms were the cockpit, parent 6980 =
+     the Termux app, uid u0a440. So Android tracks EVERY termux-forked process as a phantom under the
+     app, caps the set at 32, and trims the excess. No longer inferred — read from AM itself.
+THE ARITHMETIC OF "WHY NOW" (this is the part H83 half-had): each cockpit machine costs **2 phantom
+processes** — a `sesh master window` supervisor + its `ssh -tt`/attach. Fleet history: 4 machines →
+ideapad → 5 → **pocket4 (2026-07-28) → 6**. That took the IDLE cockpit from ~23 to ~27 against the cap
+of 32; ordinary activity on top (widget shells, a menu popup, boxyard's 15-min rclone sync, an inbound
+ssh) then crosses 32 ROUTINELY instead of never. Nothing on the phone changed — Android build Mar 2026,
+Termux 0.118.3 unchanged, no sesh/myrig regression. The fleet outgrew the 32-child budget and the
+failure surfaced ~2 weeks later looking like it came from nowhere. Termux binary got H81's keepalives on
+2026-08-08 (H82 deploy), which is a red herring that coincidentally lines up.
+THE TRIGGER IS ACTIVITY, which explains the phenomenology ("dies ~5min after I OPEN it"): crossing 32
+ARMS the killer; the trim is scheduled lazily on process-start / app-state events. So opening the app
+(the widget shell, mmt-start, the attach client, each a phantom) is what pushes it over, and the trim
+lands minutes later. LIVE-PROVEN: a master that had survived 49 minutes idle died within 90s of a
+6-process diagnostic census I ran. The cascade to "everything dies at once" is the tmux SERVER being a
+victim → SIGHUP to every pane's process group → all supervisors+ssh+attach fall together (33→16 in one
+sample); when sshd is the victim instead, the phone drops off ssh entirely (hit that twice, cost ~5min
+of access each time).
+FIX (device setting, NO code change, keeps all six windows — the ONLY option that removes the cliff
+rather than stepping back from it):
+  adb shell settings put global settings_enable_monitor_phantom_procs false   # belt+braces; AM reads
+      the effective toggle from DeviceConfig, so on THIS build the global flag alone did NOT clear the
+      list — the max bump below is what AM actually reflected.
+  adb shell device_config set_sync_disabled_for_tests persistent              # so phenotype re-sync
+      can't revert the next line (MUST precede it)
+  adb shell device_config put activity_manager max_phantom_processes 2147483647
+VERIFIED LIVE in AM's own constants: `dumpsys activity settings` →
+`max_phantom_processes=2147483647` (was 32). Nothing can exceed 2^31-1, so the killer never trims.
+NB `device_config put/override activity_manager settings_enable_monitor_phantom_procs` is
+ALLOWLIST-BLOCKED (SecurityException "must add flag to the allowlist") — the max_phantom_processes flag
+is the writable, older one and is what worked.
+PROOF (adb monitor, run as the `shell` user uid 2000 — deliberately NOT the ssh-into-Termux polling of
+H83, which kept Termux warm and confounded every earlier run; adb shell does not touch Termux's phantom
+accounting): full SIX-machine cockpit, master pid 3809, sampled every 60s, HANDS OFF for 26 minutes.
+  age 01:15 … 07:23 (phantoms=33) … 12:29 (phantoms=33) … 26:46 — SAME pid throughout, termux_procs
+  peaked at 43, phantoms sustained at 32-33 (ABOVE the old cap), **killed_records=0 the whole time**.
+Before the fix an identical 6-machine cockpit died by ~7min (1m46s under memory pressure). It sailed
+straight through every prior death point. FIXED.
+NOT VERIFIED, and it's the one open item: REBOOT DURABILITY. `set_sync_disabled_for_tests persistent`
+is designed to survive reboot and device_config overrides persist, but I could not confirm it on this
+Pixel 9 / Android 16 build without a reboot (which would kill the live cockpit under test). If it
+reverts after a reboot, re-applying is the 3 adb lines above; a durable path is to grant Termux
+`WRITE_SECURE_SETTINGS` (`adb shell pm grant com.termux android.permission.WRITE_SECURE_SETTINGS`) and
+re-assert at boot — but note the max bump is device_config, not `settings global`, so the grant only
+covers the (weaker, this-build-ineffective) global toggle; the robust re-apply still needs adb. Lukas
+to reboot when convenient so this can be checked.
+SESH FOLLOW-UP (defense-in-depth, NOT the fix, only worth it if he ever wants the cap back on): the
+supervisor layer is 6 long-lived Go processes whose only job is respawn-with-backoff. tmux can own that
+via `remain-on-exit on` + a `pane-died` hook → a short-lived `sesh master respawn-pane`, halving the
+per-machine cost 2→1 (idle cockpit ~27→~21). Must preserve H81's exit-driven reconnect (the
+blackhole-wedge cell guards it) and the marker contract (marker write already rides the remote command
+string, survives). Real design + conformance work — a ticket, not something to do unprompted.
+ADB/ANDROID TRAPS (for next time): pairing lapses (Android revokes unused debug auth) → re-pair AND
+toggle wireless-debugging OFF/ON or the device sticks at `offline` after a successful pair; the connect
+port rotates but pairing persists; `dumpsys`/`settings get`/`device_config get` for phantom flags all
+return null/denied to an untrusted app over ssh — you MUST have adb (shell uid 2000) to read them;
+`tmux -L … list-windows` via adb shows 0 windows because uid 2000 can't read Termux's socket (use ssh
+as the termux user for that). This is a device-config change, so there is nothing to commit but this
+log entry.
+
 ## H83 — termux master cockpit dies ~2min after every `mmt-start`: ANDROID REAPS THE WHOLE COHORT; myrig held NO wake lock (boot script released it 2s in); fix shipped is PARTIAL and known not to be sufficient on its own (2026-08-10, myrig 35e309b; NO sesh change; render-only deploy, ALL SIX)
 Lukas: "My master tmux setup is constantly dying on my termux. Every time I open it, it seems to die
 after around 5 minutes or so."

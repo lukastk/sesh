@@ -1,5 +1,57 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H85 — LOCAL MAC COCKPIT CLAUDE LOOKED LOGGED OUT: the local master was NOT SSHing, but its long-lived WORK tmux server had been CREATED by a remote SSH cockpit and retained that audit session; fix = target daemon is sole work-server creator (2026-08-18, sesh c550644 + myrig 119ae59; CLI/config change, no schema change; 4/6 deployed, Mac work-server replacement still pending)
+Lukas: Claude Code works in a normal macbook terminal but says `Login expired · Please run /login`
+inside his local master cockpit; self-SSH reproduces it. His correction was exactly right: the local
+master window does NOT SSH to its own machine. The missing distinction was ATTACHER versus CREATOR.
+The local window attaches directly to `tmux -L sesh`, but that server survives every client and every
+later attach in the security context of the process that originally created it.
+
+MEASURED on both Macs with `sudo launchctl procinfo`, not inferred. macbook: Dock and supervised
+`sesh-daemon` shared Aqua audit session 100022; master tmux also had 100022 (Ghostty), but WORK tmux
+PID 1155 had SSH audit session 100071 / responsible `sshd-keygen-wrapper`. It was born at 11:55:29,
+SEVEN SECONDS before the Aqua daemon at 11:55:36: an always-on remote cockpit won the empty-socket
+race. macstudio had the same split: Dock/daemon/master 100003, WORK tmux PID 1497 in SSH audit session
+100065. A direct SSH Keychain payload read and a command inside either SSH-born work server both fail;
+normal Aqua terminals work. Therefore self-SSH Claude remaining logged out is EXPECTED macOS Keychain
+isolation and is not fixed here. The local cockpit will work once its work server is daemon-born.
+
+ROOT CODE BUG: `sesh master window` used to run raw `tmux new-session -s scratch` whenever an attach
+found no sessions. For a remote machine that command runs inside SSH; `tmux` then permanently carries
+the wrong audit session even after a local client attaches. It also duplicated `SESH_TMUX_CONF` into
+`peers.Peer.TmuxConf`, making the attaching client a second server owner.
+
+FIX (sesh c550644): `master window` no longer creates raw tmux. On an empty socket it invokes the
+TARGET machine's `sesh tmux create-session --name scratch` with explicit target `SESH_HOME`, machine,
+and socket; that CLI calls the already-supervised target daemon, and only the daemon creates the work
+server. Failure is loud and the existing window supervisor retries. Removed `Peer.TmuxConf`,
+`peer add --tmux-conf`, help/docs, and the myrig peers field. myrig 119ae59 renders that smaller peer
+record and documents the Aqua/creator boundary. The sesh-cli skill now says explicitly: raw SSH Claude
+may remain Keychain-isolated; a local cockpit works because its panes live in the Aqua daemon-born
+server.
+
+HONEST TESTS. New `master.remote-work-context` uses real `ssh localhost`, starts an empty peer whose
+daemon alone has `SESH_TEST_DAEMON_CONTEXT=peer-daemon`, and asserts the real work tmux global env has
+that sentinel. It was RED against old production (`unknown variable`) and GREEN after the change.
+Focused matrix: `master.holding`, `master.remote-work-context`, `master.up`, `tmux.work-conf` = 4/4
+green; the 71-second `master.reconnect` cell is green. New command-string unit guards are green; every
+non-conformance package is green plain and `-race`; `go vet ./...` is green. The FULL 247-cell matrix
+did NOT complete and must not be called green: the default run timed out at 10m in unrelated
+`thread.flagged/claude/remote`; a second unchanged run with `-timeout 30m` timed out while waiting for
+unrelated `thread.send.headless/pi/remote`. Neither emitted a failed assertion or final grid.
+
+DEPLOY STATE at log time: mymain, macstudio, ideapad, and termux have myrig 119ae59 + clean native
+sesh c550644 binaries (`vcs.modified=false`), current daemons, rendered peers without `tmux_conf`, and
+master cockpits rebuilt so their long-lived window supervisors run the new code. Supervised machines
+were restarted only via supervisor; termux's exact old daemon PID 16971 was validated, killed, and
+relaunched with the documented setsid environment as PID 16841. macbook and pocket4 did not answer
+Tailscale/SSH and are explicitly PENDING. Also intentionally PENDING: replacing the ALREADY-RUNNING
+SSH-born Mac work servers. Macstudio PID 1497 still holds four sessions and multiple managed/unmanaged
+live panes; killing it would interrupt user work, so deployment did not pretend to mutate its immutable
+audit session. Once quiescent, stop/resume managed threads, replace the work server, and let the Aqua
+daemon create it; do the same on macbook after it wakes and receives the binaries. Future empty-server
+creation is then protected by this change.
+
 ## H84 — THE termux cockpit killer IDENTIFIED AND FIXED: Android's PHANTOM PROCESS KILLER (cap 32); cause = pocket4 made the fleet SIX machines (2 procs each) so the idle cockpit crossed 32; fix = adb `device_config` bump max_phantom_processes → 2^31-1, all six machines KEPT (2026-08-11, NO code change — device setting; H83's "NOT DETERMINED" is now RESOLVED)
 Follow-up to H83, which shipped the wake-lock fix but stated (correctly) that it was PARTIAL and that
 the phantom process killer "could not be confirmed or excluded" without adb. Lukas rebooted, restarted

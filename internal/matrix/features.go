@@ -224,6 +224,11 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "master.remote-work-context",
+		Description: "an ssh master window targeting an EMPTY peer asks that peer's daemon to create the holding work server, so the server inherits the daemon/service context rather than ssh's session context",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-attach",
 		Description: "`tmux nav --attach` (Enter from a plain shell, no tmux) attaches the terminal to the thread — a real client lands on the target session",
 		Localities:  []Locality{Local},

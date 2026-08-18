@@ -259,14 +259,20 @@ func masterWindow(cfg config.Config, args []string) error {
 }
 
 // workAttach builds a shell command that attaches into the work server on `socket`,
-// first creating a holding "scratch" session (a $HOME shell) if the server has none.
+// first asking the machine's daemon to create a holding "scratch" session (a $HOME
+// shell) if the server has none.
 // So a master window for a machine with NO live threads shows a usable shell instead
 // of looping on "no sessions" — and it stays a client of the work server, so nav can
 // switch it into a thread the instant one appears. `attach` (no -t) still prefers the
 // most-recently-used real thread over the placeholder.
-// conf (when non-empty) is the work server's `-f` config, applied if THIS attach is
-// what starts the server (so an empty machine's scratch shell already carries sesh's
-// tmux UI). The daemon applies the same conf when it starts the server for a thread.
+//
+// The daemon delegation is load-bearing on macOS. An ssh process belongs to a separate
+// audit session that cannot read the GUI login Keychain; if an ssh master window starts
+// the long-lived tmux server directly, every later pane inherits that audit session and
+// Claude appears logged out even when attached locally. The supervised daemon runs in
+// Aqua and also owns SESH_TMUX_CONF, so it is the only process allowed to create the
+// work server. Until the daemon is ready the attach fails loudly and the surrounding
+// masterWindow supervisor retries.
 // marker is the MasterClientMarker path on the WORK machine: before attaching, the
 // script records "<tty> <pid>" — which, after the exec, are exactly the tmux client's
 // #{client_name} and #{client_pid} — so nav's inner switch can target THIS window's
@@ -282,24 +288,41 @@ func masterWindow(cfg config.Config, args []string) error {
 // REMOTE panes while its local ones (no ssh hop, locale inherited directly) were fine.
 // A master window is a channel between two terminals that are always UTF-8, so state
 // that rather than inherit it.
-func workAttach(socket, conf, marker string) string {
-	newSess := fmt.Sprintf(`tmux -L %s new-session -d -s scratch -c "$HOME"`, socket)
-	if conf != "" {
-		newSess = fmt.Sprintf(`tmux -f "%s" -L %s new-session -d -s scratch -c "$HOME"`, conf, socket)
-	}
+func workAttach(socket, marker, ensureHolding string) string {
 	return fmt.Sprintf(
-		`tmux -L %[1]s list-sessions >/dev/null 2>&1 || %[2]s; printf '%%s %%s\n' "$(tty)" "$$" > "%[3]s"; exec tmux -u -L %[1]s attach`,
-		socket, newSess, marker)
+		`set -e; if ! tmux -L %[1]s list-sessions >/dev/null 2>&1; then %[2]s >/dev/null; fi; printf '%%s %%s\n' "$(tty)" "$$" > %[3]s; exec tmux -u -L %[1]s attach`,
+		shellQuote(socket), ensureHolding, shellQuote(marker))
+}
+
+// holdingCreateCommand is run on the WORK machine (locally or inside the remote
+// ssh shell). It is a daemon API call, not a direct tmux command: the child CLI's
+// explicit identity/home select that machine's already-running local daemon, and
+// the daemon creates the real server in its own service context.
+func holdingCreateCommand(binary, home, machine, socket string) string {
+	return strings.Join([]string{
+		"env",
+		"SESH_HOME=" + shellQuote(home),
+		"SESH_MACHINE=" + shellQuote(machine),
+		"SESH_TMUX_SOCKET=" + shellQuote(socket),
+		shellQuote(binary),
+		"tmux", "create-session", "--name", "scratch", "--dir", `"$HOME"`,
+	}, " ")
 }
 
 // masterAttachCommand returns a factory that builds the attach process for a machine:
 // locally (self) or over `ssh -t` (a peer; work socket from the peer registry). Both
-// go through workAttach so an empty work server falls back to a holding shell.
+// go through workAttach so an empty work server is created by that machine's daemon
+// and falls back to a holding shell.
 func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, error) {
 	if machine == cfg.Machine {
+		binary, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("master window: resolve sesh executable: %w", err)
+		}
 		marker := tmux.MasterClientMarker(cfg.Home, cfg.Machine)
+		ensureHolding := holdingCreateCommand(binary, cfg.Home, cfg.Machine, cfg.TmuxSocket)
 		return func() *exec.Cmd {
-			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket, cfg.TmuxConf, marker))
+			c := exec.Command("sh", "-c", workAttach(cfg.TmuxSocket, marker, ensureHolding))
 			c.Env = tmuxCleanEnv()
 			return c
 		}, nil
@@ -318,8 +341,12 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	if peer.Home == "" {
 		return nil, fmt.Errorf("master window: peer %q has no home (see `sesh peer add --home`)", machine)
 	}
+	if peer.Binary == "" {
+		return nil, fmt.Errorf("master window: peer %q has no binary (see `sesh peer add --binary`)", machine)
+	}
 	marker := tmux.MasterClientMarker(peer.Home, cfg.Machine)
-	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, peer.TmuxConf, marker))
+	ensureHolding := holdingCreateCommand(peer.Binary, peer.Home, peer.Machine, peer.TmuxSocket)
+	remote := "env -u TMUX sh -c " + shellQuote(workAttach(peer.TmuxSocket, marker, ensureHolding))
 	// Keepalives are load-bearing here, not hygiene: this attach is the process whose
 	// EXIT is the supervisor's only reconnect trigger (see masterWindow), and it can
 	// idle for hours, so a silently-dead path would otherwise strand it forever. See

@@ -567,7 +567,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"peer add": {
 		summary:  "register a remote machine; an --api-addr (with a token) opts the peer into HTTP transport, otherwise ssh",
-		usage:    "sesh peer add --machine <m> --ssh <user@host> --home <remote-home> [--port <p>] [--binary <path>] [--tmux-socket <name>] [--codex-home <dir>] [--tmux-conf <file>] [--api-addr <host:port> (--api-token <t>|--api-token-file <file>)]",
+		usage:    "sesh peer add --machine <m> --ssh <user@host> --home <remote-home> [--port <p>] [--binary <path>] [--tmux-socket <name>] [--codex-home <dir>] [--api-addr <host:port> (--api-token <t>|--api-token-file <file>)]",
 		examples: []string{"sesh peer add --machine macbook --ssh lukas@macbook --home /Users/lukas/.sesh --tmux-socket mytmux", "sesh peer add --machine work --ssh lukas@work --home ~/.sesh --api-addr 100.x.y.z:7070 --api-token-file ~/.sesh/token"},
 	},
 	"peer list": {

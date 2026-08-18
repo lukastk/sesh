@@ -665,6 +665,14 @@ sesh daemon restart       # bounce the daemon (e.g. after a binary update)
 sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, daemon checks)
 ```
 
+The target machine's supervised daemon is the sole creator of its work tmux server. If a
+master window finds no sessions, it asks the target daemon to create `scratch`; it does not
+run `tmux new-session` in the local or SSH attach shell. This matters on macOS because tmux
+retains its creator's audit session: a server born under SSH cannot read Claude Code's login
+Keychain even when a local cockpit later attaches to it. A daemon-born work server keeps the
+Aqua service context. Raw interactive SSH is still Keychain-isolated and may require Claude
+`/login`; the cockpit works because its panes run inside the Aqua daemon-born work server.
+
 **"A machine's threads vanished from my TUI."** Almost always that machine is
 *unreachable*, not thread-less: offline machines' threads are hidden by default
 (`o` in the TUI reveals them, and the footer names the machine). Check `sesh mesh`

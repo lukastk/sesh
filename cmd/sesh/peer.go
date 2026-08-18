@@ -36,7 +36,6 @@ func peerAdd(cfg config.Config, args []string) error {
 	binary := fs.String("binary", "sesh", "path to sesh on the remote machine")
 	tmuxSocket := fs.String("tmux-socket", "", "remote mytmux socket name (for tmux nav)")
 	codexHome := fs.String("codex-home", "", "remote SESH_CODEX_HOME (default: the peer's ~/.codex)")
-	tmuxConf := fs.String("tmux-conf", "", "remote work tmux -f config (the master's remote window starts the peer's work server with it)")
 	apiAddr := fs.String("api-addr", "", "peer daemon's TCP API addr (host:port); set => reach it over HTTP instead of ssh")
 	apiToken := fs.String("api-token", "", "bearer token for the peer's TCP API (literal; prefer --api-token-file)")
 	apiTokenFile := fs.String("api-token-file", "", "path to a file holding the peer's TCP API bearer token")
@@ -58,7 +57,7 @@ func peerAdd(cfg config.Config, args []string) error {
 		return err
 	}
 	if err := reg.Add(peers.Peer{
-		Machine: *machine, SSH: *ssh, Port: *port, Home: *home, Binary: *binary, TmuxSocket: *tmuxSocket, TmuxConf: *tmuxConf, CodexHome: *codexHome,
+		Machine: *machine, SSH: *ssh, Port: *port, Home: *home, Binary: *binary, TmuxSocket: *tmuxSocket, CodexHome: *codexHome,
 		ApiAddr: *apiAddr, ApiToken: *apiToken, ApiTokenFile: *apiTokenFile,
 	}); err != nil {
 		return err

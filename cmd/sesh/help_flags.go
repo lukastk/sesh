@@ -129,7 +129,6 @@ var flagDocs = map[string][]flagDoc{
 		{"--binary", "path to the sesh binary on the remote machine (default: sesh)"},
 		{"--tmux-socket", "remote mytmux socket name, used for tmux nav into the peer"},
 		{"--codex-home", "remote SESH_CODEX_HOME (default: the peer's ~/.codex)"},
-		{"--tmux-conf", "remote work tmux -f config the master's remote window starts the peer's work server with"},
 		{"--api-addr", "peer daemon's TCP API addr host:port; set => reach it over HTTP instead of ssh"},
 		{"--api-token", "literal bearer token for the peer's TCP API (prefer --api-token-file)"},
 		{"--api-token-file", "path to a file holding the peer's TCP API bearer token"},

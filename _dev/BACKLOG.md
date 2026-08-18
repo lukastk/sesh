@@ -134,15 +134,17 @@ caches, `_mms_machine_reachable`, nav history, flagged-cycle, `_mms_run_on_machi
 goes ~1,205 → ~150–250 lines. (Parallel to v1 for now; converge onto the canonical socket +
 single master once v2 retires v1.)
 
-## 5. ✅ DONE — Per-server tmux config for the WORK server (`SESH_TMUX_CONF` + `peer --tmux-conf`)
+## 5. ✅ DONE — Per-server tmux config for the WORK server (`SESH_TMUX_CONF`)
 
 Built: `SESH_TMUX_CONF` (config) → the work `tmux.Server` is `NewServerWithConf`, which
 prepends `-f <conf>` to every invocation (sourced at server start, ignored when running —
-verified). `peers.Peer.TmuxConf` (`peer add --tmux-conf`) → the master's remote window
-starts the peer's work server with its conf (`workAttach(socket, conf)`); local uses
-`cfg.TmuxConf`. Conformance `tmux.work-conf` (Local): a sentinel option only the supplied
-conf sets is live on the work socket (raw tmux). myrig still owns the conf FILE; sesh loads
-the path. Design notes kept below.
+verified). The supervised daemon is the sole creator of work-server sessions. When a master
+window finds an empty peer socket it invokes that peer's `sesh tmux create-session`, which
+delegates creation to the peer daemon; the attach shell never starts raw tmux. This removed
+the redundant `peers.Peer.TmuxConf` / `peer add --tmux-conf` surface. Conformance
+`tmux.work-conf` proves the supplied config is live, and `master.remote-work-context` proves
+an SSH master window still gets a daemon-born work server. myrig owns the conf FILE; sesh
+loads the path. Design notes kept below.
 
 Generalize the master's `--tmux-conf` (`-f`, already built) to the WORK server, so sesh's
 tmux can carry the sesh-specific UI (the per-thread status bar) while the user's REGULAR
@@ -155,18 +157,17 @@ gray bar on the `sesh-v2` socket.)
 Design:
 - `SESH_TMUX_CONF=<path>` (config): the work tmux server's config. When set, the work
   server is started with `tmux -f <path>` instead of the default `~/.tmux.conf`.
-- `peers.Peer.TmuxConf` (`peer add --tmux-conf <path>`): the peer's work-conf path, so the
-  master's REMOTE window creates/attaches the peer's work server with ITS conf (parallel to
-  how `tmux_socket` is per-peer).
-- Apply at server-start (whoever starts it): `internal/tmux.Server` gains an optional conf
-  and prepends `-f <conf>` (harmless once the server is running — tmux ignores `-f` when
-  connecting). The daemon passes `cfg.TmuxConf` when creating thread sessions; `master.go`
-  `workAttach` passes the conf (local: `cfg.TmuxConf`; remote: `peer.TmuxConf`).
+- Apply only at daemon-owned server start: `internal/tmux.Server` has an optional conf and
+  prepends `-f <conf>` (harmless once the server is running — tmux ignores `-f` when
+  connecting). The daemon passes `cfg.TmuxConf` when creating thread sessions. Master
+  windows request `scratch` through the target daemon, so no peer-side config duplication is
+  needed.
 - Caveat (same as the master): `-f` REPLACES base, so the supplied work conf must `source`
   the user's base bits it wants (keybindings, etc.) + add the sesh status line, or be
   self-contained. myrig owns the conf file; sesh just loads the path it's given.
-- Conformance: a cell asserting the work server loaded the given conf (set a sentinel option
-  in a test conf, assert it via raw `tmux show -g` on the work socket). Effort: medium.
+- Conformance: `tmux.work-conf` asserts the server loaded a sentinel from the supplied conf;
+  `master.remote-work-context` uses real SSH and a daemon-only sentinel to assert the target
+  daemon created the server.
 
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →

@@ -104,6 +104,7 @@ type sandboxConfig struct {
 	tmuxConf    string
 	selfhealOff bool
 	homeDir     string
+	extraEnv    map[string]string
 }
 
 type sandboxOpt func(*sandboxConfig)
@@ -131,6 +132,18 @@ func withSelfhealOff() sandboxOpt {
 // allow-list + ~ expansion resolve against a controlled tree (not the real home).
 func withHome(dir string) sandboxOpt {
 	return func(c *sandboxConfig) { c.homeDir = dir }
+}
+
+// withSandboxEnv adds one variable to the sandbox command/daemon environment.
+// A remote master's ssh shell does not inherit it, so a work tmux server carrying
+// this variable proves that the peer daemon (not the ssh attach) created it.
+func withSandboxEnv(key, value string) sandboxOpt {
+	return func(c *sandboxConfig) {
+		if c.extraEnv == nil {
+			c.extraEnv = map[string]string{}
+		}
+		c.extraEnv[key] = value
+	}
 }
 
 // shortSandboxHome returns a SHORT temp dir for a sandbox's SESH_HOME —
@@ -194,6 +207,9 @@ func newSandbox(t *testing.T, loc matrix.Locality, opts ...sandboxOpt) *Sandbox 
 	}
 	if sc.homeDir != "" {
 		env["HOME"] = sc.homeDir
+	}
+	for key, value := range sc.extraEnv {
+		env[key] = value
 	}
 	peerDaemon := &localRunner{bin: bin, env: env}
 

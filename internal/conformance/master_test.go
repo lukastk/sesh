@@ -19,6 +19,7 @@ func init() {
 	matrix.RegisterTest("master.up", matrix.AgentAgnostic, matrix.Remote, testMasterUp)
 	matrix.RegisterTest("master.reconnect", matrix.AgentAgnostic, matrix.Remote, testMasterReconnect)
 	matrix.RegisterTest("master.holding", matrix.AgentAgnostic, matrix.Local, testMasterHolding)
+	matrix.RegisterTest("master.remote-work-context", matrix.AgentAgnostic, matrix.Remote, testMasterRemoteWorkContext)
 }
 
 // testMasterHolding: a master window for a machine with NO live threads falls back to
@@ -59,6 +60,49 @@ func masterSessionNamesOn(socket string) []string {
 	return names
 }
 
+// testMasterRemoteWorkContext covers the macOS Keychain failure shape: an always-on
+// remote cockpit can reach a freshly logged-in Mac before its work server exists. The
+// ssh attach must ask the peer's supervised daemon to create that server; starting tmux
+// directly in ssh gives every later local pane ssh's audit session and makes Claude's
+// login Keychain unreadable. A daemon-only sentinel in tmux's captured global environment
+// is the external proof of which process context created the real server.
+func testMasterRemoteWorkContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	ensureSSHLocalhost(t)
+	self := newSandbox(t, matrix.Local)
+	self.startDaemon(t)
+	const sentinelKey = "SESH_TEST_DAEMON_CONTEXT"
+	const sentinelValue = "peer-daemon"
+	peer := newSandbox(t, matrix.Local, withSandboxEnv(sentinelKey, sentinelValue))
+	peer.startDaemon(t)
+	registerMasterPeer(t, self, peer, "localhost", "")
+
+	// The peer daemon is live but has never touched its work server.
+	if got := tmuxSessionCount(peer.TmuxSocket); got != 0 {
+		t.Fatalf("peer work server unexpectedly has %d sessions before master up", got)
+	}
+	if _, stderr, err := self.Runner.Run(t, "master", "up", "--machines", peer.Machine); err != nil {
+		t.Fatalf("master up: %v\n%s", err, stderr)
+	}
+	t.Cleanup(func() { self.Runner.Run(t, "master", "down") }) //nolint:errcheck
+
+	if !waitUntil(20*time.Second, func() bool { return tmuxClientCount(peer.TmuxSocket) >= 1 }) {
+		t.Fatalf("peer window never attached into the empty peer work server")
+	}
+	if !strSliceHas(masterSessionNamesOn(peer.TmuxSocket), "scratch") {
+		t.Fatalf("peer work server has no holding scratch session")
+	}
+	out, err := exec.Command("tmux", "-L", peer.TmuxSocket, "show-environment", "-g", sentinelKey).CombinedOutput()
+	if err != nil {
+		t.Fatalf("work server did not inherit the peer daemon's context sentinel: %v: %s", err, out)
+	}
+	if got, want := strings.TrimSpace(string(out)), sentinelKey+"="+sentinelValue; got != want {
+		t.Fatalf("work server context = %q, want %q (ssh created the server instead of the peer daemon)", got, want)
+	}
+}
+
 // setupMasterPair starts a self daemon + a peer daemon (ssh-localhost), registers the
 // peer (with its work socket, for the master attach), and puts a real headed thread on
 // each so each work server has a session to attach into. Returns (self, peer).
@@ -76,14 +120,7 @@ func setupMasterPairVia(t *testing.T, sshDest, port string, selfOpts ...sandboxO
 	self.startDaemon(t)
 	peer = newSandbox(t, matrix.Local)
 	peer.startDaemon(t)
-	bin := seshBin(t)
-	add := []string{"peer", "add", "--machine", peer.Machine, "--ssh", sshDest, "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket}
-	if port != "" {
-		add = append(add, "--port", port)
-	}
-	if _, stderr, err := self.Runner.Run(t, add...); err != nil {
-		t.Fatalf("peer add: %v\n%s", err, stderr)
-	}
+	registerMasterPeer(t, self, peer, sshDest, port)
 	// Headed threads => a real session exists on each work server (so attach succeeds).
 	self.newThread(t, "pi", "selfw", "/tmp")
 	peer.newThread(t, "pi", "peerw", "/tmp")
@@ -94,6 +131,18 @@ func setupMasterPairVia(t *testing.T, sshDest, port string, selfOpts ...sandboxO
 		t.Fatalf("peer work server never got a session")
 	}
 	return self, peer
+}
+
+func registerMasterPeer(t *testing.T, self, peer *Sandbox, sshDest, port string) {
+	t.Helper()
+	bin := seshBin(t)
+	add := []string{"peer", "add", "--machine", peer.Machine, "--ssh", sshDest, "--home", peer.Home, "--binary", bin, "--tmux-socket", peer.TmuxSocket}
+	if port != "" {
+		add = append(add, "--port", port)
+	}
+	if _, stderr, err := self.Runner.Run(t, add...); err != nil {
+		t.Fatalf("peer add: %v\n%s", err, stderr)
+	}
 }
 
 // testMasterUp asserts `sesh master up` builds the cockpit: one window per machine,

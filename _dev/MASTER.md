@@ -55,6 +55,12 @@ script). Machine list is sourced from the daemon's peers (`internal/peers` + the
   A long-lived **Go** process (NOT a shell `while` loop) that:
   - resolves `<machine>` from the peer registry → ssh dest (`Peer.SSH`+`Peer.SSHArgs()`),
     remote work socket (`Peer.TmuxSocket`); for self → local `cfg.TmuxSocket`, no ssh;
+  - if the work server has no sessions, asks that machine's supervised `sesh-daemon` to
+    create `scratch` via `sesh tmux create-session`; it never starts the work server with a
+    raw `tmux new-session` from the attaching shell. This keeps server creation in the
+    machine's service context and makes the daemon the sole owner of `SESH_TMUX_CONF`. On
+    macOS this is also a correctness boundary: tmux retains its creator's audit session, so
+    a server born from SSH cannot read the login Keychain even when later used locally;
   - runs the attach: `env -u TMUX tmux -L <work-socket> attach` (local) or
     `ssh -t <dest> 'env -u TMUX tmux -L <remote-work-socket> attach'` (remote);
   - **reconnect/self-heal**: when the attach exits (laptop sleep, ssh blip, remote tmux
@@ -119,12 +125,16 @@ keybindings snippet as docs — never runtime infrastructure.)
 - **`master.reconnect`** — kill a window's attach (and, separately, the remote tmux server)
   and assert the supervisor **re-establishes** it; both the local and the ssh-localhost-remote
   window, real processes. Test the drop→heal in both directions.
+- **`master.remote-work-context`** — start the master peer window over real SSH while the
+  peer work socket is absent; assert a daemon-only environment sentinel appears in the new
+  work server. This proves the daemon, not the SSH attach shell, created it.
 - Register as matrix / TUI-conformance-style cells. A `Skip` stays loud and never counts as
   done.
 
-Open detail: when a machine's work server has no sessions yet, `attach` fails — the supervisor
-retries with backoff until one exists (or optionally holds a placeholder shell). Decide during
-build; cover with a cell either way.
+Decision: when a machine's work server has no sessions, the supervisor delegates creation of a
+placeholder `scratch` session to that machine's already-running daemon. The daemon is the sole
+creator of work-server sessions; attach shells only attach. Covered by
+`master.remote-work-context`.
 
 Open detail (found live 2026-06-09): `master up` creates the master server with no `-f`, so it
 LOADS the user's base `~/.tmux.conf`. If that base sets app-specific options (Lukas's sets

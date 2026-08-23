@@ -1,5 +1,90 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H91 — TUI `goto-uuid`: jump the cursor to a thread by UUID, switching to the FIRST view that shows it (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; ticket 83d1edbd)
+Lukas ticket 83d1edbd "new sesh tui command - go to thread with given uuid": "opens up a prompt
+where you have to type in the full UID of the thread or the short form of the UID. It then takes
+you to that thread. It finds the thread in the first view where it appears." Pure TUI-client work
+on top of H88's command registry — a new command is now literally a registry row plus a case.
+
+CONFERRED two edges before building (AskUserQuestion). (1) When the CURRENT view already shows the
+thread: "It should move the cursor to that thread" — i.e. NO view switch while you are browsing;
+the display-order search is only for a thread the current view hides. (2) A thread the grid hides
+by a DISPLAY SETTING: "Refuse loudly. But if the machine is online it should be there in at least
+the `all` view" — which is exactly right and is why the only refusals left are machine-level
+(offline owner + hide-offline, or a peer on a self-only grid) plus the filter.
+
+BEHAVIOUR (internal/tui/goto.go): palette-only command `goto-uuid` (no default key — the surviving
+key set is Lukas's, H88; rebindable via `[[tui.key]]`) opens a TARGETLESS line prompt — the typed
+uuid IS the target, so unlike every other prompt it carries no row and works on an empty grid.
+Lookup is a PREFIX match (case-insensitive, trimmed) over `m.machines` — the LAST-FETCHED MESH, not
+the current view's rows, which is what lets it find a thread the view hides. Then: current view if
+it admits the row, else the first view in DISPLAY order (`orderedViews`, so a custom `[[tui.views]]`
+placed first WINS) that admits it; ViewAll admits everything so a visible thread always has a home.
+A view switch defers the cursor to the PRESELECT path in the meshMsg handler (which also expands a
+nested child's ancestors — H80's lesson that most interesting threads are children), and says so in
+the note line. It LOCATES, it does not enter — `enter` still navs.
+
+EVERY OTHER OUTCOME IS A LOUD REFUSAL THAT CHANGES NOTHING (no cursor move, no view change, and —
+the load-bearing one — NO PRESELECT LEFT ARMED: a preselect that cannot land would sit there and
+jump the cursor minutes later when the machine reconnects). Refusals: unknown prefix; ambiguous
+prefix (names the candidates, "type more of it"); input that isn't hex+dashes (a name typed by
+mistake gets "uuids are hex digits and dashes" instead of a confusing not-found); a match on an
+OFFLINE machine while hide-offline is on (names the machine + `toggle-offline`); a match on a peer
+while the grid is self-only (names `--all-machines`); and the ACTIVE FILTER hiding it (query
+mismatch, or ^y's child exclusion) — a filter narrows EVERY view, so unlike a view mismatch it
+cannot be fixed by switching, and silently ignoring it would leave the cursor sitting still with no
+explanation.
+
+ONE CONVERSION, NOT TWO: the snapshot→row build was extracted from `flattenMeshRows` into `meshRow`
+and shared. View admission reads Archived/OnHold/Head/Busy/Flagged, so a second hand-written
+conversion in the goto lookup that dropped a field would pick a view the grid does not actually
+render the thread in — the plausible-but-wrong class.
+
+TESTS. Units (goto_test.go) build their rows THROUGH the real `flattenMeshRows` so the model's view
+filtering is the shipped one: full/short/uppercase/whitespace forms, the current-view-wins rule,
+archived→archived + held→on-hold + all-stays-all, a custom view placed first, a nested child, and
+every refusal; plus the prompt flow (open/type/enter, esc cancels, empty cancels, works with NO
+selection) and a guard that the `?` popup and palette really list it. `goto-uuid` is in the offline
+gate's LOCAL list (it never touches an owner — and gating it would refuse a jump AWAY from an
+offline row). New conformance claim `goto-uuid` (registered AND declared — the H25 gotcha) drives a
+REAL daemon through the PALETTE: archive two threads for real, wait until the active view really
+drops them, jump to one by SHORT id → the grid switches to `archived` and the cursor is on it; jump
+back to a live thread by FULL uuid → back to `active`; an unknown uuid is refused with nothing moved.
+ANTI-GAMING (all reverse-edited, never git-checkout — H44; all `-count=1` — H75): current-view rule
+removed → RED "landed in view archived, want all"; ambiguity check removed → RED; filter check
+removed → RED both ways; the offline/self-only gate neutered → RED; the view-switch removed → claim
+RED landing in view 3 (ViewAll — the meshMsg escalation, i.e. the plausible-but-wrong fallback);
+preselect dropped on the switch → claim RED "cursor never landed".
+**THE VACUITY THE SECOND NEUTER CAUGHT, worth remembering:** the first version of the claim put the
+jump target ALONE in the destination view, so a cursor left at position 0 "landed" on it by accident
+— the neutered preselect PASSED. The claim now seeds each destination view with a DECOY row that
+sorts above the target (alphabetically in `active`; archived LAST so it heads the archived view's
+archived_at-DESC order) and asserts the cursor is not already on the target before each jump.
+
+GREEN: internal/tui plain and -race; `go vet ./...`; the full TUI claims suite serially — 65 pass,
+2 fail, and both failures are the PRE-EXISTING macbook reds recorded in H80/H88, byte-identical
+(`action-fork` "transcript <id>: exit status 1", the pi-transcript class; `uuid-popup-copy`, whose
+claim stubs `wl-copy`, a WAYLAND tool, on a Mac). Every other non-conformance package green plain
+and -race except the long-standing `TestMaintainerDropsStaleReportedBusy` "baseline: busy=idle
+authority=" (H75/H81/H88; internal/daemon untouched here). `gofmt -l` still flags
+internal/tui/predicate_test.go + internal/tui/tickets.go on clean HEAD (toolchain drift, H48) —
+only touched files formatted.
+LIVE-SMOKED in a fully isolated sandbox (own SESH_HOME/daemon/sockets under a short /tmp path,
+inherited SESH_* stripped, four scratch threads, two archived; sandbox daemon killed by explicit pid
+and the tree removed; the live daemon never touched): `p`→"goto"→enter→"4ec6271d"→enter switched to
+`[archived]`, printed `go to 4ec6271d "parked-two" · switched to the archived view`, and put the `>`
+on parked-two — NOT on the decoy row above it; the full uuid of a live thread jumped back to
+`[active]` onto live-one; `deadbeef` and `dagster` both printed their loud ✗ lines with nothing moved.
+**SMOKE TRAP (new, macOS): myrig defines a `sesh` shell FUNCTION that pins SESH_HOME to the LIVE
+`$HOME/.sesh` and machine=macbook**, so a sandbox `zsh -c "source env.sh; sesh daemon status"` talks
+to the LIVE daemon however carefully you set SESH_HOME. Call the sandbox binary by ABSOLUTE PATH.
+Also: `setsid` does not exist on macOS — plain `nohup … &` for a sandbox daemon.
+
+DEPLOY: **binary-only, NO daemon restart, no schema/API/CLI-flag change** (a pure TUI-client
+command). Docs synced in the same change: `sesh help tui` long text + the sesh-cli SKILL
+(palette-only list + a "Going to a thread by uuid" paragraph). A running SIDEBAR keeps the binary it
+launched with (H70), so a deployed machine still needs `prefix+r` (or mmt-kill/mmt-start) before the
+command exists inside its sidebar.
 ## H90 — a 34 KB ticket "refused to send": tmux's set-buffer argv cap (MAX_IMSGSIZE=16384); fix = SendText streams via `load-buffer -b <buf> -` on STDIN (revisits H46's declined fix) + the TUI ticket viewer now shows the ticket's OWN full uuid (2026-08-23, sesh c487969; NO schema/API/CLI change; DAEMON rebuild+restart for the send fix + binary-only for the viewer row; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "I tried sending ticket 538e103f to thread 538e103f-71c8-... but it refuses to send." TWO
 distinct causes, one of them a real transport limit:

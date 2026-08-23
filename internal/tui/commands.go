@@ -57,6 +57,7 @@ var commands = []Command{
 	// --- modes / navigation ---
 	{ID: "enter", Desc: "enter the thread (revives a dead one)", Keys: []string{"enter"}},
 	{ID: "filter", Desc: "filter mode (fuzzy)", Keys: []string{"/"}},
+	{ID: "goto-uuid", Desc: "go to a thread by UUID (full or short)"},
 	{ID: "view-picker", Desc: "view picker", Keys: []string{"tab"}},
 	{ID: "palette", Desc: "command palette", Keys: []string{"p"}},
 

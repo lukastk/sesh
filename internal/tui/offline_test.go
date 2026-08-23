@@ -59,6 +59,9 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	// Commands that never touch the owner — gating them would wrongly block offline browsing.
 	local := []string{"cursor-up", "cursor-down", "scroll-up", "scroll-down", "fold", "unfold",
 		"pan-left", "pan-right", "filter", "view-picker", "palette", "toggle-id",
+		// goto-uuid only moves the cursor (and the view) — it never touches an owner,
+		// and gating it would refuse a jump AWAY from an offline machine's row.
+		"goto-uuid",
 		"toggle-width-cap", "toggle-offline", "uuid", "details", "refresh", "help",
 		"dismiss", "quit",
 		// undo-archive routes, but its target comes from the undo STACK, not the

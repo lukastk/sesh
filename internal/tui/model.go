@@ -225,6 +225,7 @@ const (
 	promptHold                  // hold the selected thread until a date (YYYY-MM-DD; empty = clear)
 	promptNewVirtual            // name a NEW virtual grouping thread (empty = cancel)
 	promptNewDivider            // label a NEW divider (empty = an unlabeled divider; Esc cancels)
+	promptGoto                  // go to a thread by uuid/prefix (empty = cancel); no target row — the input IS the target
 )
 
 // confirmKind says which destructive action a y/n confirmation popup gates.
@@ -997,6 +998,15 @@ func (m Model) fetch() tea.Cmd {
 	}
 }
 
+// meshRow converts one mesh snapshot entry into the row type the grid renders.
+// It is the SINGLE conversion, shared by the fetch path and the uuid `goto`
+// lookup (see goto.go): view admission reads Archived/OnHold/Head/Busy/Flagged,
+// so a second hand-written conversion that dropped a field would make goto pick a
+// different view than the one the grid actually renders the thread in.
+func meshRow(t api.ThreadSnapshot) api.ThreadRow {
+	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority}
+}
+
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
 // applying the machine-level and view-level filters. It is a pure function (no client,
 // no clock) so the filtering — especially the offline-hide — is unit-testable without a
@@ -1017,7 +1027,7 @@ func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all
 			continue
 		}
 		for _, t := range mv.Threads {
-			row := api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority}
+			row := meshRow(t)
 			if preselect != "" && t.ID == preselect {
 				preselectSeen = true // present in the mesh, regardless of the view filter
 			}
@@ -2215,6 +2225,13 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 	case "filter":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
+	case "goto-uuid":
+		// Go to a thread by UUID: a line prompt takes the full uuid or its short
+		// prefix and the cursor lands on that thread, switching view when the
+		// current one doesn't show it (see goto.go). There is no target ROW — the
+		// typed uuid IS the target — so the selection is irrelevant here and the
+		// prompt carries a zero row.
+		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptGoto, api.ThreadRow{}, nil, 0
 	// Fold/unfold the tree is on the ARROW keys; ^h/^l pan the columns horizontally so
 	// clipped columns can be brought into view. (h/l moved to ^h/^l in 2026-06 to free
 	// h/H for hold — Lukas; the pan pair stays symmetric.)
@@ -2546,6 +2563,13 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case promptNewDivider:
 			// Empty label is legitimate (a plain rule); Esc (above) is how you cancel.
 			return m, m.newDividerRow(row, input)
+		case promptGoto:
+			// Empty = cancel (there is nothing to go to).
+			if input == "" {
+				return m, nil
+			}
+			nm, cmd := m.gotoUUID(input)
+			return nm, cmd
 		}
 		return m, nil
 	case "left", "ctrl+b":
@@ -3897,6 +3921,9 @@ func (m Model) viewFrame() string {
 	}
 	if m.prompting != promptNone {
 		label, target := "rename", m.promptRow.Name
+		// targetless prompts act on the INPUT, not on a selected thread, so they
+		// render without the `"name"` carrier the others show.
+		targetless := false
 		switch m.prompting {
 		case promptTag:
 			label = "tag"
@@ -3926,8 +3953,15 @@ func (m Model) viewFrame() string {
 			if target == "" {
 				target = "local"
 			}
+		case promptGoto:
+			// The typed uuid IS the target; there is no thread to name yet.
+			label, targetless = "go to uuid (full or short; empty=cancel)", true
 		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("%s %q> %s", label, target, renderPromptInput(m.promptInput, m.promptCursor))) + "\n")
+		line := fmt.Sprintf("%s %q> %s", label, target, renderPromptInput(m.promptInput, m.promptCursor))
+		if targetless {
+			line = fmt.Sprintf("%s> %s", label, renderPromptInput(m.promptInput, m.promptCursor))
+		}
+		b.WriteString(styleHeader.Render(line) + "\n")
 	}
 	cols := m.activeColumns()
 	vis := m.visibleMatches()

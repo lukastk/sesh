@@ -365,6 +365,8 @@ ctrl+c       quit (always available, never rebindable)
 Palette-only commands (id — what it does):
 
 ```
+goto-uuid        GO TO a thread by uuid (line prompt; the full uuid or the short
+                 8-character form, empty = cancel) — see below
 hold-until       hold until an explicit date (line prompt; YYYY-MM-DD, empty = clear)
 tag-add          add a tag                tag-remove   remove a tag (picker)
 set-parent       set parent by PICKING one from a list — see below
@@ -386,6 +388,21 @@ delete           delete the record (asks y/n)
 toggle-offline   show / hide the threads of OFFLINE mesh machines (hidden by default)
 dismiss          clear the ✗ error / note lines (esc/q do this in sidebar mode)
 ```
+
+**Going to a thread by uuid (`goto-uuid`).** A line prompt takes a thread's uuid —
+the full 36-character one, or the short prefix the ID column (`i`) shows — and the
+CURSOR lands on that thread. It **locates, it does not enter**: `enter` is still what
+navs into a thread. If the current view already shows the thread the cursor just
+moves; otherwise the grid switches to the **first view in display order** (active →
+on hold → archived → all → your `[[tui.views]]`) that shows it, and says so in the
+note line — so an archived thread takes you to `archived`, a parked one to `on hold`.
+A nested thread's ancestors are expanded so the cursor really lands on it. Every
+other outcome is a **loud refusal that changes nothing**: a uuid matching no thread,
+a prefix matching several (it names them — type more characters), input that isn't a
+uuid at all, or a thread the grid is deliberately hiding — one on an **OFFLINE**
+machine (run `toggle-offline`), one on a **peer** while the grid is self-only (start
+with `--all-machines`), or one the **active filter** drops (clear the filter). It is
+palette-only by default; bind it with `[[tui.key]]` if you want a key.
 
 **Setting a parent interactively (`set-parent`).** Run it on the CHILD: a picker opens
 listing the threads it could hang under — type to filter (fuzzy, by name or uuid),

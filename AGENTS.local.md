@@ -277,6 +277,98 @@ call). DEPLOY: render-only, ALL SIX (install-home per machine); NO conf change (
 untouched → no source-file), NO daemon restart. A running shell keeps the old functions until
 re-source, but the cockpit invokes these via popup/menu `zsh -lc` which re-reads shell.sh.
 
+## H89 — SHELL THREADS: a tracked tmux SESSION as a first-class thread, + the `S` shells viewer over live/ghost sessions (2026-08-23, sesh 4699452+70084c2 api 46→47 NO store migration, myrig 7f1dfe3; ticket 4d4e8592 — NOT DEPLOYED, branch `shell-threads` not merged)
+Lukas: "one big gap currently in sesh is that we kind of ignore TMUX sessions. Everything is centered
+around agent threads but we kind of obfuscate the fact that everything in the cockpit is based off of
+TMUX sessions... no easy way for me to just enter a TMUX session inside a box and then keep track of
+that TMUX session in the sidebar." Designed with him over a long conversation (the full spec, with
+every rejected alternative, is the vault ticket `tkt/2026-08-23 sesh - new thread type.md`; the
+in-repo record is `_dev/SHELL.md`).
+
+THE MODEL, and it is the sentence that makes the rest fall out: **a shell thread's "conversation" is
+its working directory.** headful = a live session exists; headless = a remembered place; "revive" =
+`new-session -c <cwd>`. So `head` and `revive` stay genuinely meaningful and the TUI needs NO special
+case for Enter. NB his note said "attached/detached" for session-live-vs-not — that collides with
+sesh's third axis (a tmux client is looking at it); the words already existed: headful/headless.
+
+**THE TRAP THAT SHAPED EVERYTHING — measured, not reasoned: tmux user options INHERIT during format
+expansion** (pane → window → session → global, from the deepest object in the format's context). Set
+`@sesh-thread-id` at SESSION scope and every UNMARKED pane in that session reports it:
+    $ tmux set-option -t boxsess @sesh-thread-id SHELL-ID-123
+    $ tmux list-panes -a -F '#{pane_id} | [#{@sesh-thread-id}]'
+    %0 | [SHELL-ID-123]      <- UNMARKED pane, inheriting the SESSION's value
+    %1 | [AGENT-ID-999]
+That would silently corrupt FindPaneByThreadID, ThreadIDOfPane, `tmux current`, adopt's ownership
+guard and nav's window resolution — each a plausible wrong answer, the `--machine X` class. So the
+session marker is a DISTINCT key `@sesh-shell-id`, and `TestMarkerScopesDoNotCollide` (real tmux) goes
+red if anyone ever collapses them. THREE MORE tmux findings, all measured: (a) `list-sessions -F
+'#{@foo}'` resolves through the session's ACTIVE PANE, not the session object — a session-scoped read
+is only trustworthy for a key never set at pane scope, a SECOND independent reason the keys differ;
+(b) the `=exact` target prefix is NOT honored by set-option/show-options (it ERRORS "no such session:
+=boxsess", unlike list-panes/list-clients/has-session/kill-session which do honor it — copying a
+neighbouring idiom is how this bites); (c) `show-options -v` EXITS 1 on an unset option, `-qv` returns
+empty rc=0 (already the repo's idiom at model.go's window-active-style read). **None of the three was
+a live bug** — audited: both existing set-option sites stamp at PANE scope, no set-option/show-options
+call uses `=`, and the one show-options read already passes -q.
+
+THE INTERNAL REFACTOR THIS FORCED, and it is the good part: `nonAgentGate` conflated two questions. A
+shell thread has a RUNTIME but no CONVERSATION, so the predicate split into `api.HasConversation` /
+`api.HasRuntime` → `conversationGate` (fork, transcript, send-headless) vs `runtimeGate` (enter/nav,
+send, capture, revive), re-pointing six call sites onto the correct axis. Settle this BEFORE anything
+else; keying a verb on the wrong gate is the exact silent-wrong-behaviour class.
+
+**BOTH state resolvers must branch on kind BEFORE the pane lookup** — the maintainer's refreshThread
+AND the on-demand `thread status` path. Missing the second is what the conformance cells caught (a
+live shell thread reporting headless). `Server.RuntimeIndex` returns the pane index AND the
+shell-session index from ONE server walk, so the maintainer pays no extra per-tick tmux call.
+
+GHOSTS ARE RECOGNISED WITHOUT BEING RECORDED (his third bullet, and the design decision I pushed
+back on): auto-registering every session would mint a record per throwaway shell, churn the mesh, and
+force sesh to AUTO-DELETE records — which it does nowhere else. Instead the `S` viewer enumerates live
+sessions on demand and `P` promotes the ones worth keeping. Ghosts are deliberately NOT in the
+replicated mesh snapshot: their attached bit flips constantly and would destroy H44 delta sync's
+steady-state-empty property.
+
+DECISIONS HE MADE (all recorded in the ticket): noun = **shell**; no busy axis at all (process-based
+foreground detection considered and REJECTED — the code is trivial but the policy is not: an open
+editor reads busy forever, so it would need a shell allowlist plus an editors-don't-count rule);
+delete does NOT kill (the existing contract applied honestly — it refuses while live, --force drops
+the record and UNSTAMPS so the session becomes a ghost, and `archive` is the "get it out of my way
+while I keep working in it" verb); auto-parenting OFF by default, root-only, never retroactive;
+`mt-enter-tmux-session` STAYS (the fzf popup is a jumper, `S` is a manager — the same split as
+mmt-jump vs mmt-enter-session).
+
+**THE CELLS FOUND FOUR REAL DEFECTS while being written** — the matrix doing its job: the on-demand
+status path, fork's gate ordering (the CLI copies the source's kind into --agent, so ParseKind
+rejected "shell" with its generic message BEFORE the fork gate — hoisted the gate above ParseKind so
+every client gets the tailored refusal), capture, and a `thread stop --force` flag that existed on the
+wire but not on the CLI.
+
+GOTCHA worth remembering: `topLevelCommands`/`subcommandSets` in help_test.go are HAND-MAINTAINED
+mirrors of the dispatch switch, so the help meta-test cannot catch a brand-new top-level command until
+you declare it there. It caught every missing flagDoc once declared.
+
+TESTS: shell.lifecycle / shell.promote / shell.gates × (local, remote) = 6 cells green over real tmux
++ a real ssh hop; tmux.info extended to prove `#{session_path}` is the session's START dir and does NOT
+follow a `cd`; `shells-view` TUI claim drives the real viewer through promote and kill. Units for
+classification (incl. shell-DOMINATES-agent and stale), the send-target resolver, auto-parent rules,
+and the maintainer's session-based head. ANTI-GAMING (reverse-edited, never git-checkout): collapsing
+the markers → red; neutering the maintainer branch → live shell reads headless; neutering stale
+detection → reads shell; glyphs → ▣/▢ → the confusable-family guard red naming all three
+quadrilaterals (▢ vs the virtual ◇ is the H78 shape, which is why the pair is the narrow ▮/▯). Full
+TUI claims suite (176s) and every non-conformance package green plain AND -race; vet + gofmt clean.
+**The full 247-cell matrix was NOT run** (~40min) — do not read this as all-green.
+
+NOT BUILT, deliberately: `realize` from a shell thread. Its semantics are unsettled (the live session
+would be left carrying a marker for a record that is no longer a shell) and `thread new
+--into-session <the shell's session> --parent-shell` already covers the flow.
+
+DEPLOY: **NOT DEPLOYED. Branch `shell-threads`, not merged, not pushed.** api 46→47 is additive (a
+pre-47 peer just omits session_path/shell_id), but the daemon serves `tmux info` and the shell routes,
+so it is a rebuild + supervised restart per machine, NOT binary-only. ORDER MATTERS: **sesh before
+myrig** — myrig's rewired `_mt_enter_box_session` calls `sesh shell enter`, so a machine with the new
+shell.sh and an old binary fails loudly on every enter-box.
+
 ## H88 — TUI COMMAND PALETTE + config-rebindable keymap, and an INTERACTIVE reparent picker (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; tickets 7e01fe7e + 9ecfbdeb; NOT YET DEPLOYED)
 Two tickets, one commit's worth of surface. Lukas: "Currently `sesh tui` has loads of keyboard
 shortcuts. Way too many. Instead of that we shall adopt a *command palette* approach. Pressing

@@ -82,6 +82,35 @@ source-file'd separately (it's an outbound leaf, absent from `mmt-reload-conf-al
 set). All 15 new commands verified registered (`-g mmt`/`mt`) + j/k bound on every server. NO
 daemon restart, no sesh binary change (pure myrig).
 
+### H89 follow-up — the bulk hold/unhold apply is now PARALLEL (myrig <this commit>; still no sesh change)
+Lukas ran `mmt-unhold-all-threads`, it worked but was ~3s. MEASURED: 27 held threads (16
+mymain / 6 macbook / 4 macstudio / 1 ideapad); the cost is grid fan-out ~290ms + a per-thread
+`sesh thread hold` fork+call done SEQUENTIALLY, and each REMOTE clear is a ~150-230ms routed
+round trip (11 remote ≈ 2.1s = ~70% of the wall-clock). His question: should sesh have a batch
+verb? ASSESSED both: (A) parallelize the shell loop (myrig-only) → ~0.6s; (B) a sesh batch
+endpoint (`hold --ids`, one routed call per machine) → ~0.5s + cleaner + reusable by sesh-ui,
+but an API schema bump + conformance + a fleet daemon rebuild/restart. RECOMMENDED + shipped A
+(90% of the win, zero fleet risk); B stays on the shelf until bulk mesh-mutation is frequent/
+large (then it's the right mechanism). FIX: new `_mt_apply_holds <label>` reads
+`id⇥machine⇥<hold-args>` lines and fires `sesh thread hold` CONCURRENTLY (bounded 12; batch-
+`wait` every 12 for portability — no `wait -n`, which is zsh 5.9+), tallying ok/fail via per-id
+temp files (background jobs can't share a counter — the `_mt_box_checkout_machines` pattern),
+failures named on stderr. All three DOC commands route their apply-loop through it (setup-the-
+DOC → `--until <tomorrow>` rows, unhold-DOC → inDOC&held rows, unhold-all → any own-hold row).
+CRITICAL REUSE of the H89 gotcha: `_mt_apply_holds` must be invoked via `$(… <<<"$rows")`
+(command-sub + here-string), NEVER `… | _mt_apply_holds` — a bare `local` in a PIPELINE-stage
+subshell echoes `name=value` into stdout; so it's never a pipeline stage AND every local is
+given an initial value (belt+braces). NB the distinction learned here: a bare `local` in a
+COMMAND-SUB subshell (a function's main body, e.g. `home=$(_mt_machine_home)`) is SILENT — the
+stray-echo is specific to a `cmd | while`/`cmd | func` pipeline stage. TESTED (fake `sesh`,
+6 jobs × 0.15s): clean `5 1` tally, 228ms wall (parallel; ~900ms serial), failure named,
+empty input → `0 0`. Row extraction verified read-only against the live fleet (unhold-all 27,
+setup-the-DOC 27 hold-rows w/ `--until 2026-08-24`, unhold-DOC 0 — the lone in-DOC thread isn't
+held). Did NOT run the real mutating commands (would clear/park the fleet's 27 holds — Lukas's
+call). DEPLOY: render-only, ALL SIX (install-home per machine); NO conf change (bindings
+untouched → no source-file), NO daemon restart. A running shell keeps the old functions until
+re-source, but the cockpit invokes these via popup/menu `zsh -lc` which re-reads shell.sh.
+
 ## H88 — TUI COMMAND PALETTE + config-rebindable keymap, and an INTERACTIVE reparent picker (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; tickets 7e01fe7e + 9ecfbdeb; NOT YET DEPLOYED)
 Two tickets, one commit's worth of surface. Lukas: "Currently `sesh tui` has loads of keyboard
 shortcuts. Way too many. Instead of that we shall adopt a *command palette* approach. Pressing

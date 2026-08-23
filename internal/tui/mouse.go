@@ -36,14 +36,15 @@ func (m *Model) resetClickTracking() {
 // there is ignored rather than reaching the grid underneath.
 func (m Model) handleLeftClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.ticketMode != ticketNone || m.detailsPopup || m.helpPopup || m.viewPicker ||
-		m.confirming != confirmNone || m.prompting != promptNone || m.tagPopup ||
-		m.uuidPopup || m.reordering {
+		m.palette || m.parentPick || m.confirming != confirmNone ||
+		m.prompting != promptNone || m.tagPopup || m.uuidPopup || m.reordering {
 		// Log WHICH mode swallowed it: a mode stuck on (move mode in particular
 		// renders almost like the normal grid) silently eats every click, which
 		// is indistinguishable from "the mouse stopped working".
-		debugLog("CLICK x=%d y=%d | SWALLOWED by modal: ticket=%v details=%v help=%v picker=%v confirm=%v prompt=%v tag=%v uuid=%v reorder=%v",
+		debugLog("CLICK x=%d y=%d | SWALLOWED by modal: ticket=%v details=%v help=%v picker=%v palette=%v parentpick=%v confirm=%v prompt=%v tag=%v uuid=%v reorder=%v",
 			msg.X, msg.Y, m.ticketMode != ticketNone, m.detailsPopup, m.helpPopup, m.viewPicker,
-			m.confirming != confirmNone, m.prompting != promptNone, m.tagPopup, m.uuidPopup, m.reordering)
+			m.palette, m.parentPick, m.confirming != confirmNone, m.prompting != promptNone,
+			m.tagPopup, m.uuidPopup, m.reordering)
 		return m, nil
 	}
 	idx, ok := m.rowAtY(msg.Y)

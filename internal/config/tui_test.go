@@ -178,3 +178,52 @@ func TestLoadTUIShowOffline(t *testing.T) {
 		t.Errorf("show_offline should default to false when unset")
 	}
 }
+
+// TestLoadTUIKeys covers the [[tui.key]] rebinding table: entries parse in order
+// (order matters — the first entry for a command replaces its defaults, later ones
+// add), and an empty key is preserved as the deliberate "unbind" signal rather
+// than being dropped as a missing field.
+func TestLoadTUIKeys(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, `
+[tui]
+columns = ["name"]
+
+[[tui.key]]
+command = "fork"
+key     = "F"
+
+[[tui.key]]
+command = "flag"
+key     = "g"
+
+[[tui.key]]
+command = "flag"
+key     = "ctrl+g"
+
+[[tui.key]]
+command = "delete"
+key     = ""
+`)
+	c, err := LoadTUI(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil {
+		t.Fatal("nil TUI config")
+	}
+	want := []KeyBinding{
+		{Command: "fork", Key: "F"},
+		{Command: "flag", Key: "g"},
+		{Command: "flag", Key: "ctrl+g"},
+		{Command: "delete", Key: ""},
+	}
+	if len(c.Keys) != len(want) {
+		t.Fatalf("key entries = %+v, want %d", c.Keys, len(want))
+	}
+	for i, w := range want {
+		if c.Keys[i] != w {
+			t.Errorf("key entry %d = %+v, want %+v", i, c.Keys[i], w)
+		}
+	}
+}

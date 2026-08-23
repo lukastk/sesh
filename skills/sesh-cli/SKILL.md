@@ -108,7 +108,7 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
   Deleting a thread **promotes its children** to the deleted thread's own parent
   (grandparent; root if it had none) — parent ids never dangle.
-- **Virtual threads** (`thread new --virtual --name X`, or the `v` key in the TUI) are
+- **Virtual threads** (`thread new --virtual --name X`, or the `new-virtual` command in the TUI) are
   grouping nodes WITHOUT an
   agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
   group threads under a parent that isn't (yet) real work: parent/reparent threads under
@@ -262,10 +262,10 @@ the last one the cockpit is told to show (previously the stale preview could lan
 top of the click, so the click "didn't take" and only corrected itself a nav later).
 A stalled preview can't swallow the click — past a short grace the enter goes out
 anyway.
-**esc/q never quit in sidebar mode** — a persistent pane must not die to a stray
-keystroke (ctrl+c is the deliberate kill; hide/show is the cockpit toggle's job);
-instead they DISMISS the ✗ error / note lines, which otherwise persist until the
-next action (indefinitely, in a pane that never quits). A successful nav or follow
+**esc/q dismiss rather than quit** (as they do everywhere now) — which matters most
+here, since a persistent pane must not die to a stray keystroke and those ✗ error /
+note lines would otherwise persist forever in a pane that never quits. ctrl+c is the
+deliberate kill; hide/show is the cockpit toggle's job. A successful nav or follow
 also clears a stale error.
 Entering a thread from `/` search exits search (query cleared, cursor on the entered
 thread) — the sidebar returns to the whole ambient list. While in filter INPUT mode
@@ -284,7 +284,27 @@ revives a dead one — Enter still does); the sibling machine resolves live from
 tmux window name ($SESH_TUI_MASTER_MACHINE pins it for static spawners). Every other
 key/view/action works exactly as in the normal grid.
 
-Keymap (normal mode):
+### Commands, the palette, and the keymap
+
+Every action the grid can perform is a named **command** (`flag`, `archive`,
+`set-parent`, `new-divider`, …). There are two ways to run one:
+
+- **`p` — the COMMAND PALETTE.** A full-screen fuzzy search over every command:
+  type part of its description or its id, `↑/↓` (or `^k/^j`) move, **enter runs it
+  on the selected thread**, esc cancels. A mouse click on a row runs it; the wheel
+  moves the selection. Each row shows the command's current key, so the palette
+  doubles as a discoverable keymap.
+- **A key**, for the frequent commands only. The key set is deliberately small —
+  everything else is palette-only.
+
+`?` shows the whole keymap in a scrollable popup (one binding per line, keyless
+commands included). The bottom line carries only a dim **`? keys · p commands`** hint.
+
+**`ctrl+c` always quits** and cannot be rebound — it is the guaranteed way out.
+Note `q`/`esc` no longer quit: they DISMISS the ✗ error / note lines (which
+otherwise persist until the next action). `quit` is a palette command.
+
+Keymap (normal mode) — the commands that carry a default key:
 
 ```
 ↑/↓ or j/k   move cursor          ^j / ^k    scroll viewport a half-page
@@ -314,54 +334,95 @@ tab          view PICKER: a popup listing every view (active / on hold / archive
              cockpit prefix+a preselect the current
              thread; if it is hidden by the default view — e.g. a headless archived
              thread, or one on hold — the TUI opens on `all` so the cursor still lands on it)
+p            COMMAND PALETTE (fuzzy-run any command — see above)
 h            hold: park the thread until the start of tomorrow (it drops out of the
              default view and returns automatically tomorrow); on an already-held thread
              `h` releases it
-H            hold until an explicit date (line prompt; YYYY-MM-DD, empty = clear)
 r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
-t            add tag                T          remove tag (picker)
-P            set parent (paste a parent uuid/prefix; empty = root; self/cycle/unknown
-             are refused with a persistent on-screen warning)
-v            new VIRTUAL group (name prompt; empty cancels). Creates a root
-             grouping thread on the SELECTED row's machine (virtual parents only
-             group same-machine threads) and lands the cursor on it — then `P`
-             children under it. No selection = the local machine.
-p            pin the selected top-level thread to the TOP of the manual-order block
-             (pinned threads render ABOVE the auto-sorted list — position is the
-             marker; there is no pin glyph)
+f            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
+ctrl+f       toggle auto-flagging for the thread (⌁ when disabled; also unflags)
+n            toggle notify          i          toggle the ID column
+w            toggle the column-width cap (off = every column grows to its content,
+             so clipped text — a long name/cwd — becomes fully visible)
 u            unpin (remove the manual ordering; the thread rejoins the auto block)
 m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it within the
              block, enter/esc commit-and-exit (an unpinned top-level row is pinned first)
-D            new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal line
-             in the pinned block, on the SELECTED row's machine; reposition it with `m`
-n            toggle notify          i          toggle the ID column
-f            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
-ctrl+f       toggle auto-flagging for the thread (⌁ when disabled; also unflags)
-w            toggle the column-width cap (off = every column grows to its content,
-             so clipped text — a long name/cwd — becomes fully visible)
 I            thread details: a read-only popup of ALL of the selected thread's
              fields (id, agent, model, state axes, cwd, parent, tags, hold,
              tickets, session id, meta…); esc/q closes
-o            show / hide the threads of OFFLINE mesh machines (hidden by default)
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
-F            fork: copy the selected thread into a new HEADLESS thread (same
-             conversation, branched; keeps the source name marked ` (fork)`). It
-             doesn't start anything — enter the copy to continue from where the
-             source left off; the source is untouched.
-x            stop      d  delete (asks y/n)    a  archive/unarchive (INSTANT)
+x            stop      a  archive/unarchive (INSTANT)
 U            undo the last archive (LIFO across this session's archives)
-q / esc      quit
+?            the keymap popup
+q / esc      dismiss the ✗ error / note lines
+ctrl+c       quit (always available, never rebindable)
 ```
 
+Palette-only commands (id — what it does):
+
+```
+hold-until       hold until an explicit date (line prompt; YYYY-MM-DD, empty = clear)
+tag-add          add a tag                tag-remove   remove a tag (picker)
+set-parent       set parent by PICKING one from a list — see below
+set-parent-uuid  set parent by pasting a uuid/prefix (empty = root; self/cycle/unknown
+                 are refused with a persistent on-screen warning)
+new-virtual      new VIRTUAL group (name prompt; empty cancels). Creates a root
+                 grouping thread on the SELECTED row's machine (virtual parents only
+                 group same-machine threads) and lands the cursor on it — then
+                 `set-parent` children under it. No selection = the local machine.
+pin              pin the selected top-level thread to the TOP of the manual-order block
+                 (pinned threads render ABOVE the auto-sorted list — position is the
+                 marker; there is no pin glyph)
+new-divider      new DIVIDER (label prompt; empty = an unlabeled rule). A horizontal
+                 line in the pinned block, on the SELECTED row's machine
+fork             copy the selected thread into a new HEADLESS thread (same conversation,
+                 branched; keeps the source name marked ` (fork)`). It doesn't start
+                 anything — enter the copy to continue; the source is untouched.
+delete           delete the record (asks y/n)
+toggle-offline   show / hide the threads of OFFLINE mesh machines (hidden by default)
+quit             quit the TUI
+```
+
+**Setting a parent interactively (`set-parent`).** Run it on the CHILD: a picker opens
+listing the threads it could hang under — type to filter (fuzzy, by name or uuid),
+`↑/↓` move, **enter applies**, esc cancels, a mouse click applies directly. The list is
+narrowed to choices the daemon will actually accept: the **same machine only** (a
+parent is validated against the owner's local store, so cross-machine parenting does
+not exist), never the thread itself or any of its **descendants** (a cycle), never a
+divider, and not its current parent. A thread that already has a parent also gets a
+**`(root — no parent)`** entry at the top, which detaches it. `set-parent-uuid` is the
+original paste-a-uuid form and is unchanged.
+
+**Rebinding keys (`[[tui.key]]`).** Any command's key can be changed, added to, or
+removed in `~/.sesh/config.toml`:
+
+```toml
+[[tui.key]]
+command = "fork"          # a command id (as shown by `?` / the palette)
+key     = "F"             # a bubbletea key string: "f", "F", "ctrl+f", "up", "alt+enter"
+
+[[tui.key]]
+command = "delete"
+key     = ""              # unbound — reachable only from the palette
+```
+
+The **first** entry naming a command REPLACES its default keys (so this MOVES it
+rather than adding a second binding); **further entries for the same command add**
+more keys. A configured key WINS over a default that held it, and the displaced
+command then renders as keyless — the `?` popup and the palette always show what the
+keys actually do. An unknown command id, an unusable key name (a typo like
+`ctlr+f`), two entries fighting over one key, or an attempt to rebind `ctrl+c` are all
+**loud startup errors** — never a key that silently never fires.
+
 On a **virtual** row (`◇` — a grouping node with no agent), Enter and `f` show a
-warning instead of acting; convert it first with `sesh thread realize`. Grouping keys
-(`h`/`H`, `t`/`T`, `r`, `P`, `a`, `d`) work normally on it.
+warning instead of acting; convert it first with `sesh thread realize`. Grouping
+commands (hold, tags, rename, set-parent, archive, delete) work normally on it.
 
 The selection is **anchored to the thread**, not the row position: when a background
 refresh (the ~3s poll / mesh sync) makes a row appear or disappear above the cursor, the
 cursor stays on the *same* thread rather than shifting onto whatever slid into its slot —
-so `a`/`d`/`x` never hit the wrong thread. The exception is when your own action removes
+so archive/delete/stop never hit the wrong thread. The exception is when your own action removes
 the selected thread from the view (archive it, hold it, reparent it away): the cursor
 then falls to the neighbour rather than chasing the vanished row.
 
@@ -380,37 +441,35 @@ resolved per machine (a cross-machine parent's hold is not inherited).
 
 **Manual ordering (pinning + dividers).** Threads are otherwise auto-sorted, but you can
 **pin** top-level threads to a manually-ordered block that renders **above** the
-auto-sorted list. `p` pins the selected thread to the top of the block; `u` unpins it (it
-rejoins the auto block). Pinned rows carry **no marker glyph** — their position above the
+auto-sorted list. The `pin` command (palette) pins the selected thread to the top of the
+block; `u` unpins it (it rejoins the auto block). Pinned rows carry **no marker glyph** — their position above the
 auto-sorted block is the signal. `m` enters **move mode** — ↑/↓
 reposition the pinned row within the block, enter/esc exit (a still-unpinned top-level row
 is pinned first). Only **top-level** threads can be pinned; a thread loses its pin when
-**archived** or **reparented under another thread**. `D` spawns a **divider** — a
+**archived** or **reparented under another thread**. `new-divider` spawns a **divider** — a
 horizontal rule (with an optional label) you place between pinned threads to group them;
 dividers live in the pinned block, are repositioned like any pinned row (`m`), and are
-removed with `d` (delete), not archived/unpinned. Pinning is a real thread property
+removed with the `delete` command, not archived/unpinned. Pinning is a real thread property
 (`pin_order`), synced across the mesh, so the order is the same viewed from any machine.
 The CLI verbs are `sesh thread pin` / `sesh thread unpin` / `sesh thread new --divider`
 (see below).
 
-`d` (delete) opens a **y/n confirmation** — `y` confirms, any other key cancels.
+`delete` opens a **y/n confirmation** — `y` confirms, any other key cancels.
 **Archiving is instant** (no confirm): `a` parks the thread immediately and notes
 "`U` to undo"; `U` un-archives the most recently archived thread (a LIFO stack of
 this session's archives, so repeated `U` walks back through them; an entry whose
-owner machine is offline refuses loudly and stays undoable). The bottom line shows
-only a dim **`? keys`** hint — press `?` for the full keymap in a popup, ONE BINDING
-PER LINE; when the list overflows the terminal height it scrolls (↑/↓, j/k, or the
-wheel; ▲/▼ show what's off-screen; esc/q/? closes). Move mode still shows its own
-ambient legend.
+owner machine is offline refuses loudly and stays undoable). Move mode shows its own
+ambient legend in place of the `? keys · p commands` hint.
 
 **Offline machines.** A machine's threads keep showing in the mesh view (for offline
 browsing) even after it disconnects, but every action on them routes to the *owning*
 daemon — which is unreachable — so entering/archiving/holding one would hang on the
 routing timeout (~6–15 s) and then fail. So the TUI **hides an OFFLINE machine's
 last-known threads by default**, and if you're pointed at one, an owner-routed key
-(`enter`, `a`, `h`, `x`, `r`, `t`, `P`, `K`, …) **refuses instantly** with a loud
-`<machine> is offline …` message instead of freezing. The OFFLINE footer line still
-shows the machine (and how many threads are hidden); press **`o`** to reveal/re-hide
+(enter, archive, hold, stop, rename, tag, set-parent, tickets, …) **refuses instantly**
+with a loud `<machine> is offline …` message instead of freezing — from the command
+palette as well as from a key. The OFFLINE footer line still shows the machine (and how
+many threads are hidden); run **`toggle-offline`** from the palette to reveal/re-hide
 them (e.g. to browse a powered-off machine). Default the reveal on with `[tui]
 show_offline = true` or `--show-offline`. Reachability comes from the mesh sync, so it
 can lag a real disconnect by a sync tick or two.
@@ -686,7 +745,7 @@ Aqua service context. Raw interactive SSH is still Keychain-isolated and may req
 
 **"A machine's threads vanished from my TUI."** Almost always that machine is
 *unreachable*, not thread-less: offline machines' threads are hidden by default
-(`o` in the TUI reveals them, and the footer names the machine). Check `sesh mesh`
+(the TUI's toggle-offline command reveals them, and the footer names the machine). Check `sesh mesh`
 from another machine — the affected box's own view stays green because outbound sync
 keeps working, so diagnose from the OUTSIDE. Then run `sesh doctor` on it and read the
 `api` line: `ok listening on <ip>:<port>` is healthy; `fail … NOT BOUND` means the bind
@@ -738,7 +797,7 @@ label = 'mysetup/{rel}'
 [tui]
 columns = ["machine","agent","name","cwd","tags","notify"]
 all_machines = true              # default `sesh tui` to the cross-machine view (= --all-machines)
-show_offline = true              # show OFFLINE machines' threads by default (else hidden; `o` toggles)
+show_offline = true              # show OFFLINE machines' threads by default (else hidden; toggle-offline toggles)
 expand_children = true           # tree nodes start EXPANDED (default false: children collapsed; = --expand)
 [[tui.column]]                   # MOVE one column relative to an anchor, on top of the base set —
 name   = "notify"                #   so you can reposition a column without enumerating them all
@@ -749,6 +808,10 @@ color = "green"
 [[tui.glyph_color]]              # gutter attention glyphs: busy ▶ / descendant ↓ (bright green by default)
 name = "busy"
 color = "2"                      # a name, a 0-255 number, or #rrggbb; empty clears the tint
+[[tui.key]]                      # REBIND a command's key (ids come from `?` / the palette)
+command = "fork"                 #   first entry for a command REPLACES its defaults (a MOVE);
+key     = "F"                    #   further entries ADD keys; key = "" unbinds (palette-only).
+                                 #   Unknown id / unusable key / two entries on one key = loud error.
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
 filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/flagged/flagdisabled/ticketed

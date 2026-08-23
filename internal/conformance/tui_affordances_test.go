@@ -188,8 +188,12 @@ func typeText(t *testing.T, m tui.Model, text string) tui.Model {
 	return nm.(tui.Model)
 }
 
-// claimQuitEsc: Esc quits from normal mode; while the line prompt is open, Esc
-// only closes the prompt (the TUI stays running).
+// claimQuitEsc: while the line prompt is open, Esc closes the PROMPT and does not
+// quit. In normal mode Esc no longer quits either — since the command palette
+// landed, esc/q DISMISS the message lines and `quit` lives in the palette, with
+// ctrl+c as the always-available kill. This claim pins all three against a real
+// daemon, because "the TUI won't close" and "the TUI closed when I hit esc" are
+// both things you only notice in the real thing.
 func claimQuitEsc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -198,7 +202,14 @@ func claimQuitEsc(t *testing.T) {
 	sb.startDaemon(t)
 	sb.newHeadlessThread(t, "pi", "escme")
 
-	m := tui.New(sb.Home+"/daemon.sock", false)
+	// WithExec/WithLocal are REQUIRED for any claim whose model performs a routed
+	// action: without them the TUI shells out to os.Executable() — which under
+	// `go test` is the TEST BINARY — and re-runs the whole suite as a subprocess
+	// instead of running `sesh`. (This claim only opened popups before, so it got
+	// away with the bare constructor; the reparent below does not.)
+	bin := seshBin(t)
+	env := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "escme")
 
 	// Prompt open: Esc closes the prompt, does NOT quit.
@@ -217,14 +228,66 @@ func claimQuitEsc(t *testing.T) {
 		t.Errorf("Esc did not close the prompt")
 	}
 
-	// Normal mode: Esc quits.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	// Normal mode: Esc DISMISSES rather than quitting. Give it something to
+	// dismiss first — a real refused action on a real record — so the assertion
+	// cannot pass vacuously against an already-empty message line.
+	m = runCommand(t, m, "set-parent-uuid")
+	m = typeText(t, m, "not-a-real-uuid")
+	m = runSpecial(t, m, tea.KeyEnter)
+	if !waitUntil(10*time.Second, func() bool {
+		m, _ = render(t, m)
+		return m.ActionErr() != nil
+	}) {
+		t.Fatalf("reparent to a bogus uuid should have set a loud action error")
+	}
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = nm.(tui.Model)
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatalf("Esc in normal mode must NOT quit any more — quit moved to the palette")
+		}
+	}
+	if m.ActionErr() != nil {
+		t.Errorf("Esc in normal mode should dismiss the error line, still: %v", m.ActionErr())
+	}
+
+	// ctrl+c is the always-available kill and cannot be configured away.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
-		t.Fatalf("Esc in normal mode returned no command (want quit)")
+		t.Fatalf("ctrl+c returned no command (want quit)")
 	}
 	if _, quit := cmd().(tea.QuitMsg); !quit {
-		t.Errorf("Esc in normal mode did not quit (got %T)", cmd())
+		t.Errorf("ctrl+c did not quit (got %T)", cmd())
 	}
+
+	// And `quit` really is reachable from the palette.
+	m2 := runCommandNoApply(t, m, "quit")
+	if m2 == nil {
+		t.Errorf("quit is not reachable from the command palette")
+	}
+}
+
+// runCommandNoApply drives the palette to a command and returns the tea.Cmd Enter
+// produced WITHOUT feeding it back into the model — for a command (like quit)
+// whose message must not be applied mid-claim.
+func runCommandNoApply(t *testing.T, m tui.Model, id string) tea.Cmd {
+	t.Helper()
+	m = runKey(t, m, "p")
+	idx := -1
+	for i, c := range m.PaletteCommands() {
+		if c == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("command %q is not in the palette", id)
+	}
+	for range idx {
+		m = runSpecial(t, m, tea.KeyDown)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return cmd
 }
 
 // claimViewCycleTab: Tab cycles active -> on hold -> archived -> all (REAL archived
@@ -415,7 +478,7 @@ func claimActionHold(t *testing.T) {
 	m = nextView(t, m) // on hold -> archived
 	m = nextView(t, m) // archived -> all (holdme is visible here)
 	m, _ = renderUntilRow(t, m, "holdme")
-	m = runKey(t, m, "H")
+	m = runCommand(t, m, "hold-until")
 	if !m.Prompting() {
 		t.Fatalf("H did not open the hold-date prompt")
 	}
@@ -636,7 +699,7 @@ func claimActionTag(t *testing.T) {
 	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "tagme")
 
-	m = runKey(t, m, "t")
+	m = runCommand(t, m, "tag-add")
 	if !m.Prompting() {
 		t.Fatalf("t did not open the tag prompt")
 	}
@@ -692,7 +755,7 @@ func claimActionUntag(t *testing.T) {
 	}
 
 	// Open the picker, move to the SECOND tag (dropme2), remove it.
-	m = runKey(t, m, "T")
+	m = runCommand(t, m, "tag-remove")
 	if !strings.Contains(m.View(), "remove tag") {
 		t.Fatalf("T did not open the remove-tag popup: %q", m.View())
 	}
@@ -758,9 +821,9 @@ func claimActionReparent(t *testing.T) {
 
 	// Put the cursor on beta (the node we move), paste alpha's full uuid, submit.
 	m = selectRowByName(t, m, "beta")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	if !m.Prompting() {
-		t.Fatalf("P did not open the reparent prompt")
+		t.Fatalf("set-parent-uuid did not open the reparent prompt")
 	}
 	m = typeText(t, m, alpha.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
@@ -782,7 +845,7 @@ func claimActionReparent(t *testing.T) {
 	// Cycle guard: making alpha a child of its own descendant beta is refused LOUDLY,
 	// and alpha's record stays a root.
 	m = selectRowByName(t, m, "alpha")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	m = typeText(t, m, beta.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
 	if m.ActionErr() == nil {
@@ -801,7 +864,7 @@ func claimActionReparent(t *testing.T) {
 	// Self-parent: reparenting beta under ITSELF is refused LOUDLY, record untouched.
 	beforeParent := threadParentOf(t, sb, beta.ID)
 	m = selectRowByName(t, m, "beta")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	m = typeText(t, m, beta.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
 	if m.ActionErr() == nil {
@@ -813,7 +876,7 @@ func claimActionReparent(t *testing.T) {
 
 	// A non-existent parent uuid is refused LOUDLY (no silent no-op).
 	m = selectRowByName(t, m, "beta")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	m = typeText(t, m, "ffffffff-ffff-ffff-ffff-ffffffffffff")
 	m = runSpecial(t, m, tea.KeyEnter)
 	if m.ActionErr() == nil {
@@ -823,7 +886,7 @@ func claimActionReparent(t *testing.T) {
 	// Detach: an empty submit makes beta a root again (asserted via daemon truth — a
 	// stale UI error from the prior rejections may linger in actionErr, which is fine).
 	m = selectRowByName(t, m, "beta")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	m = runSpecial(t, m, tea.KeyEnter) // empty input = root
 	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == "" }) {
 		t.Errorf("empty submit did not detach beta to a root; parent=%q", threadParentOf(t, sb, beta.ID))

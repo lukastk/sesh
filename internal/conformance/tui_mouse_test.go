@@ -81,7 +81,7 @@ func claimMouseClick(t *testing.T) {
 	}
 	// Nest beta under alpha on the daemon (the P reparent path).
 	m = selectRowByName(t, m, "beta")
-	m = runKey(t, m, "P")
+	m = runCommand(t, m, "set-parent-uuid")
 	m = typeText(t, m, alpha.ID)
 	m = runSpecial(t, m, tea.KeyEnter)
 	if !waitUntil(10*time.Second, func() bool { return threadParentOf(t, sb, beta.ID) == alpha.ID }) {

@@ -1,5 +1,137 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H88 — TUI COMMAND PALETTE + config-rebindable keymap, and an INTERACTIVE reparent picker (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; tickets 7e01fe7e + 9ecfbdeb; NOT YET DEPLOYED)
+Two tickets, one commit's worth of surface. Lukas: "Currently `sesh tui` has loads of keyboard
+shortcuts. Way too many. Instead of that we shall adopt a *command palette* approach. Pressing
+`p` will now bring up the command palette... Only these keyboard shortcuts will survive:
+[[nul/260822_231314]]" + "a new command that allows you to set the parent of a thread more
+interactively... you select the thread you want to reparent it to, and press enter."
+
+**THE SPEC IS THE VAULT NOTE, and it is exact.** `nul/260822_231314.md` is the CURRENT `?` help
+list with lines DELETED — verbatim, same order, same wording. So the surviving key set is
+mechanically derivable and there is nothing to interpret: what is gone is {H, t, T, P, v, p,
+D, F, d, o, q/esc}. I asked Lukas which bindings survive anyway and got, correctly, "Did I not
+already say which ones to keep in 260822_231314? Did you not read the full ticket?" — READ THE
+LINKED NOTE AND DIFF IT AGAINST helpBindings BEFORE ASKING ANYTHING. Two corollaries that are
+easy to get wrong: (a) `j/k` and the mouse SURVIVE — the note lists `↑/↓` exactly as the old
+help did while j/k also worked, so their absence is not a removal; (b) `q/esc quit` IS deleted,
+which is a real behaviour change, not an oversight to "fix" — see below.
+
+DESIGN (conferred; he picked the `[[tui.key]]` table form and confirmed pin is palette-only):
+- **internal/tui/commands.go — a COMMAND REGISTRY** is the single source of truth for the three
+  surfaces that were hand-maintained and could drift: the keymap, the palette, and the `?` help
+  (now GENERATED, so it cannot advertise a key that runs something else after a rebind).
+- **handleKey → keymap lookup → `runCommand(id)`**. One dispatch for both entry points, which is
+  what makes the palette safe: the offline-owner gate, the popups, the optimistic patches all
+  behave identically however a command is invoked.
+- **`requiresReachableOwner` is now keyed by COMMAND ID, not key string.** This is the
+  load-bearing change of the whole batch. Keys are configurable now, so a key-keyed gate would
+  silently stop covering a rebound action — the exact plausible-but-wrong class this project
+  exists to prevent. Its drift guard is also now EXHAUSTIVE over the registry: a new command in
+  neither the routed nor the local list fails the test (it caught `undo-archive` immediately —
+  which belongs in `local` because its target comes from the undo STACK, not the selection, so
+  the selection-keyed gate would check the wrong machine; H54).
+- **`[[tui.key]]` semantics**, chosen so the rendered keymap can never lie: first entry for a
+  command REPLACES its defaults (a MOVE, not an addition), further entries ADD, `key = ""`
+  unbinds; a configured key WINS over a default and is TAKEN AWAY from the command that held it
+  (so `f = delete` leaves `flag` rendering as keyless rather than claiming a key that deletes).
+  Two CONFIG entries on one key, an unknown command id, and an unusable key name are all LOUD.
+  Key names are validated against a set DERIVED FROM BUBBLETEA ITSELF (iterate `tea.KeyType`
+  -100..200 and collect non-empty `Key{Type:t}.String()` — 85 names incl. backspace at 127),
+  so a typo like `ctlr+f` is refused instead of binding a key that can never fire.
+- **`ctrl+c` is hard-wired OUTSIDE the registry** and cannot be rebound: a config that unbinds
+  `quit` must never leave the TUI with no way out.
+- **`q`/`esc` now run `dismiss`** (clear the ✗/note lines) — the behaviour sidebar mode already
+  had, now uniform. **CALL THIS OUT TO LUKAS**: it is the note's most surprising consequence,
+  `quit` is palette-only, and if he wants `q` back it is one registry line.
+- **The reparent picker (parentpick.go)** lists only choices the daemon will ACCEPT: same
+  machine only (a parent is validated owner-locally — H37, cross-machine parenting does not
+  exist), never the thread itself or its DESCENDANTS (cycle), never a divider, never its current
+  parent; plus a `(root — no parent)` entry when it has one to detach from. `set-parent-uuid`
+  keeps the old paste-a-uuid prompt untouched, as asked.
+
+**FOUND AND FIXED EN ROUTE — H70's bug was still live in EVERY full-screen popup.** The live
+smoke showed the palette rendering with its title MISSING. Cause: H70 trimmed the trailing
+newline only on the GRID path; `View()`'s popup branches (`helpView`, `viewPickerView`,
+`detailsView`, `ticketView`) each early-return their own frame WITH a trailing "\n". Each sizes
+its list to fill the height exactly, so the phantom final line made the frame height+1 and
+bubbletea dropped the TOP — i.e. **the `?` keymap has been losing its title on a full-height
+pane ever since it was built.** Fixed at the one seam they all pass through (`View` trims,
+`viewFrame` builds). New `TestPopupFramesFitPaneHeight` guards every popup at five heights.
+NOT FIXED, deliberately, and NOT silently dropped: the `I` details popup renders a FIXED ~23-line
+field list with NO scrolling, so on a short pane it overflows by ~15 lines regardless of the
+newline (measured 24 lines in a 20-row pane on clean HEAD). It needs the scroll treatment
+helpView/paletteView have — a separate change, excluded from the guard with that reason written
+into the test.
+
+TESTS. Units: the surviving key set pinned EXACTLY in both directions (a key that quietly comes
+back fails); registry well-formedness; ResolveKeymap override/unbind/displace/loud-error truth
+tables; validateKeyName; zero-value Model uses the defaults (the H80 struct-literal lesson);
+removed keys are INERT; `p` opens the palette and no longer pins; palette filter/scroll/mouse/
+modal-swallow; picker candidates+exclusions/filter/apply/detach/divider-refusal. Conformance:
+three new claims, all REGISTERED AND DECLARED (the H25 gotcha) — `command-palette` (a fuzzy
+query reaches a keyless command and Enter really tags the thread on the daemon; esc cancels
+without running it), `keymap-config` (a `[[tui.key]]` rebind against a live daemon: the NEW key
+performs the routed action AND the key it moved off does nothing), `action-set-parent` (pick a
+parent from the list — no uuid typed — and the record really moves; a descendant is never
+offered; `(root)` clears the parent).
+**The 10 claims that drove a REMOVED key now drive the command THROUGH THE PALETTE** (new
+`runCommand` helper: press `p`, walk to the command, Enter). Deliberately not a direct call into
+the dispatch — every converted claim now also proves the palette can reach that command against
+a real daemon.
+ANTI-GAMING (all reverse-edited, never git-checkout — H44; all `-count=1` — H75): picker drops
+the descendant exclusion → RED naming `grand1`/`gamma`; runCommand skips the offline gate → RED;
+ResolveKeymap stops clearing defaults → claim RED "`f` still flagged after [[tui.key]] moved flag
+to `g`"; palette enter stops dispatching → RED both ways; palette ignores the query → RED; help
+rendered from defaults instead of the live keymap → RED.
+**THE TRAP THAT COST THE MOST — a conformance TUI model built WITHOUT `.WithExec(bin, env)`
+shells out to `os.Executable()`, which under `go test` is the TEST BINARY.** `claimQuitEsc`
+used the bare `tui.New(...)` constructor and always had; that was harmless while it only
+opened and closed popups, but the moment I gave it a routed action (a reparent, to produce a
+real error line to dismiss) it re-ran the whole conformance suite as a subprocess. It looked
+exactly like a hang — the claim sat for many minutes with no output — and it leaked sandbox
+daemons under `/var/folders/.../sesh-conformance-*` that had to be killed by explicit pid
+afterwards (the H75 leak class; `pgrep -af 'sesh daemon run'` after any killed suite run, and
+NEVER `pkill -f`). If a claim's model performs ANY action, it needs `WithExec` + `WithLocal`.
+
+**TWO ANTI-GAMING TRAPS worth remembering.** (1) My first neuter left `excluded` unused, so the
+package did not COMPILE — and a grep for `--- FAIL` showed nothing, which reads exactly like a
+passing test. A neuter that does not compile proves NOTHING; make it compile (I kept the map
+referenced) and check for build errors explicitly. (2) Reversing a neuter by string-replacing
+`new`→`old` hit the WRONG occurrence: the palette's esc arm is byte-identical to the neutered
+enter arm, so the reversal moved the dispatch onto esc. Caught by the suite immediately, but it
+means: after reversing a neuter, RE-RUN the tests — a "reversed" edit is not verified until green.
+
+GREEN: every non-conformance package plain and `-race`; `go vet ./...`; the three new claims
+3/3. FULL TUI CLAIMS SUITE (serial): **65 pass, 2 fail**, and both failures are PRE-EXISTING —
+reproduced byte-identically on a clean detached worktree at 580e4c3, and both already recorded
+in H80 as macbook-environment reds: `action-fork` ("transcript <id>: exit status 1" — the pi-
+transcript class from H77) and `uuid-popup-copy` (the claim stubs `wl-copy`, a WAYLAND tool, on
+a Mac). A THIRD claim, `filter-esc-applies`, went red and WAS mine: it asserted normal-mode Esc
+quits. Repaired to the new contract — it now asserts Esc does NOT quit, does NOT disturb the
+applied filter (the property the claim actually exists for), and that ctrl+c still quits. That
+one is the reminder that a grep for the removed keys is not enough: `filter-esc-applies` drove
+Esc through `m.Update` directly, not through the `runKey` helper my sweep matched.
+PRE-EXISTING RED outside conformance, also verified on the clean worktree and NOT mine
+(internal/daemon is untouched here): `TestMaintainerDropsStaleReportedBusy` "baseline: busy=idle
+authority=" — the H75/H81 macbook red, still unfixed. Also unchanged: `gofmt -l` flags internal/config/{config,tui}.go on clean
+HEAD too (toolchain drift mangling a quote in a comment — H48; format only touched files).
+LIVE-SMOKED in a fully isolated tmux (own SESH_HOME/daemon/sockets under a short /tmp path for
+the 108-char sockaddr limit, every inherited SESH_* stripped, sandbox daemon killed by explicit
+pid and the tree removed; the live daemon never touched): `p` → palette with the title intact,
+`div` ranks "new divider" first, `setparent` → the picker naming the child and listing exactly
+the two same-machine candidates → filter `alpha` → Enter → the DAEMON's record really reads
+`gamma-leaf parent=alpha-parent` and the grid renders it nested; then the `(root — no parent)`
+entry appears (its current parent correctly gone from the list) and clears the parent; `q` does
+not quit; `?` renders the generated keymap; `pin_order` stayed None throughout (i.e. `p` really
+does not pin any more).
+DEPLOY: **binary-only, NO daemon restart, no schema/API/CLI change** (a pure TUI-client
+feature). NOT YET DEPLOYED — the fleet still has the old keymap. A running SIDEBAR keeps the
+binary it launched with (H70), so a deployed machine also needs `prefix+r` (or mmt-kill/
+mmt-start) before the palette exists in it. myrig may want `[[tui.key]]` entries in
+`config.toml.jinja` if Lukas wants any of the removed keys back — none added here, since the
+note's set IS the requested default.
+
 ## H86 — NAMING: "the master tmux setup" is retired; the thing is **mycockpit** ("the cockpit"), and `master`/`base` are its two LEVELS — `mmt-`/`mt-` and every `master` identifier STAY (2026-08-23, myrig c098ba5 + sesh d57451e/<this commit> + sesh-ui/myassistant/myagent/myarch; docs + user-facing strings only, NO schema/API/behaviour change; myrig home files NOT yet deployed)
 Lukas: "Right now I have a fairly clumsy name for the tmux thing I have set up with sesh:
 the master tmux setup." Ticket ae05a84e. The rename is **mycockpit**, and he also wants to

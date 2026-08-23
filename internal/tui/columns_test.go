@@ -150,12 +150,12 @@ func TestHelpPopupAndLegendHint(t *testing.T) {
 	if strings.Contains(out, "quit") {
 		t.Fatalf("tail binding visible without scrolling at height 10:\n%s", out)
 	}
-	for range len(helpBindings) { // page past the end; the offset clamps
+	for range len(m.helpBindings()) { // page past the end; the offset clamps
 		mm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
 		m = mm.(Model)
 	}
 	out = strip.ReplaceAllString(m.helpView(), "")
-	if !strings.Contains(out, "▲") || !strings.Contains(out, "wheel") {
+	if !strings.Contains(out, "▲") || !strings.Contains(out, "cannot be rebound") {
 		t.Errorf("scrolled-to-end help should show ▲ and the last binding:\n%s", out)
 	}
 	// The popup takes over View() and esc closes it (resetting the offset).

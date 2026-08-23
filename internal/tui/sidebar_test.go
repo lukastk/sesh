@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -66,14 +67,18 @@ func TestSidebarEscDoesNotQuit(t *testing.T) {
 	if _, quit := cmd().(tea.QuitMsg); !quit {
 		t.Fatalf("ctrl+c must still quit the sidebar (the deliberate kill)")
 	}
-	// The popup grid keeps q/esc-quit (pinned live by claimQuitEsc too).
-	popup := Model{rows: rowsWith("a")}
-	_, cmd = popup.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if cmd == nil {
-		t.Fatalf("popup esc produced no command")
+	// Since the command palette landed, esc/q DISMISS the message lines rather than
+	// quitting — in the popup grid too (quit moved to the palette; ctrl+c above is the
+	// always-available kill). Pinned live by claimQuitEsc.
+	popup := Model{rows: rowsWith("a"), note: "something", actionErr: errors.New("boom")}
+	nm, cmd := popup.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatalf("popup esc must NOT quit any more — it dismisses")
+		}
 	}
-	if _, quit := cmd().(tea.QuitMsg); !quit {
-		t.Fatalf("popup esc must quit")
+	if got := nm.(Model); got.note != "" || got.actionErr != nil {
+		t.Fatalf("popup esc should dismiss the message lines (note=%q err=%v)", got.note, got.actionErr)
 	}
 }
 

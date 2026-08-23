@@ -86,6 +86,9 @@ var declaredTUIClaims = []string{
 	"column-max-width",          // full-width columns are capped by default (a long NAME truncates); `w` toggles the cap off to show full text; a [[tui.column_width]] override raises the cap (config→render)
 	"thread-details",            // I opens a read-only takeover showing a thread's REAL fields (full uuid, machine, agent, cwd, live axis); esc closes back to the grid
 	"mouse-click",               // a left CLICK selects the row under the pointer; a click on the ▸/▾ fold marker collapses/expands that thread's subtree — over a REAL parent/child tree + render
+	"command-palette",           // `p` opens the COMMAND PALETTE; a fuzzy query reaches a command with no key at all and Enter runs it for real (the daemon's record changes); esc cancels without running it
+	"keymap-config",             // a [[tui.key]] rebinding really moves a command's key against a live daemon: the NEW key performs the routed action and the key it moved off does nothing
+	"action-set-parent",         // the INTERACTIVE reparent picker: pick the new parent from the list (no uuid typed) and the daemon really moves the thread; a descendant is never offered (cycle); the (root) entry clears the parent
 }
 
 var boundTUIClaims = map[string]func(*testing.T){}
@@ -803,6 +806,36 @@ func innerClientSession(t *testing.T, socket string) string {
 // runKey drives a keypress, runs the command it produces (the real action), and
 // feeds the result back through Update — how a test exercises an in-app action end
 // to end. The returned model's LastErr() carries any action error.
+// runCommand invokes a TUI command THROUGH THE COMMAND PALETTE — the real user
+// path for every action that no longer carries a key: press `p`, move to the
+// command, press Enter. Deliberately not a direct call into the dispatch: driving
+// the palette means each converted claim ALSO proves the palette can reach that
+// command against a real daemon.
+//
+// The palette opens with an empty query, which lists every command in registry
+// order, so the command's index is deterministic.
+func runCommand(t *testing.T, m tui.Model, id string) tui.Model {
+	t.Helper()
+	m = runKey(t, m, "p")
+	if !m.PaletteOpen() {
+		t.Fatalf("`p` did not open the command palette")
+	}
+	idx := -1
+	for i, c := range m.PaletteCommands() {
+		if c == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("command %q is not in the palette (have %v)", id, m.PaletteCommands())
+	}
+	for range idx {
+		m = runSpecial(t, m, tea.KeyDown)
+	}
+	return runSpecial(t, m, tea.KeyEnter)
+}
+
 func runKey(t *testing.T, m tui.Model, key string) tui.Model {
 	t.Helper()
 	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
@@ -880,7 +913,7 @@ func claimActionFork(t *testing.T) {
 		WithExec(seshBin(t), []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}).
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "trunk") // single thread => cursor on it
-	if m = runKey(t, m, "F"); m.ActionErr() != nil {
+	if m = runCommand(t, m, "fork"); m.ActionErr() != nil {
 		t.Fatalf("fork action errored: %v", m.ActionErr())
 	}
 
@@ -930,7 +963,7 @@ func claimActionDelete(t *testing.T) {
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "delme")
 	// `d` opens the confirmation; it must NOT delete on its own, and a non-y key cancels.
-	m = runKey(t, m, "d")
+	m = runCommand(t, m, "delete")
 	if !m.Confirming() {
 		t.Fatalf("d did not open the delete confirmation")
 	}
@@ -942,7 +975,7 @@ func claimActionDelete(t *testing.T) {
 		t.Fatalf("a cancelled delete still dropped the record")
 	}
 	// Confirm with `y` → the record is really gone from the daemon.
-	m = runKey(t, m, "d")
+	m = runCommand(t, m, "delete")
 	if m = runKey(t, m, "y"); m.ActionErr() != nil {
 		t.Fatalf("delete action errored: %v", m.ActionErr())
 	}
@@ -1213,7 +1246,7 @@ func claimMeshRenderOffline(t *testing.T) {
 	}
 	// `o` reveals the peer's LAST-KNOWN threads — offline browsing (retained,
 	// not dropped).
-	m = runKey(t, m, "o")
+	m = runCommand(t, m, "toggle-offline")
 	if !waitUntil(15*time.Second, func() bool {
 		mm, view := render(t, m)
 		m = mm

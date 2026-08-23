@@ -255,12 +255,30 @@ func claimFilterEscApplies(t *testing.T) {
 		t.Errorf("/ did not re-edit the applied query (filtering=%v q=%q)", m.Filtering(), m.FilterQuery())
 	}
 	m = runSpecial(t, m, tea.KeyEsc) // apply again
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	// Normal-mode Esc no longer QUITS (quit moved to the command palette when the
+	// keymap was cut down) — but it must still not disturb the applied filter, which
+	// is the property this claim exists for: the filter survives the keystroke that
+	// used to end the session.
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = nm.(tui.Model)
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Errorf("normal-mode Esc must no longer quit")
+		}
+	}
+	if m.Filtering() || m.FilterQuery() != "beta" {
+		t.Errorf("normal-mode Esc disturbed the applied filter (filtering=%v q=%q)", m.Filtering(), m.FilterQuery())
+	}
+	if view := m.View(); strings.Contains(view, "alpha-api") {
+		t.Errorf("applied filter stopped narrowing after a normal-mode Esc:\n%s", view)
+	}
+	// ctrl+c is the always-available quit.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
-		t.Fatalf("normal-mode Esc returned no command")
+		t.Fatalf("ctrl+c returned no command (want quit)")
 	}
 	if _, quit := cmd().(tea.QuitMsg); !quit {
-		t.Errorf("normal-mode Esc did not quit")
+		t.Errorf("ctrl+c did not quit")
 	}
 }
 

@@ -115,10 +115,10 @@ func TestNewVirtualGroupPrompt(t *testing.T) {
 			{Machine: "macbook", Reachable: true},
 		},
 	}
-	nm, _ := m.Update(keyMsg("v"))
+	nm, _ := m.runCommand("new-virtual")
 	m = nm.(Model)
 	if m.prompting != promptNewVirtual {
-		t.Fatalf("v did not open the new-virtual prompt (got %v)", m.prompting)
+		t.Fatalf("new-virtual did not open the prompt (got %v)", m.prompting)
 	}
 	if view := m.View(); !strings.Contains(view, `"macbook"`) {
 		t.Errorf("prompt should name the target machine (the selected row's), view:\n%s", view)
@@ -138,18 +138,18 @@ func TestNewVirtualGroupPrompt(t *testing.T) {
 // names the local machine.
 func TestNewVirtualGroupPromptNoSelection(t *testing.T) {
 	m := Model{machine: "mymain"}
-	nm, _ := m.Update(keyMsg("v"))
+	nm, _ := m.runCommand("new-virtual")
 	m = nm.(Model)
 	if m.prompting != promptNewVirtual {
-		t.Fatalf("v with no selection should still open the prompt")
+		t.Fatalf("new-virtual with no selection should still open the prompt")
 	}
 	if view := m.View(); !strings.Contains(view, `"mymain"`) {
 		t.Errorf("prompt should fall back to the local machine, view:\n%s", view)
 	}
 }
 
-// `v` on an OFFLINE machine's row is refused by the reachability gate before
-// the prompt opens (creating there would hang on the routing timeout).
+// `new-virtual` on an OFFLINE machine's row is refused by the reachability gate
+// before the prompt opens (creating there would hang on the routing timeout).
 func TestNewVirtualGroupOfflineRefused(t *testing.T) {
 	m := Model{
 		machine: "mymain",
@@ -160,10 +160,10 @@ func TestNewVirtualGroupOfflineRefused(t *testing.T) {
 			{Machine: "macstudio", Reachable: false},
 		},
 	}
-	nm, cmd := m.Update(keyMsg("v"))
+	nm, cmd := m.runCommand("new-virtual")
 	m = nm.(Model)
 	if m.prompting != promptNone || cmd != nil || m.ActionErr() == nil {
-		t.Fatalf("v on an offline row must refuse instantly (prompting=%v cmd=%v err=%v)",
+		t.Fatalf("new-virtual on an offline row must refuse instantly (prompting=%v cmd=%v err=%v)",
 			m.prompting, cmd, m.ActionErr())
 	}
 }

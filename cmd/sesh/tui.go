@@ -140,6 +140,19 @@ func runTUI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tui glyph colors: %w", err)
 	}
+	// Key bindings: the command registry's defaults overlaid by any [[tui.key]]
+	// entries. An unknown command id, an unusable key name, or two entries fighting
+	// over one key is loud here — a misbound key would otherwise just never fire.
+	var keySpecs []tui.KeySpec
+	if tcfg != nil {
+		for _, k := range tcfg.Keys {
+			keySpecs = append(keySpecs, tui.KeySpec{Command: k.Command, Key: k.Key})
+		}
+	}
+	keymap, err := tui.ResolveKeymap(keySpecs)
+	if err != nil {
+		return fmt.Errorf("tui keys: %w", err)
+	}
 	// Per-column max-width overrides ([[tui.column_width]]) + the cap on/off default
 	// ([tui] max_column_widths, unset = on). Unknown column / bad max is loud here.
 	var widthSpecs []tui.ColumnWidthSpec
@@ -195,10 +208,11 @@ func runTUI(args []string) error {
 	// lets the popup bindings drop the wrapper that used to add the flag).
 	useAllMachines := *allMachines || (tcfg != nil && tcfg.AllMachines)
 	// Offline machines' stale threads are hidden by default; --show-offline or
-	// [tui] show_offline reveals them (the `o` key toggles it per-session either way).
+	// [tui] show_offline reveals them (the toggle-offline command flips it per-session
+	// either way).
 	showOfflineDefault := *showOffline || (tcfg != nil && tcfg.ShowOffline)
 	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithGlyphColors(glyphColors).WithEditor(editor).
-		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(colWidths)
+		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(colWidths).WithKeymap(keymap)
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

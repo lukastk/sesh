@@ -370,7 +370,7 @@ func claimActionVirtualEnter(t *testing.T) {
 	}
 
 	// F: fork refuses client-side with a clear message.
-	m = runKey(t, m, "F")
+	m = runCommand(t, m, "fork")
 	if m.ActionErr() == nil || !strings.Contains(m.ActionErr().Error(), "virtual") {
 		t.Errorf("fork on a virtual row should warn about virtualness, got %v", m.ActionErr())
 	}
@@ -400,7 +400,7 @@ func claimActionNewVirtual(t *testing.T) {
 	m, _ = renderUntilRow(t, m, "anchor")
 
 	// Empty submit cancels: no new record.
-	m = runKey(t, m, "v")
+	m = runCommand(t, m, "new-virtual")
 	if !m.Prompting() {
 		t.Fatalf("v did not open the name prompt")
 	}
@@ -412,7 +412,7 @@ func claimActionNewVirtual(t *testing.T) {
 	}
 
 	// Named submit creates a ROOT virtual thread on the daemon.
-	m = runKey(t, m, "v")
+	m = runCommand(t, m, "new-virtual")
 	m = typeText(t, m, "grp x")
 	m = runSpecial(t, m, tea.KeyEnter)
 	if m.ActionErr() != nil {

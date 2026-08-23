@@ -294,7 +294,7 @@ func claimActionPin(t *testing.T) {
 	}
 
 	m = selectRowByName(t, m, "pinme")
-	m = runKey(t, m, "p")
+	m = runCommand(t, m, "pin")
 	if m.ActionErr() != nil {
 		t.Fatalf("pin action errored: %v", m.ActionErr())
 	}
@@ -389,7 +389,7 @@ func claimActionNewDivider(t *testing.T) {
 		WithLocal(sb.Machine, sb.TmuxSocket)
 	m, _ = renderUntilRow(t, m, "anchor")
 
-	m = runKey(t, m, "D")
+	m = runCommand(t, m, "new-divider")
 	if !m.Prompting() {
 		t.Fatalf("D did not open the divider label prompt")
 	}

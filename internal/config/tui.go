@@ -59,6 +59,24 @@ type TUIConfig struct {
 	//	name = "name"
 	//	max  = 60
 	ColumnWidths []ColumnWidth `toml:"column_width"`
+	// Keys rebind the TUI's commands. Every action lives in a command registry
+	// (`p` opens the palette, `?` lists them); only the frequent ones carry a key
+	// by default. An entry's FIRST appearance replaces that command's default
+	// keys, further entries for it ADD keys, and an empty key UNBINDS it (leaving
+	// it palette-only) — the same empty-clears convention as column_color /
+	// glyph_color. A configured key wins over a default that held it. Unknown
+	// command ids, unusable key names and two entries fighting over one key are
+	// all LOUD errors (see the TUI's ResolveKeymap). ctrl+c always quits and
+	// cannot be rebound.
+	//
+	//	[[tui.key]]
+	//	command = "fork"
+	//	key     = "F"
+	//
+	//	[[tui.key]]
+	//	command = "delete"
+	//	key     = ""      # palette-only
+	Keys []KeyBinding `toml:"key"`
 	// ExpandChildren makes tree nodes start EXPANDED (default false: children
 	// start collapsed under their parent, per v1).
 	ExpandChildren bool `toml:"expand_children"`
@@ -131,6 +149,14 @@ type ColumnColor struct {
 type GlyphColor struct {
 	Name  string `toml:"name"`
 	Color string `toml:"color"`
+}
+
+// KeyBinding binds one TUI command to one key. Command is the command's stable
+// id (as listed by the `?` popup / the command palette); Key is a bubbletea key
+// string ("f", "ctrl+f", "up", "alt+enter"), and empty unbinds the command.
+type KeyBinding struct {
+	Command string `toml:"command"`
+	Key     string `toml:"key"`
 }
 
 // ColumnWidth overrides one column's max render width (used when the width cap is

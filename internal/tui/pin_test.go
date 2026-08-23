@@ -96,18 +96,19 @@ func TestReorderTarget(t *testing.T) {
 	}
 }
 
-// `p` pins a top-level thread (optimistic patch applied instantly); a nested thread is
-// refused loudly and never pinned.
-func TestPinKey(t *testing.T) {
+// The `pin` command pins a top-level thread (optimistic patch applied instantly); a
+// nested thread is refused loudly and never pinned. Palette-only since 2026-08 — `p`
+// now opens the command palette.
+func TestPinCommand(t *testing.T) {
 	m := Model{
 		machine:  "mymain",
 		rows:     []api.ThreadRow{pinTestRow("t1", "top", "mymain", nil)},
 		machines: selfMachines(),
 	}
-	nm, cmd := m.Update(keyMsg("p"))
+	nm, cmd := m.runCommand("pin")
 	got := nm.(Model)
 	if cmd == nil {
-		t.Fatal("p should return a persist command")
+		t.Fatal("pin should return a persist command")
 	}
 	p := got.pendingFor("t1")
 	if p == nil || !p.pinSet || p.pinOrder == nil {
@@ -119,7 +120,7 @@ func TestPinKey(t *testing.T) {
 		rows:     []api.ThreadRow{{Thread: api.Thread{ID: "c1", Name: "kid", Machine: "mymain", AgentKind: "pi", Parent: "x"}}},
 		machines: selfMachines(),
 	}
-	nm2, cmd2 := child.Update(keyMsg("p"))
+	nm2, cmd2 := child.runCommand("pin")
 	g2 := nm2.(Model)
 	if cmd2 != nil || g2.ActionErr() == nil || g2.pendingFor("c1") != nil {
 		t.Fatalf("pinning a child must refuse loudly and not pin (err=%v cmd=%v)", g2.ActionErr(), cmd2)
@@ -211,15 +212,15 @@ func TestDivider(t *testing.T) {
 		rows:     []api.ThreadRow{pinTestRow("t1", "top", "mymain", nil)},
 		machines: selfMachines(),
 	}
-	nm, _ := m.Update(keyMsg("D"))
+	nm, _ := m.runCommand("new-divider")
 	dm2 := nm.(Model)
 	if dm2.prompting != promptNewDivider {
-		t.Fatalf("D should open the divider prompt, got %v", dm2.prompting)
+		t.Fatalf("new-divider should open the divider prompt, got %v", dm2.prompting)
 	}
 	// The prompt HEADER must name the DIVIDER action (regression: it fell through to
 	// the default "rename" label). Assert the specific header text is rendered.
 	if view := dm2.View(); !strings.Contains(view, "new divider label") {
-		t.Errorf("D prompt header should read 'new divider label ...', not the default rename; view:\n%s", view)
+		t.Errorf("new-divider prompt header should read 'new divider label ...', not the default rename; view:\n%s", view)
 	}
 
 	div := api.ThreadRow{Thread: api.Thread{ID: "d1", Name: "today", Machine: "mymain", AgentKind: api.DividerAgentKind, PinOrder: fptr(1)}}

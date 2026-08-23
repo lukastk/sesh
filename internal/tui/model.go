@@ -404,6 +404,25 @@ type Model struct {
 	// when the binding list overflows the terminal height.
 	helpPopup  bool
 	helpOffset int
+	// keymap resolves a key press to a command id (see commands.go). nil = the
+	// built-in defaults — Model.km() applies that fallback, so a struct-literal
+	// Model (as most unit tests build) has the shipped bindings.
+	keymap *Keymap
+	// palette: `p` opens the COMMAND PALETTE — a full-screen fuzzy search over
+	// every registered command, run with Enter. paletteOffset scrolls it when the
+	// match list overflows the terminal height. See palette.go.
+	palette       bool
+	paletteQuery  []rune
+	paletteCursor int
+	paletteOffset int
+	// parentPick: the interactive reparent picker — choose the selected thread's
+	// new parent from a list instead of pasting a uuid. parentPickRow is the CHILD
+	// captured when the picker opened. See parentpick.go.
+	parentPick       bool
+	parentPickRow    api.ThreadRow
+	parentPickQuery  []rune
+	parentPickCursor int
+	parentPickOffset int
 	// archiveUndo is the U key's LIFO stack of this session's archives.
 	archiveUndo []archiveUndoEntry
 	// detailsPopup: `I` opens a full-screen takeover showing ALL of the selected
@@ -1091,6 +1110,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				if m.helpOffset < m.helpMaxOffset() {
 					m.helpOffset++
+				}
+			}
+			return m, nil
+		}
+		// While the COMMAND PALETTE is up: the wheel moves its selection, a left
+		// click on a command line RUNS it (click outside the list is a no-op — the
+		// palette stays, esc dismisses).
+		if m.palette {
+			cands := m.paletteCandidates()
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if len(cands) > 0 {
+					m.paletteCursor = (m.paletteCursor - 1 + len(cands)) % len(cands)
+					m.ensurePaletteVisible(len(cands))
+				}
+			case tea.MouseButtonWheelDown:
+				if len(cands) > 0 {
+					m.paletteCursor = (m.paletteCursor + 1) % len(cands)
+					m.ensurePaletteVisible(len(cands))
+				}
+			case tea.MouseButtonLeft:
+				if msg.Action == tea.MouseActionPress {
+					if i, ok := m.paletteRowAtY(msg.Y); ok {
+						id := cands[i].cmd.ID
+						m.closePalette()
+						return m.runCommand(id)
+					}
+				}
+			}
+			return m, nil
+		}
+		// While the REPARENT PICKER is up: the wheel moves its selection, a left
+		// click on a candidate sets that parent.
+		if m.parentPick {
+			cands := m.parentCandidates()
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if len(cands) > 0 {
+					m.parentPickCursor = (m.parentPickCursor - 1 + len(cands)) % len(cands)
+					m.ensureParentPickVisible(len(cands))
+				}
+			case tea.MouseButtonWheelDown:
+				if len(cands) > 0 {
+					m.parentPickCursor = (m.parentPickCursor + 1) % len(cands)
+					m.ensureParentPickVisible(len(cands))
+				}
+			case tea.MouseButtonLeft:
+				if msg.Action == tea.MouseActionPress {
+					if i, ok := m.parentPickRowAtY(msg.Y); ok {
+						child, target := m.parentPickRow, cands[i]
+						m.closeParentPick()
+						return m, m.reparentRow(child, target.id)
+					}
 				}
 			}
 			return m, nil
@@ -1986,40 +2058,50 @@ func (m Model) machineReachable(machine string) bool {
 	return true
 }
 
-// requiresReachableOwner reports whether a normal-mode key triggers an action that
-// mutates or enters a thread ON ITS OWNING MACHINE (and so routes over the mesh). Such
-// an action on an OFFLINE machine's thread would shell out and hang on the 6–15s routing
-// timeout before failing — so handleKey refuses it instantly instead. Navigation/read-only
-// keys (movement, scroll, fold, filter, view cycle, uuid, id, copy, refresh) are exempt:
-// they never touch the owner. A new owner-routed key MUST be added here (a test enforces
-// that every routed action's key is covered — see TestRequiresReachableOwnerCoversActions).
-func requiresReachableOwner(key string) bool {
-	switch key {
+// requiresReachableOwner reports whether a COMMAND mutates or enters a thread ON ITS
+// OWNING MACHINE (and so routes over the mesh). Such an action on an OFFLINE machine's
+// thread would shell out and hang on the 6–15s routing timeout before failing — so
+// runCommand refuses it instantly instead. Navigation/read-only commands (movement,
+// scroll, fold, filter, view picker, palette, uuid, id, copy, refresh) are exempt: they
+// never touch the owner.
+//
+// Keyed by COMMAND ID, not by key string: keys are configurable ([[tui.key]]), so a
+// key-keyed gate would silently stop covering a rebound action — exactly the
+// plausible-but-wrong failure this project exists to prevent. A new owner-routed
+// command MUST be added here (TestRequiresReachableOwnerCoversActions enforces it).
+func requiresReachableOwner(cmdID string) bool {
+	switch cmdID {
 	case "enter", // navSelected (resume/nav on the owner)
-		"a",      // archive/unarchive
-		"d",      // delete
-		"x",      // stop
-		"f",      // flag toggle (owner-routed setter)
-		"F",      // fork (thread new --fork-from on the owner)
-		"ctrl+f", // flag-gate toggle (owner-routed setter)
-		"r",      // rename
-		"t",      // tag add
-		"T",      // tag remove
-		"P",      // reparent
-		"h",      // hold toggle
-		"H",      // hold until date
-		"n",      // notify on/off
-		"v",      // new virtual group (created on the selected row's machine)
-		"p",      // pin to top (routed pin on the owner)
-		"u",      // unpin (routed pin --clear on the owner)
-		"m",      // enter move mode (auto-pins on the owner)
-		"D",      // new divider (created on the selected row's machine)
-		"K":      // tickets view (loadTickets routes to the owner)
+		"archive",         // archive/unarchive
+		"delete",          // delete
+		"stop",            // stop
+		"flag",            // flag toggle (owner-routed setter)
+		"fork",            // fork (thread new --fork-from on the owner)
+		"flag-gate",       // flag-gate toggle (owner-routed setter)
+		"rename",          // rename
+		"tag-add",         // tag add
+		"tag-remove",      // tag remove
+		"set-parent",      // reparent (pick a parent from a list)
+		"set-parent-uuid", // reparent (paste a uuid)
+		"hold",            // hold toggle
+		"hold-until",      // hold until date
+		"notify",          // notify on/off
+		"new-virtual",     // new virtual group (created on the selected row's machine)
+		"pin",             // pin to top (routed pin on the owner)
+		"unpin",           // unpin (routed pin --clear on the owner)
+		"move-mode",       // enter move mode (auto-pins on the owner)
+		"new-divider",     // new divider (created on the selected row's machine)
+		"tickets":         // tickets view (loadTickets routes to the owner)
 		return true
 	}
 	return false
 }
 
+// handleKey routes a key press. Modal surfaces (ticket view, popups, prompt,
+// filter, move mode) own the keyboard while they are up; otherwise the key is
+// resolved through the KEYMAP to a command id and dispatched by runCommand — so
+// a rebind ([[tui.key]]) changes which key reaches a command without touching
+// the command itself.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if debugEnabled() {
 		sel := ""
@@ -2040,6 +2122,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpPopup {
 		return m.handleHelpKey(msg)
 	}
+	if m.palette {
+		return m.handlePaletteKey(msg)
+	}
+	if m.parentPick {
+		return m.handleParentPickKey(msg)
+	}
 	if m.viewPicker {
 		return m.handleViewPickerKey(msg)
 	}
@@ -2056,96 +2144,111 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 	// Move mode (manual ordering): ↑/↓ reposition the pinned row, Enter/Esc exit.
-	// Dispatched before the offline gate — entry (`m`) is already gated, and a routed
-	// reorder that fails on an owner going offline mid-move surfaces loudly on its own.
+	// Dispatched before the keymap — move mode is a modal grid, not a set of commands.
 	if m.reordering {
 		return m.handleReorderKey(msg)
 	}
+	// ctrl+c ALWAYS quits and is not in the registry, so no config can take it away:
+	// a keymap that unbinds `quit` must never leave the TUI with no way out.
+	if msg.String() == hardQuitKey {
+		return m, tea.Quit
+	}
+	id := m.km().Command(msg.String())
+	if id == "" {
+		return m, nil
+	}
+	return m.runCommand(id)
+}
+
+// runCommand executes one registry command against the current selection. It is the
+// SINGLE dispatch for both entry points — a key press and the command palette — so a
+// command cannot behave differently depending on how it was invoked (including its
+// offline-owner refusal).
+func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
+	if debugEnabled() {
+		debugLog("CMD %q | cursor=%d", id, m.cursor)
+	}
 	// Refuse an owner-routed action on an OFFLINE machine's thread instantly (loud, no
-	// popup, no shell-out) instead of hanging on the routing timeout. Gating here — before
-	// any confirm/prompt popup opens — means `a`/`d`/`r`/… don't even prompt for a thread
-	// you can't reach.
-	if requiresReachableOwner(msg.String()) {
+	// popup, no shell-out) instead of hanging on the routing timeout. Gating here —
+	// before any confirm/prompt popup opens — means archive/delete/rename/… don't even
+	// prompt for a thread you can't reach.
+	if requiresReachableOwner(id) {
 		if row, ok := m.Selected(); ok && !m.machineReachable(row.Machine) {
 			m.note = ""
 			m.actionErr = fmt.Errorf("%s is offline — can't reach %q until it reconnects", row.Machine, offlineRowLabel(row))
 			return m, nil
 		}
 	}
-	switch msg.String() {
-	// Esc quits from normal mode. (When a filter mode lands, Esc-in-filter will
-	// apply/leave the filter first, v1-style — quitting stays a normal-mode-only Esc.)
-	// SIDEBAR mode: esc/q never QUIT — a persistent cockpit pane must not die to
-	// a stray keystroke (its pane would vanish and take the traveling slot with
-	// it; hide/show is the cockpit toggle's job). Instead they DISMISS the
-	// message lines (actionErr/note), which otherwise persist until the next
-	// action — indefinitely, in a pane that never quits (Lukas hit a virtual-
-	// thread refusal that sat forever). ctrl+c stays as the deliberate kill.
-	case "q", "esc":
-		if m.sidebar {
-			m.actionErr, m.note = nil, ""
-			return m, nil
-		}
+	switch id {
+	// `dismiss` clears the message lines (actionErr/note), which otherwise persist
+	// until the next action. It is what esc/q do now that quitting moved to the
+	// palette: in SIDEBAR mode a persistent cockpit pane must never die to a stray
+	// keystroke (its pane would vanish and take the traveling slot with it), and the
+	// normal grid gets the same non-destructive behaviour. ctrl+c stays the kill.
+	case "dismiss":
+		m.actionErr, m.note = nil, ""
+		return m, nil
+	case "quit":
 		return m, tea.Quit
-	case "ctrl+c":
-		return m, tea.Quit
-	case "up", "k":
+	case "cursor-up":
 		m.moveCursor(-1) // wraps (fzf --cycle feel), over the VISIBLE (filtered) rows
 		m.ensureCursorVisible()
 		cmd := m.armFollow() // sidebar: preview the selection in the sibling pane once it rests
 		return m, cmd
-	case "down", "j":
+	case "cursor-down":
 		m.moveCursor(1)
 		m.ensureCursorVisible()
 		cmd := m.armFollow()
 		return m, cmd
-	case "ctrl+k":
+	case "scroll-up":
 		m.scrollRows(-m.halfPage()) // scroll the viewport up a half-page (cursor follows into view)
 		cmd := m.armFollow()
 		return m, cmd
-	case "ctrl+j":
+	case "scroll-down":
 		m.scrollRows(m.halfPage())
 		cmd := m.armFollow()
 		return m, cmd
-	case "/":
+	case "filter":
 		m.filtering = true
 		m.filterCaret = len([]rune(m.filter))
 	// Fold/unfold the tree is on the ARROW keys; ^h/^l pan the columns horizontally so
 	// clipped columns can be brought into view. (h/l moved to ^h/^l in 2026-06 to free
 	// h/H for hold — Lukas; the pan pair stays symmetric.)
-	case "right":
+	case "unfold":
 		m.foldSelected(true)
-	case "left":
+	case "fold":
 		m.foldSelected(false)
-	case "ctrl+l":
+	case "pan-right":
 		if m.hOffset < m.maxHOffset() {
 			m.hOffset++
 		}
-	case "ctrl+h":
+	case "pan-left":
 		if m.hOffset > 0 {
 			m.hOffset--
 		}
-	case "h":
+	case "hold":
 		// Toggle hold: a non-held thread is parked until the start of tomorrow (so it
 		// returns to the active view tomorrow); a held thread is released now.
 		// (Bound before returning: the helper records the keypress-time patch on m.)
 		cmd := m.holdToggleSelected()
 		return m, cmd
-	case "H":
+	case "hold-until":
 		// Hold until an explicit date: open a prompt (YYYY-MM-DD); blank clears the hold.
 		if row, ok := m.Selected(); ok {
 			pre := []rune(holdDatePrefill(row))
 			m.prompting, m.promptRow, m.promptInput = promptHold, row, pre
 			m.promptCursor = len(m.promptInput)
 		}
-	case "tab":
+	case "view-picker":
 		// Open the VIEW PICKER on the CURRENT view (Lukas — preselecting the
 		// next one was disorienting; advancing is one more tab).
 		m.viewPicker = true
 		m.viewPickerCursor = m.viewPos(m.view)
-	case "i":
+	case "palette":
+		m.openPalette()
+	case "toggle-id":
 		m.showID = !m.showID
-	case "w":
+	case "toggle-width-cap":
 		// Toggle the per-column max-width cap. Off = every column grows to its
 		// content, so a clipped name/cwd becomes fully readable. Re-clamp the
 		// horizontal pan since the column widths (and so maxHOffset) just changed.
@@ -2153,46 +2256,46 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.hOffset > m.maxHOffset() {
 			m.hOffset = m.maxHOffset()
 		}
-	case "o":
+	case "toggle-offline":
 		// Toggle whether OFFLINE machines' last-known threads are shown. Refetch so the
 		// change lands immediately; reset the cursor since the visible row set shifts.
 		m.hideOffline = !m.hideOffline
 		m.cursor = 0
 		return m, m.fetch()
-	case "n":
+	case "notify":
 		cmd := m.notifySelected()
 		return m, cmd
-	case "f":
+	case "flag":
 		cmd := m.flagSelected()
 		return m, cmd
-	case "ctrl+f":
+	case "flag-gate":
 		cmd := m.flagGateSelected()
 		return m, cmd
-	case "?":
+	case "help":
 		m.helpPopup = true
-	case "y":
+	case "uuid":
 		if _, ok := m.Selected(); ok {
 			m.uuidPopup = true
 		}
-	case "I":
+	case "details":
 		// Thread details: a read-only full-screen takeover of every field of the
 		// selected thread (the record + live axes). Local data — nothing routes.
 		if row, ok := m.Selected(); ok {
 			m.detailsPopup, m.detailsRow = true, row
 		}
-	case "R":
+	case "refresh":
 		return m, m.fetch()
-	case "r":
+	case "rename":
 		if row, ok := m.Selected(); ok {
 			// Prefill with the current name, cursor at the end so you can edit in place.
 			m.prompting, m.promptRow, m.promptInput = promptRename, row, []rune(row.Name)
 			m.promptCursor = len(m.promptInput)
 		}
-	case "t":
+	case "tag-add":
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptTag, row, nil, 0
 		}
-	case "T":
+	case "tag-remove":
 		if row, ok := m.Selected(); ok {
 			if len(row.Tags) == 0 {
 				m.note = "no tags to remove"
@@ -2200,19 +2303,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.tagPopup, m.tagPopupRow, m.tagPopupCursor = true, row, 0
 			}
 		}
-	case "P":
+	case "set-parent":
+		// Interactive reparent: pick the new parent from a list of this machine's
+		// threads instead of pasting a uuid. See parentpick.go.
+		return m.openParentPick()
+	case "set-parent-uuid":
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptReparent, row, nil, 0
 		}
-	case "v":
+	case "new-virtual":
 		// New VIRTUAL grouping thread (a root group; reparent children under it
-		// with P). The selection is only a MACHINE carrier — the group is created
-		// on the selected row's machine, because a virtual parent can only group
-		// same-machine threads, so it must live where the threads being grouped
-		// live. No selection (empty grid) = a zero row = the local machine.
+		// with set-parent). The selection is only a MACHINE carrier — the group is
+		// created on the selected row's machine, because a virtual parent can only
+		// group same-machine threads, so it must live where the threads being
+		// grouped live. No selection (empty grid) = a zero row = the local machine.
 		row, _ := m.Selected()
 		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewVirtual, row, nil, 0
-	case "p":
+	case "pin":
 		// Pin the selected top-level thread to the TOP of the manual-order block.
 		if row, ok := m.Selected(); ok {
 			if row.Parent != "" {
@@ -2224,7 +2331,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.persistPin(row, &order, seq)
 			return m, cmd
 		}
-	case "u":
+	case "unpin":
 		// Unpin: remove the manual ordering (the row rejoins the auto block).
 		if row, ok := m.Selected(); ok {
 			if row.PinOrder == nil {
@@ -2232,14 +2339,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if row.AgentKind == api.DividerAgentKind {
-				m.actionErr = fmt.Errorf("a divider can't be un-pinned — delete it (d)")
+				m.actionErr = fmt.Errorf("a divider can't be un-pinned — delete it")
 				return m, nil
 			}
 			seq := m.applyPinPatch(row, nil)
 			cmd := m.persistPin(row, nil, seq)
 			return m, cmd
 		}
-	case "m":
+	case "move-mode":
 		// Enter MOVE MODE: reposition the selected pinned row (auto-pinning a top-level
 		// row to the top first). ↑/↓ then move it within the block; Enter/Esc exit.
 		if row, ok := m.Selected(); ok {
@@ -2256,35 +2363,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reordering, m.reorderID = true, row.ID
 			return m, cmd
 		}
-	case "D":
+	case "new-divider":
 		// New DIVIDER: a visual rule in the pinned block. Prompt for an optional label
 		// (empty = an unlabeled line; Esc cancels). Created on the selected row's machine.
 		row, _ := m.Selected()
 		m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptNewDivider, row, nil, 0
-	case "F":
+	case "fork":
 		// Fork: copy the selected thread into a new headless thread (same
-		// conversation, branched). It doesn't start anything — enter it to
-		// continue. (Uppercase since 44: lowercase f is the flag toggle — the
-		// far more frequent action.)
+		// conversation, branched). It doesn't start anything — enter it to continue.
 		return m, m.forkSelected()
-	case "x":
+	case "stop":
 		cmd := m.stopSelected()
 		return m, cmd
-	case "d":
+	case "delete":
 		// Destructive: confirm before dropping the record (y/n popup).
 		if row, ok := m.Selected(); ok {
 			m.confirming, m.confirmRow = confirmDelete, row
 		}
-	case "a":
+	case "archive":
 		// Archive/unarchive INSTANTLY — no confirm (H54): archiving is cheap to
 		// reverse, so the flow is act-then-undo (`U` restores the most recent).
 		if row, ok := m.Selected(); ok {
 			cmd := m.archiveRow(row)
 			return m, cmd
 		}
-	case "U":
+	case "undo-archive":
 		return m.undoLastArchive()
-	case "K":
+	case "tickets":
 		// Tickets view: a full-screen takeover of the selected thread's tickets.
 		if row, ok := m.Selected(); ok {
 			return m, m.openTicketView(row)
@@ -3332,55 +3437,51 @@ var (
 	styleErr      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
 )
 
-// helpBindings is the full keymap, one entry per line in the `?` popup (the
-// bottom line carries only legendHint — the always-on wrapped legend ate 3-4
-// rows of every frame). The popup SCROLLS when the list overflows the
-// terminal height, so every binding stays reachable on any size (the H1
-// no-clipping lesson, vertical edition).
-var helpBindings = []struct{ key, desc string }{
-	{"↑/↓", "move the selection"},
-	{"^j/^k", "scroll the viewport"},
-	{"←/→", "collapse / expand the tree fold"},
-	{"^h/^l", "pan columns"},
-	{"enter", "enter the thread (revives a dead one)"},
-	{"/", "filter mode (fuzzy)"},
-	{"tab", "view picker (tab/↑↓ move · enter apply · esc cancel · click a view)"},
-	{"f", "toggle the needs-attention flag ⚑"},
-	{"ctrl+f", "toggle auto-flagging (⌁ when disabled)"},
-	{"h", "hold until tomorrow / release"},
-	{"H", "hold until a date (prompt)"},
-	{"r", "rename"},
-	{"t", "add a tag"},
-	{"T", "remove a tag"},
-	{"P", "set the parent thread"},
-	{"v", "new virtual group"},
-	{"p", "pin to the top block"},
-	{"u", "unpin"},
-	{"m", "move mode (reorder pinned rows)"},
-	{"D", "new divider"},
-	{"K", "tickets view"},
-	{"I", "thread details"},
-	{"i", "toggle the ID column"},
-	{"w", "toggle the column-width cap"},
-	{"y", "show the full UUID (c copies)"},
-	{"n", "toggle notifications"},
-	{"F", "fork the thread (headless copy)"},
-	{"x", "stop the runtime (keep the record)"},
-	{"a", "archive / unarchive (instant)"},
-	{"U", "undo the last archive"},
-	{"d", "delete (y/n confirm)"},
-	{"o", "show / hide offline machines"},
-	{"R", "force refresh"},
-	{"?", "this help"},
-	{"q/esc", "quit"},
+// helpLine is one rendered line of the `?` popup.
+type helpLine struct{ key, desc string }
+
+// mouseHelp are the pointer gestures — not commands (nothing dispatches them
+// through the keymap), so they are appended to the generated list rather than
+// living in the registry.
+var mouseHelp = []helpLine{
 	{"", ""},
 	{"click", "select the row (double-click enters it)"},
 	{"▸/▾", "click the fold marker to collapse/expand"},
 	{"wheel", "move the selection (shift+wheel pans)"},
+	{hardQuitKey, "quit (always available, cannot be rebound)"},
 }
 
-// legendHint is the one always-visible bottom line: how to see the keymap.
-const legendHint = "? keys"
+// helpBindings renders the CURRENT keymap, one entry per line, generated from the
+// command registry so it can never disagree with what a key actually does after a
+// [[tui.key]] rebind. Commands with no key still appear — with an empty key column
+// — because the palette is how you reach them, and hiding them would make the
+// palette's contents undiscoverable. The popup SCROLLS when the list overflows the
+// terminal height, so every binding stays reachable on any size (the H1
+// no-clipping lesson, vertical edition).
+func (m Model) helpBindings() []helpLine {
+	km := m.km()
+	out := make([]helpLine, 0, len(commands)+len(mouseHelp))
+	for _, c := range commands {
+		out = append(out, helpLine{key: km.KeyLabel(c.ID), desc: c.Desc})
+	}
+	return append(out, mouseHelp...)
+}
+
+// legendHint is the one always-visible bottom line: how to see the keymap and how
+// to reach every command. Rendered from the live keymap, so a rebind (or an
+// unbind — then only the surviving hint shows) can't leave it advertising a key
+// that does something else.
+func (m Model) legendHint() string {
+	km := m.km()
+	var parts []string
+	if k := km.KeyLabel("help"); k != "" {
+		parts = append(parts, k+" keys")
+	}
+	if k := km.KeyLabel("palette"); k != "" {
+		parts = append(parts, k+" commands")
+	}
+	return strings.Join(parts, " · ")
+}
 
 // reorderLegendText is the legend while MOVE MODE is active — only the reposition
 // keys are live, so it REPLACES the hint (mode feedback must stay ambient).
@@ -3389,7 +3490,7 @@ const reorderLegendText = "MOVE MODE — ↑/↓ reposition the pinned row · en
 // renderLegend renders the bottom legend line: the `?` hint normally, the move-mode
 // keymap while reordering (wrapped to width — never clipped).
 func (m Model) renderLegend() string {
-	text := legendHint
+	text := m.legendHint()
 	if m.reordering {
 		text = reorderLegendText
 	}
@@ -3403,22 +3504,23 @@ func (m Model) renderLegend() string {
 // chrome (title, the two more-indicators, the footer). Height unknown (tests,
 // no WindowSizeMsg yet) = everything.
 func (m Model) helpVisibleRows() int {
+	n := len(m.helpBindings())
 	if m.height <= 0 {
-		return len(helpBindings)
+		return n
 	}
 	avail := m.height - 4
 	if avail < 1 {
 		avail = 1
 	}
-	if avail > len(helpBindings) {
-		avail = len(helpBindings)
+	if avail > n {
+		avail = n
 	}
 	return avail
 }
 
 // helpMaxOffset is the largest useful scroll offset.
 func (m Model) helpMaxOffset() int {
-	return len(helpBindings) - m.helpVisibleRows()
+	return len(m.helpBindings()) - m.helpVisibleRows()
 }
 
 // helpView is the `?` popup: a full-screen takeover listing every binding on
@@ -3426,6 +3528,7 @@ func (m Model) helpMaxOffset() int {
 // two indicator lines are ALWAYS present (blank when unneeded) so the layout
 // is stable while scrolling.
 func (m Model) helpView() string {
+	bindings := m.helpBindings()
 	avail := m.helpVisibleRows()
 	off := m.helpOffset
 	if max := m.helpMaxOffset(); off > max {
@@ -3438,7 +3541,7 @@ func (m Model) helpView() string {
 	} else {
 		b.WriteString("\n")
 	}
-	for _, e := range helpBindings[off : off+avail] {
+	for _, e := range bindings[off : off+avail] {
 		line := fmt.Sprintf("  %-8s %s", e.key, e.desc)
 		if m.width > 1 {
 			if r := []rune(line); len(r) > m.width {
@@ -3447,7 +3550,7 @@ func (m Model) helpView() string {
 		}
 		b.WriteString(styleDim.Render(line) + "\n")
 	}
-	if rest := len(helpBindings) - off - avail; rest > 0 {
+	if rest := len(bindings) - off - avail; rest > 0 {
 		b.WriteString(styleDim.Render(fmt.Sprintf("  ▼ %d more", rest)) + "\n")
 	} else {
 		b.WriteString("\n")
@@ -3719,7 +3822,23 @@ func descendantsRunning(rows []api.ThreadRow) map[string]bool {
 
 // View renders the grid. Kept pure (Model -> string) so a snapshot test can assert
 // the rendered output reflects the model's REAL rows.
+// View renders the current screen.
+//
+// The trailing-newline trim is load-bearing and applies to EVERY surface, the
+// full-screen popups included: bubbletea splits the view on "\n" and renders one
+// terminal line per element, so a trailing newline contributes a PHANTOM empty
+// final line and the frame comes out one line taller than the pane. bubbletea then
+// drops lines from the TOP (newLines[len-height:]) — the title vanishes and every
+// row renders one line higher than the model believes, which for the grid meant
+// clicks landing one row off (H70). Each popup builds its own frame sized to fill
+// the height exactly, so each hit the same off-by-one; trimming here, at the one
+// seam they all pass through, fixes them together and keeps a new popup from
+// re-introducing it. TestViewFitsPaneHeight and TestPopupFramesFitPaneHeight guard it.
 func (m Model) View() string {
+	return strings.TrimSuffix(m.viewFrame(), "\n")
+}
+
+func (m Model) viewFrame() string {
 	if m.ticketMode != ticketNone {
 		return m.ticketView() // full-screen takeover
 	}
@@ -3728,6 +3847,12 @@ func (m Model) View() string {
 	}
 	if m.helpPopup {
 		return m.helpView() // full-screen takeover: the complete keymap
+	}
+	if m.palette {
+		return m.paletteView() // full-screen takeover: fuzzy-run any command (p)
+	}
+	if m.parentPick {
+		return m.parentPickView() // full-screen takeover: pick a new parent thread
 	}
 	if m.viewPicker {
 		return m.viewPickerView() // full-screen takeover: pick a view (Tab)
@@ -3935,17 +4060,11 @@ func (m Model) View() string {
 	default:
 		b.WriteString("\n" + m.renderLegend() + "\n")
 	}
-	// NO TRAILING NEWLINE. bubbletea splits the view on "\n" and renders one
-	// terminal line per element, so a trailing newline contributes a PHANTOM
-	// empty final line — the frame is one line taller than it looks. Combined
-	// with chromeLines' 2-line reserve for the ▲/▼ indicators being exactly
-	// consumed (a list scrolled to the middle shows BOTH), that made the frame
-	// height+1: bubbletea then drops the TOP line to fit
-	// (newLines[len-height:]), the title vanishes, and every row renders one
-	// line higher than the model believes. Clicks are then off by one — you
-	// have to click one row BELOW the one you want (Lukas, 2026-07-28).
-	// TestViewFitsPaneHeight guards this.
-	return strings.TrimSuffix(b.String(), "\n")
+	// The trailing newline is trimmed by View (see the note there): with
+	// chromeLines' 2-line reserve for the ▲/▼ indicators exactly consumed (a list
+	// scrolled to the middle shows BOTH), the phantom line made the frame
+	// height+1 and every click landed one row off (Lukas, 2026-07-28).
+	return b.String()
 }
 
 // detailsView renders the full-screen thread-details takeover (`I`): every field of

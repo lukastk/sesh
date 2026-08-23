@@ -36,32 +36,65 @@ func TestMachineReachable(t *testing.T) {
 	}
 }
 
-// requiresReachableOwner must cover EVERY normal-mode key whose action routes to the
-// owning machine, and none of the read-only/navigation keys. This guards against the
-// gate silently drifting out of sync with handleKey (the freeze would come back for a
-// newly-added routed key). If you add an owner-routed key to handleKey, add it here too.
+// requiresReachableOwner must cover EVERY command whose action routes to the owning
+// machine, and none of the read-only/navigation ones. Keyed by COMMAND ID since keys
+// are configurable — a gate keyed by key string would stop covering a rebound action.
+//
+// The classification is EXHAUSTIVE over the registry: a newly added command that is in
+// neither list fails this test, so the gate cannot silently drift out of sync with the
+// dispatch (the freeze would come back for the new command, from the palette too).
 func TestRequiresReachableOwnerCoversActions(t *testing.T) {
-	// Keys that shell out `sesh <verb> --machine <owner>` (mutate or enter a thread).
-	routed := []string{"enter", "a", "d", "x", "f", "F", "ctrl+f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"}
-	for _, k := range routed {
-		if !requiresReachableOwner(k) {
-			t.Errorf("owner-routed key %q not gated by requiresReachableOwner", k)
+	// Commands that shell out `sesh <verb> --machine <owner>` (mutate or enter a thread).
+	routed := []string{"enter", "archive", "delete", "stop", "flag", "fork", "flag-gate",
+		"rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid", "new-virtual",
+		"pin", "unpin", "move-mode", "new-divider", "hold", "hold-until", "notify", "tickets"}
+	for _, id := range routed {
+		if _, ok := commandByID(id); !ok {
+			t.Fatalf("routed command %q is not in the registry", id)
+		}
+		if !requiresReachableOwner(id) {
+			t.Errorf("owner-routed command %q not gated by requiresReachableOwner", id)
 		}
 	}
-	// Keys that never touch the owner — gating them would wrongly block offline browsing.
-	local := []string{"up", "down", "k", "j", "ctrl+j", "ctrl+k", "ctrl+h", "ctrl+l",
-		"left", "right", "/", "tab", "i", "w", "I", "o", "y", "R", "q", "esc"}
-	for _, k := range local {
-		if requiresReachableOwner(k) {
-			t.Errorf("read-only key %q must NOT be gated (breaks offline browsing/navigation)", k)
+	// Commands that never touch the owner — gating them would wrongly block offline browsing.
+	local := []string{"cursor-up", "cursor-down", "scroll-up", "scroll-down", "fold", "unfold",
+		"pan-left", "pan-right", "filter", "view-picker", "palette", "toggle-id",
+		"toggle-width-cap", "toggle-offline", "uuid", "details", "refresh", "help",
+		"dismiss", "quit",
+		// undo-archive routes, but its target comes from the undo STACK, not the
+		// selection — the selection-keyed gate would check the WRONG machine. It
+		// checks its own entry's machine and refuses there instead (H54).
+		"undo-archive"}
+	for _, id := range local {
+		if _, ok := commandByID(id); !ok {
+			t.Fatalf("read-only command %q is not in the registry", id)
+		}
+		if requiresReachableOwner(id) {
+			t.Errorf("read-only command %q must NOT be gated (breaks offline browsing/navigation)", id)
+		}
+	}
+	classified := map[string]bool{}
+	for _, id := range append(append([]string(nil), routed...), local...) {
+		classified[id] = true
+	}
+	for _, c := range Commands() {
+		if !classified[c.ID] {
+			t.Errorf("command %q is in neither list — classify it (routed => add to requiresReachableOwner)", c.ID)
 		}
 	}
 }
 
-// Pressing an owner-routed key on a thread whose machine is OFFLINE refuses instantly:
+// ownerRoutedCommands is the routed set, for the offline-gate tests below.
+var ownerRoutedCommands = []string{"enter", "archive", "delete", "stop", "flag", "fork",
+	"flag-gate", "rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid",
+	"new-virtual", "pin", "unpin", "move-mode", "new-divider", "hold", "hold-until",
+	"notify", "tickets"}
+
+// Running an owner-routed command on a thread whose machine is OFFLINE refuses instantly:
 // a loud actionErr, NO command (so nothing shells out to hang on the routing timeout),
-// and no confirm/prompt popup opens. This is the freeze fix — proven by the ABSENCE of
-// a returned tea.Cmd (the old code returned a blocking exec cmd).
+// and no confirm/prompt/picker popup opens. This is the freeze fix — proven by the ABSENCE
+// of a returned tea.Cmd (the old code returned a blocking exec cmd). Driven through
+// runCommand, so it covers palette invocation as well as key presses.
 func TestOfflineActionRefusedInstantly(t *testing.T) {
 	offlineRow := api.ThreadRow{Thread: api.Thread{ID: "beef1234", Name: "stuck", Machine: "macstudio"}}
 	base := func() Model {
@@ -74,52 +107,41 @@ func TestOfflineActionRefusedInstantly(t *testing.T) {
 			},
 		}
 	}
-	// Every owner-routed key must be refused with no side effects.
-	for _, k := range []string{"enter", "a", "d", "x", "f", "F", "ctrl+f", "r", "t", "T", "P", "v", "p", "u", "m", "D", "h", "H", "n", "K"} {
+	for _, id := range ownerRoutedCommands {
 		m := base()
-		var key tea.KeyMsg
-		if k == "enter" {
-			key = tea.KeyMsg{Type: tea.KeyEnter}
-		} else {
-			key = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
-		}
-		mm, cmd := m.handleKey(key)
+		mm, cmd := m.runCommand(id)
 		got := mm.(Model)
 		if cmd != nil {
-			t.Errorf("key %q on offline thread returned a non-nil cmd (would shell out and hang)", k)
+			t.Errorf("command %q on offline thread returned a non-nil cmd (would shell out and hang)", id)
 		}
 		if got.actionErr == nil {
-			t.Errorf("key %q on offline thread did not set a loud actionErr", k)
+			t.Errorf("command %q on offline thread did not set a loud actionErr", id)
 		}
 		// No popup/prompt should have opened.
-		if got.confirming != confirmNone || got.prompting != promptNone || got.tagPopup || got.ticketMode != ticketNone {
-			t.Errorf("key %q on offline thread opened a popup/prompt (should refuse before that)", k)
+		if got.confirming != confirmNone || got.prompting != promptNone || got.tagPopup ||
+			got.ticketMode != ticketNone || got.parentPick {
+			t.Errorf("command %q on offline thread opened a popup/prompt (should refuse before that)", id)
 		}
 	}
 }
 
-// The SAME keys on a REACHABLE thread are NOT refused by the gate (they proceed to their
-// action — a returned cmd or an opened popup — so the gate only bites offline threads).
-func TestReachableActionNotBlocked(t *testing.T) {
-	row := api.ThreadRow{Thread: api.Thread{ID: "cafe5678", Name: "live", Machine: "macbook", Tags: []string{"x"}}}
-	base := func() Model {
-		return Model{
-			machine: "mymain",
-			rows:    []api.ThreadRow{row},
-			machines: []api.MachineView{
-				{Machine: "mymain", Self: true, Reachable: true},
-				{Machine: "macbook", Reachable: true},
-			},
-		}
+// The gate also bites when the command is reached by its KEY (the other entry point):
+// a bound owner-routed key on an offline row refuses with no cmd and no popup.
+func TestOfflineKeyRefusedInstantly(t *testing.T) {
+	offlineRow := api.ThreadRow{Thread: api.Thread{ID: "beef1234", Name: "stuck", Machine: "macstudio"}}
+	m := Model{
+		machine: "mymain",
+		rows:    []api.ThreadRow{offlineRow},
+		machines: []api.MachineView{
+			{Machine: "mymain", Self: true, Reachable: true},
+			{Machine: "macstudio", Reachable: false},
+		},
 	}
-	// A representative spread: direct-action keys return a cmd; popup keys open a popup.
-	// None should set actionErr from the offline gate.
-	for _, k := range []string{"a", "r", "P", "T"} {
-		m := base()
-		mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+	for _, k := range []string{"a", "f", "x", "r", "h", "n", "u", "m", "K"} {
+		mm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
 		got := mm.(Model)
-		if got.actionErr != nil {
-			t.Errorf("key %q on a reachable thread was wrongly refused: %v", k, got.actionErr)
+		if cmd != nil || got.actionErr == nil {
+			t.Errorf("key %q on offline thread must refuse instantly (cmd=%v err=%v)", k, cmd != nil, got.actionErr)
 		}
 	}
 }
@@ -169,17 +191,18 @@ func TestFlattenHidesOfflineMachines(t *testing.T) {
 	}
 }
 
-// Pressing `o` flips hideOffline (the per-session toggle).
-func TestOfflineToggleKey(t *testing.T) {
+// The toggle-offline command flips hideOffline (the per-session toggle). It carries no
+// default key since 2026-08 — the palette is how you reach it.
+func TestOfflineToggleCommand(t *testing.T) {
 	m := Model{hideOffline: true}
-	mm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	mm, _ := m.runCommand("toggle-offline")
 	if mm.(Model).hideOffline {
-		t.Errorf("`o` should toggle hideOffline true->false")
+		t.Errorf("toggle-offline should flip hideOffline true->false")
 	}
 	m2 := Model{hideOffline: false}
-	mm2, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	mm2, _ := m2.runCommand("toggle-offline")
 	if !mm2.(Model).hideOffline {
-		t.Errorf("`o` should toggle hideOffline false->true")
+		t.Errorf("toggle-offline should flip hideOffline false->true")
 	}
 }
 

@@ -137,12 +137,21 @@ the two same-machine candidates → filter `alpha` → Enter → the DAEMON's re
 entry appears (its current parent correctly gone from the list) and clears the parent; `q` does
 not quit; `?` renders the generated keymap; `pin_order` stayed None throughout (i.e. `p` really
 does not pin any more).
-DEPLOY: **binary-only, NO daemon restart, no schema/API/CLI change** (a pure TUI-client
-feature). NOT YET DEPLOYED — the fleet still has the old keymap. A running SIDEBAR keeps the
-binary it launched with (H70), so a deployed machine also needs `prefix+r` (or mmt-kill/
-mmt-start) before the palette exists in it. myrig may want `[[tui.key]]` entries in
-`config.toml.jinja` if Lukas wants any of the removed keys back — none added here, since the
-note's set IS the requested default.
+DEPLOY (2026-08-23, commit 61aba9b = the palette d8b355f + the esc/q restoration): **binary-
+only, NO daemon restart, no schema/API/CLI change** (a pure TUI-client feature), and live on
+**ALL SIX** machines — macbook, mymain, macstudio, ideapad, pocket4, termux — every installed
+binary reporting `vcs.revision=61aba9b` + `vcs.modified=false`. All six checkouts were clean on
+main with nothing unpushed beforehand (checked first — mymain's has carried another agent's WIP
+before, H49/H63). Macs built with /opt/homebrew/bin/go, mymain/ideapad/pocket4 natively, termux
+with PLAIN `go build` (verified CGO_ENABLED=1 / GOARCH=arm64 on the box per H22). Installed via
+.new+mv everywhere — never overwrite a running binary in place on macOS (H57). No daemon was
+restarted and none needed to be; the mesh was healthy afterwards (all five API machines
+reachable) and `sesh help tui` on both a local and a remote binary carries the palette text.
+**A running SIDEBAR keeps the binary it launched with (H70), so each machine still needs
+`prefix+r` (or mmt-kill/mmt-start) before the palette exists inside its sidebar** — the
+cockpit's own windows likewise. myrig may want `[[tui.key]]` entries in `config.toml.jinja` if
+Lukas wants any of the removed keys back; none added, since the note's set IS the requested
+default (and esc/q are back on quit).
 
 ## H86 — NAMING: "the master tmux setup" is retired; the thing is **mycockpit** ("the cockpit"), and `master`/`base` are its two LEVELS — `mmt-`/`mt-` and every `master` identifier STAY (2026-08-23, myrig c098ba5 + sesh d57451e/<this commit> + sesh-ui/myassistant/myagent/myarch; docs + user-facing strings only, NO schema/API/behaviour change; myrig home files NOT yet deployed)
 Lukas: "Right now I have a fairly clumsy name for the tmux thing I have set up with sesh:

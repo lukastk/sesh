@@ -521,6 +521,18 @@ type Model struct {
 	ticketFilter       string // status filter for the list (default "active"; "all" = no filter)
 	ticketFilterCursor int    // selection in the Tab status-filter picker
 	editor             string // editor for in-TUI field edits (--editor / [tui] editor / $EDITOR)
+
+	// Shells view (S): a full-screen takeover listing every LIVE tmux session on
+	// every reachable machine's work server — the sessions the grid cannot show,
+	// because a plain session has no thread record. Enumerated live, never
+	// recorded. See shells.go and _dev/SHELL.md.
+	shells           bool // the viewer is open
+	shellRows        []sessionRow
+	shellCursor      int
+	shellLoading     bool
+	shellErrs        []string // per-machine fan-out failures (one bad peer must not blank the view)
+	shellNote        string   // transient status line (e.g. "killed mymain:scratch")
+	shellConfirmKill bool     // the y/n kill confirmation is up
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -1400,6 +1412,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Quit so the terminal is restored, then runTUI execs the attach.
 		m.attachTarget, m.attachThread = msg.target, msg.thread
 		return m, tea.Quit
+	case shellsLoadedMsg:
+		m.shellLoading = false
+		m.shellRows, m.shellErrs = msg.rows, msg.errs
+		if m.shellCursor >= len(m.shellRows) {
+			m.shellCursor = max(0, len(m.shellRows)-1)
+		}
+		return m, nil
+	case shellActionMsg:
+		if msg.err != nil {
+			m.shellNote = ""
+			m.shellErrs = []string{msg.err.Error()}
+			return m, nil
+		}
+		m.shellErrs = nil
+		m.shellNote = msg.note
+		if msg.reload {
+			m.shellLoading = true
+			return m, m.loadShells()
+		}
+		return m, nil
 	case ticketsLoadedMsg:
 		// Ignore a stale load (the user backed out / switched threads).
 		if m.ticketMode == ticketNone || msg.thread.ID != m.ticketThread.ID {
@@ -2104,6 +2136,11 @@ func requiresReachableOwner(cmdID string) bool {
 		"tickets":         // tickets view (loadTickets routes to the owner)
 		return true
 	}
+	// NB `shells` is deliberately NOT here. It enumerates every REACHABLE machine
+	// and acts on the VIEWER's own selection, never on the grid's selected row, so
+	// this selection-keyed gate would check the wrong machine entirely — the same
+	// reasoning that keeps undo-archive out (H54). Its fan-out already skips
+	// unreachable peers, so there is nothing to refuse up front.
 	return false
 }
 
@@ -2122,6 +2159,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.ticketMode != ticketNone {
 		return m.handleTicketKey(msg)
+	}
+	if m.shells {
+		return m.handleShellKey(msg)
 	}
 	if m.confirming != confirmNone {
 		return m.handleConfirmKey(msg)
@@ -2410,6 +2450,8 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		}
 	case "undo-archive":
 		return m.undoLastArchive()
+	case "shells":
+		return m.openShells()
 	case "tickets":
 		// Tickets view: a full-screen takeover of the selected thread's tickets.
 		if row, ok := m.Selected(); ok {
@@ -2954,6 +2996,11 @@ func (m Model) forkSelected() tea.Cmd {
 		// "unknown agent" parse error, since a fork inherits the source's kind).
 		if row.AgentKind == api.VirtualAgentKind {
 			return actionMsg{err: fmt.Errorf("fork %q: a virtual thread has no conversation to fork — realize it first", row.Name)}
+		}
+		// Same for a SHELL thread: it has a runtime but no conversation, so
+		// there is nothing to branch. Refused client-side so it is instant.
+		if row.AgentKind == api.ShellAgentKind {
+			return actionMsg{err: fmt.Errorf("fork %q: a shell thread is a tracked tmux session — it has no conversation to fork", row.Name)}
 		}
 		args := []string{"thread", "new", "--fork-from", row.ID, "--name", name, "--json"}
 		if machine == "" || row.Machine != machine {
@@ -3690,6 +3737,17 @@ func HeadGlyph(row api.ThreadRow) string {
 	if row.AgentKind == api.VirtualAgentKind {
 		return "◇"
 	}
+	// SHELL threads use a RECTANGLE pair with the same head semantics as ●/◌.
+	// It reads as a terminal block cursor, and the silhouette (rectangle) is
+	// distinct from the agent circle ●, the headless dotted circle ◌ and the
+	// virtual diamond ◇ — the sidebar renders only the NAME column, so this
+	// gutter glyph is the ONLY place a shell thread is distinguishable there.
+	if row.AgentKind == api.ShellAgentKind {
+		if row.Head == api.Headful {
+			return ShellLiveGlyph
+		}
+		return ShellDeadGlyph
+	}
 	if row.AgentKind == api.DividerAgentKind {
 		return "─" // dividers render as a full rule (see the View loop); this is a fallback
 	}
@@ -3710,6 +3768,12 @@ func HeadGlyph(row api.ThreadRow) string {
 // (Attention states render in the FLAG gutter cell — see FlagGlyph — not
 // here; the 43-era ‼/✔ overlays were replaced by the flagged system.)
 func BusyGlyph(row api.ThreadRow) string {
+	// A SHELL thread has no busy axis at all — there is no turn that could be
+	// executing. Render BLANK rather than the idle dot: "·" means "not busy right
+	// now", which would invite the reader to expect ▶ sometimes.
+	if row.AgentKind == api.ShellAgentKind {
+		return " "
+	}
 	switch row.Busy {
 	case api.BusyBusy:
 		return "▶"
@@ -3739,6 +3803,21 @@ func FlagGlyph(row api.ThreadRow) string {
 	}
 	return " "
 }
+
+// ShellLiveGlyph / ShellDeadGlyph are the head-axis glyphs for a SHELL thread —
+// the same live/not-live semantics as ●/◌, drawn as a terminal block cursor.
+//
+// The pair is deliberately a RECTANGLE, not a square or diamond: `▢`/`▣` were
+// rejected because a hollow square and the virtual thread's `◇` are both hollow
+// quadrilaterals, which is precisely the H78 failure mode (`⌀` and `⊘` were
+// distinct codepoints that rendered as the same slashed circle in adjacent
+// gutter cells). TestGutterGlyphsDistinct guards the family; its
+// hollow-quadrilateral family must cover `◇▢▣□◻` and must NOT contain these two,
+// or it would put two live states in one family and be red on arrival.
+const (
+	ShellLiveGlyph = "▮"
+	ShellDeadGlyph = "▯"
+)
 
 // ArchivedGlyph renders the archived slot: a marker on an ARCHIVED thread, blank
 // otherwise. Archived threads now surface in the default view while still headful
@@ -3869,6 +3948,9 @@ func (m Model) View() string {
 func (m Model) viewFrame() string {
 	if m.ticketMode != ticketNone {
 		return m.ticketView() // full-screen takeover
+	}
+	if m.shells {
+		return m.shellsView() // full-screen takeover
 	}
 	if m.detailsPopup {
 		return m.detailsView() // full-screen takeover: all fields of one thread

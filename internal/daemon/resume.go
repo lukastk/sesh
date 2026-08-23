@@ -98,7 +98,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if nonAgentGate(w, thread, "revive") {
+	if runtimeGate(w, thread, "revive") {
 		return
 	}
 
@@ -115,6 +115,31 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		delete(d.hlInFlight, id)
 		d.hlMu.Unlock()
 	}()
+
+	// SHELL THREAD: its runtime is a tmux SESSION, not an agent pane, so reviving
+	// it means recreating that session in the thread's recorded cwd — the exact
+	// mirror of resuming an agent's conversation. This is why the TUI needs no
+	// special case for Enter on a shell thread.
+	if thread.AgentKind == api.ShellAgentKind {
+		if _, live, err := d.tmux.FindSessionByShellID(id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if live {
+			writeError(w, http.StatusConflict, "revive: shell thread is already live")
+			return
+		}
+		if err := d.startShellSession(thread); err != nil {
+			writeError(w, http.StatusInternalServerError, "revive: "+err.Error())
+			return
+		}
+		revived, err := d.store.GetThread(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: revived})
+		return
+	}
 
 	if _, found, err := d.tmux.FindPaneByThreadID(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

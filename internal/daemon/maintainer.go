@@ -222,7 +222,10 @@ func (m *maintainer) tick() {
 	// panes; AgentUnderPane re-runs `ps`) made a ~100-thread sweep take seconds, so
 	// each pane was sampled far less than twice per busyWindow and `busy` never
 	// latched. If either enumeration fails, skip this tick and retry next.
-	panes, err := m.d.tmux.PaneIndexByThreadID()
+	// One walk yields BOTH runtime indices: agent threads by pane marker, shell
+	// threads by session marker (a shell thread's runtime is a whole session, so
+	// it never appears in the pane index).
+	panes, shellSessions, err := m.d.tmux.RuntimeIndex()
 	if err != nil {
 		return
 	}
@@ -261,7 +264,7 @@ func (m *maintainer) tick() {
 		go func(th api.Thread) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			m.refreshThread(th, attached, tickets, panes, procs, now, effHolds[th.ID])
+			m.refreshThread(th, attached, tickets, panes, shellSessions, procs, now, effHolds[th.ID])
 		}(th)
 	}
 	wg.Wait()
@@ -291,7 +294,7 @@ func (m *maintainer) recordTombstoneLocked(id string) {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, shellSessions map[string]api.TmuxSession, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -308,6 +311,30 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		CwdRel: config.TildeRelative(th.Cwd, m.home),
 		// The effective (inherited) hold deadline; publish() turns it into OnHold.
 		OnHoldEffectiveUnix: effHoldUntil}
+
+	// SHELL THREAD: its runtime is a tmux SESSION, so head comes from the session
+	// index, never the pane index — it has no marked pane of its own. Busy does
+	// not apply at all (there is no turn to be executing), so it is pinned idle
+	// rather than probed: a content-diff over a shell's panes would read a
+	// `tail -f` as a permanent turn and a silent build as idle. Attachment works
+	// exactly as for an agent thread.
+	if th.AgentKind == api.ShellAgentKind {
+		m.d.clearAuthority(th.ID)
+		snap.Busy = api.BusyIdle
+		if sess, live := shellSessions[th.ID]; live {
+			snap.Head = api.Headful
+			if act, ok := attached[sess.Name]; ok {
+				snap.Attachment = api.Attached
+				snap.AttachedActivityUnix = act
+			}
+			st.lastActive = now.Unix()
+		} else {
+			snap.Head = api.Headless
+		}
+		snap.LastActiveUnix = st.lastActive
+		m.publish(st, snap)
+		return
+	}
 
 	// The two axes are PROBED, never read from the record: head from pane
 	// presence, busy from the pane content-diff (headful) or the turn registry

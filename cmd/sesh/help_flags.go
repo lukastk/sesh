@@ -13,6 +13,49 @@ type flagDoc struct {
 
 // flagDocs: help-registry key -> ordered flag explanations (usage-line order).
 var flagDocs = map[string][]flagDoc{
+	"shell new": {
+		{"--cwd", "the session's working directory — a shell thread's DURABLE content, recreated on revive. Absolute, or ~-relative so it stays portable across machines"},
+		{"--name", "thread name (default: derived from the cwd — for a box, its index name)"},
+		{"--session-name", "tmux session name (default: derived from the thread name). Purely descriptive: identity is the @sesh-shell-id marker, so a collision is suffixed, not refused"},
+		{"--parent", "parent thread id ('' = root)"},
+		{"--no-start", "record the place WITHOUT starting a session (the thread is born headless; `thread resume` creates it later)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"shell enter": {
+		{"--cwd", "the session's working directory — a shell thread's DURABLE content, recreated on revive. Absolute, or ~-relative so it stays portable across machines"},
+		{"--name", "thread name (default: derived from the cwd — for a box, its index name)"},
+		{"--session-name", "tmux session name (default: derived from the thread name). Purely descriptive: identity is the @sesh-shell-id marker, so a collision is suffixed, not refused"},
+		{"--parent", "parent thread id ('' = root)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"shell here": {
+		{"--name", "thread name (default: the session's own name)"},
+		{"--parent", "parent thread id ('' = root)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+	},
+	"shell promote": {
+		{"--session", "tmux session name to promote (required)"},
+		{"--name", "thread name (default: the session's own name)"},
+		{"--parent", "parent thread id ('' = root)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"shell sessions": {
+		{"--json", "emit one classified session object per line (JSONL)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"shell info": {
+		{"--id", "shell thread id or unique prefix (required)"},
+		{"--json", "emit the full locator incl. socket_path and tmux_prefix (the raw-tmux escape hatch) plus the window/pane tree"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"shell panes": {
+		{"--id", "shell thread id or unique prefix (required)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"await": {
 		{"--id", "thread id/prefix to await (default: the current thread; also accepts a positional id)"},
 		{"--timeout", "give up after this duration (0 = no limit)"},
@@ -224,6 +267,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"thread new": {
+		{"--parent-shell", "parent the new thread under the SHELL THREAD whose session hosts it (--into-session/--into-window/--into-pane), so agents started inside a box's shell session become its children. Opt-in, and LAST in precedence: an explicit --parent wins, then SESH_THREAD_ID inference, then this — so it only ever applies to a thread that would otherwise be a root, and never re-parents anything"},
 		{"--agent", "agent to spawn: claude | codex | pi (required)"},
 		{"--cwd", "start directory; a relative path expands against the invocation dir, a ~/… path resolves against the OWNER machine's home (portable cross-machine) (default: the current dir '.')"},
 		{"--name", "thread name (optional; empty = a nameless thread)"},
@@ -310,6 +354,8 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"thread send": {
+		{"--pane", "SHELL threads only: deliver to this tmux pane id (%12). A shell thread's runtime is a whole session, so the target is a real choice; default is the session's active pane. Refused on an agent thread, whose target is its marked pane"},
+		{"--window", "SHELL threads only: deliver to this window's active pane. Alternative to --pane"},
 		{"--id", "thread id or unique prefix (required)"},
 		{"--text", "message text to send into the pane (required)"},
 		{"--wait", "block until the turn settles (idle or blocked); fails fast if the input produces no state change within 5s"},
@@ -338,6 +384,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"thread stop": {
+		{"--force", "SHELL threads only: kill the session even though it hosts OTHER threads' agent panes — they die with it and drop to headless. An agent thread's stop kills exactly its own pane and ignores this"},
 		{"--id", "thread id or unique prefix (required)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

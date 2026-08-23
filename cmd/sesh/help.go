@@ -108,6 +108,81 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh tmux master-current --origin mymain", "sesh tmux master-current --origin mymain --json --machine macbook"},
 	},
 
+	"shell": {
+		summary:  "shell threads — a tracked tmux SESSION as a first-class thread (new | enter | here | promote | sessions | info | panes)",
+		usage:    "sesh shell <new|enter|here|promote|sessions|info|panes> [flags]",
+		examples: []string{"sesh shell enter --cwd ~/dev/20260214_0opf84__appgarden", "sesh shell here", "sesh shell sessions"},
+		long: `A SHELL THREAD is a tracked tmux session. Its durable content is its working
+directory, the way an agent thread's is its conversation: headful means a live
+session exists, headless means it is a remembered place, and reviving it
+(sesh thread resume) recreates the session in that directory.
+
+Everything a shell thread shares with an agent thread is the ordinary
+` + "`sesh thread`" + ` surface, unchanged: list, rename, tag, pin, hold, archive,
+delete, reparent, meta, notify, flag, resume, stop and send. Only the verbs
+here are shell-specific.
+
+It has NO conversation, so fork / transcript / send-headless / --model refuse
+loudly. Use ` + "`sesh shell info --json`" + ` to get everything needed to drive the
+session with raw tmux — sesh deliberately does not reimplement tmux.`,
+	},
+	"shell new": {
+		summary:  "record a tracked tmux session in a directory and start it",
+		usage:    "sesh shell new --cwd <dir> [--name <n>] [--session-name <s>] [--parent <id>] [--no-start] [--json] [--machine <m>]",
+		examples: []string{"sesh shell new --cwd ~/dev/appgarden", "sesh shell new --cwd ~/src --name tests --machine macbook"},
+		long: `Refuses when a non-archived shell thread with the derived name already exists in
+that cwd: several shells in one directory are fine, but they need distinct names
+or their rows are indistinguishable. Pass --name, or use ` + "`shell enter`" + ` to
+enter the existing one. --no-start records the place without starting a session
+(born headless).`,
+	},
+	"shell enter": {
+		summary:  "enter the shell thread for a directory, creating it if there is none (idempotent)",
+		usage:    "sesh shell enter --cwd <dir> [--name <n>] [--session-name <s>] [--parent <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh shell enter --cwd ~/dev/20260214_0opf84__appgarden"},
+		long: `The box flow. Keyed on (cwd, name) among non-archived shell threads on the target
+machine: an existing one is returned (and its session restarted if it had gone
+away), otherwise one is created. Never makes a duplicate.`,
+	},
+	"shell here": {
+		summary:  "promote the tmux session you are currently in into a tracked shell thread",
+		usage:    "sesh shell here [--name <n>] [--parent <id>] [--json]",
+		examples: []string{"sesh shell here", "sesh shell here --name appgarden"},
+		long: `Resolves the CALLER's session from $TMUX/$TMUX_PANE, so it is deliberately not
+--machine-routable: the session it means is the one you are sitting in. Work
+server only. Refuses loudly if that session is already a shell thread.`,
+	},
+	"shell promote": {
+		summary:  "promote a named untracked tmux session into a tracked shell thread",
+		usage:    "sesh shell promote --session <name> [--name <n>] [--parent <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh shell promote --session scratch", "sesh shell promote --session build --machine macbook"},
+		long: `The thread's cwd is taken from the session's START directory (tmux
+#{session_path}), which does not drift when a pane cds away. If tmux does not
+report one, the active pane's path is used and that fallback is logged, because
+it CAN be wrong.`,
+	},
+	"shell sessions": {
+		summary:  "list every live tmux session on the work server, classified (shell | agent | ghost | stale)",
+		usage:    "sesh shell sessions [--json] [--machine <m>]",
+		examples: []string{"sesh shell sessions", "sesh shell sessions --json --machine macbook"},
+		long: `shell = tracked (carries a marker resolving to a record); agent = hosts agent
+thread panes; ghost = no sesh identity at all, the promote target; stale = a
+marker whose record is gone (a delete that failed to unstamp — promotable, but a
+bug worth seeing). Sessions are enumerated live and never recorded.`,
+	},
+	"shell info": {
+		summary:  "a shell thread's locator + live window/pane tree, incl. the raw-tmux prefix",
+		usage:    "sesh shell info --id <id> [--json] [--machine <m>]",
+		examples: []string{"sesh shell info --id 4d4e", "sesh shell info --id 4d4e --json"},
+		long: `--json returns the socket path and a ready-to-paste tmux_prefix so anything sesh
+does not wrap can be driven straight against the tmux server.`,
+	},
+	"shell panes": {
+		summary:  "flat list of the panes in a shell thread's session (pane, command, pid, cwd, owning thread)",
+		usage:    "sesh shell panes --id <id> [--json] [--machine <m>]",
+		examples: []string{"sesh shell panes --id 4d4e"},
+	},
+
 	"thread": {
 		summary:  "thread layer — coding-agent sessions (new | list | stop | delete | resume | headful | rename | tag | archive | send | send-headless | status | grid | …)",
 		usage:    "sesh thread <new|list|stop|pane|capture|status|send|send-headless|headless-reply|rename|info|adopt|transcript|notify|reparent|tag|archive|delete|resume|headful|grid|snapshot>",
@@ -115,7 +190,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread new": {
 		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec). --virtual creates a VIRTUAL thread instead: a pure grouping node with NO agent (parent other threads under it; renders ◇ in the TUI) — takes no agent-shaped flag, cwd is optional (kept as the default for a later `thread realize`), and agent verbs on it refuse loudly until realized.",
-		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--divider] [--parent <id>] [--no-parent] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		usage:    "sesh thread new --agent <claude|codex|pi> [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--divider] [--parent <id>] [--no-parent] [--parent-shell] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec", "sesh thread new --virtual --name 'project X'", "sesh thread new --divider --name 'today'"},
 	},
 	"thread list": {
@@ -125,7 +200,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread stop": {
 		summary:  "end a thread's runtime (agent + tmux session) but keep the record, making it a dead, resumable thread",
-		usage:    "sesh thread stop --id <id> [--machine <m>]",
+		usage:    "sesh thread stop --id <id> [--force] [--machine <m>]",
 		examples: []string{"sesh thread stop --id 1a2b3c4d"},
 	},
 	"thread pane": {
@@ -145,7 +220,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 	"thread send": {
 		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise)",
-		usage:    "sesh thread send --id <id> --text <text> [--wait --timeout <dur>] [--machine <m>]",
+		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--machine <m>]",
 		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m"},
 	},
 	"thread wait": {
@@ -607,7 +682,7 @@ var helpRegistry = map[string]cmdHelp{
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "thread", "resume", "ticket", "blob", "fs", "plugins", "tui", "info",
+	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "blob", "fs", "plugins", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

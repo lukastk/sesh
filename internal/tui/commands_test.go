@@ -31,6 +31,10 @@ func TestDefaultKeymapIsTheSurvivingSet(t *testing.T) {
 		"i": "toggle-id", "w": "toggle-width-cap", "y": "uuid", "n": "notify",
 		"x": "stop", "a": "archive", "U": "undo-archive", "R": "refresh",
 		"?": "help",
+		// S was added AFTER the keymap cut, deliberately: the shells viewer is the
+		// sibling of the tickets view (K), which kept its key, and Lukas asked for a
+		// key to open it. Every other shell command is palette-only.
+		"S": "shells",
 		// esc/q KEEP quitting (Lukas asked for them back after the keymap cut). In
 		// SIDEBAR mode they resolve to `dismiss` instead — see TestSidebarKeymapSwapsQuit.
 		"esc": "quit", "q": "quit",

@@ -206,6 +206,14 @@ func (s *Store) SetThreadAgentSession(id, agentSessionID string) error {
 	return s.updateThread(`UPDATE threads SET agent_session_id = ? WHERE id = ?`, agentSessionID, id)
 }
 
+// SetThreadSessionName records the tmux session name a thread's runtime actually
+// landed on. Used by shell threads, whose session name is DESCRIPTIVE (identity
+// is the @sesh-shell-id marker), so a name collision is resolved by suffixing and
+// the record must be corrected to the name that was really used.
+func (s *Store) SetThreadSessionName(id, sessionName string) error {
+	return s.updateThread(`UPDATE threads SET session_name = ? WHERE id = ?`, sessionName, id)
+}
+
 // SetThreadHeaded flips a headless thread to headed and gives it a real tmux session
 // name (used by `thread headful` promotion).
 func (s *Store) SetThreadHeaded(id, sessionName string) error {

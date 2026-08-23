@@ -23,7 +23,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "tmux.info",
-		Description: "JSONL walk of sessions/windows/panes across machines; --machine/--session",
+		Description: "JSONL walk of sessions/windows/panes across machines; --machine/--session; each session also reports its START directory (`session_path`) — the only honest 'where does this session live' signal tmux exposes, which does NOT drift when a pane cds away",
 		Localities:  bothLoc,
 	})
 	Register(Feature{
@@ -345,6 +345,21 @@ func init() {
 	Register(Feature{
 		ID:          "thread.delete",
 		Description: "drop a record without touching the runtime (unlike kill); children are promoted to the deleted thread's parent (a parent id never dangles)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "shell.lifecycle",
+		Description: "shell threads: `shell new --cwd` records a tracked tmux SESSION (agent_kind shell) and starts it in that dir with the @sesh-shell-id session marker; head follows the SESSION (headful while it lives, headless once killed) and `thread resume` recreates it in the recorded cwd; `shell enter` is idempotent on (cwd, name) while a duplicate name in one cwd is refused; routed to the owner",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "shell.promote",
+		Description: "shell threads: an untracked tmux session lists as `ghost` and `shell promote` adopts it in place (record minted, session marked, cwd taken from the session's START dir), after which it classifies as `shell`; a session hosting agent panes classifies `agent`; a marker whose record is gone classifies `stale`",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "shell.gates",
+		Description: "shell threads have a RUNTIME but no CONVERSATION: fork/transcript/send-headless refuse loudly, while enter/send/capture/stop work; `thread send --pane` addresses a SPECIFIC pane of the session and lands nowhere else; stopping a shell whose session hosts other threads' agent panes refuses without --force",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

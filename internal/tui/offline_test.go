@@ -67,7 +67,11 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 		// undo-archive routes, but its target comes from the undo STACK, not the
 		// selection — the selection-keyed gate would check the WRONG machine. It
 		// checks its own entry's machine and refuses there instead (H54).
-		"undo-archive"}
+		"undo-archive",
+		// shells fans out to every REACHABLE machine and acts on the viewer's own
+		// selection, not the grid's — same class as undo-archive. Its fan-out
+		// skips unreachable peers, so there is nothing for this gate to refuse.
+		"shells"}
 	for _, id := range local {
 		if _, ok := commandByID(id); !ok {
 			t.Fatalf("read-only command %q is not in the registry", id)

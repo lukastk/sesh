@@ -51,17 +51,43 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if nonAgentGate(w, thread, "thread send") {
+	if runtimeGate(w, thread, "thread send") {
 		return
 	}
-	loc, found, err := d.tmux.FindPaneByThreadID(req.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
-		return
+	// Resolve the TARGET pane. An agent thread has exactly one — its marked pane.
+	// A shell thread's runtime is a whole session, so it has many, and the caller
+	// may address one explicitly.
+	var target string
+	if thread.AgentKind == api.ShellAgentKind {
+		sess, live, serr := d.tmux.FindSessionByShellID(req.ID)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		if !live {
+			writeError(w, http.StatusConflict, "shell thread has no live session; revive it first (sesh thread resume --id "+req.ID+")")
+			return
+		}
+		target, err = shellSendTarget(sess, req.Pane, req.Window)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		if req.Pane != "" || req.Window != nil {
+			writeError(w, http.StatusBadRequest, "thread send: --pane/--window address a SHELL thread's session; an agent thread's target is its own marked pane")
+			return
+		}
+		loc, found, ferr := d.tmux.FindPaneByThreadID(req.ID)
+		if ferr != nil {
+			writeError(w, http.StatusInternalServerError, ferr.Error())
+			return
+		}
+		if !found {
+			writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
+			return
+		}
+		target = loc.Pane
 	}
 	// Expand @blob(…) references to absolute paths; an unknown blob is a loud 400.
 	text, err := d.expandPrompt(req.Text)
@@ -69,7 +95,7 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := d.tmux.SendText(loc.Pane, text, true); err != nil {
+	if err := d.tmux.SendText(target, text, true); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -102,6 +128,18 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	if req.Divider {
 		d.newDividerThread(w, req)
 		return
+	}
+	// A FORK inherits its source's kind, so a source with no CONVERSATION must be
+	// refused HERE — before ParseKind, which would otherwise reject the inherited
+	// kind with its generic "unknown agent" message and hide what is actually
+	// wrong. Every client (CLI, TUI, sesh-ui) gets the tailored refusal because
+	// the gate lives at the seam, not in one caller.
+	if req.ForkFrom != "" {
+		if src, serr := d.store.GetThread(req.ForkFrom); serr == nil {
+			if conversationGate(w, src, "fork") {
+				return
+			}
+		}
 	}
 	kind, err := agents.ParseKind(req.Agent)
 	if err != nil {
@@ -140,6 +178,18 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	if nSet(req.IntoSession != "", req.IntoWindow != "", req.IntoPane != "") > 1 {
 		writeError(w, http.StatusBadRequest, "thread: --into-session, --into-window and --into-pane are mutually exclusive")
 		return
+	}
+	// AUTO-PARENT under the hosting SHELL THREAD (opt-in). Resolved here, before
+	// any placement branch, so every placement mode gets the same rule — and only
+	// when the thread would otherwise be a ROOT, which is what keeps it from
+	// re-parenting anything.
+	if req.ParentShell && req.Parent == "" {
+		host, err := d.hostingShellThread(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "thread: --parent-shell: "+err.Error())
+			return
+		}
+		req.Parent = host // "" = the target session is not a shell thread's; stay a root
 	}
 	if req.IntoPane != "" {
 		d.newThreadIntoPane(w, kind, req)
@@ -453,19 +503,43 @@ func (d *Daemon) handleThreadCapture(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if nonAgentGate(w, thread, "thread capture") {
+	if runtimeGate(w, thread, "thread capture") {
 		return
 	}
-	loc, found, err := d.tmux.FindPaneByThreadID(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	// A SHELL thread has no marked pane of its own — its runtime is a whole
+	// session — so capture reads the session's ACTIVE pane, the one you would be
+	// looking at. (Address a specific pane with `sesh shell panes` + raw tmux;
+	// sesh does not reimplement capture-pane targeting.)
+	var capturePane string
+	if thread.AgentKind == api.ShellAgentKind {
+		sess, live, serr := d.tmux.FindSessionByShellID(id)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		if !live {
+			writeError(w, http.StatusConflict, "shell thread has no live session; cannot capture")
+			return
+		}
+		target, terr := shellSendTarget(sess, "", nil)
+		if terr != nil {
+			writeError(w, http.StatusConflict, terr.Error())
+			return
+		}
+		capturePane = target
+	} else {
+		loc, found, ferr := d.tmux.FindPaneByThreadID(id)
+		if ferr != nil {
+			writeError(w, http.StatusInternalServerError, ferr.Error())
+			return
+		}
+		if !found {
+			writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot capture")
+			return
+		}
+		capturePane = loc.Pane
 	}
-	if !found {
-		writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot capture")
-		return
-	}
-	content, err := d.tmux.CapturePaneLines(loc.Pane, lines)
+	content, err := d.tmux.CapturePaneLines(capturePane, lines)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -517,6 +591,38 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id}
+
+	// SHELL THREAD: its runtime is a tmux SESSION, so head comes from the session
+	// marker, never the pane index — a pane lookup would find nothing and report
+	// a live shell thread as headless. This on-demand path must agree with the
+	// maintainer's (maintainer.refreshThread), which is why both branch on kind
+	// BEFORE looking for a pane. Busy does not apply: pinned idle.
+	if thread.AgentKind == api.ShellAgentKind {
+		sess, live, serr := d.tmux.FindSessionByShellID(id)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		resp.Busy = api.BusyIdle
+		resp.Attachment = api.Detached
+		if !live {
+			resp.Head = api.Headless
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		resp.Head = api.Headful
+		clients, cerr := d.tmux.ClientCount(sess.Name)
+		if cerr != nil {
+			writeError(w, http.StatusInternalServerError, cerr.Error())
+			return
+		}
+		resp.Clients = clients
+		if clients > 0 {
+			resp.Attachment = api.Attached
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 
 	loc, found, err := d.tmux.FindPaneByThreadID(id)
 	if err != nil {

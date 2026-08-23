@@ -27,24 +27,51 @@ func (d *Daemon) routesRealize(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/realize", d.handleThreadRealize)
 }
 
-// nonAgentGate refuses an agent-shaped operation on a NON-AGENT node — a VIRTUAL
-// grouping thread or a DIVIDER — with a loud, actionable 409, and reports whether
-// it fired. Callers place it right after loading the thread, before any
-// agent-specific work. The remedy differs by kind (realize a virtual thread;
-// delete a divider), so the message is tailored.
-func nonAgentGate(w http.ResponseWriter, thread api.Thread, verb string) bool {
-	if !api.NonAgentKind(thread.AgentKind) {
-		return false
-	}
+// The two gates below are the taxonomy split (api.HasConversation /
+// api.HasRuntime). Which one a verb uses is a real decision, not a style choice:
+// a SHELL thread has a runtime but no conversation, so it must pass the runtime
+// gate (enter, send, capture, revive — reviving one creates its session) and be
+// refused by the conversation gate (fork, transcript, send-headless, --model).
+// Keying a verb on the wrong gate is exactly the plausible-but-wrong failure
+// this project exists to prevent. See _dev/SHELL.md.
+
+// nodeRefusal is the loud, actionable 409 body for a gate, tailored to the kind
+// (the remedy differs: realize a virtual thread, delete a divider, and a shell
+// thread simply has no conversation to operate on).
+func nodeRefusal(thread api.Thread, verb string) string {
 	name := thread.Name
 	if name == "" {
 		name = thread.ID
 	}
-	msg := verb + ": " + name + " is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id " + thread.ID + " --agent claude|codex|pi"
-	if thread.AgentKind == api.DividerAgentKind {
-		msg = verb + ": " + name + " is a divider (a visual separator — no conversation); delete it with sesh thread delete --id " + thread.ID
+	switch thread.AgentKind {
+	case api.DividerAgentKind:
+		return verb + ": " + name + " is a divider (a visual separator — no conversation); delete it with sesh thread delete --id " + thread.ID
+	case api.ShellAgentKind:
+		return verb + ": " + name + " is a shell thread (a tracked tmux session — it has no agent conversation, so there is nothing to " + verb + "); enter it with sesh tmux nav, or start an agent in it"
+	default:
+		return verb + ": " + name + " is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id " + thread.ID + " --agent claude|codex|pi"
 	}
-	writeError(w, http.StatusConflict, msg)
+}
+
+// conversationGate refuses a CONVERSATION-shaped operation (fork, transcript,
+// send-headless, a model pin) on a node that has none — virtual, divider, or
+// shell — and reports whether it fired.
+func conversationGate(w http.ResponseWriter, thread api.Thread, verb string) bool {
+	if api.HasConversation(thread.AgentKind) {
+		return false
+	}
+	writeError(w, http.StatusConflict, nodeRefusal(thread, verb))
+	return true
+}
+
+// runtimeGate refuses a RUNTIME-shaped operation (enter/nav, send, capture,
+// revive) on a node that can never have one — virtual or divider. A SHELL thread
+// passes: its runtime is a tmux session.
+func runtimeGate(w http.ResponseWriter, thread api.Thread, verb string) bool {
+	if api.HasRuntime(thread.AgentKind) {
+		return false
+	}
+	writeError(w, http.StatusConflict, nodeRefusal(thread, verb))
 	return true
 }
 

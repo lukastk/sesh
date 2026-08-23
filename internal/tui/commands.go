@@ -84,6 +84,7 @@ var commands = []Command{
 
 	// --- inspect / display toggles ---
 	{ID: "tickets", Desc: "tickets view", Keys: []string{"K"}},
+	{ID: "shells", Desc: "shells view (live tmux sessions: promote, enter, kill)", Keys: []string{"S"}},
 	{ID: "details", Desc: "thread details", Keys: []string{"I"}},
 	{ID: "toggle-id", Desc: "toggle the ID column", Keys: []string{"i"}},
 	{ID: "toggle-width-cap", Desc: "toggle the column-width cap", Keys: []string{"w"}},

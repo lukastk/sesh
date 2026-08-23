@@ -53,6 +53,7 @@ var subcommandSets = map[string][]string{
 	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "send-headless",
 		"headless-reply", "rename", "info", "adopt", "transcript", "notify", "report-state", "wait", "flag", "hold", "pin",
 		"unpin", "reparent", "tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},
+	"shell":   {"new", "enter", "here", "promote", "sessions", "info", "panes"},
 	"ticket":  {"create", "list", "set-status", "import", "unbind", "move", "needs-input", "send-prompt"},
 	"blob":    {"add", "ls", "get", "rm", "path", "expand"},
 	"fs":      {"list"},

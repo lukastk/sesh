@@ -271,7 +271,7 @@ package api
 // Additive and mixed-mesh safe: report-state is owner-local (the reporter
 // talks to its own machine's daemon); a pre-46 daemon simply ignores the
 // unknown JSON field (the pre-46 behavior).
-const SchemaVersion = 46
+const SchemaVersion = 47
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

@@ -29,6 +29,7 @@ thing; do not write "the master cockpit", which is redundant.
 | `PLAN.md` | How we build and track it: the feature registry, the matrix harness, the testing framework. |
 | `MESH.md` | Mesh-replicated live state — the cross-machine thread view, sync cadence, delta sync. |
 | `MASTER.md` | **mycockpit**, the cross-machine tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
+| `SHELL.md` | **Shell threads** — a tracked tmux session as a first-class thread, and the `S` shells viewer over live/ghost sessions. Carries the tmux marker-inheritance trap digest. |
 | `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
 | `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
 | `CLI_TUI_FEATURES.md` | The 2026-06-11 CLI/TUI feature batch and its contract. |

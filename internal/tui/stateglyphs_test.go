@@ -102,20 +102,27 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 	flagged.Flagged = true
 	disabled := api.ThreadRow{}
 	disabled.FlagDisabled = true
-
+	shellLive := api.ThreadRow{}
+	shellLive.AgentKind = api.ShellAgentKind
+	shellLive.Head = api.Headful
+	shellDead := api.ThreadRow{}
+	shellDead.AgentKind = api.ShellAgentKind
+	shellDead.Head = api.Headless
 	// Every non-blank glyph the gutter can render, by the state it means.
 	glyphs := map[string]string{
-		"head/headful":  HeadGlyph(headful),
-		"head/headless": HeadGlyph(headless),
-		"head/virtual":  HeadGlyph(virtual),
-		"busy/busy":     BusyGlyph(api.ThreadRow{Busy: api.BusyBusy}),
-		"busy/idle":     BusyGlyph(api.ThreadRow{Busy: api.BusyIdle}),
-		"desc/running":  DescendantGlyph(true),
-		"att/attached":  "*", // rendered inline in View
-		"arch/archived": ArchivedGlyph(archived),
-		"flag/flagged":  FlagGlyph(flagged),
-		"flag/disabled": FlagGlyph(disabled),
-		"mark/moving":   pinMark(api.ThreadRow{}, true),
+		"head/headful":    HeadGlyph(headful),
+		"head/headless":   HeadGlyph(headless),
+		"head/virtual":    HeadGlyph(virtual),
+		"head/shell-live": HeadGlyph(shellLive),
+		"head/shell-dead": HeadGlyph(shellDead),
+		"busy/busy":       BusyGlyph(api.ThreadRow{Busy: api.BusyBusy}),
+		"busy/idle":       BusyGlyph(api.ThreadRow{Busy: api.BusyIdle}),
+		"desc/running":    DescendantGlyph(true),
+		"att/attached":    "*", // rendered inline in View
+		"arch/archived":   ArchivedGlyph(archived),
+		"flag/flagged":    FlagGlyph(flagged),
+		"flag/disabled":   FlagGlyph(disabled),
+		"mark/moving":     pinMark(api.ThreadRow{}, true),
 	}
 
 	seen := map[string]string{}
@@ -140,6 +147,14 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		"dot":            "·•∙‧⋅",
 		"right triangle": "▶▸►▹",
 		"vertical arrow": "↕↑↓⇕",
+		// Hollow quadrilaterals: a hollow square and the virtual diamond ◇ render
+		// alike at one cell, which is why the shell head glyphs are the NARROW
+		// rectangles ▮/▯ rather than ▣/▢. This family must NOT contain ▮/▯ — the
+		// virtual thread already draws ◇ from it, so adding them would put two
+		// LIVE states in one family and make this guard red on arrival. Its job is
+		// to trip if anyone ever moves a gutter glyph INTO the hollow-quadrilateral
+		// look, not to police the rectangles that deliberately sit outside it.
+		"hollow quadrilateral": "◇▢▣□◻",
 	}
 	// familyExempt: a state may share ONE named family, with the reason. Keyed by
 	// state+family deliberately — a blanket per-state exemption would also wave the

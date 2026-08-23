@@ -25,11 +25,21 @@ type TmuxWindow struct {
 
 // TmuxSession is one session and its windows.
 type TmuxSession struct {
-	Machine  string       `json:"machine"`
-	Socket   string       `json:"socket"`
-	Name     string       `json:"name"`
-	Attached bool         `json:"attached"`
-	Windows  []TmuxWindow `json:"windows"`
+	Machine  string `json:"machine"`
+	Socket   string `json:"socket"`
+	Name     string `json:"name"`
+	Attached bool   `json:"attached"`
+	// Path is the session's START directory (tmux `#{session_path}`), which is
+	// what `new-session -c` was given and does NOT follow a later `cd` in a pane
+	// (a pane's live cwd is TmuxPane.Path / `#{pane_current_path}`). It is the
+	// honest "where does this session live" signal — a tmux session has no cwd of
+	// its own beyond this. Empty from a pre-47 peer.
+	Path string `json:"path,omitempty"`
+	// ShellID is the @sesh-shell-id SESSION user-option: the sesh SHELL thread
+	// this session is the runtime of ("" = untracked). It is a DIFFERENT tmux key
+	// from the pane-scoped @sesh-thread-id on purpose — see tmux.ShellIDOption.
+	ShellID string       `json:"shell_id,omitempty"`
+	Windows []TmuxWindow `json:"windows"`
 }
 
 // TmuxInfoResponse is returned by GET /v1/tmux/info.

@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-// line builds a tab-separated list-panes record with the canonical 13 fields.
+// line builds a tab-separated list-panes record with the canonical field set
+// (session_name, session_attached, session_path, then window/pane fields).
 func line(fields ...string) string {
 	if len(fields) != paneFieldCount {
 		panic("test line needs exactly the pane field count")
@@ -16,9 +17,9 @@ func line(fields ...string) string {
 func TestParsePanesGroupsSessionsWindowsPanes(t *testing.T) {
 	// session "work": window 0 (two panes), window 1 (one pane).
 	out := strings.Join([]string{
-		line("work", "1", "0", "zsh", "0", "%0", "0", "1", "100", "zsh", "title0", "/a", "thr_1"),
-		line("work", "1", "0", "zsh", "0", "%1", "1", "0", "101", "vim", "title1", "/a", ""),
-		line("work", "1", "1", "log", "1", "%2", "0", "1", "102", "tail", "title2", "/b", ""),
+		line("work", "1", "/srv", "sh-1", "0", "zsh", "0", "%0", "0", "1", "100", "zsh", "title0", "/a", "thr_1"),
+		line("work", "1", "/srv", "sh-1", "0", "zsh", "0", "%1", "1", "0", "101", "vim", "title1", "/a", ""),
+		line("work", "1", "/srv", "sh-1", "1", "log", "1", "%2", "0", "1", "102", "tail", "title2", "/b", ""),
 	}, "\n")
 
 	sessions, err := parsePanes("mac", "mytmux", out)
@@ -31,6 +32,19 @@ func TestParsePanesGroupsSessionsWindowsPanes(t *testing.T) {
 	s := sessions[0]
 	if s.Machine != "mac" || s.Socket != "mytmux" || s.Name != "work" || !s.Attached {
 		t.Fatalf("session header wrong: %+v", s)
+	}
+	// session_path is the session's START dir and is deliberately NOT any pane's
+	// live cwd (/a, /b here) — see api.TmuxSession.Path.
+	if s.Path != "/srv" {
+		t.Fatalf("session path = %q, want /srv", s.Path)
+	}
+	// The SESSION-scoped shell marker is parsed independently of the PANE-scoped
+	// thread marker — the two must never be conflated (see ShellIDOption).
+	if s.ShellID != "sh-1" {
+		t.Fatalf("session shell id = %q, want sh-1", s.ShellID)
+	}
+	if s.Windows[0].Panes[0].ThreadID != "thr_1" || s.Windows[0].Panes[1].ThreadID != "" {
+		t.Fatalf("pane thread ids wrong: %+v", s.Windows[0].Panes)
 	}
 	if len(s.Windows) != 2 {
 		t.Fatalf("want 2 windows, got %d", len(s.Windows))

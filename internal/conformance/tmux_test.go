@@ -142,6 +142,66 @@ func testTmuxInfo(t *testing.T, loc matrix.Locality) {
 	if len(filtered) != 1 || filtered[0].Name != "alpha" {
 		t.Fatalf("--session alpha returned %v", sessionNames(filtered))
 	}
+
+	// session_path: a session's START directory, reported per session. It is the
+	// only honest "where does this session live" signal tmux exposes — a session
+	// has no cwd of its own — and the shells viewer renders it, so it must be
+	// real and it must NOT drift when a pane cds away. Both halves are asserted
+	// against the REAL tmux server here.
+	startDir := filepath.Join(sb.Home, "startdir")
+	otherDir := filepath.Join(sb.Home, "otherdir")
+	for _, d := range []string{startDir, otherDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	if out, err := sb.rawTmux(t, "new-session", "-d", "-s", "rooted", "-c", startDir); err != nil {
+		t.Fatalf("new-session rooted: %v\n%s", err, out)
+	}
+	rooted := func() api.TmuxSession {
+		t.Helper()
+		for _, s := range tmuxInfoSessions(t, sb) {
+			if s.Name == "rooted" {
+				return s
+			}
+		}
+		t.Fatalf("session 'rooted' missing from tmux info")
+		return api.TmuxSession{}
+	}
+	if got := rooted().Path; got != startDir {
+		t.Fatalf("session_path = %q, want the session's start dir %q", got, startDir)
+	}
+
+	// cd the pane away and wait for tmux to actually observe it (pane_current_path
+	// follows the shell, so poll for the real change rather than sleeping).
+	pane := sb.paneOf(t, "rooted")
+	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "-l", "cd "+otherDir); err != nil {
+		t.Fatalf("send-keys cd: %v\n%s", err, out)
+	}
+	if out, err := sb.rawTmux(t, "send-keys", "-t", pane, "Enter"); err != nil {
+		t.Fatalf("send-keys enter: %v\n%s", err, out)
+	}
+	moved := false
+	for i := 0; i < 100 && !moved; i++ {
+		cur, err := sb.rawTmux(t, "display-message", "-p", "-t", pane, "#{pane_current_path}")
+		if err != nil {
+			t.Fatalf("display-message: %v\n%s", err, cur)
+		}
+		if strings.TrimSpace(cur) == otherDir {
+			moved = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !moved {
+		t.Skip("NOT OBSERVED: the pane's shell never cd'd (no usable shell in this sandbox) — the no-drift half cannot be proven honestly here")
+	}
+	// The pane moved; the SESSION's path must not have. This is what makes
+	// session_path usable as a shell thread's registered cwd.
+	if got := rooted().Path; got != startDir {
+		t.Fatalf("session_path drifted to %q after the pane cd'd to %q — it must stay the session's START dir %q",
+			got, otherDir, startDir)
+	}
 }
 
 // testTmuxCreateSession creates a session via sesh and verifies it exists in tmux

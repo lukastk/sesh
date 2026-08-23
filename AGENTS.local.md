@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H90 — a 34 KB ticket "refused to send": tmux's set-buffer argv cap (MAX_IMSGSIZE=16384); fix = SendText streams via `load-buffer -b <buf> -` on STDIN (revisits H46's declined fix) + the TUI ticket viewer now shows the ticket's OWN full uuid (2026-08-23, sesh <this commit>; NO schema/API/CLI change; DAEMON rebuild+restart for the send fix + binary-only for the viewer row; NOT YET DEPLOYED)
+## H90 — a 34 KB ticket "refused to send": tmux's set-buffer argv cap (MAX_IMSGSIZE=16384); fix = SendText streams via `load-buffer -b <buf> -` on STDIN (revisits H46's declined fix) + the TUI ticket viewer now shows the ticket's OWN full uuid (2026-08-23, sesh c487969; NO schema/API/CLI change; DAEMON rebuild+restart for the send fix + binary-only for the viewer row; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "I tried sending ticket 538e103f to thread 538e103f-71c8-... but it refuses to send." TWO
 distinct causes, one of them a real transport limit:
 1. **ID CONFUSION (red herring, but its own fix below):** `538e103f` is the THREAD id, not a ticket
@@ -48,7 +48,23 @@ NO schema/API/CLI change (no new flag/command/key/column/env var). SendText runs
 send fix needs a daemon REBUILD + RESTART per machine; the ticket-viewer id row is a TUI-client render
 (binary-only, no restart) — both ship in the one binary. Schema-neutral ⇒ a mixed fleet is safe during
 rollout. SKILL sync: sesh-cli ticket-view paragraph notes the read-only full-id row.
-DEPLOY: NOT YET DEPLOYED at commit time — recorded after the fleet rebuild below.
+DEPLOY (2026-08-23, commit c487969): live on FIVE of six — mymain, ideapad, macstudio, macbook,
+termux; every installed binary vcs.revision=c487969. mymain/ideapad/macstudio rebuilt natively +
+`supervisorctl restart sesh-daemon`. macbook built from a THROWAWAY `git clone --depth 1` in /tmp (its
+~/mysetup/sesh checkout carried ANOTHER agent's TUI "goto" WIP — modified commands.go/model.go/
+offline_test.go + untracked goto.*; never pull/build a dirty checkout, H49) then supervisorctl restart,
+WIP untouched, clone removed. termux plain `go build` (android/arm64, H22), old daemon killed by EXPLICIT
+pid 14616 (never pkill -f — H22/H74) + setsid-nohup relaunch with its exact env → new daemon pid 3138
+(the H75 no-API leaf WARNING in its log is EXPECTED — termux is inbound-less). Mesh healthy after (all
+four API peers reachable). LIVE-SMOKED on the SUPERVISED mymain daemon: a disposable pi thread accepted a
+20,020-byte `thread send` (rc=0 "sent" — the old set-buffer path returned "command too long"); scratch
+thread stopped+archived+deleted (its `=session` capture read empty only due to the space/parens name-match
+quirk — the "sent" return is the signal). pocket4 OFFLINE → PENDING (self-heals on its next pull + rebuild
++ supervisor restart; schema-neutral so a mixed fleet is harmless meanwhile).
+FOLLOW-UP done for Lukas (the original incident): sent the actual ticket 4d4e8592 ("sesh - new thread
+type", 34 KB) to its bound thread 538e103f via `sesh ticket send-prompt` on the fixed mymain daemon — it
+delivered ("sent prompt for 4d4e8592"), the thread flipped busy=busy and ticket_needs_input cleared, i.e.
+the agent received the prompt and started the turn. Pre-fix this same call returned "command too long".
 
 ## H89 — NEW cockpit commands (ticket 318aa457): thread/box NOTES (myvault) + DOC bulk hold/unhold + create-null/create-tmp (2026-08-23, myrig 9e45c47; NO sesh change; render-only + conf source-file, deployed ALL SIX; mysrs note added; ticket 318aa457 done)
 Lukas ticket 318aa457 "New mmt and mt commands" — a batch of cockpit commands, all

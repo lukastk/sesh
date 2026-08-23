@@ -48,6 +48,58 @@ once the fleet rebuilds (myrig's post step builds per machine). myrig's home fil
 `update-myrig-home-all`. sesh-ui needs an app rebuild. Nothing here changes behaviour, so a
 mixed fleet is cosmetic only.
 
+## H87 — mmt-enter-box slow after the pick + stalls on an unreachable-machine box: the scope=all checkout fan-out ssh-probed EVERY peer (10s ConnectTimeout each) ignoring the mesh; fix = probe only mesh-REACHABLE machines + a clear "on an unreachable machine" error (2026-08-23, myrig fb1817b; NO sesh change; render-only deploy, 5/6 — pocket4 offline, pending; ticket 64c2035a done)
+Lukas: "mmt-enter-box is very slow — the fzf opens fast, but once I pick a box it takes very long to
+open. Also it stalls forever without an error when the box is on a machine that's unreachable."
+ROOT CAUSE (measured on mymain): after the pick, mmt- (scope=all) calls `_mt_box_checkout_machines` to
+find WHICH machine holds the box — by fanning out `ssh-target <m> "test -d <home>/dev/<index>"` to EVERY
+peer in parallel and `wait`-ing for ALL of them. `ssh-target` has ConnectTimeout=10, so a single asleep
+peer makes `wait` block ~10s — and pocket4 has been chronically offline, so EVERY mmt-enter-box paid a
+~10s tax even for a box checked out LOCALLY. MEASURED on the same local box: OLD fan-out **10.191s**, NEW
+**0.844s**. The box→machine location is a genuine per-machine fact with no reliable SYNCED signal
+(boxyard inclusion is local; the code deliberately rejects `ctx/` groups as mis-attributing — the H11
+lineage), so the live probe is fundamental; the bug was probing machines the mesh already KNOWS are
+offline. NB `sesh --machine X` ALREADY fast-fails on an offline peer ("machine X is offline per the
+local mesh cache; not routing", 0.08s) — the box fan-out just wasn't consulting that same knowledge.
+FIX (myrig shell.sh.jinja, NO sesh change): new `_mt_reachable_machines` reads the daemon's cached mesh
+view (`sesh mesh --json | jq '.machines[]|select(.reachable).machine'`, ~0.16s, local socket, NO
+network) and `_mt_box_checkout_machines` now probes ONLY those — a known-offline peer costs 0 ssh
+instead of a 10s timeout. If the mesh can't be read (daemon down) it WARNS on stderr and falls back to
+`_mt_all_machines` (the old probe-everyone path) so a broken daemon degrades to slow-but-correct, never
+"box not found". For complaint #2, when a box is on NO reachable machine the empty-result error now
+names the offline machines: `enter-box: "<box>" is not checked out on any REACHABLE machine (unreachable
+now: pocket4). If it lives on one of those, bring it online first (sesh mesh); else include it: boxyard
+include -r <index>.` — fast + actionable instead of a 10s wait + the misleading "not checked out on any
+known machine". Same treatment in `_mt_enter_box_thread` (mmt-enter-box-thread / mmt-enter-new-box-thread
+share the helper via `_mt_unreachable_machines`). mt- (scope=this) is untouched — it never fans out
+(local stat only).
+RESIDUAL (bounded, self-healing, stated honestly): a machine that is http-reachable per the mesh but
+whose SSH connects-then-wedges — e.g. macbook in the brief window right after it sleeps, before the next
+failed http sync flips it unreachable — can still make one probe slow. But it's bounded by
+`ssh-target`'s ConnectTimeout=10 AND `~/.ssh/config` Host* ServerAliveInterval=15/CountMax=3 (~45s
+ceiling, H81), and it self-heals once the mesh marks that peer offline (then it's skipped entirely). I
+hit exactly this once mid-testing (a ~2-min hang while macbook was mid-sleep; all peers ssh'd in ~0s
+immediately before AND after). There is NO cross-platform `timeout` (the cockpit often runs on a Mac, no
+GNU timeout), so I did not wrap the probe in a hard kill — the mesh filter + existing ssh timeouts are
+the proportionate bound. If it ever bites in practice, the next lever is a native ssh keepalive on the
+probe itself (needs teaching `ssh-target` to pass -o, or a dedicated probe path).
+TESTS (live, mymain, real mesh with pocket4 genuinely offline): `zsh -n` on the jinja-rendered file
+clean (rendered via python jinja2 with a mock targets/config ctx); `_mt_reachable_machines` =
+{mymain,ideapad,macbook,macstudio}, `_mt_unreachable_machines` = {pocket4};
+`_mt_box_checkout_machines` on a local box 0.844s (NEW, reachable-filtered) vs 10.191s (OLD probe-all) —
+same correct result "mymain"; the empty-result path printed the new unreachable-aware error fast. No
+sesh binary/daemon/schema change (pure myrig shell). No skill surface change (command name/flags
+unchanged; mysetup-navigator only NAMES mmt-enter-box).
+DEPLOY: render-only (shell.sh is a rendered jinja — install-home per machine; NO daemon restart, NO conf
+re-source; a running shell picks it up on next source / new shell). Deployed 5/6: mymain (local
+install-home), ideapad (python3), macbook + macstudio (uv --with jinja2 — their system python3 lacks
+jinja2, the H46 class), termux (python3 — NB /tmp is unwritable there so the render must not redirect a
+log to /tmp, H38). Every machine's rendered shell.sh carries the helpers; `sesh mesh --json` verified
+working on termux too (returns the reachable set). pocket4 OFFLINE → PENDING (harmless; it self-updates
+on its next myrig pull + install-home). CONCURRENT-SESSION note: origin/main had advanced 2 commits (a
+"mycockpit" docs rename that also touched shell.sh.jinja) between commit and push — rebased cleanly, both
+changes coexist; verified with `git show HEAD:...shell.sh.jinja` after (the H63 lesson).
+
 ## H85 — LOCAL MAC COCKPIT CLAUDE LOOKED LOGGED OUT: the local master was NOT SSHing, but its long-lived WORK tmux server had been CREATED by a remote SSH cockpit and retained that audit session; fix = target daemon is sole work-server creator (2026-08-18, sesh c550644 + myrig 119ae59; CLI/config change, no schema change; 4/6 deployed, Mac work-server replacement still pending)
 Lukas: Claude Code works in a normal macbook terminal but says `Login expired · Please run /login`
 inside his local master cockpit; self-SSH reproduces it. His correction was exactly right: the local

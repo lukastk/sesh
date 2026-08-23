@@ -4,11 +4,15 @@
 
 **Naming.** The cross-machine tmux cockpit sesh builds — one window per machine, each an
 auto-reconnecting attach into that machine's work server — is called **mycockpit**, or just
-**the cockpit** / **my cockpit**. It was formerly "the master tmux setup"; do not use that
-name in prose. The *code* still spells itself `master` everywhere (`sesh master …`,
-`cmd/sesh/master.go`, `SESH_MASTER_SOCKET`, `master-client.*`, myrig's `mmt-*` = master-tmux),
-and those identifiers are unchanged — so name the command when you mean the command, and
-"the cockpit" when you mean the thing.
+**the cockpit** / **my cockpit**. It was formerly "the master tmux setup"; that name is
+retired.
+
+**`master` and `base` are its two LEVELS**, and stay as the vocabulary: the **master** level
+is the cockpit's own tmux server (`SESH_MASTER_SOCKET`, prefix `C-a`), cross-machine; the
+**base** level is one machine's work server (`SESH_TMUX_SOCKET`, prefix `C-b`). So `sesh
+master …`, `cmd/sesh/master.go`, `master-client.*` and myrig's `mmt-*`/`mt-*` split are all
+naming a level, not carrying the old name — leave them. Reserve "the cockpit" for the whole
+thing; do not write "the master cockpit", which is redundant.
 
 **It is shipped.** v1 is gone; v2 runs in production on all six machines and is what Lukas works in every day. You are almost certainly *extending or fixing* it, not building it — so the bar is "do not regress the fleet", and every change lands against a live system. Treat `_dev/PLAN.md`'s Phase 0 ("build the tracking spine first") as history: the spine exists.
 

@@ -525,7 +525,7 @@ var helpRegistry = map[string]cmdHelp{
 	},
 
 	"master": {
-		summary:  "master-tmux cockpit — one window per machine, each an auto-reconnecting attach into that machine's work server (up | window | attach | down | ensure | watchers). NOT --machine routable",
+		summary:  "mycockpit, the cross-machine cockpit — one window per machine, each an auto-reconnecting attach into that machine's work server (up | window | attach | down | ensure | watchers). NOT --machine routable",
 		usage:    "sesh master <up|window|attach|down|ensure|watchers>",
 		examples: []string{"sesh master up --tmux-conf ~/.sesh/myrig/tmux.master.conf", "sesh master attach"},
 	},
@@ -555,7 +555,7 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh master ensure", "sesh master ensure --machines self,macbook"},
 	},
 	"master watchers": {
-		summary:  "list the origin machines whose master cockpit currently has a live window-attach into THIS machine's work server (who is watching me)",
+		summary:  "list the origin machines whose cockpit currently has a live window-attach into THIS machine's work server (who is watching me)",
 		usage:    "sesh master watchers [--json]",
 		examples: []string{"sesh master watchers", "sesh master watchers --json"},
 	},

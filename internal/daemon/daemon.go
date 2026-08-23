@@ -77,7 +77,7 @@ type Daemon struct {
 	flags config.FlagsConfig
 	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
 	subTracker *subscribe.Tracker
-	// mmaint converges the master cockpit (one window per connected machine);
+	// mmaint converges the cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
 
@@ -216,7 +216,7 @@ func (d *Daemon) Serve() error {
 	go d.evt.run()      // observe the merged mesh + fire [[hooks]]
 	go d.checkPeerDNS() // loudly warn if http peers' hostnames don't resolve (e.g. a CGO=0 termux build)
 	if d.mmaint != nil {
-		d.mmaint.start() // converge the master cockpit to one window per connected machine
+		d.mmaint.start() // converge the cockpit to one window per connected machine
 	}
 
 	// Optional network API (remote clients / mobile). Only a MISCONFIGURATION (API

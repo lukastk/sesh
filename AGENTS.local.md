@@ -1,10 +1,52 @@
 # AGENTS.local.md — sesh v2 working notes
 
-> **Naming (2026-08-23).** The cross-machine tmux cockpit is now called **mycockpit** —
-> or just **the cockpit** / **my cockpit**. Entries below predate that and call it "the
-> master tmux setup", "the master", or "the master cockpit"; they are a dated record and
-> are left as written. Use the new name in anything new. Code identifiers (`sesh master`,
-> `SESH_MASTER_SOCKET`, `mmt-*`, `tmux.master.conf`) are unchanged either way.
+## H86 — NAMING: "the master tmux setup" is retired; the thing is **mycockpit** ("the cockpit"), and `master`/`base` are its two LEVELS — `mmt-`/`mt-` and every `master` identifier STAY (2026-08-23, myrig c098ba5 + sesh d57451e/<this commit> + sesh-ui/myassistant/myagent/myarch; docs + user-facing strings only, NO schema/API/behaviour change; myrig home files NOT yet deployed)
+Lukas: "Right now I have a fairly clumsy name for the tmux thing I have set up with sesh:
+the master tmux setup." Ticket ae05a84e. The rename is **mycockpit**, and he also wants to
+say just **"the cockpit"** or **"my cockpit"**.
+
+WHAT THE NAME COVERS: the whole cross-machine cockpit — one tmux server with a window per
+machine, each an auto-reconnecting attach into that machine's work server — regardless of
+which repo the piece lives in. It is NOT a repo and there is no plan for one; the mechanism
+is sesh (`sesh master …`, `tmux nav`, `tui`), the policy is myrig (`~/.sesh/myrig/`). (A
+2026-08-22 vault ticket proposed extracting `sesh tui` into a `mycockpit` repo — that
+attempt was ABORTED. Do not write "it has no repo of its own yet"; it implies a plan that
+does not exist.)
+
+THE PART THAT IS EASY TO GET WRONG — `master` IS NOT THE OLD NAME. The cockpit has two
+LEVELS and both keep their words:
+  - **master** — the cockpit's own tmux server (`SESH_MASTER_SOCKET`/`sesh-master`, prefix
+    `C-a`), CROSS-MACHINE: a command picks a machine, then acts.
+  - **base** — one machine's work server (`SESH_TMUX_SOCKET`/`sesh`, prefix `C-b`), THIS
+    machine.
+`mmt-*` acts at the master level, `mt-*` at the base level. The prefixes stand for "my
+master tmux" / "my tmux"; Lukas is KEEPING them as the technical terminology, and expects
+"master" and "base" to be recognised in cockpit context. So `sesh master up|window|attach|
+down`, `cmd/sesh/master.go`, `master-client.*`, `tmux master-current`, `tmux.master.conf`
+and `masterMaint` are all naming a LEVEL and are correct — do not "fix" them. What IS
+retired is the phrase "the master tmux setup", and the redundant "the master cockpit": the
+cockpit IS the master level, so say "the cockpit" for the whole thing and "master
+window"/"master server" for the precise internal parts.
+
+CHANGED (prose + user-facing strings only): sesh AGENTS.md (a Naming section), the sesh-cli
+skill, `_dev/MASTER.md` (retitled) + SPEC/SIDEBAR/BACKLOG/experiments, and the `cockpit`
+strings in cmd/sesh/{help,master,navlast}.go + internal/daemon/daemon.go. myrig: AGENTS.md,
+the deployed global `home/.pi/agent/AGENTS.md`, mysetup-navigator SKILL, and the user-facing
+text in the home files — every `my_alias -d` for `mmt-*` (these render in the prefix+M/m
+palettes), `mmt-start`/`mmt-jump` `--help`, the `_mmt_current_thread` error, the termux
+widget headers and termux.properties comments. sesh-ui: the Master screen header is now
+"mycockpit". Plus myassistant/myagent/myarch docs.
+
+NOT CHANGED, DELIBERATELY: this file's and `_dev/AGENTS.local.archive.md`'s existing
+entries (a dated record, with verbatim Lukas quotes using the old name — see H83's "My
+master tmux setup is constantly dying on my termux" and H81's sleep report); `_dev/
+V1_FEATURE_AUDIT.md` (v1 archaeology, where `master-tmux.sh` is a real filename). No file,
+socket, function, env var or tmux server was renamed.
+
+DEPLOY: help.go is a user-facing string, so `sesh help master` only reads the new summary
+once the fleet rebuilds (myrig's post step builds per machine). myrig's home files need
+`update-myrig-home-all`. sesh-ui needs an app rebuild. Nothing here changes behaviour, so a
+mixed fleet is cosmetic only.
 
 ## H85 — LOCAL MAC COCKPIT CLAUDE LOOKED LOGGED OUT: the local master was NOT SSHing, but its long-lived WORK tmux server had been CREATED by a remote SSH cockpit and retained that audit session; fix = target daemon is sole work-server creator (2026-08-18, sesh c550644 + myrig 119ae59; CLI/config change, no schema change; 4/6 deployed, Mac work-server replacement still pending)
 Lukas: Claude Code works in a normal macbook terminal but says `Login expired · Please run /login`

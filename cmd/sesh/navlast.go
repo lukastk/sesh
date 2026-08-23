@@ -48,7 +48,7 @@ func writeNavPrev(home, machine, session string, window int) {
 	_ = os.WriteFile(navPrevPath(home), []byte(fmt.Sprintf("%s\t%s\t%d\n", machine, session, window)), 0o600)
 }
 
-// resolveMasterLocation resolves where the master cockpit is CURRENTLY pointing — the
+// resolveMasterLocation resolves where the cockpit is CURRENTLY pointing — the
 // machine of the carrier client's active window, plus that machine's marker client's
 // session + window (routed for a remote machine via `tmux master-current`). ok=false
 // when it can't resolve (no carrier, no live marker, a plain-shell pane) — a legitimate

@@ -18,7 +18,7 @@ import (
 	"github.com/lukastk/sesh/internal/tmux"
 )
 
-// The master tmux server is the cross-machine cockpit: one session with one window
+// The master tmux server is mycockpit — the cross-machine cockpit: one session with one window
 // PER MACHINE (window-name == machine-name), each window an auto-reconnecting attach
 // into that machine's WORK server. sesh both BUILDS it (`master up`) and DRIVES it
 // (`tmux nav`), so the window-name/work-socket conventions are sesh-internal — there
@@ -361,7 +361,7 @@ func masterAttachCommand(cfg config.Config, machine string) (func() *exec.Cmd, e
 	}, nil
 }
 
-// masterWatchers lists the origin machines whose master cockpit currently has a LIVE
+// masterWatchers lists the origin machines whose cockpit currently has a LIVE
 // window-attach into THIS machine's work server — "who is watching me". Each master
 // window's attach records "<client_name> <client_pid>" in MasterClientMarker(home,
 // origin); an origin counts only if that exact pair is a current client of the work

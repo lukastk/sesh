@@ -277,7 +277,7 @@ set (the same columns the normal grid shows) and swaps back to name-only on rest
 A maximized sidebar does not follow the selection (the preview pane is hidden and a
 cross-machine follow would switch windows and drop the zoom) — browse the list, Enter
 commits. Follow
-crosses machines: the cockpit window switches and the traveling sidebar rides along
+crosses machines: the master window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never
 revives a dead one — Enter still does); the sibling machine resolves live from the
@@ -657,8 +657,13 @@ are exact, the heuristic can mistake your own typing-settle for a turn end).
 **mycockpit** — also "the cockpit" / "my cockpit" — is Lukas's cross-machine tmux cockpit:
 one tmux server (socket `sesh-master`, prefix `C-a`) with one window per machine, each an
 auto-reconnecting attach into that machine's work server. sesh builds and drives it
-(`sesh master …`); myrig wraps it in the `mmt-*` commands. The name is prose only — every
-identifier still says `master`. ("The master tmux setup" is the retired old name.)
+(`sesh master …`); myrig wraps it in the `mmt-*` commands. ("The master tmux setup" is the
+retired old name.)
+
+It has two **levels**, and Lukas uses these words: the **master** level is the cockpit's own
+server (`sesh-master`, prefix `C-a`, cross-machine — pick a machine, then act), the **base**
+level is one machine's work server (`sesh`, prefix `C-b`, this machine). myrig's `mmt-*`
+commands act at the master level, `mt-*` at the base level.
 
 ```bash
 sesh peer list                                             # registered machines + transport
@@ -672,7 +677,7 @@ sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, 
 ```
 
 The target machine's supervised daemon is the sole creator of its work tmux server. If a
-cockpit window finds no sessions, it asks the target daemon to create `scratch`; it does not
+master window finds no sessions, it asks the target daemon to create `scratch`; it does not
 run `tmux new-session` in the local or SSH attach shell. This matters on macOS because tmux
 retains its creator's audit session: a server born under SSH cannot read Claude Code's login
 Keychain even when a local cockpit later attaches to it. A daemon-born work server keeps the
@@ -692,7 +697,7 @@ service environment (fix: `supervisorctl restart sesh-daemon`; the same warning 
 logged at daemon startup).
 
 **"The cockpit froze after my laptop slept — I can select threads but nothing opens."**
-A cockpit window is an ssh attach into that machine's work server, and sleep can leave that
+A master window is an ssh attach into that machine's work server, and sleep can leave that
 connection dead with no FIN and no RST. ssh notices only when it next has bytes to send,
 which an idle attach never does, so the window keeps painting its last pre-sleep frame.
 Nav still *reports success* — the far side's sshd still holds the pty, so the remote tmux

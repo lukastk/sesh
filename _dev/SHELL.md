@@ -120,10 +120,17 @@ column and every field a shell thread needs already existed).
 - **TUI**: `S` shells viewer (classified live sessions; `enter` jump, `P` promote,
   `x` kill with a confirmation naming the agent threads it would take down), the
   `▮`/`▯` head glyph and a blank busy cell.
-- **myrig**: `_mt_enter_box_session` — the shared start-or-enter tail of
-  enter-box / create-box / create-null / enter-mysetup / create-session — now calls
-  `sesh shell enter`, so every box entered by hand is tracked. New
-  `mt-promote-session-here`.
+- **myrig**: `mt-promote-session-here` → `sesh shell here`, the deliberate way to
+  start tracking the session you are in.
+  - `_mt_enter_box_session` (the shared tail of enter-box / create-box /
+    create-null / enter-mysetup / create-session) briefly called `sesh shell enter`
+    so every box entered by hand became tracked. **Reverted** (myrig d7146f8):
+    auto-creating a record on every box entry is exactly the record-every-session
+    behaviour this design rejects — it mints a record per entry, throwaway ones
+    included, when the premise is *recognise without recording*. Boxes are plain
+    sessions again; they show in the `S` view as ghosts and are promoted
+    deliberately. `sesh shell enter` remains available for anyone who wants the
+    automatic behaviour explicitly.
 
 **Conformance**: `shell.lifecycle`, `shell.promote`, `shell.gates` × (local,
 remote) = 6 cells green over real tmux and a real ssh hop; the `tmux.info` cells

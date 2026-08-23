@@ -363,11 +363,32 @@ NOT BUILT, deliberately: `realize` from a shell thread. Its semantics are unsett
 would be left carrying a marker for a record that is no longer a shell) and `thread new
 --into-session <the shell's session> --parent-shell` already covers the flow.
 
-DEPLOY: **NOT DEPLOYED. Branch `shell-threads`, not merged, not pushed.** api 46→47 is additive (a
-pre-47 peer just omits session_path/shell_id), but the daemon serves `tmux info` and the shell routes,
-so it is a rebuild + supervised restart per machine, NOT binary-only. ORDER MATTERS: **sesh before
-myrig** — myrig's rewired `_mt_enter_box_session` calls `sesh shell enter`, so a machine with the new
-shell.sh and an old binary fails loudly on every enter-box.
+FOLLOW-UP SAME DAY — **enter-box does NOT auto-track, and that correction matters**: I had rewired
+myrig's `_mt_enter_box_session` onto `sesh shell enter`, so every box entered by hand became a shell
+thread. Lukas: "not sure I want mmt-enter-box to create a new shell thread." He was right and it was
+MY inconsistency: auto-recording every box entry is precisely the record-every-session behaviour this
+design REJECTED (record churn from sessions you never decided to keep) — I argued against it for
+ghosts and then did it in myrig without re-checking it against the principle. Reverted (myrig
+d7146f8): boxes are plain sessions again, they appear in the `S` view as GHOSTS, and tracking is
+deliberate via `mt-promote-session-here` / `P`. `sesh shell enter` stays available for anyone who
+wants the automatic behaviour explicitly. THE GENERAL LESSON: when a design's premise is "do not
+record automatically", check every integration point against that premise — a one-line convenience in
+the policy layer can quietly reinstate the behaviour the mechanism was shaped to avoid.
+
+DEPLOY: **LIVE ON ALL SIX MACHINES** at sesh `e9fd050` (merge commit; api schema 47, `vcs.modified=
+false` everywhere) + myrig `d7146f8`. api 46→47 is additive (a pre-47 peer
+just omits session_path/shell_id), but the daemon serves `tmux info` and the shell routes, so it was a
+rebuild + supervised restart per machine, NOT binary-only. Supervised machines restarted ONLY via
+`supervisorctl restart sesh-daemon`; termux followed its recipe — but note its **zshenv login-guard
+relaunched the daemon by itself** within seconds of the explicit-pid kill (the H36 property), so the
+new pid 24097 was already up before I could relaunch it; verified it carried the new binary and the
+right four SESH_* vars rather than assuming. Hit the documented termux `/tmp`-unwritable trap on
+install-home (H38) — redirect the log to `$HOME`. REBASE: a concurrent session landed `goto-uuid`
+(250e394/c18402c) on main mid-flight, touching the SAME command registry and owner-gate files —
+rebased cleanly, both commands coexist, both drift guards pass. LIVE-PROVEN after deploy: `sesh shell
+sessions` on mymain classifies his real working state (adobe-suite, boxyard-go as GHOSTS — exactly the
+gap he reported), and the routed form works over the real mesh from mymain against macbook and
+ideapad. Mesh healthy after all six restarts.
 
 ## H88 — TUI COMMAND PALETTE + config-rebindable keymap, and an INTERACTIVE reparent picker (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; tickets 7e01fe7e + 9ecfbdeb; NOT YET DEPLOYED)
 Two tickets, one commit's worth of surface. Lukas: "Currently `sesh tui` has loads of keyboard

@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"errors"
@@ -53,6 +55,32 @@ func (d *Daemon) handleThreadStop(w http.ResponseWriter, r *http.Request) {
 		d.threadOpErr(w, err)
 		return
 	}
+	// SHELL THREAD: stopping one kills its whole tmux SESSION, which is a far
+	// wider blast radius than an agent thread's single pane — every window, every
+	// pane, including any OTHER threads' agent panes living in that session. So
+	// it refuses unless forced, and the refusal NAMES the agents that would die.
+	if thread.AgentKind == api.ShellAgentKind {
+		sess, live, serr := d.tmux.FindSessionByShellID(thread.ID)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		if live {
+			if hosted := hostedAgentThreads(sess); len(hosted) > 0 && !req.Force {
+				writeError(w, http.StatusConflict, fmt.Sprintf(
+					"stop: shell thread %s hosts agent panes for %s — killing its session kills them too. Re-run with --force, or stop those threads first.",
+					thread.ID, strings.Join(hosted, ", ")))
+				return
+			}
+			if err := d.tmux.KillSession(sess.Name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		d.respondThread(w, req.ID)
+		return
+	}
+
 	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -171,7 +199,34 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		d.threadOpErr(w, err)
 		return
 	}
-	if !req.Force {
+	// A SHELL thread's liveness is its SESSION, not a pane — and the consequence
+	// of a forced delete differs too: an orphaned agent is a running conversation
+	// you have lost the handle to, whereas an "orphaned" session is merely a
+	// ghost, fully listed in the shells viewer and re-promotable. The refusal
+	// says that rather than borrowing the agent wording.
+	if thread.AgentKind == api.ShellAgentKind {
+		sess, live, err := d.tmux.FindSessionByShellID(req.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if live && !req.Force {
+			writeError(w, http.StatusConflict,
+				"delete: shell thread "+thread.SessionName+" still has a live tmux session; run `stop` first, or delete --force to drop the record and leave the session running as an untracked ghost (you can promote it again from the shells view)")
+			return
+		}
+		if live {
+			// UNSTAMP before dropping the record: a session left carrying a marker
+			// whose record is gone classifies as `stale`, which is a bug state, not
+			// a ghost. Loud on failure — the stale marker would otherwise be silent.
+			if err := d.tmux.UnstampSessionShellID(sess.Name); err != nil {
+				writeError(w, http.StatusInternalServerError,
+					"delete: could not clear the @sesh-shell-id marker on session "+sess.Name+
+						" (dropping the record now would leave a STALE marker): "+err.Error())
+				return
+			}
+		}
+	} else if !req.Force {
 		if _, live, err := d.tmux.FindPaneByThreadID(req.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -317,7 +372,7 @@ func (d *Daemon) handleThreadTranscript(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if nonAgentGate(w, th, "transcript") {
+	if conversationGate(w, th, "transcript") {
 		return
 	}
 	tail := -1
@@ -411,4 +466,20 @@ func (d *Daemon) handleThreadImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+}
+
+// hostedAgentThreads lists the ids of agent threads whose panes live in a
+// session — what a shell thread's kill would take down with it.
+func hostedAgentThreads(sess api.TmuxSession) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range sess.Windows {
+		for _, p := range w.Panes {
+			if p.ThreadID != "" && !seen[p.ThreadID] {
+				seen[p.ThreadID] = true
+				out = append(out, p.ThreadID)
+			}
+		}
+	}
+	return out
 }

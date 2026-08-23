@@ -148,6 +148,38 @@ func (s *Server) PaneIndexByThreadID() (map[string]api.PaneLocator, error) {
 	return out, nil
 }
 
+// RuntimeIndex resolves BOTH runtime indices from a SINGLE server walk: agent
+// threads by their pane marker (@sesh-thread-id) and shell threads by their
+// session marker (@sesh-shell-id). The maintainer needs both on every tick and
+// they come out of the same enumeration, so walking twice would double the
+// per-tick tmux cost for nothing.
+func (s *Server) RuntimeIndex() (map[string]api.PaneLocator, map[string]api.TmuxSession, error) {
+	sessions, err := s.Info("")
+	if err != nil {
+		return nil, nil, err
+	}
+	panes := make(map[string]api.PaneLocator)
+	shells := make(map[string]api.TmuxSession)
+	for _, sess := range sessions {
+		if sess.ShellID != "" {
+			shells[sess.ShellID] = sess
+		}
+		for _, win := range sess.Windows {
+			for _, pane := range win.Panes {
+				if pane.ThreadID != "" {
+					panes[pane.ThreadID] = api.PaneLocator{
+						Session: sess.Name,
+						Window:  win.Index,
+						Pane:    pane.Pane,
+						PanePID: pane.PID,
+					}
+				}
+			}
+		}
+	}
+	return panes, shells, nil
+}
+
 // SessionFirstPane returns the pane id of a session's first pane (a freshly
 // created session has exactly one).
 func (s *Server) SessionFirstPane(session string) (string, error) {
@@ -309,4 +341,50 @@ func (s *Server) SocketPath() string {
 		dir = "/tmp"
 	}
 	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), s.socket)
+}
+
+// StampSessionShellID marks a tmux SESSION as a shell thread's runtime. NB the
+// `=exact` target prefix is NOT honored by set-option (it errors "no such
+// session: =name" — unlike list-panes/has-session/kill-session, which do honor
+// it), so the plain name is passed and callers match exactly in Go.
+func (s *Server) StampSessionShellID(session, threadID string) error {
+	if session == "" || threadID == "" {
+		return fmt.Errorf("tmux: stamp shell id: empty session or thread id")
+	}
+	_, err := s.run("set-option", "-t", session, ShellIDOption, threadID)
+	return err
+}
+
+// UnstampSessionShellID removes the marker, returning the session to an
+// untracked ghost. Used when a shell thread's record is deleted: a session left
+// carrying a marker whose record is gone would classify as `stale`.
+func (s *Server) UnstampSessionShellID(session string) error {
+	if session == "" {
+		return fmt.Errorf("tmux: unstamp shell id: empty session")
+	}
+	_, err := s.run("set-option", "-t", session, "-u", ShellIDOption)
+	return err
+}
+
+// FindSessionByShellID returns the live session carrying the given shell-thread
+// marker. found=false means the shell thread is headless (no session).
+//
+// It reads the marker via `list-sessions -F` rather than `show-options -v` for
+// two reasons: one tmux call covers the whole server (show-options is one call
+// per session), and show-options -v EXITS 1 on an unset option rather than
+// returning empty, so the natural single-session read needs -q to be usable.
+func (s *Server) FindSessionByShellID(threadID string) (api.TmuxSession, bool, error) {
+	if threadID == "" {
+		return api.TmuxSession{}, false, fmt.Errorf("tmux: empty shell thread id")
+	}
+	sessions, err := s.Info("")
+	if err != nil {
+		return api.TmuxSession{}, false, err
+	}
+	for _, sess := range sessions {
+		if sess.ShellID == threadID {
+			return sess, true, nil
+		}
+	}
+	return api.TmuxSession{}, false, nil
 }

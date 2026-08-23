@@ -10,133 +10,56 @@ import (
 	"github.com/lukastk/sesh/internal/api"
 )
 
-// pane builds a TmuxPane carrying (or not carrying) a thread marker.
-func pane(id, threadID string) api.TmuxPane {
-	return api.TmuxPane{Pane: id, ThreadID: threadID}
-}
-
-// TestClassifySession pins the whole stage-1 classification rule: a session
-// hosting ANY @sesh-thread-id-marked pane is an agent session; anything else is
-// a ghost — the promote target.
-func TestClassifySession(t *testing.T) {
-	names := map[string]string{"t-aaa": "corkboard", "t-bbb": "worker"}
-
-	t.Run("no marked pane is a ghost", func(t *testing.T) {
-		s := api.TmuxSession{Name: "appgarden", Path: "/home/l/dev/appgarden", Attached: true,
-			Windows: []api.TmuxWindow{{Panes: []api.TmuxPane{pane("%0", ""), pane("%1", "")}}}}
-		got := classifySession("mymain", s, names)
-		if got.Class != classGhost {
-			t.Fatalf("class = %q, want ghost", got.Class)
-		}
-		if got.Machine != "mymain" || got.Name != "appgarden" || got.Path != "/home/l/dev/appgarden" || !got.Attached {
-			t.Fatalf("row header wrong: %+v", got)
-		}
-		if got.Windows != 1 || got.Panes != 2 {
-			t.Fatalf("counts = %d windows / %d panes, want 1/2", got.Windows, got.Panes)
-		}
-		if len(got.Threads) != 0 {
-			t.Fatalf("ghost must name no threads, got %v", got.Threads)
-		}
-	})
-
-	t.Run("one marked pane makes it an agent session", func(t *testing.T) {
-		s := api.TmuxSession{Name: "work", Windows: []api.TmuxWindow{
-			{Panes: []api.TmuxPane{pane("%0", ""), pane("%1", "t-aaa")}},
-		}}
-		got := classifySession("mymain", s, names)
-		if got.Class != classAgent {
-			t.Fatalf("class = %q, want agent", got.Class)
-		}
-		if len(got.Threads) != 1 || got.Threads[0] != "corkboard" {
-			t.Fatalf("threads = %v, want [corkboard]", got.Threads)
-		}
-	})
-
-	t.Run("threads are deduped across windows and named from the grid", func(t *testing.T) {
-		s := api.TmuxSession{Name: "work", Windows: []api.TmuxWindow{
-			{Panes: []api.TmuxPane{pane("%0", "t-aaa"), pane("%1", "t-aaa")}},
-			{Panes: []api.TmuxPane{pane("%2", "t-bbb")}},
-		}}
-		got := classifySession("mymain", s, names)
-		if len(got.Threads) != 2 || got.Threads[0] != "corkboard" || got.Threads[1] != "worker" {
-			t.Fatalf("threads = %v, want [corkboard worker] deduped + sorted", got.Threads)
-		}
-		if got.Panes != 3 || got.Windows != 2 {
-			t.Fatalf("counts = %d windows / %d panes, want 2/3", got.Windows, got.Panes)
-		}
-	})
-
-	t.Run("an unknown thread id still classifies, shown short", func(t *testing.T) {
-		s := api.TmuxSession{Name: "work", Windows: []api.TmuxWindow{
-			{Panes: []api.TmuxPane{pane("%0", "deadbeef-cafe-0000")}},
-		}}
-		got := classifySession("mymain", s, names)
-		if got.Class != classAgent {
-			t.Fatalf("class = %q, want agent", got.Class)
-		}
-		// A thread the grid does not carry (another view, or archived) must not
-		// silently vanish from the row — it renders by short id.
-		if len(got.Threads) != 1 || got.Threads[0] != "deadbeef" {
-			t.Fatalf("threads = %v, want [deadbeef]", got.Threads)
-		}
-	})
-}
-
-// TestClassifySessionIgnoresSessionScopedMarker is the guard for the trap that
-// shaped this whole design: tmux user options INHERIT down to panes during
-// format expansion, so if sesh ever stamped @sesh-thread-id at SESSION scope,
-// every unmarked pane would report it and every ghost would misclassify as an
-// agent session. Classification reads the PANE's value, and the only reason that
-// is trustworthy is that sesh stamps that option at pane scope ONLY.
-//
-// This test pins the consequence: a session whose panes carry no marker of their
-// own is a ghost, no matter what the session itself is called or holds.
-func TestClassifySessionIgnoresSessionScopedMarker(t *testing.T) {
-	// api.TmuxSession has no session-marker field precisely because the pane
-	// marker must never be set at session scope; the enumeration reads
-	// #{@sesh-thread-id} per PANE. An unmarked pane arrives with ThreadID "".
-	s := api.TmuxSession{Name: "boxsess", Windows: []api.TmuxWindow{
-		{Panes: []api.TmuxPane{pane("%0", ""), pane("%1", "")}},
-	}}
-	got := classifySession("mymain", s, nil)
-	if got.Class != classGhost {
-		t.Fatalf("class = %q, want ghost — a session with no PANE-marked panes is untracked", got.Class)
-	}
-}
-
 func TestParseSessionRows(t *testing.T) {
-	enc := func(ss ...api.TmuxSession) []byte {
+	enc := func(ss ...api.ShellSession) []byte {
 		var b strings.Builder
 		e := json.NewEncoder(&b)
-		for _, s := range ss {
-			if err := e.Encode(s); err != nil {
+		for _, x := range ss {
+			if err := e.Encode(x); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return []byte(b.String())
 	}
-
 	out := enc(
-		api.TmuxSession{Name: "a", Path: "/tmp", Windows: []api.TmuxWindow{{Panes: []api.TmuxPane{pane("%0", "")}}}},
-		api.TmuxSession{Name: "b", Path: "/usr", Windows: []api.TmuxWindow{{Panes: []api.TmuxPane{pane("%1", "t-aaa")}}}},
+		api.ShellSession{Machine: "mymain", Name: "a", Path: "/tmp", Class: api.ShellClassGhost},
+		api.ShellSession{Machine: "mymain", Name: "b", Class: api.ShellClassAgent, AgentThreads: []string{"t-aaa", "unknown-thread-id"}},
+		api.ShellSession{Name: "c", Class: api.ShellClassShell, ThreadID: "sh-1"},
 	)
 	rows, err := parseSessionRows("mymain", out, map[string]string{"t-aaa": "corkboard"})
 	if err != nil {
 		t.Fatalf("parseSessionRows: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("want 2 rows, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
 	}
-	if rows[0].Class != classGhost || rows[1].Class != classAgent {
-		t.Fatalf("classes = %q, %q; want ghost, agent", rows[0].Class, rows[1].Class)
+	if rows[0].Class != api.ShellClassGhost || rows[0].Path != "/tmp" {
+		t.Fatalf("row 0 wrong: %+v", rows[0])
 	}
-	if rows[0].Path != "/tmp" {
-		t.Fatalf("session path lost: %+v", rows[0])
+	// Agent-thread ids are resolved to NAMES from the grid; one the grid does not
+	// carry must not silently vanish — it renders by short id.
+	if len(rows[1].Threads) != 2 || rows[1].Threads[0] != "corkboard" || rows[1].Threads[1] != "unknown-" {
+		t.Fatalf("row 1 threads = %v, want [corkboard unknown-]", rows[1].Threads)
+	}
+	// A peer that did not stamp the machine gets the one we asked.
+	if rows[2].Machine != "mymain" {
+		t.Fatalf("row 2 machine = %q, want the queried machine", rows[2].Machine)
+	}
+
+	// Promotability: everything except an already-tracked shell.
+	if !rows[0].promotable() || !rows[1].promotable() {
+		t.Fatal("ghost and agent sessions must be promotable")
+	}
+	if rows[2].promotable() {
+		t.Fatal("a session that is ALREADY a shell thread must not be promotable")
+	}
+	stale := sessionRow{ShellSession: api.ShellSession{Class: api.ShellClassStale}}
+	if !stale.promotable() {
+		t.Fatal("a STALE marker must be promotable — re-promoting is the repair")
 	}
 
 	// Malformed JSONL is LOUD, never a silently dropped session (a dropped row
-	// would read as "that session does not exist", which is the whole bug class
-	// this viewer exists to fix).
+	// would read as "that session does not exist", the bug this viewer fixes).
 	if _, err := parseSessionRows("mymain", []byte("{not json}\n"), nil); err == nil {
 		t.Fatal("malformed JSONL must be a loud error, got nil")
 	}
@@ -165,15 +88,16 @@ func TestReachableMachines(t *testing.T) {
 	}
 }
 
+func ghostRow(machine, name string) sessionRow {
+	return sessionRow{ShellSession: api.ShellSession{Machine: machine, Name: name, Class: api.ShellClassGhost}}
+}
+
 func shellModel(rows ...sessionRow) Model {
 	return Model{shells: true, shellRows: rows, machine: "mymain"}
 }
 
 func TestShellViewerKeys(t *testing.T) {
-	rows := []sessionRow{
-		{Machine: "mymain", Name: "a", Class: classGhost},
-		{Machine: "mymain", Name: "b", Class: classGhost},
-	}
+	rows := []sessionRow{ghostRow("mymain", "a"), ghostRow("mymain", "b")}
 
 	t.Run("cursor moves and clamps", func(t *testing.T) {
 		m := shellModel(rows...)
@@ -251,8 +175,10 @@ func TestShellViewerKeys(t *testing.T) {
 // The viewer renders the classification and the session's start path, and warns
 // that a kill takes the agent panes with it.
 func TestShellsViewRenders(t *testing.T) {
-	m := shellModel(sessionRow{Machine: "mymain", Name: "appgarden", Path: "/dev/ag",
-		Class: classAgent, Windows: 2, Panes: 3, Threads: []string{"corkboard"}})
+	m := shellModel(sessionRow{
+		ShellSession: api.ShellSession{Machine: "mymain", Name: "appgarden", Path: "/dev/ag",
+			Class: api.ShellClassAgent, Windows: 2, Panes: 3},
+		Threads: []string{"corkboard"}})
 	m.width = 200
 	out := m.shellsView()
 	for _, want := range []string{"appgarden", "agent", "/dev/ag", "corkboard"} {
@@ -265,4 +191,38 @@ func TestShellsViewRenders(t *testing.T) {
 	if !strings.Contains(warn, "corkboard") || !strings.Contains(warn, "headless") {
 		t.Fatalf("kill confirmation must name the agent threads it would drop to headless:\n%s", warn)
 	}
+}
+
+func TestShellViewerPromoteKey(t *testing.T) {
+	t.Run("P promotes a ghost", func(t *testing.T) {
+		m := shellModel(ghostRow("mymain", "scratch"))
+		_, cmd := m.handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+		if cmd == nil {
+			t.Fatal("P on a ghost must issue a promote command")
+		}
+	})
+	t.Run("P refuses a session that is already a shell thread", func(t *testing.T) {
+		m := shellModel(sessionRow{ShellSession: api.ShellSession{
+			Machine: "mymain", Name: "tracked", Class: api.ShellClassShell, ThreadID: "sh-1"}})
+		next, cmd := m.handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+		if cmd != nil {
+			t.Fatal("P on an already-tracked session must not shell out")
+		}
+		if !strings.Contains(next.(Model).shellNote, "already a shell thread") {
+			t.Fatalf("expected a note saying it is already tracked, got %q", next.(Model).shellNote)
+		}
+	})
+	t.Run("P promotes a STALE marker (re-promoting is the repair)", func(t *testing.T) {
+		m := shellModel(sessionRow{ShellSession: api.ShellSession{
+			Machine: "mymain", Name: "orphan", Class: api.ShellClassStale, ThreadID: "gone"}})
+		if _, cmd := m.handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")}); cmd == nil {
+			t.Fatal("P on a stale-marker session must promote")
+		}
+	})
+	t.Run("p is NOT the promote key (it is the global palette)", func(t *testing.T) {
+		m := shellModel(ghostRow("mymain", "scratch"))
+		if _, cmd := m.handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")}); cmd != nil {
+			t.Fatal("lowercase p must not promote — it shadows the command palette")
+		}
+	})
 }

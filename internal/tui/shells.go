@@ -15,9 +15,10 @@ package tui
 // a record per throwaway shell, churn the mesh, and force sesh to auto-delete
 // records, which it does nowhere else.
 //
-// STAGE 1 (this file) is read-only + nav + kill. Classification therefore has
-// only two classes; the `shell` (tracked) and `stale` classes arrive with the
-// shell-thread record, along with promotion.
+// Classification lives in the DAEMON (see daemon.classifySession), not here: it
+// is mechanism, so every client — this viewer, sesh-ui, a script — gets the same
+// answer. The viewer fans `sesh shell sessions --json` out per machine and
+// renders what comes back.
 
 import (
 	"encoding/json"
@@ -33,33 +34,21 @@ import (
 	"github.com/lukastk/sesh/internal/api"
 )
 
-// sessionClass is what a live tmux session IS to sesh.
-type sessionClass string
-
-const (
-	// classAgent: the session hosts at least one @sesh-thread-id-marked pane, so
-	// it already has representation in the grid — it is an agent thread's home,
-	// not an untracked session.
-	classAgent sessionClass = "agent"
-	// classGhost: no sesh identity at all. The promote target, once shell threads
-	// exist.
-	classGhost sessionClass = "ghost"
-)
-
-// sessionRow is one row of the viewer: a live session plus what sesh knows about
-// it. Nothing here is persisted.
+// sessionRow is one row of the viewer: a classified live session (from the
+// daemon) plus display-only thread NAMES resolved against the grid's rows.
+// Nothing here is persisted — sessions are enumerated live every fan-out.
 type sessionRow struct {
-	Machine  string
-	Name     string
-	Path     string // the session's START dir (#{session_path}), not any pane's live cwd
-	Attached bool
-	Windows  int
-	Panes    int
-	Class    sessionClass
-	// Threads names the agent threads whose panes live in this session (display
-	// only). Resolved from the grid's rows, so it costs no extra fetch.
+	api.ShellSession
+	// Threads names the agent threads whose panes live in this session, resolved
+	// from the grid's rows so it costs no extra fetch (ids fall back to a short
+	// form when the grid does not carry that thread).
 	Threads []string
 }
+
+// promotable reports whether `P` can turn this session into a tracked shell
+// thread: anything that is not already one. A STALE marker is promotable —
+// re-promoting is the repair for a record that went away without unstamping.
+func (r sessionRow) promotable() bool { return r.Class != api.ShellClassShell }
 
 // shellsLoadedMsg carries a completed fan-out. errs are per-machine failures,
 // reported alongside whatever DID load — one unreachable machine must not blank
@@ -133,7 +122,7 @@ func (m Model) loadShells() tea.Cmd {
 			wg.Add(1)
 			go func(i int, machine string) {
 				defer wg.Done()
-				args := []string{"tmux", "info"}
+				args := []string{"shell", "sessions", "--json"}
 				if self == "" || machine != self {
 					args = append(args, "--machine", machine)
 				}
@@ -170,58 +159,33 @@ func (m Model) loadShells() tea.Cmd {
 	}
 }
 
-// parseSessionRows turns `sesh tmux info` JSONL into classified rows.
+// parseSessionRows turns `sesh shell sessions --json` JSONL into viewer rows,
+// resolving agent-thread ids to names against the grid.
 func parseSessionRows(machine string, out []byte, names map[string]string) ([]sessionRow, error) {
 	var rows []sessionRow
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var s api.TmuxSession
-		if err := json.Unmarshal([]byte(line), &s); err != nil {
+		var ss api.ShellSession
+		if err := json.Unmarshal([]byte(line), &ss); err != nil {
 			return nil, fmt.Errorf("decode session: %w", err)
 		}
-		rows = append(rows, classifySession(machine, s, names))
-	}
-	return rows, nil
-}
-
-// classifySession is the whole classification rule, kept pure so it is testable
-// without a daemon: a session hosting ANY thread-marked pane is an agent
-// session; anything else is a ghost.
-//
-// NB it reads TmuxPane.ThreadID, which is the PANE-scoped @sesh-thread-id. That
-// is only trustworthy because sesh never sets that option at session scope — a
-// session-scoped value would be inherited by every unmarked pane in the session
-// and would make every ghost here look like an agent session. See _dev/SHELL.md
-// §"Trap digest".
-func classifySession(machine string, s api.TmuxSession, names map[string]string) sessionRow {
-	row := sessionRow{
-		Machine:  machine,
-		Name:     s.Name,
-		Path:     s.Path,
-		Attached: s.Attached,
-		Windows:  len(s.Windows),
-		Class:    classGhost,
-	}
-	seen := map[string]bool{}
-	for _, w := range s.Windows {
-		row.Panes += len(w.Panes)
-		for _, p := range w.Panes {
-			if p.ThreadID == "" || seen[p.ThreadID] {
-				continue
-			}
-			seen[p.ThreadID] = true
-			row.Class = classAgent
-			if n := names[p.ThreadID]; n != "" {
+		if ss.Machine == "" {
+			ss.Machine = machine // a peer that did not stamp it
+		}
+		row := sessionRow{ShellSession: ss}
+		for _, id := range ss.AgentThreads {
+			if n := names[id]; n != "" {
 				row.Threads = append(row.Threads, n)
 			} else {
-				row.Threads = append(row.Threads, shortID(p.ThreadID))
+				row.Threads = append(row.Threads, shortID(id))
 			}
 		}
+		sort.Strings(row.Threads)
+		rows = append(rows, row)
 	}
-	sort.Strings(row.Threads)
-	return row
+	return rows, nil
 }
 
 // shortID renders an unknown thread id compactly (the grid's tid8 convention).
@@ -305,6 +269,25 @@ func (m Model) killSession(row sessionRow) tea.Cmd {
 	}
 }
 
+// promoteSession turns an untracked session into a tracked shell thread on its
+// owning machine. This is the whole point of recognising ghosts: you work by
+// hand, then keep the ones worth keeping.
+func (m Model) promoteSession(row sessionRow) tea.Cmd {
+	bin, env, self := m.binaryPath, m.navEnv, m.machine
+	return func() tea.Msg {
+		args := []string{"shell", "promote", "--session", row.Name}
+		if self == "" || row.Machine != self {
+			args = append(args, "--machine", row.Machine)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return shellActionMsg{err: fmt.Errorf("promote %s:%s: %v: %s", row.Machine, row.Name, err, strings.TrimSpace(string(out)))}
+		}
+		return shellActionMsg{note: fmt.Sprintf("promoted %s:%s to a shell thread", row.Machine, row.Name), reload: true}
+	}
+}
+
 // handleShellKey is the viewer's sub-state machine (active while m.shells).
 func (m Model) handleShellKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
@@ -344,6 +327,18 @@ func (m Model) handleShellKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// session, and leaving a full-screen takeover over it would hide it.
 		m.shells = false
 		return m, m.navSession(row)
+	case "P":
+		// P, not p — p is the global command palette (H88). A modal sub-view has
+		// its own keyspace, but shadowing the palette key reads badly.
+		row, ok := m.selectedSession()
+		if !ok {
+			return m, nil
+		}
+		if !row.promotable() {
+			m.shellNote = fmt.Sprintf("%s:%s is already a shell thread", row.Machine, row.Name)
+			return m, nil
+		}
+		return m, m.promoteSession(row)
 	case "x":
 		if _, ok := m.selectedSession(); !ok {
 			return m, nil
@@ -422,7 +417,7 @@ func (m Model) shellsView() string {
 		}
 	}
 
-	b.WriteString("\n" + styleDim.Render("enter jump · x kill · R refresh · esc close") + "\n")
+	b.WriteString("\n" + styleDim.Render("enter jump · P promote · x kill · R refresh · esc close") + "\n")
 	return b.String()
 }
 
@@ -439,7 +434,7 @@ func (m Model) ShellSessionCount() int { return len(m.shellRows) }
 func (m Model) ShellSessionClass(machine, name string) (string, bool) {
 	for _, r := range m.shellRows {
 		if r.Machine == machine && r.Name == name {
-			return string(r.Class), true
+			return r.Class, true
 		}
 	}
 	return "", false

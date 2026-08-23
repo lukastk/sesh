@@ -103,16 +103,42 @@ flips constantly and would destroy delta sync's steady-state-empty property
 
 ## Status
 
-**Stage 1 — BUILT.** `#{session_path}` carried through `tmux info` (api 47), and
-the `shells` viewer (`S`, or the palette): every live tmux session on every
-REACHABLE machine, classified `ghost` (no sesh identity) or `agent` (hosts a
-thread-marked pane), with enter-to-nav and a confirmed kill. Enumerated live,
-nothing recorded. Covered by `TestClassifySession`, `TestShellViewerKeys`, the
-extended `tmux.info` matrix cells (both localities), and the `shells-view` TUI
-claim (real sessions, real kill).
+**Stages 1–5 BUILT** (api schema 47, NO store migration — `agent_kind` is a TEXT
+column and every field a shell thread needs already existed).
 
-**Not yet built:** the shell-thread record itself (`agent_kind: "shell"`), the
-`@sesh-shell-id` session marker, the taxonomy split, `sesh shell
-new|enter|here|info|panes`, promotion of a ghost, the `shell`/`stale` classes,
-the `▮`/`▯` head glyph, and the myrig `_mt_enter_box` substitution. See the
-ticket's §13 for the staging.
+- **The record**: `agent_kind: "shell"`, `machine`/`session_name`/`cwd`/`name`/
+  `tags`/`parent`/`meta`/`archived`/`on_hold_until`/`pin_order`/`flagged`/`notify`.
+- **The marker**: session-scoped `@sesh-shell-id` (`tmux.ShellIDOption`), read
+  alongside the pane marker from ONE server walk (`Server.RuntimeIndex`).
+- **The taxonomy split**: `conversationGate` (fork, transcript, send-headless)
+  vs `runtimeGate` (enter/nav, send, capture, revive), replacing `nonAgentGate`.
+- **Both state resolvers branch on kind before the pane lookup** — the maintainer
+  (`refreshThread`) AND the on-demand `thread status` path. They must agree; the
+  conformance cells caught the on-demand one being missed.
+- **CLI**: `sesh shell new|enter|here|promote|sessions|info|panes`, plus
+  `thread send --pane/--window`, `thread stop --force`, `thread new --parent-shell`.
+- **TUI**: `S` shells viewer (classified live sessions; `enter` jump, `P` promote,
+  `x` kill with a confirmation naming the agent threads it would take down), the
+  `▮`/`▯` head glyph and a blank busy cell.
+- **myrig**: `_mt_enter_box_session` — the shared start-or-enter tail of
+  enter-box / create-box / create-null / enter-mysetup / create-session — now calls
+  `sesh shell enter`, so every box entered by hand is tracked. New
+  `mt-promote-session-here`.
+
+**Conformance**: `shell.lifecycle`, `shell.promote`, `shell.gates` × (local,
+remote) = 6 cells green over real tmux and a real ssh hop; the `tmux.info` cells
+prove `session_path`; the `shells-view` TUI claim drives the real viewer through
+promote and kill. Unit coverage for classification, the send-target resolver, the
+auto-parent rules, and `TestMarkerScopesDoNotCollide` (real tmux) for the
+inheritance trap.
+
+**NOT built, deliberately: `realize` from a shell thread.** The spec listed it as
+an optional "I was poking around by hand, now put claude on it". It is left out
+because its semantics are genuinely unsettled: realize converts a record IN PLACE,
+but a shell thread's session would then be left carrying a marker for a record
+that is no longer a shell (a `stale` session), and refusing while the session is
+live — the safe reading — makes the very flow it exists for awkward. The natural
+flow already exists and is unambiguous: `thread new --into-session <the shell's
+session> --cwd <dir>`, optionally with `--parent-shell` so the agent becomes the
+shell thread's child. Revisit only with a decision about what happens to the live
+session.

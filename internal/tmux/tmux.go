@@ -19,6 +19,20 @@ import (
 // in one list-panes pass.
 const ThreadIDOption = "@sesh-thread-id"
 
+// ShellIDOption is the tmux SESSION user-option that stamps a session with its
+// owning sesh SHELL thread id — the session-level mirror of ThreadIDOption.
+//
+// IT MUST NOT BE THE SAME KEY AS ThreadIDOption, and that is not stylistic.
+// tmux resolves user options with INHERITANCE during format expansion (pane →
+// window → session → global, from the deepest object in the format's context),
+// so a session-scoped @sesh-thread-id would be reported by EVERY unmarked pane
+// in that session — silently corrupting FindPaneByThreadID, ThreadIDOfPane,
+// `sesh tmux current`, adopt's ownership guard and nav's window resolution, each
+// returning a plausible-but-wrong thread. Measured; see _dev/SHELL.md. The two
+// keys are distinct precisely so both can be read without ambiguity, and
+// TestMarkerScopesDoNotCollide guards it.
+const ShellIDOption = "@sesh-shell-id"
+
 // Server addresses one tmux server by socket name (tmux -L <socket>).
 type Server struct {
 	socket string
@@ -122,6 +136,7 @@ func (s *Server) Info(machine string) ([]api.TmuxSession, error) {
 		"#{session_name}",
 		"#{session_attached}",
 		"#{session_path}",
+		"#{" + ShellIDOption + "}",
 		"#{window_index}",
 		"#{window_name}",
 		"#{window_active}",
@@ -146,7 +161,7 @@ func (s *Server) Info(machine string) ([]api.TmuxSession, error) {
 	return parsePanes(machine, s.socket, out)
 }
 
-const paneFieldCount = 14
+const paneFieldCount = 15
 
 func parsePanes(machine, socket, out string) ([]api.TmuxSession, error) {
 	// Preserve first-seen order of sessions and windows.
@@ -172,23 +187,24 @@ func parsePanes(machine, socket, out string) ([]api.TmuxSession, error) {
 		sname := f[0]
 		sattached := f[1] == "1"
 		spath := f[2]
-		windex := atoi(f[3])
-		wname := f[4]
-		wactive := f[5] == "1"
+		shellID := f[3]
+		windex := atoi(f[4])
+		wname := f[5]
+		wactive := f[6] == "1"
 		pane := api.TmuxPane{
-			Pane:     f[6],
-			Index:    atoi(f[7]),
-			Active:   f[8] == "1",
-			PID:      atoi(f[9]),
-			Command:  f[10],
-			Title:    f[11],
-			Path:     f[12],
-			ThreadID: f[13],
+			Pane:     f[7],
+			Index:    atoi(f[8]),
+			Active:   f[9] == "1",
+			PID:      atoi(f[10]),
+			Command:  f[11],
+			Title:    f[12],
+			Path:     f[13],
+			ThreadID: f[14],
 		}
 
 		sess, ok := sessions[sname]
 		if !ok {
-			sess = &api.TmuxSession{Machine: machine, Socket: socket, Name: sname, Attached: sattached, Path: spath}
+			sess = &api.TmuxSession{Machine: machine, Socket: socket, Name: sname, Attached: sattached, Path: spath, ShellID: shellID}
 			sessions[sname] = sess
 			sessOrder = append(sessOrder, sname)
 		}

@@ -81,6 +81,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh tmux:", err)
 			os.Exit(1)
 		}
+	case "shell":
+		if err := runShell(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh shell:", err)
+			os.Exit(1)
+		}
 	case "thread":
 		if err := runThread(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh thread:", err)

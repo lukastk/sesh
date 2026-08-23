@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 	"github.com/lukastk/sesh/internal/tui"
 )
@@ -64,11 +65,39 @@ func claimShellsView(t *testing.T) {
 		t.Fatalf("thread-marked session: class=%q listed=%v, want a listed agent session", class, ok)
 	}
 
-	// Kill the ghost THROUGH the viewer (x → y) and prove it is really gone from
-	// the tmux server, not merely dropped from the list.
+	// PROMOTE the ghost through the viewer (P) — the whole point of recognising
+	// ghosts: work by hand, then keep the ones worth keeping. It must become a
+	// real record AND reclassify.
 	if !m.ShellSelect(sb.Machine, "ghostsess") {
 		t.Fatalf("ghostsess not selectable")
 	}
+	m = runKeyDeep(t, m, "P")
+	if class, _ := m.ShellSessionClass(sb.Machine, "ghostsess"); class != "shell" {
+		t.Fatalf("after promote the session classifies %q, want shell (errs=%v)", class, m.ShellErrs())
+	}
+	var promoted string
+	for _, th := range sb.listThreads(t) {
+		if th.AgentKind == api.ShellAgentKind && th.SessionName == "ghostsess" {
+			promoted = th.ID
+		}
+	}
+	if promoted == "" {
+		t.Fatalf("promote minted no shell-thread record")
+	}
+	// Promoting again is refused rather than minting a duplicate.
+	m = runKeyDeep(t, m, "P")
+	count := 0
+	for _, th := range sb.listThreads(t) {
+		if th.AgentKind == api.ShellAgentKind {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("a second promote made %d shell threads, want 1", count)
+	}
+
+	// Kill the promoted session THROUGH the viewer (x → y) and prove it is really
+	// gone from the tmux server, not merely dropped from the list.
 	m = runKeyDeep(t, m, "x")
 	// x alone must not kill: the confirmation is the whole guard on a
 	// session-wide blast radius.

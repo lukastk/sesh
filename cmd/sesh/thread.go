@@ -445,6 +445,8 @@ func threadSend(cfg config.Config, args []string) error {
 	text := fs.String("text", "", "message text (required)")
 	wait := fs.Bool("wait", false, "block until the turn settles (idle or blocked)")
 	timeout := fs.Duration("timeout", 0, "overall deadline for --wait (required with --wait)")
+	pane := fs.String("pane", "", "SHELL threads: send to this tmux pane id (default: the session's active pane)")
+	window := fs.Int("window", -1, "SHELL threads: send to this window's active pane (default: the session's active pane)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -474,7 +476,11 @@ func threadSend(cfg config.Config, args []string) error {
 		}
 		preActive, preBusy = pre.LastActiveUnix, pre.Reached
 	}
-	if err := c.ThreadSend(context.Background(), *id, *text); err != nil {
+	var win *int
+	if *window >= 0 {
+		win = window
+	}
+	if err := c.ThreadSendTo(context.Background(), *id, *text, *pane, win); err != nil {
 		return err
 	}
 	if !*wait {
@@ -620,6 +626,7 @@ func threadNew(cfg config.Config, args []string) error {
 	intoWindow := fs.String("into-window", "", "place the thread as a SPLIT pane of target (a pane id or session:window)")
 	intoPane := fs.String("into-pane", "", "bind the thread to an EXISTING shell pane and run the agent in place (register-then-exec; with --exec)")
 	doExec := fs.Bool("exec", false, "with --into-pane: replace THIS process with the agent (run it in the calling pane)")
+	parentShell := fs.Bool("parent-shell", false, "parent the new thread under the SHELL THREAD hosting the target session (--into-*); only applies when it would otherwise be a root")
 	virtual := fs.Bool("virtual", false, "create a VIRTUAL thread — a pure grouping node with no agent (parent other threads under it; convert later with `thread realize`)")
 	divider := fs.Bool("divider", false, "create a DIVIDER — a visual horizontal rule in the pinned block (--name is its optional label; placed at the top, reposition with `thread pin`)")
 	asJSON := fs.Bool("json", false, "emit JSON")
@@ -732,7 +739,7 @@ func threadNew(cfg config.Config, args []string) error {
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
 		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg, Model: *model,
 		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
-		Virtual: *virtual,
+		Virtual: *virtual, ParentShell: *parentShell,
 	})
 	if err != nil {
 		return err
@@ -834,6 +841,7 @@ func threadList(cfg config.Config, args []string) error {
 func threadStop(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
+	force := fs.Bool("force", false, "SHELL threads: kill the session even though it hosts other threads' agent panes (they die with it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -850,7 +858,7 @@ func threadStop(cfg config.Config, args []string) error {
 		return err
 	}
 	*id = rid
-	if err := c.ThreadStop(context.Background(), *id); err != nil {
+	if err := c.ThreadStopForce(context.Background(), *id, *force); err != nil {
 		return err
 	}
 	fmt.Println("stopped", *id)

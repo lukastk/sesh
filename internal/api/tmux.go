@@ -34,7 +34,11 @@ type TmuxSession struct {
 	// (a pane's live cwd is TmuxPane.Path / `#{pane_current_path}`). It is the
 	// honest "where does this session live" signal — a tmux session has no cwd of
 	// its own beyond this. Empty from a pre-47 peer.
-	Path    string       `json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
+	// ShellID is the @sesh-shell-id SESSION user-option: the sesh SHELL thread
+	// this session is the runtime of ("" = untracked). It is a DIFFERENT tmux key
+	// from the pane-scoped @sesh-thread-id on purpose — see tmux.ShellIDOption.
+	ShellID string       `json:"shell_id,omitempty"`
 	Windows []TmuxWindow `json:"windows"`
 }
 

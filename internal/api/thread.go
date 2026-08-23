@@ -19,11 +19,50 @@ const VirtualAgentKind = "virtual"
 // remove it).
 const DividerAgentKind = "divider"
 
-// NonAgentKind reports whether an agent_kind is one of the non-agent node kinds
-// (virtual grouping node, divider) — records that have no conversation and refuse
-// every agent-shaped operation.
+// ShellAgentKind is the agent_kind of a SHELL thread — a tracked tmux SESSION.
+// Its durable content is its working directory, the way an agent thread's is its
+// conversation: headful means a live session carrying its @sesh-shell-id marker
+// exists, headless means it is a remembered place, and "reviving" it is
+// `new-session -c <cwd>`. It has a runtime but NO conversation, which is what
+// makes it different in kind from virtual/divider (see HasConversation). Like
+// them it is deliberately NOT a valid agents.Kind, so any agent path that parses
+// the kind fails closed rather than doing something plausible-but-wrong.
+// See _dev/SHELL.md.
+const ShellAgentKind = "shell"
+
+// The node taxonomy is TWO independent questions, and conflating them is how a
+// gate ends up keyed on the wrong axis:
+//
+//	kind                    has runtime?   has conversation?
+//	claude / codex / pi          ✔                ✔
+//	shell                        ✔                ✘
+//	virtual                      ✘                ✘
+//	divider                      ✘                ✘
+//
+// Refuse CONVERSATION-shaped verbs (fork, transcript, send-headless, resume as an
+// agent, --model, adopt, agent-session stamping, report-state) with
+// HasConversation; refuse RUNTIME-shaped ones (enter/nav, stop, capture) with
+// HasRuntime. A shell thread is the reason these are separate predicates: it is
+// enterable and killable but has nothing to fork or transcribe.
+
+// HasConversation reports whether a kind owns an agent conversation — a
+// transcript, a resumable session id, a model.
+func HasConversation(kind string) bool {
+	return kind != VirtualAgentKind && kind != DividerAgentKind && kind != ShellAgentKind
+}
+
+// HasRuntime reports whether a kind can have something LIVE to enter: an agent
+// pane, or (for a shell thread) a tmux session.
+func HasRuntime(kind string) bool {
+	return kind != VirtualAgentKind && kind != DividerAgentKind
+}
+
+// NonAgentKind reports whether an agent_kind is one of the node kinds that have
+// NO conversation — a virtual grouping node, a divider, or a shell thread. It is
+// the inverse of HasConversation; prefer HasConversation/HasRuntime at new call
+// sites, which say which axis is meant.
 func NonAgentKind(kind string) bool {
-	return kind == VirtualAgentKind || kind == DividerAgentKind
+	return !HasConversation(kind)
 }
 
 // Thread is the persistent thread record. Pane and runtime state are NOT stored
@@ -183,6 +222,17 @@ type NewThreadRequest struct {
 	// Mode overrides the [spawn] launch mode for this spawn (yolo|default|
 	// sandbox; '' = the config default).
 	Mode string `json:"mode,omitempty"`
+	// ParentShell opts INTO parenting the new thread under the SHELL THREAD whose
+	// session hosts it (--into-session/--into-window/--into-pane), so the agents
+	// you start inside a box's shell session become its children.
+	//
+	// OFF by default and deliberately last in the precedence chain: an explicit
+	// Parent wins, then the caller's own SESH_THREAD_ID inference, and only then
+	// this. It therefore only ever applies to a thread that would otherwise be a
+	// ROOT — a thread that already has a parent is never re-parented. It is also
+	// never retroactive: promoting a session that already hosts agent threads
+	// does not touch their parents.
+	ParentShell bool `json:"parent_shell,omitempty"`
 	// Model pins the agent model for this thread (opaque pass-through; '' = the
 	// agent's default). Stored on the record and applied to every later spawn/turn.
 	Model string `json:"model,omitempty"`
@@ -280,6 +330,14 @@ type ThreadSendRequest struct {
 	// Model overrides the thread's pinned model for THIS headless turn only ('' =
 	// use the thread's stored model). The thread record is not changed.
 	Model string `json:"model,omitempty"`
+	// Pane / Window address a SPECIFIC pane of a SHELL thread's session. A shell
+	// thread's runtime is a whole session, which may hold many panes, so unlike an
+	// agent thread (one marked pane) "where does this text go?" is a real
+	// question. Default: the session's ACTIVE pane. Pane is a tmux pane id
+	// ("%12"); Window is a window index, meaning that window's active pane.
+	// Both are refused on an agent thread, whose target is its marker.
+	Pane   string `json:"pane,omitempty"`
+	Window *int   `json:"window,omitempty"`
 }
 
 // RenameThreadRequest is the body of POST /v1/threads/rename.
@@ -306,6 +364,11 @@ type ArchiveThreadRequest struct {
 // thread).
 type StopThreadRequest struct {
 	ID string `json:"id"`
+	// Force is required to stop a SHELL thread whose session hosts OTHER
+	// threads' agent panes: killing a shell thread kills its whole tmux session,
+	// so those agents die with it. An agent thread ignores this (stopping one
+	// kills exactly its own pane).
+	Force bool `json:"force,omitempty"`
 }
 
 // DeleteThreadRequest is the body of POST /v1/threads/delete (drop the record).

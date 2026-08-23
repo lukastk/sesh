@@ -73,8 +73,11 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   stateless via `--resume`). The two are not a stored mode — they're inferred at runtime.
 - **Two orthogonal state axes** (what the glyphs mean):
   - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `◇` **virtual**
-    (a pure grouping node — no agent at all; see *Virtual threads* below).
-  - **busy**: `▶` busy (mid-turn) / `·` idle.
+    (a pure grouping node — no agent at all; see *Virtual threads* below) /
+    `▮` **shell thread** with a live tmux session, `▯` one without (see *Shell
+    threads* below).
+  - **busy**: `▶` busy (mid-turn) / `·` idle. **Blank for a shell thread** — it has
+    no turn that could be executing, so the axis does not apply.
   - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your
     attention. Auto-set when a turn ends or the agent stalls on a
     question/approval — attended or not (the unattended-only gate was removed
@@ -108,6 +111,37 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
   Deleting a thread **promotes its children** to the deleted thread's own parent
   (grandparent; root if it had none) — parent ids never dangle.
+- **Shell threads** (`sesh shell …`, glyph `▮`/`▯`, `agent_kind` reads `shell`) are
+  **tracked tmux SESSIONS**. Where an agent thread's durable content is its conversation,
+  a shell thread's is its **working directory**: headful means a live session exists,
+  headless means it is a remembered place, and `thread resume` re-creates the session in
+  the recorded cwd. Runtime identity is a session-scoped `@sesh-shell-id` marker, so a
+  session rename does not lose it and the session name is descriptive only.
+  - **They have a runtime but no conversation.** `enter`/nav, `send`, `capture`, `stop`,
+    `resume` all work; `fork`, `transcript`, `send-headless` and `--model` refuse loudly.
+  - Everything else is the ordinary `thread` surface: list, rename, tag, pin, hold,
+    archive, delete, reparent, meta, notify, flag.
+  - `shell new --cwd <dir> [--name X]` records and starts one (`--no-start` records the
+    place only). `shell enter --cwd <dir>` is **idempotent** on `(cwd, name)` — it enters
+    the existing one (restarting a session that went away) or creates it. Several shells
+    per cwd are legal but need **distinct names**; `shell new` refuses a duplicate.
+  - `shell here` promotes the session you are sitting in; `shell promote --session <name>`
+    promotes a named one. `shell sessions` lists every live session on the work server,
+    classified `shell` (tracked) / `agent` (hosts agent panes) / `ghost` (untracked — the
+    promote target) / `stale` (a marker whose record is gone).
+  - `thread send --id <shell> [--pane %12 | --window N]` addresses ONE pane of the
+    session (default: its active pane). `shell panes --id X` lists them.
+  - `shell info --id X --json` returns the socket path and a ready-to-paste `tmux_prefix`
+    — the deliberate **raw-tmux escape hatch**, since sesh does not reimplement tmux.
+  - **Stopping a shell kills its whole session**, including any agent-thread panes inside
+    it, so it refuses without `--force` when it hosts them. `delete` never kills: it
+    refuses while the session lives, and `delete --force` drops the record, clears the
+    marker and leaves the session running as a ghost you can re-promote. To get it out of
+    the active view while still working in it, **archive** it.
+  - In the TUI: **`S`** opens the **shells view** — every live session on every reachable
+    machine, classified. `enter` jumps to one, **`P`** promotes it to a tracked shell
+    thread, `x` kills it (confirmed; the confirmation names any agent threads that would
+    die with it), `R` refreshes, `esc` closes.
 - **Virtual threads** (`thread new --virtual --name X`, or the `new-virtual` command in the TUI) are
   grouping nodes WITHOUT an
   agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
@@ -355,6 +389,10 @@ I            thread details: a read-only popup of ALL of the selected thread's
              tickets, session id, meta…); esc/q closes
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
+S            SHELLS view — every live tmux session on every reachable machine,
+             classified shell/agent/ghost/stale. enter jumps to one, P promotes it
+             to a tracked shell thread, x kills it (confirmed), R refreshes, esc
+             closes. This is where sessions sesh did NOT create become visible.
 x            stop      a  archive/unarchive (INSTANT)
 U            undo the last archive (LIFO across this session's archives)
 ?            the keymap popup

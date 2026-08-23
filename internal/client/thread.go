@@ -97,7 +97,14 @@ func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) er
 
 // ThreadStop posts POST /v1/threads/stop (end the runtime, keep the record).
 func (c *Client) ThreadStop(ctx context.Context, id string) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/stop", api.StopThreadRequest{ID: id}, nil)
+	return c.ThreadStopForce(ctx, id, false)
+}
+
+// ThreadStopForce is ThreadStop with the SHELL-thread override: killing a shell
+// thread kills its whole tmux session, so one hosting other threads' agent panes
+// refuses unless force is set.
+func (c *Client) ThreadStopForce(ctx context.Context, id string, force bool) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/stop", api.StopThreadRequest{ID: id, Force: force}, nil)
 }
 
 // ThreadDelete posts POST /v1/threads/delete (drop the record). force drops a
@@ -233,6 +240,14 @@ func (c *Client) ThreadStatus(ctx context.Context, id string) (api.ThreadStatusR
 // ThreadSend posts POST /v1/threads/send (headful send into the live pane).
 func (c *Client) ThreadSend(ctx context.Context, id, text string) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/send", api.ThreadSendRequest{ID: id, Text: text}, nil)
+}
+
+// ThreadSendTo is ThreadSend addressing a SPECIFIC pane of a shell thread's
+// session (pane id, or a window index meaning that window's active pane). Empty
+// pane + nil window is the session's active pane.
+func (c *Client) ThreadSendTo(ctx context.Context, id, text, pane string, window *int) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/send",
+		api.ThreadSendRequest{ID: id, Text: text, Pane: pane, Window: window}, nil)
 }
 
 // ThreadSendHeadless posts POST /v1/threads/send-headless (deliver a turn to a

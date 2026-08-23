@@ -2997,6 +2997,11 @@ func (m Model) forkSelected() tea.Cmd {
 		if row.AgentKind == api.VirtualAgentKind {
 			return actionMsg{err: fmt.Errorf("fork %q: a virtual thread has no conversation to fork — realize it first", row.Name)}
 		}
+		// Same for a SHELL thread: it has a runtime but no conversation, so
+		// there is nothing to branch. Refused client-side so it is instant.
+		if row.AgentKind == api.ShellAgentKind {
+			return actionMsg{err: fmt.Errorf("fork %q: a shell thread is a tracked tmux session — it has no conversation to fork", row.Name)}
+		}
 		args := []string{"thread", "new", "--fork-from", row.ID, "--name", name, "--json"}
 		if machine == "" || row.Machine != machine {
 			args = append(args, "--machine", row.Machine)
@@ -3732,6 +3737,17 @@ func HeadGlyph(row api.ThreadRow) string {
 	if row.AgentKind == api.VirtualAgentKind {
 		return "◇"
 	}
+	// SHELL threads use a RECTANGLE pair with the same head semantics as ●/◌.
+	// It reads as a terminal block cursor, and the silhouette (rectangle) is
+	// distinct from the agent circle ●, the headless dotted circle ◌ and the
+	// virtual diamond ◇ — the sidebar renders only the NAME column, so this
+	// gutter glyph is the ONLY place a shell thread is distinguishable there.
+	if row.AgentKind == api.ShellAgentKind {
+		if row.Head == api.Headful {
+			return ShellLiveGlyph
+		}
+		return ShellDeadGlyph
+	}
 	if row.AgentKind == api.DividerAgentKind {
 		return "─" // dividers render as a full rule (see the View loop); this is a fallback
 	}
@@ -3752,6 +3768,12 @@ func HeadGlyph(row api.ThreadRow) string {
 // (Attention states render in the FLAG gutter cell — see FlagGlyph — not
 // here; the 43-era ‼/✔ overlays were replaced by the flagged system.)
 func BusyGlyph(row api.ThreadRow) string {
+	// A SHELL thread has no busy axis at all — there is no turn that could be
+	// executing. Render BLANK rather than the idle dot: "·" means "not busy right
+	// now", which would invite the reader to expect ▶ sometimes.
+	if row.AgentKind == api.ShellAgentKind {
+		return " "
+	}
 	switch row.Busy {
 	case api.BusyBusy:
 		return "▶"
@@ -3781,6 +3803,21 @@ func FlagGlyph(row api.ThreadRow) string {
 	}
 	return " "
 }
+
+// ShellLiveGlyph / ShellDeadGlyph are the head-axis glyphs for a SHELL thread —
+// the same live/not-live semantics as ●/◌, drawn as a terminal block cursor.
+//
+// The pair is deliberately a RECTANGLE, not a square or diamond: `▢`/`▣` were
+// rejected because a hollow square and the virtual thread's `◇` are both hollow
+// quadrilaterals, which is precisely the H78 failure mode (`⌀` and `⊘` were
+// distinct codepoints that rendered as the same slashed circle in adjacent
+// gutter cells). TestGutterGlyphsDistinct guards the family; its
+// hollow-quadrilateral family must cover `◇▢▣□◻` and must NOT contain these two,
+// or it would put two live states in one family and be red on arrival.
+const (
+	ShellLiveGlyph = "▮"
+	ShellDeadGlyph = "▯"
+)
 
 // ArchivedGlyph renders the archived slot: a marker on an ARCHIVED thread, blank
 // otherwise. Archived threads now surface in the default view while still headful

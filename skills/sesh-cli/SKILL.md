@@ -1,6 +1,6 @@
 ---
 name: sesh-cli
-description: Use the `sesh` CLI/TUI to list, find, enter, resume, create, tag, archive, rename, reparent, capture, send-to, delegate, or inspect coding-agent threads across machines. Use when the user asks about sesh command usage, the thread TUI, entering/resuming a thread, cross-machine thread state, the sesh daemon, peers, the master-tmux cockpit, or tickets.
+description: Use the `sesh` CLI/TUI to list, find, enter, resume, create, tag, archive, rename, reparent, capture, send-to, delegate, or inspect coding-agent threads across machines. Use when the user asks about sesh command usage, the thread TUI, entering/resuming a thread, cross-machine thread state, the sesh daemon, peers, mycockpit (the cross-machine tmux cockpit), or tickets.
 ---
 
 # sesh
@@ -64,7 +64,7 @@ behind myrig's "kill empty sessions" cleanup.
 
 Extra care: `delete` (drops a record; refuses a live thread unless `--force`, which
 orphans the agent — `stop` first), `send`/`send-headless` (injects into a real agent's
-conversation), `master down` (tears the cockpit), `peer remove`, `import`.
+conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
 
 ## Core concepts
 
@@ -177,7 +177,7 @@ conversation), `master down` (tears the cockpit), `peer remove`, `import`.
   `ticket move` is **daemon-coordinated**: the daemon you invoke it on pulls the record (and
   every `@blob()` its prompt references) from `--from` and pushes them to `--to`, then deletes
   the source — over its own peer transport, so only the invoked machine must reach both ends.
-  The `mt-`/`mmt-` ticket cockpit does this automatically on a cross-machine bind.
+  myrig's `mt-`/`mmt-` ticket commands do this automatically on a cross-machine bind.
 
 ## Blobs & files in prompts (`sesh blob`)
 
@@ -277,7 +277,7 @@ set (the same columns the normal grid shows) and swaps back to name-only on rest
 A maximized sidebar does not follow the selection (the preview pane is hidden and a
 cross-machine follow would switch windows and drop the zoom) — browse the list, Enter
 commits. Follow
-crosses machines: the master window switches and the traveling sidebar rides along
+crosses machines: the cockpit window switches and the traveling sidebar rides along
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never
 revives a dead one — Enter still does); the sibling machine resolves live from the
@@ -585,7 +585,7 @@ sesh thread new --agent claude --name x --cwd ~/proj --machine macbook
 ```
 
 `enter`/nav is normally done from the TUI; the underlying primitive is `sesh tmux nav --to
-<machine>:<session>` (the master-tmux cockpit + the inner client switch).
+<machine>:<session>` (mycockpit + the inner client switch).
 
 ## Driving an agent, delegating, awaiting
 
@@ -652,7 +652,13 @@ rule). Heuristic busy→idle edges flag only for agents opted in via `[flags]
 heuristic_agents = ["codex"]` in config.toml (default: none — reporter edges
 are exact, the heuristic can mistake your own typing-settle for a turn end).
 
-## Mesh, peers, master cockpit, daemon
+## Mesh, peers, mycockpit, daemon
+
+**mycockpit** — also "the cockpit" / "my cockpit" — is Lukas's cross-machine tmux cockpit:
+one tmux server (socket `sesh-master`, prefix `C-a`) with one window per machine, each an
+auto-reconnecting attach into that machine's work server. sesh builds and drives it
+(`sesh master …`); myrig wraps it in the `mmt-*` commands. The name is prose only — every
+identifier still says `master`. ("The master tmux setup" is the retired old name.)
 
 ```bash
 sesh peer list                                             # registered machines + transport
@@ -666,7 +672,7 @@ sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, 
 ```
 
 The target machine's supervised daemon is the sole creator of its work tmux server. If a
-master window finds no sessions, it asks the target daemon to create `scratch`; it does not
+cockpit window finds no sessions, it asks the target daemon to create `scratch`; it does not
 run `tmux new-session` in the local or SSH attach shell. This matters on macOS because tmux
 retains its creator's audit session: a server born under SSH cannot read Claude Code's login
 Keychain even when a local cockpit later attaches to it. A daemon-born work server keeps the
@@ -686,14 +692,14 @@ service environment (fix: `supervisorctl restart sesh-daemon`; the same warning 
 logged at daemon startup).
 
 **"The cockpit froze after my laptop slept — I can select threads but nothing opens."**
-A master window is an ssh attach into that machine's work server, and sleep can leave that
+A cockpit window is an ssh attach into that machine's work server, and sleep can leave that
 connection dead with no FIN and no RST. ssh notices only when it next has bytes to send,
 which an idle attach never does, so the window keeps painting its last pre-sleep frame.
 Nav still *reports success* — the far side's sshd still holds the pty, so the remote tmux
 still lists that client, the master-client marker still matches it, and `switch-client`
 returns 0 against a client nobody can see. sesh now passes `ServerAliveInterval`
 keepalives on every ssh it opens, so a dead path is dropped within ~45s and the window's
-supervisor re-establishes it by itself. **A running master keeps the binary it was
+supervisor re-establishes it by itself. **A running cockpit keeps the binary it was
 launched with**, so after updating sesh you need `mmt-kill && mmt-start` (or
 `sesh master down` + `up`) once before the keepalives are actually in force. If a cockpit
 is wedged right now, that same restart is the recovery — rebuilding the sidebar

@@ -12,7 +12,7 @@ The complete mapping of every sesh CLI/daemon feature to its graphical-app surfa
 
 **The app is an API client, not a reimplementation.** sesh's daemon already exposes its *complete* router two ways (the same `d.routes()` mux behind both): a local **unix socket** (no auth, local trust) and an opt-in **TCP API** (`SESH_API_ADDR` + `Authorization: Bearer <SESH_API_TOKEN>`, refuses to bind without a token). The Svelte UI talks to **one daemon at a time**; cross-machine views (`--all-machines`, `mesh`, ticket `find`/`move`) are **fanned out daemon-side** over the peer mesh, so a client pointed at one daemon already sees and can act on the whole mesh. The GUI mirrors the existing TUI's design principle: it is a **thin client** that *emits verbs* (which auto-route to the owning daemon) and refreshes from the snapshot/mesh endpoints — it never reimplements a verb or invents state.
 
-**The GUI replaces tmux as the client.** The entire `tmux nav/attach/switch-client` layer — addressing a process as `(machine, socket, session, window, pane)` and switching the attached terminal to it — collapses into **app selection state**: select a thread → its chat/terminal surface fills the main pane. Master-tmux cockpit commands (`master up/window/attach/down/ensure/watchers`) are a terminal-era stand-in for what the GUI *is*, and become non-features (kept only as an optional desktop power surface).
+**The GUI replaces tmux as the client.** The entire `tmux nav/attach/switch-client` layer — addressing a process as `(machine, socket, session, window, pane)` and switching the attached terminal to it — collapses into **app selection state**: select a thread → its chat/terminal surface fills the main pane. The cockpit's commands (`master up/window/attach/down/ensure/watchers`) are a terminal-era stand-in for what the GUI *is*, and become non-features (kept only as an optional desktop power surface).
 
 **The two chat modes (the central design fact).** sesh has **no unified "message" abstraction** — a thread is one of two runtime shapes, and the UI must branch per-thread on the two state axes (`head: headful|headless`, `busy: bool`) carried on every snapshot/grid row:
 
@@ -139,10 +139,10 @@ Columns: **Command | API | UI surface | Desktop/Android | Live? | Priority**.
 
 | Command | API | UI surface | Desktop/Android | Live? | Pri |
 |---|---|---|---|---|---|
-| **master up** | CLI-only (tmux orchestration) | None primary — admin "Start master cockpit" button only | Desktop only; hide Android | No | P2 |
+| **master up** | CLI-only (tmux orchestration) | None primary — admin "Start cockpit" button only | Desktop only; hide Android | No | P2 |
 | **master window** | CLI-only | None — internal; GUI equivalent = the per-machine reachability dot | N/A | n/a | P2 (do not surface) |
 | **master attach** | CLI-only | Optional desktop diagnostics "Attach cockpit" (embedded xterm.js) | Desktop only | live PTY (out-of-band) | P2 |
-| **master down** | CLI-only | "Stop master cockpit" button | Desktop only | No | P2 |
+| **master down** | CLI-only | "Stop cockpit" button | Desktop only | No | P2 |
 | **master ensure** | CLI-only (daemon's `masterMaint` self-heals automatically) | "Repair cockpit" button | Desktop only | No | P2 |
 | **master watchers** | CLI-only (marker files); **no remote endpoint** | "Watched by" badge (niche; tmux clipboard-relay workflow the GUI replaces) — likely **drop** | Desktop-relevant; hide Android | ~5s poll if shown | P2 |
 | **peer add** | CLI-only (writes `peers.json`); **no endpoint — GUI gap** | "Add machine" modal: name/ssh/port/home + advanced (binary/socket/codex-home/conf) + transport toggle (SSH/HTTP → api-addr+token); loud validation | Desktop full form+file picker; Android paste-only, default HTTP | One-shot; appears in mesh ~1s | P0 |
@@ -235,7 +235,7 @@ The daemon exposes the full router over a local **unix socket** (no auth, local 
 
 ### P2 — power & hygiene
 - Advanced→tmux panel (info tree, create-session, kill-session + "clean up empty"), thread adopt (pane picker), meta table, raw send-text.
-- master cockpit panel (up/down/ensure/attach embedded terminal); drop master watchers/current.
+- cockpit panel (`master up/down/ensure/attach` embedded terminal); drop master watchers/current.
 - hooks test; subscriptions graph; ticket import (internal).
 - backup/restore/copy (Electron-only); v1 import; blob ls/rm/path; per-column colors; copy-id; refresh.
 - **End-state**: SSE chat/screen streams; WS pty terminal bridge.

@@ -6,7 +6,7 @@
 
 ## 0. Thesis
 
-sesh v2 is the single owner of the hard, performance-sensitive infrastructure for managing coding-agent work across machines. It absorbs three things that today live in separate places — the **tmux orchestration** (master-tmux in `myrig`), **session/thread management** (sesh v1), and **tickets** — into one Go binary + per-machine daemon.
+sesh v2 is the single owner of the hard, performance-sensitive infrastructure for managing coding-agent work across machines. It absorbs three things that today live in separate places — the **tmux orchestration** (the cockpit, then `master-tmux.sh` in `myrig`), **session/thread management** (sesh v1), and **tickets** — into one Go binary + per-machine daemon.
 
 The governing split:
 
@@ -48,7 +48,7 @@ daemon/API     per-machine; single-writer-per-record + read replicas; HTTP+JSON 
 ### Model
 
 - On each machine, the agent/thread tmux server runs on socket **`mytmux`** (renamed from v1's `mysystem`). `mytmux` is *just a regular tmux server* — it carries no semantics of its own; sesh imposes meaning, not the socket name.
-- A separate socket **`mymastertmux`** can be started on any one machine. It holds the "master" view: **one window per machine**, each window SSH'd into that machine's `mytmux` server (exactly as the current master-tmux does). This is a *view*, not a registry.
+- A separate socket **`mymastertmux`** can be started on any one machine. It holds **mycockpit** — "the cockpit": **one window per machine**, each window SSH'd into that machine's `mytmux` server (exactly as the pre-v2 cockpit did). This is a *view*, not a registry.
 - The full address of any running process is **`(machine, socket, session, window, pane)`**.
 - **No session persistence; records persist, runtime is re-derived.** This split is load-bearing, so state it plainly:
   - **Thread *records* persist** — they live in the daemon's SQLite store and survive reboots.
@@ -60,7 +60,7 @@ daemon/API     per-machine; single-writer-per-record + read replicas; HTTP+JSON 
 - `sesh tmux current` → resolve the locator of the calling terminal: machine, socket, session, window, pane, and (if present) the owning thread id.
 - `sesh tmux info` → JSONL of all tmux sessions across all machines, with their windows, panes, and what is running in each. Filterable with `--machine` and `--session`. This is the cross-machine "walker"; it replaces v1's hand-rolled SSH poller + `~/.cache/mms/*.tsv`.
 - `sesh tmux create-session` / `sesh tmux create-pane` → explicit primitives for building runtime structure.
-- `sesh tmux nav --to <machine>:<session>` → **the navigation primitive.** From `mymastertmux`, move to an exact session on another machine. This is the single fiddliest operation in the system and the reason this layer must be tested Go, not shell. It does, atomically:
+- `sesh tmux nav --to <machine>:<session>` → **the navigation primitive.** From the cockpit, move to an exact session on another machine. This is the single fiddliest operation in the system and the reason this layer must be tested Go, not shell. It does, atomically:
   1. switch the **outer** (`mymastertmux`) client to machine M's window, **and**
   2. drive machine M's **inner** `mytmux` server (over that window's SSH) to `switch-client -t <session>`, **and**
   3. handle the **detached-pane case**: if the target session has no attached client to switch, perform the "bare-shell kick" (attach/select so a client exists, then switch).
@@ -182,13 +182,13 @@ The TUI stays in sesh/Go because it is performance-sensitive (renders live cross
 ### Example myrig wrappers (thin, illustrative — these live in myrig, not sesh)
 
 - `sesh-enter-local-session` — fzf over local tmux sessions; enter the choice.
-- `sesh-enter-session` — fzf over all sessions across all machines (columns show the machine); enter the choice in `mymastertmux` via `sesh tmux nav`.
+- `sesh-enter-session` — fzf over all sessions across all machines (columns show the machine); enter the choice in the cockpit via `sesh tmux nav`.
 
 ---
 
 ## 7. What this deletes from the current setup (traceability to the review)
 
-- The master-tmux SSH poller + all `~/.cache/mms/*.tsv` caches (R1) → replaced by `sesh tmux info` / the mesh.
+- The v1 `master-tmux.sh` SSH poller + all `~/.cache/mms/*.tsv` caches (R1) → replaced by `sesh tmux info` / the mesh.
 - The v1 `sesh.sh` dead picker + `~/.sesh/cache/*.json` + `--machine local` path (R2).
 - `spawn-agent-session` as a separate spawn door (R4) → `sesh` is the one spawn path.
 - The session-naming-by-string-convention spread across 5–6 places (R3) → there is no name-encoded join anymore; box/note links are real fields/tags.

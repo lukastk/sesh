@@ -1,5 +1,11 @@
 # AGENTS.local.md — ARCHIVE (June 2026 build-out)
 
+> **Naming (2026-08-23).** The cross-machine tmux cockpit is now called **mycockpit** —
+> or just **the cockpit** / **my cockpit**. Entries below predate that and call it "the
+> master tmux setup", "the master", or "the master cockpit"; they are a dated record and
+> are left as written. Use the new name in anything new. Code identifiers (`sesh master`,
+> `SESH_MASTER_SOCKET`, `mmt-*`, `tmux.master.conf`) are unchanged either way.
+
 The original sesh v2 build-out working-log entries (H1-H33 and the foundational notes),
 covering 2026-06-10 -> 2026-06-29. Moved here out of `AGENTS.local.md` on 2026-08-22 so
 the live log (imported into every agent session via `@AGENTS.local.md`) stops carrying

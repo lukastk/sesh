@@ -2,6 +2,14 @@
 
 **sesh v2** is one Go binary + per-machine daemon that owns multi-machine coding-agent session management, tmux orchestration, and tickets.
 
+**Naming.** The cross-machine tmux cockpit sesh builds — one window per machine, each an
+auto-reconnecting attach into that machine's work server — is called **mycockpit**, or just
+**the cockpit** / **my cockpit**. It was formerly "the master tmux setup"; do not use that
+name in prose. The *code* still spells itself `master` everywhere (`sesh master …`,
+`cmd/sesh/master.go`, `SESH_MASTER_SOCKET`, `master-client.*`, myrig's `mmt-*` = master-tmux),
+and those identifiers are unchanged — so name the command when you mean the command, and
+"the cockpit" when you mean the thing.
+
 **It is shipped.** v1 is gone; v2 runs in production on all six machines and is what Lukas works in every day. You are almost certainly *extending or fixing* it, not building it — so the bar is "do not regress the fleet", and every change lands against a live system. Treat `_dev/PLAN.md`'s Phase 0 ("build the tracking spine first") as history: the spine exists.
 
 - This file: **the rules you must follow.** They are not optional and they are not negotiable.
@@ -16,7 +24,7 @@
 | `SPEC.md` | The design. What sesh v2 is and the layer split (`sesh` = mechanism, `myrig` = policy/UX). Read first. |
 | `PLAN.md` | How we build and track it: the feature registry, the matrix harness, the testing framework. |
 | `MESH.md` | Mesh-replicated live state — the cross-machine thread view, sync cadence, delta sync. |
-| `MASTER.md` | The master-tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
+| `MASTER.md` | **mycockpit**, the cross-machine tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
 | `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
 | `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
 | `CLI_TUI_FEATURES.md` | The 2026-06-11 CLI/TUI feature batch and its contract. |

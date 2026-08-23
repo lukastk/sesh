@@ -7,12 +7,12 @@ the myvault pad "Herdr vs sesh - migration assessment".
 ## Decisions (locked)
 
 1. **Substrate: tmux-layered.** No native PTY multiplexer. sesh ships the render
-   mode (`sesh tui --sidebar`); myrig's master cockpit owns the layout. The
+   mode (`sesh tui --sidebar`); myrig's cockpit layer owns the layout. The
    which-client law, nav, adopt, clipboard relay and the phone cockpit all stay.
 2. **Placement: ONE TRAVELING sidebar over fixed slots** (revised 2026-07-25 —
    per-window sidebars felt awkward: four copies of the same list, cursor/view
    state not traveling). The cockpit keeps its window-per-machine shape; every
-   master window keeps a PERMANENT 38-col left slot. The single real sidebar
+   cockpit window keeps a PERMANENT 38-col left slot. The single real sidebar
    occupies the active window's slot; the other windows hold an inert blank
    placeholder pane. An `after-select-window` tmux hook `swap-pane`s the sidebar
    with the newly-active window's placeholder — swap exchanges SAME-SIZED panes,
@@ -24,8 +24,8 @@ the myvault pad "Herdr vs sesh - migration assessment".
    practice: revert to per-window (hiccup-free, state diverges), or the
    single-window swap-pane cockpit (zero artifacts + single state, but rewrites
    master nav/markers/mastermaint — a deliberate later project).
-3. **Refresh: accept active mesh cadence on desktop masters** (they run active or
-   hooks-pinned anyway); the termux master simply doesn't spawn a sidebar (mobile
+3. **Refresh: accept active mesh cadence on desktop cockpits** (they run active or
+   hooks-pinned anyway); the termux cockpit simply doesn't spawn a sidebar (mobile
    data — the H44 rationing stays intact). Poll stays the TUI's normal 3s +
    post-action reconciles; schema 45's keypress optimism + nudge apply unchanged.
 4. **Content: the plain thread list** (the existing tree, narrow name-only column

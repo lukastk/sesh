@@ -1,5 +1,11 @@
 # AGENTS.local.md — sesh v2 working notes
 
+> **Naming (2026-08-23).** The cross-machine tmux cockpit is now called **mycockpit** —
+> or just **the cockpit** / **my cockpit**. Entries below predate that and call it "the
+> master tmux setup", "the master", or "the master cockpit"; they are a dated record and
+> are left as written. Use the new name in anything new. Code identifiers (`sesh master`,
+> `SESH_MASTER_SOCKET`, `mmt-*`, `tmux.master.conf`) are unchanged either way.
+
 ## H85 — LOCAL MAC COCKPIT CLAUDE LOOKED LOGGED OUT: the local master was NOT SSHing, but its long-lived WORK tmux server had been CREATED by a remote SSH cockpit and retained that audit session; fix = target daemon is sole work-server creator (2026-08-18, sesh c550644 + myrig 119ae59; CLI/config change, no schema change; 4/6 deployed, Mac work-server replacement still pending)
 Lukas: Claude Code works in a normal macbook terminal but says `Login expired · Please run /login`
 inside his local master cockpit; self-SSH reproduces it. His correction was exactly right: the local

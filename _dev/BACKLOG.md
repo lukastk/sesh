@@ -8,25 +8,25 @@ suggestion: #1 (small) then #2 (medium).
 
 > **STATUS:** #1, #2, #3 are DONE (built + matrix-green). #4 (myrig integration) remains.
 
-## 1. ✅ DONE — `nav --in-client`: enter a thread in the CURRENT tmux client (same-socket, no master)
+## 1. ✅ DONE — `nav --in-client`: enter a thread in the CURRENT tmux client (same-socket, no cockpit)
 
 **Want:** in `sesh tui`, pressing Enter on a thread that is on the LOCAL machine and on the
 tmux socket you're already attached to should just switch your current client to that
-thread's session — no master-tmux required. (Cross-machine still uses the full master path.)
+thread's session — no cockpit required. (Cross-machine still uses the full `sesh master` path.)
 
 **Why it's easy:** it's exactly the *inner half* of `nav`, which already exists.
 - `internal/tmux/nav.go` `InnerSwitchScript(socket, session)` = `tmux -L <socket>
   switch-client -t =<session>` (+ a "kick" fallback that creates a client when none exists).
 - `cmd/sesh/tmux.go` `tmuxNav` currently ALWAYS does the outer step first
-  (`master.SelectWindow(machine)` on `cfg.MasterSocket`) — that's the part needing master-tmux.
+  (`master.SelectWindow(machine)` on `cfg.MasterSocket`) — that's the part needing the cockpit.
 - `internal/tui/model.go` `navSelected()` execs `sesh tmux nav --to <machine>:<session>`.
 
 **Design:**
 - Add `tmux nav --in-client`: do the **inner switch only**, and error LOUDLY if `$TMUX`
   isn't a client on the target socket (no silent no-op). Reject if target machine != self.
 - TUI on Enter: if `row.Machine == cfg.Machine` AND the TUI's own `$TMUX` socket path matches
-  the thread's socket → exec `nav --to <m>:<s> --in-client`; else fall back to the master
-  path (or, until master-tmux exists, surface "master-tmux not set up" rather than a cryptic
+  the thread's socket → exec `nav --to <m>:<s> --in-client`; else fall back to the cockpit
+  path (or, until the cockpit exists, say so plainly rather than a cryptic
   outer-select error).
 - The TUI knows its socket: `$TMUX` = `<socket-path>,<pid>,<session>`; compare basename to
   `cfg.TmuxSocket`.
@@ -77,9 +77,9 @@ before-first-turn = justified N/A.
 
 ---
 
-## 3. `sesh master`: master-tmux infrastructure in Go (full design in `_dev/MASTER.md`)
+## 3. `sesh master`: cockpit infrastructure in Go (full design in `_dev/MASTER.md`)
 
-Move ALL master-tmux infrastructure into sesh — building the master server, the per-window
+Move ALL cockpit infrastructure into sesh — building the cockpit server, the per-window
 ssh-attach, and the reconnect/self-heal loop — as `sesh master up [--machines …] [--tmux-conf]`
 / `sesh master window <machine>` (a Go supervisor, not a shell loop) / `sesh master attach` /
 `sesh master down`, machines sourced from the daemon peers. myrig collapses to a tmux conf +
@@ -125,7 +125,7 @@ mymain↔macbook run hand-started daemons + a hand-written `~/.myrig/zshenv/sesh
   `--all-machines`). **Remove the manual `~/.myrig/zshenv/sesh-v2.sh` on mymain+macbook** so
   the managed one isn't shadowed.
 
-**4b. Collapse myrig's master-tmux to config + aliases (and DELETE the old orchestration).**
+**4b. Collapse myrig's `master-tmux.sh` to config + aliases (and DELETE the old orchestration).**
 Per `_dev/MASTER.md §4–5`, once `sesh master` (#3) exists: keep only the `.tmux` conf
 (prefix/keybindings/look) + thin `mms-*` aliases → `sesh master …` + fzf pickers
 (`fzf | sesh tmux nav`) + clipboard wrappers. **Delete**: the SSH poller, all `~/.cache/mms/*`
@@ -171,4 +171,4 @@ Design:
 
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →
-#2 promote then #1 enter; anything cross-machine → the master-tmux nav path.
+#2 promote then #1 enter; anything cross-machine → the cockpit nav path.

@@ -76,7 +76,7 @@ round-trip inside a Svelte UI today, with **zero changes to sesh**.
   HTTP / dev proxy). Svelte stores never know which.
 - **Mesh-as-model:** the app polls `GET /v1/mesh` from a single daemon; that daemon already aggregates
   and routes the whole mesh. The GUI **replaces tmux as the client** — selecting a thread *is* nav;
-  the entire master-tmux cockpit (`master up/window/attach/…`) becomes a non-feature (optional desktop
+  the entire cockpit (`master up/window/attach/…`) becomes a non-feature (optional desktop
   power panel at most).
 - **Chat, branched on `agentKind` × the `head`/`busy` axes every row already carries:**
   - **pi (headful *or* headless) → RPC streaming bubbles** — proven in exp 04: pi's `rpc-socket`

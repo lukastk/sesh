@@ -261,7 +261,7 @@ fixed by routing through a non-browser HTTP layer and (optionally) adding a WS/S
 - **Experiment code gitignored**; `EXPERIMENTS_PLAN.md`, `FEATURE_UI_MAP.md`, `UI_SCOPING.md` tracked.
 - **Stack:** Svelte for the UI; Electron for desktop; Android as a second target (Lukas).
 - **The app is an API client**, one daemon at a time (mesh fan-out is daemon-side). The GUI replaces
-  tmux-as-client; the master-tmux cockpit becomes a non-feature.
+  tmux-as-client; the cockpit becomes a non-feature.
 - **Two chat modes**, branched on `head`/`busy`: headless transcript-chat (mobile-perfect) + the
   xterm.js terminal for live panes.
 - **CORS:** don't add it to the daemon — route through Electron-main / Android-native HTTP instead.

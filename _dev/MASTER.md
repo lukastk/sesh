@@ -1,12 +1,14 @@
-# sesh v2 — master-tmux (design)
+# mycockpit — the cross-machine tmux cockpit (design)
 
 > **STATUS:** the sesh side (§2 `sesh master up|window|attach|down`) is **BUILT** in
 > `cmd/sesh/master.go`, with conformance cells `master.up` + `master.reconnect` green.
 > Remaining: the myrig collapse (§4 / BACKLOG #4b) and `nav --in-client` (BACKLOG #1).
 
-The cross-machine "cockpit": a single tmux server with one window per machine, each an
-auto-reconnecting attach into that machine's work server. `sesh tmux nav` jumps you across
-machines by driving it. **All of this infrastructure lives in sesh** — building the master,
+**mycockpit** — also "the cockpit" / "my cockpit", and formerly "the master tmux setup" — is
+a single tmux server with one window per machine, each an auto-reconnecting attach into that
+machine's work server. `sesh tmux nav` jumps you across machines by driving it. Everything
+below spells the machinery `master` (the subcommand, the socket, the Go file); that is the
+code's name for the cockpit and is unchanged by the rename. **All of this infrastructure lives in sesh** — building the master,
 the per-window ssh-attach, and the reconnect loop. myrig only *configures* (a tmux conf) and
 *aliases* (`mms-*` → `sesh master …`); it never sources sesh's internals. The seam is the
 CLI/process boundary.

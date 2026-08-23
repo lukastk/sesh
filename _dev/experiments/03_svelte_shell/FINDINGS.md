@@ -76,7 +76,7 @@ of it — fast.** Each screen is a thin Svelte component polling/posting the exi
   enabled only when bound), delete. `shots/app-tickets.png`, `app-ticket-detail.png`.
 - **Machines** (`MachinesScreen.svelte`) — the **mesh** (`GET /v1/mesh`): a card per machine with a
   reachability dot, freshness ("live"/"12s ago"/"OFFLINE"), thread counts, and a thread preview. The
-  master-tmux cockpit collapses into this. `shots/app-machines.png`.
+  the cockpit collapses into this. `shots/app-machines.png`.
 
 Confirms the scoping thesis: **the whole non-chat surface is lists + forms + modals over the daemon
 API** — the only hard parts were the two chat modes (terminal + RPC streaming), both now solved and

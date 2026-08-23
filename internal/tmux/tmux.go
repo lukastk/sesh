@@ -121,6 +121,7 @@ func (s *Server) Info(machine string) ([]api.TmuxSession, error) {
 	format := strings.Join([]string{
 		"#{session_name}",
 		"#{session_attached}",
+		"#{session_path}",
 		"#{window_index}",
 		"#{window_name}",
 		"#{window_active}",
@@ -145,7 +146,7 @@ func (s *Server) Info(machine string) ([]api.TmuxSession, error) {
 	return parsePanes(machine, s.socket, out)
 }
 
-const paneFieldCount = 13
+const paneFieldCount = 14
 
 func parsePanes(machine, socket, out string) ([]api.TmuxSession, error) {
 	// Preserve first-seen order of sessions and windows.
@@ -170,23 +171,24 @@ func parsePanes(machine, socket, out string) ([]api.TmuxSession, error) {
 		}
 		sname := f[0]
 		sattached := f[1] == "1"
-		windex := atoi(f[2])
-		wname := f[3]
-		wactive := f[4] == "1"
+		spath := f[2]
+		windex := atoi(f[3])
+		wname := f[4]
+		wactive := f[5] == "1"
 		pane := api.TmuxPane{
-			Pane:     f[5],
-			Index:    atoi(f[6]),
-			Active:   f[7] == "1",
-			PID:      atoi(f[8]),
-			Command:  f[9],
-			Title:    f[10],
-			Path:     f[11],
-			ThreadID: f[12],
+			Pane:     f[6],
+			Index:    atoi(f[7]),
+			Active:   f[8] == "1",
+			PID:      atoi(f[9]),
+			Command:  f[10],
+			Title:    f[11],
+			Path:     f[12],
+			ThreadID: f[13],
 		}
 
 		sess, ok := sessions[sname]
 		if !ok {
-			sess = &api.TmuxSession{Machine: machine, Socket: socket, Name: sname, Attached: sattached}
+			sess = &api.TmuxSession{Machine: machine, Socket: socket, Name: sname, Attached: sattached, Path: spath}
 			sessions[sname] = sess
 			sessOrder = append(sessOrder, sname)
 		}

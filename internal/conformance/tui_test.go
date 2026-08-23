@@ -77,6 +77,7 @@ var declaredTUIClaims = []string{
 	"tickets-view",              // K opens the tickets view, lists the thread's REAL bound tickets, and the status-change + delete + create actions land on the daemon
 	"tickets-view-remote",       // tickets view on a thread owned by ANOTHER machine: every op routes to the thread's machine (the cross-machine "bound thread not found" bug)
 	"tickets-view-filter",       // the K view defaults to showing ACTIVE tickets; Tab opens a status picker (incl. all) that narrows the list
+	"shells-view",               // S lists the REAL tmux sessions incl. ones sesh never made (ghosts), classifies them, and really kills one
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
 	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ◇ glyph rendered; f refuses too; record untouched
 	"action-new-virtual",        // v opens a name prompt and creates a ROOT virtual group on the daemon (--no-parent beats inference); empty submit cancels; cursor preselects the new row
@@ -139,6 +140,7 @@ func init() {
 	registerTUIClaim("sidebar-nav-stays", claimSidebarNavStays)
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
+	registerTUIClaim("shells-view", claimShellsView)
 	registerTUIClaim("tickets-view", claimTicketsView)
 	registerTUIClaim("tickets-view-remote", claimTicketsViewRemote)
 	registerTUIClaim("tickets-view-filter", claimTicketsViewFilter)

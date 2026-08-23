@@ -23,7 +23,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "tmux.info",
-		Description: "JSONL walk of sessions/windows/panes across machines; --machine/--session",
+		Description: "JSONL walk of sessions/windows/panes across machines; --machine/--session; each session also reports its START directory (`session_path`) — the only honest 'where does this session live' signal tmux exposes, which does NOT drift when a pane cds away",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

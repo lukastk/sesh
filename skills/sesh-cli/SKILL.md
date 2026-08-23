@@ -485,7 +485,7 @@ in the default view too).
 
 **Tickets view (`K`)** is a full-screen takeover listing the selected thread's tickets. It
 defaults to showing **active** tickets; **`tab`** opens a status picker (triage/ready/active/
-done/dropped/**all**) that narrows the list. Enter drills into one ticket: its fields (name, prompt) + a small action menu. Enter on
+done/dropped/**all**) that narrows the list. Enter drills into one ticket: its full **id** (the ticket's own uuid, shown read-only at the top — distinct from the truncated thread id) plus its fields (name, prompt) + a small action menu. Enter on
 **name**/**prompt** edits it in your editor (suspend → save); **status** opens a picker
 (triage/ready/active/done/dropped); **thread** opens an fzf-style picker to (re)bind the
 ticket to another thread (type to filter by name or uuid); **send prompt to thread**

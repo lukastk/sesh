@@ -606,6 +606,11 @@ func (m Model) ticketDetailView() string {
 	if tk.ThreadID != "" {
 		thread = tid8(tk.ThreadID)
 	}
+	// The ticket's own full id, rendered as a non-selectable header row. Without it
+	// the view showed only the (truncated) thread id in both the header and the
+	// "thread" row, so the ticket id had to be guessed — it was mistaken for the
+	// thread id. It sits above the navigable items and never takes the cursor.
+	b.WriteString("  " + fmt.Sprintf("%-8s %s", "id:", tk.ID) + "\n")
 	items := []struct{ label, val string }{
 		{"name", tk.Name},
 		{"prompt", firstLine(tk.Prompt)},

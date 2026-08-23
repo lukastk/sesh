@@ -1,5 +1,55 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H90 — a 34 KB ticket "refused to send": tmux's set-buffer argv cap (MAX_IMSGSIZE=16384); fix = SendText streams via `load-buffer -b <buf> -` on STDIN (revisits H46's declined fix) + the TUI ticket viewer now shows the ticket's OWN full uuid (2026-08-23, sesh <this commit>; NO schema/API/CLI change; DAEMON rebuild+restart for the send fix + binary-only for the viewer row; NOT YET DEPLOYED)
+Lukas: "I tried sending ticket 538e103f to thread 538e103f-71c8-... but it refuses to send." TWO
+distinct causes, one of them a real transport limit:
+1. **ID CONFUSION (red herring, but its own fix below):** `538e103f` is the THREAD id, not a ticket
+   id — `ticket get --id 538e103f` 404s. The ticket bound to that thread is `4d4e8592-b9d7-43cd-
+   8f5d-d3df37c5c9f0` ("sesh - new thread type"), status active, correctly bound (`--field thread` =
+   538e103f; my first `jq .thread` read null only because the JSON key is `thread_id`). The user grabbed
+   the wrong id because the TUI ticket VIEWER showed only the (truncated) thread id — in the header
+   `[538e103f]` AND the `thread: 538e103f` row — with the ticket's own id NOWHERE on screen (fix #2).
+2. **THE REAL BLOCKER — the prompt is 34,560 bytes and tmux caps a single command's argv at
+   MAX_IMSGSIZE=16384.** `tmux.SendText` filled its paste buffer with `set-buffer -b <buf> <text>`,
+   passing the whole prompt as ONE argv (ops.go:83 ← handleTicketSendPrompt ticket.go:184). MEASURED in
+   an isolated tmux: set-buffer OK at 16000, FAILS "command too long" at 16384/20000/34560. So the send
+   errored at set-buffer BEFORE a byte reached the pane (why the thread still read `ticket_needs_input:
+   true`). This is EXACTLY the H46 limitation (the ~16.3 KB `thread send --text` cap), now hit by a
+   legitimately large ticket prompt.
+FIX (the one H46 named and Lukas DECLINED then; conferred + approved via AskUserQuestion, because a
+ticket's whole job is to carry its prompt — there is no natural file/@blob workaround for a 34 KB spec
+ticket the way there is for `thread send --text`): SendText fills the buffer with **`load-buffer -b
+<buf> -` reading STDIN** via a new `Server.runStdin` (tmux.go) instead of `set-buffer` argv. load-buffer
+streams the payload — no MAX_IMSGSIZE argv cap (proven: 34 KB and 200 KB both load fine). Delivery is
+UNCHANGED: still `paste-buffer -p -d -b <buf> -t <target>`, so H77's bracketed-paste property and H76's
+per-call unique buffer names are preserved; only how the buffer gets FILLED changed. SendText is the
+SINGLE large-text seam (H77) — a repo grep confirmed set-buffer/literal-`send-keys -l` had no other
+user, so this one change covers thread send, ticket send-prompt, subscription/completion delivery, and
+spawn `--msg`.
+FIX #2 (same commit, TUI-client): `ticketDetailView` (internal/tui/tickets.go) now renders the ticket's
+FULL uuid as a NON-selectable header row (`  id:      <uuid>`) above the navigable td* items — the td
+enum + dispatch are untouched (the cursor still starts on tdName). This closes the exact confusion that
+produced the wrong id.
+TESTS. Transport regression `TestSendTextLargePayloadExceedsArgvCap` (internal/tmux/navwindow_test.go):
+real tmux, a 34 KB multi-line payload delivered byte-exact into a pane reading in RAW mode. TWO harness
+gotchas baked in as comments: (a) a CANONICAL-mode pty reader capped the capture at 32768 bytes (a tty
+line-discipline artifact — the send itself delivered all 34072; `stty raw -echo` fixes the reader, which
+is honest since a real agent TUI reads raw); (b) `paste-buffer` (no `-r`) replaces embedded LF with CR
+inside the paste, so `want` maps `\n`→`\r` (length unchanged). ANTI-GAMING: revert SendText to set-buffer
+→ RED "…BIGEND: exit status 1: command too long" (the exact user failure), reverse-edited back (never
+git-checkout — H44). TUI unit `TestTicketDetailShowsFullTicketID`: the detail view contains the full
+ticket id and NOT the full thread id; anti-gaming: delete the id-row line → RED, restored. INTEGRATION:
+H77's real-codex `TestCodexLongSingleLineSendSubmits` PASSES through the new seam (23.8s); conformance
+**ticket.send-prompt 6/6 + thread.send.headful 6/6** (real agents × local+remote, run serially — H65).
+internal/tmux + internal/tui green plain AND `-race` (SendText `-race` clean); `go vet` clean. gofmt
+flags tickets.go on an UNRELATED pre-existing const-iota drift (present at HEAD — H48 class; my lines are
+clean; not swept).
+NO schema/API/CLI change (no new flag/command/key/column/env var). SendText runs in the DAEMON, so the
+send fix needs a daemon REBUILD + RESTART per machine; the ticket-viewer id row is a TUI-client render
+(binary-only, no restart) — both ship in the one binary. Schema-neutral ⇒ a mixed fleet is safe during
+rollout. SKILL sync: sesh-cli ticket-view paragraph notes the read-only full-id row.
+DEPLOY: NOT YET DEPLOYED at commit time — recorded after the fleet rebuild below.
+
 ## H89 — NEW cockpit commands (ticket 318aa457): thread/box NOTES (myvault) + DOC bulk hold/unhold + create-null/create-tmp (2026-08-23, myrig 9e45c47; NO sesh change; render-only + conf source-file, deployed ALL SIX; mysrs note added; ticket 318aa457 done)
 Lukas ticket 318aa457 "New mmt and mt commands" — a batch of cockpit commands, all
 MYRIG-ONLY (no sesh change), wrapping existing sesh/boxyard/vaultiel surfaces + reusing the

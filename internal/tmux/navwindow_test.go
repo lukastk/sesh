@@ -378,3 +378,88 @@ func TestKillPaneLastPaneTearsDownServerIsSuccess(t *testing.T) {
 		t.Error("KillPane on a nonexistent pane (live server) must surface an error, not be swallowed")
 	}
 }
+
+// TestSendTextLargePayloadExceedsArgvCap proves the load-buffer transport removes
+// tmux's per-command argv cap (MAX_IMSGSIZE, 16384 bytes). The old set-buffer path
+// passed the whole text as one argv and failed "command too long" past that size, so
+// a real 34 KB ticket prompt could never be delivered to its pane. load-buffer streams
+// the payload on stdin, which has no such cap. The pane requests bracketed paste and
+// records its raw input bytes; the full multi-line payload must arrive byte-for-byte
+// inside one paste event.
+func TestSendTextLargePayloadExceedsArgvCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	sock := "seshsend-large-" + strings.ReplaceAll(t.Name(), "/", "_")
+	raw := func(args ...string) (string, error) {
+		out, err := exec.Command("tmux", append([]string{"-L", sock}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	defer exec.Command("tmux", "-L", sock, "kill-server").Run() //nolint:errcheck
+
+	// A multi-line payload well past the 16384-byte argv cap (the incident was a 34 KB
+	// ticket prompt), with sentinels so a truncated delivery is caught, not just a wrong
+	// length.
+	var sb strings.Builder
+	sb.WriteString("BIGSTART\n")
+	for sb.Len() < 34000 {
+		sb.WriteString("the quick brown fox jumps over the lazy dog 0123456789\n")
+	}
+	sb.WriteString("BIGEND")
+	text := sb.String()
+	if len(text) <= 16384 {
+		t.Fatalf("test payload must exceed the 16384-byte argv cap, got %d", len(text))
+	}
+	// paste-buffer -p wraps the payload in bracketed-paste markers; enter=false so no
+	// trailing Enter. paste-buffer (no -r) also replaces embedded LF with CR inside the
+	// paste (how a multi-line block reaches a TUI's line editor), so the delivered bytes
+	// carry CR where the source had LF. Length is unchanged. Reader captures exactly this
+	// many raw bytes.
+	want := []byte("\x1b[200~" + strings.ReplaceAll(text, "\n", "\r") + "\x1b[201~")
+
+	inputPath := filepath.Join(t.TempDir(), "input.bin")
+	// Read the pty in RAW mode: canonical mode caps a line/input burst and would drop
+	// bytes of a large paste at the tty discipline (a harness artifact — a real agent TUI
+	// reads raw), making the reader, not SendText, the bottleneck.
+	command := fmt.Sprintf("stty raw -echo 2>/dev/null; printf '\\033[?2004hLARGE_PASTE_READY\\n'; head -c %d > %q; sleep 5", len(want), inputPath)
+	if _, err := raw("-f", "/dev/null", "new-session", "-d", "-s", "large", "-x", "100", "-y", "30", command); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	pane, err := raw("list-panes", "-t", "large", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("pane id: %v", err)
+	}
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		capture, _ := raw("capture-pane", "-t", pane, "-p")
+		if strings.Contains(capture, "LARGE_PASTE_READY") {
+			ready = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("pane never acknowledged bracketed-paste mode")
+	}
+
+	// The load-buffer transport must accept the oversized payload without error.
+	if err := NewServer(sock).SendText(pane, text, false); err != nil {
+		t.Fatalf("SendText of a %d-byte payload failed — the argv cap was not removed: %v", len(text), err)
+	}
+	var got []byte
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got, _ = os.ReadFile(inputPath)
+		if len(got) == len(want) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("large payload not delivered intact: got %d bytes, want %d", len(got), len(want))
+	}
+}

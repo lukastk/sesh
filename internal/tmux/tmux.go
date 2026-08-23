@@ -60,6 +60,24 @@ func (s *Server) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// runStdin is run() with input piped to tmux's stdin. It exists for load-buffer,
+// which reads its payload from stdin (or a file) rather than as an argv. That
+// distinction is load-bearing: tmux's client->server imsg protocol caps a single
+// COMMAND at MAX_IMSGSIZE (16 KiB), so a large payload passed as a set-buffer argv
+// fails "command too long"; the same payload streamed on stdin has no such cap.
+func (s *Server) runStdin(input string, args ...string) (string, error) {
+	full := append(s.base(), args...)
+	cmd := exec.Command("tmux", full...)
+	cmd.Stdin = strings.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(full, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 // serverRunning reports whether this tmux server is up. tmux returns a specific
 // error when no server is running; that is an empty state, not a failure.
 func (s *Server) serverRunning() (bool, error) {

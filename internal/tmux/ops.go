@@ -66,7 +66,7 @@ func nextSendBufferName() string {
 // SendText sends literal text to target's pane. If enter is true, a trailing
 // Enter key is sent after (so it submits).
 //
-// Text always goes through set-buffer + paste-buffer -p, never a literal
+// Text always goes through a tmux buffer + paste-buffer -p, never a literal
 // send-keys stream. Besides preserving embedded newlines, this is load-bearing
 // for long single-line prompts: Codex classifies a fast literal key stream as a
 // paste in chunks, and a following Enter can land inside its paste-suppression
@@ -74,13 +74,19 @@ func nextSendBufferName() string {
 // requested bracketed-paste mode, -p gives it one explicit paste event that
 // clears that transient state before the trailing Enter. tmux preserves the
 // paste-end -> Enter byte ordering, so no guessed sleep is needed.
+//
+// The buffer is filled with load-buffer reading STDIN, not set-buffer taking the
+// text as an argv. set-buffer's argv path is capped by tmux's per-command
+// MAX_IMSGSIZE (16 KiB) — a >16 KiB prompt (e.g. a large ticket spec) fails
+// "command too long" and never reaches the pane. load-buffer streams the payload
+// on stdin, which has no such cap; delivery via paste-buffer -p is unchanged.
 func (s *Server) SendText(target, text string, enter bool) error {
 	if target == "" {
 		return fmt.Errorf("tmux: send-text: empty target")
 	}
 	if text != "" {
 		buf := nextSendBufferName()
-		if _, err := s.run("set-buffer", "-b", buf, text); err != nil {
+		if _, err := s.runStdin(text, "load-buffer", "-b", buf, "-"); err != nil {
 			return err
 		}
 		if _, err := s.run("paste-buffer", "-p", "-d", "-b", buf, "-t", target); err != nil {

@@ -85,6 +85,21 @@ command). Docs synced in the same change: `sesh help tui` long text + the sesh-c
 (palette-only list + a "Going to a thread by uuid" paragraph). A running SIDEBAR keeps the binary it
 launched with (H70), so a deployed machine still needs `prefix+r` (or mmt-kill/mmt-start) before the
 command exists inside its sidebar.
+DEPLOY RESULT (2026-08-23, commit 250e394): live on **5/6** — macbook, macstudio, ideapad, termux
+(plain `go build`, per H22) and mymain, every installed binary reporting `vcs.revision=250e394` +
+`vcs.modified=false`, and `sesh help tui` carrying the goto text on all five. **pocket4 OFFLINE**
+(ssh :22 timed out; it was already pending for H90) → PENDING, harmless (binary-only, mixed-mesh
+trivially safe); when it returns: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new
+./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh` (no restart).
+**mymain needed the throwaway route again** (H49/H63): its checkout is on ANOTHER AGENT'S branch
+`shell-threads` at be04707 with 14 modified files, so it was never pulled — built from a detached
+`git worktree` at origin/main, then the worktree removed. **GOTCHA WORTH KEEPING: a binary built in a
+linked git WORKTREE gets NO `vcs.revision` stamp at all** (Go's VCS detection wants a real `.git`
+DIRECTORY; the worktree has a `.git` FILE), so the verification step silently printed nothing and the
+deploy looked failed when it had actually worked — confirmed behaviourally via `sesh help tui`, then
+rebuilt from a `git clone --depth 1` of origin so the stamp is real. Also: mymain's `/usr/bin/go` is
+1.24.4 while go.mod wants 1.25.0 (the toolchain auto-download covers it), and `go` is NOT on the
+non-login ssh PATH there — use the absolute path.
 ## H90 — a 34 KB ticket "refused to send": tmux's set-buffer argv cap (MAX_IMSGSIZE=16384); fix = SendText streams via `load-buffer -b <buf> -` on STDIN (revisits H46's declined fix) + the TUI ticket viewer now shows the ticket's OWN full uuid (2026-08-23, sesh c487969; NO schema/API/CLI change; DAEMON rebuild+restart for the send fix + binary-only for the viewer row; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "I tried sending ticket 538e103f to thread 538e103f-71c8-... but it refuses to send." TWO
 distinct causes, one of them a real transport limit:

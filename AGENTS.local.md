@@ -40,10 +40,20 @@ DESIGN (conferred; he picked the `[[tui.key]]` table form and confirmed pin is p
   -100..200 and collect non-empty `Key{Type:t}.String()` — 85 names incl. backspace at 127),
   so a typo like `ctlr+f` is refused instead of binding a key that can never fire.
 - **`ctrl+c` is hard-wired OUTSIDE the registry** and cannot be rebound: a config that unbinds
-  `quit` must never leave the TUI with no way out.
-- **`q`/`esc` now run `dismiss`** (clear the ✗/note lines) — the behaviour sidebar mode already
-  had, now uniform. **CALL THIS OUT TO LUKAS**: it is the note's most surprising consequence,
-  `quit` is palette-only, and if he wants `q` back it is one registry line.
+  `quit` must never leave the TUI with no way out. It is the one binding [[tui.key]] refuses.
+- **`q`/`esc` KEEP quitting.** The note deletes the `q/esc quit` line, so I first made them
+  run `dismiss` with `quit` palette-only, flagged it as the note's most surprising
+  consequence — and Lukas said "bring back esc and q". They are back on `quit`. **The
+  interesting part is how**: the old code special-cased sidebar mode inside the `q`/`esc`
+  branch, which a key-string switch could do but a command registry cannot without lying
+  about what the keys do. So `Keymap` now carries a **SIDEBAR VARIANT** built once at resolve
+  time (`withQuitAsDismiss`): every key bound to `quit` is rebound to `dismiss`, and
+  `Model.km()` returns it when `m.sidebar`. That keeps all three properties — a persistent
+  cockpit pane still cannot die to a stray keystroke, a `?` popup INSIDE a sidebar correctly
+  shows esc/q as dismiss and `quit` as keyless, and the rule follows a REBOUND quit (bind
+  quit to `Q` and it is `Q` that dismisses in a sidebar, not esc). `quit` chosen explicitly
+  from the palette still quits even a sidebar — a deliberate act, not a stray keystroke — as
+  does ctrl+c.
 - **The reparent picker (parentpick.go)** lists only choices the daemon will ACCEPT: same
   machine only (a parent is validated owner-locally — H37, cross-machine parenting does not
   exist), never the thread itself or its DESCENDANTS (cycle), never a divider, never its current
@@ -111,7 +121,9 @@ a Mac). A THIRD claim, `filter-esc-applies`, went red and WAS mine: it asserted 
 quits. Repaired to the new contract — it now asserts Esc does NOT quit, does NOT disturb the
 applied filter (the property the claim actually exists for), and that ctrl+c still quits. That
 one is the reminder that a grep for the removed keys is not enough: `filter-esc-applies` drove
-Esc through `m.Update` directly, not through the `runKey` helper my sweep matched.
+Esc through `m.Update` directly, not through the `runKey` helper my sweep matched. (Both it and
+`quit-esc` were then restored to the quit contract when esc/q came back — and they caught the
+reversal immediately, which is the point of having them.)
 PRE-EXISTING RED outside conformance, also verified on the clean worktree and NOT mine
 (internal/daemon is untouched here): `TestMaintainerDropsStaleReportedBusy` "baseline: busy=idle
 authority=" — the H75/H81 macbook red, still unfixed. Also unchanged: `gofmt -l` flags internal/config/{config,tui}.go on clean

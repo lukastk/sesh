@@ -2181,13 +2181,17 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 	}
 	switch id {
 	// `dismiss` clears the message lines (actionErr/note), which otherwise persist
-	// until the next action. It is what esc/q do now that quitting moved to the
-	// palette: in SIDEBAR mode a persistent cockpit pane must never die to a stray
-	// keystroke (its pane would vanish and take the traveling slot with it), and the
-	// normal grid gets the same non-destructive behaviour. ctrl+c stays the kill.
+	// until the next action. It carries no key by default in the normal grid — but in
+	// SIDEBAR mode the keymap binds esc/q to it instead of quit (see Keymap.sidebar),
+	// because a persistent cockpit pane must never die to a stray keystroke: its pane
+	// would vanish and take the traveling slot with it, and those message lines would
+	// otherwise sit there forever in a pane that never quits.
 	case "dismiss":
 		m.actionErr, m.note = nil, ""
 		return m, nil
+	// `quit` really quits, wherever it is invoked from. In a sidebar no KEY reaches it
+	// (they resolve to dismiss), but choosing it explicitly from the palette is a
+	// deliberate act, not a stray keystroke, so it is honoured — as is ctrl+c.
 	case "quit":
 		return m, tea.Quit
 	case "cursor-up":

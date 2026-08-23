@@ -31,9 +31,9 @@ func TestDefaultKeymapIsTheSurvivingSet(t *testing.T) {
 		"i": "toggle-id", "w": "toggle-width-cap", "y": "uuid", "n": "notify",
 		"x": "stop", "a": "archive", "U": "undo-archive", "R": "refresh",
 		"?": "help",
-		// esc/q no longer quit — quitting moved to the palette (ctrl+c is the
-		// always-available kill); they dismiss the message lines instead.
-		"esc": "dismiss", "q": "dismiss",
+		// esc/q KEEP quitting (Lukas asked for them back after the keymap cut). In
+		// SIDEBAR mode they resolve to `dismiss` instead — see TestSidebarKeymapSwapsQuit.
+		"esc": "quit", "q": "quit",
 	}
 	km := DefaultKeymap()
 	for key, id := range want {
@@ -53,8 +53,11 @@ func TestDefaultKeymapIsTheSurvivingSet(t *testing.T) {
 		{"hold-until", "H"}, {"tag-add", "t"}, {"tag-remove", "T"},
 		{"set-parent-uuid", "P"}, {"new-virtual", "v"}, {"pin", "p"},
 		{"new-divider", "D"}, {"fork", "F"}, {"delete", "d"},
-		{"toggle-offline", "o"}, {"quit", "q"},
+		{"toggle-offline", "o"}, {"dismiss", ""},
 	} {
+		if c.oldKey == "" && len(km.KeysFor(c.id)) != 0 {
+			t.Errorf("command %q should carry no default key", c.id)
+		}
 		if keys := km.KeysFor(c.id); len(keys) != 0 {
 			t.Errorf("command %q should be palette-only, but carries %v", c.id, keys)
 		}
@@ -229,18 +232,14 @@ func TestSurvivingKeyReassignments(t *testing.T) {
 		t.Errorf("p must no longer pin the selected thread")
 	}
 
-	dm := base
-	dm.note, dm.actionErr = "hi", errTest
+	// esc/q still QUIT in the normal grid (restored after the keymap cut).
 	for _, k := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
-		nm, cmd := dm.handleKey(k)
-		got := nm.(Model)
-		if cmd != nil {
-			if _, quit := cmd().(tea.QuitMsg); quit {
-				t.Errorf("%v must not quit any more", k)
-			}
+		_, cmd := base.handleKey(k)
+		if cmd == nil {
+			t.Fatalf("%v produced no command (want quit)", k)
 		}
-		if got.note != "" || got.actionErr != nil {
-			t.Errorf("%v should dismiss the message lines", k)
+		if _, quit := cmd().(tea.QuitMsg); !quit {
+			t.Errorf("%v must still quit the normal grid", k)
 		}
 	}
 
@@ -288,3 +287,75 @@ var errTest = &testErr{}
 type testErr struct{}
 
 func (*testErr) Error() string { return "test" }
+
+// SIDEBAR mode swaps the keys that would QUIT over to `dismiss`: a persistent
+// cockpit pane must not die to a stray keystroke (its pane would vanish and take
+// the traveling slot with it), while the message lines it accumulates would
+// otherwise sit there forever. ctrl+c stays the deliberate kill, and choosing
+// `quit` explicitly from the palette is still honoured.
+func TestSidebarKeymapSwapsQuit(t *testing.T) {
+	row := api.ThreadRow{Thread: api.Thread{ID: "t1", Name: "one", Machine: "mymain", AgentKind: "pi"}}
+	sb := Model{machine: "mymain", rows: []api.ThreadRow{row}, machines: selfMachines(), sidebar: true}
+	sb.note, sb.actionErr = "hi", errTest
+
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
+		nm, cmd := sb.handleKey(k)
+		got := nm.(Model)
+		if cmd != nil {
+			if _, quit := cmd().(tea.QuitMsg); quit {
+				t.Errorf("%v must not quit a SIDEBAR", k)
+			}
+		}
+		if got.note != "" || got.actionErr != nil {
+			t.Errorf("%v should dismiss the sidebar's message lines", k)
+		}
+	}
+	// The rendered keymap must say so too — a sidebar's `?` popup that still
+	// advertised esc/q as quit would be lying about what they do there.
+	if got := sb.km().Command("esc"); got != "dismiss" {
+		t.Errorf("sidebar keymap resolves esc to %q, want dismiss", got)
+	}
+	if keys := sb.km().KeysFor("quit"); len(keys) != 0 {
+		t.Errorf("the sidebar keymap should show quit as keyless, got %v", keys)
+	}
+	if lbl := sb.km().KeyLabel("dismiss"); lbl != "esc/q" {
+		t.Errorf("sidebar dismiss should carry esc/q, got %q", lbl)
+	}
+	// ctrl+c is outside the registry and still kills the sidebar.
+	_, cmd := sb.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatalf("ctrl+c produced no command in a sidebar")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Errorf("ctrl+c must still quit a sidebar (the deliberate kill)")
+	}
+	// Explicitly running `quit` from the palette IS honoured — a deliberate act,
+	// not a stray keystroke.
+	_, cmd = sb.runCommand("quit")
+	if cmd == nil {
+		t.Fatalf("palette quit produced no command in a sidebar")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Errorf("an explicit palette `quit` should quit even a sidebar")
+	}
+}
+
+// A REBOUND quit follows the sidebar rule too — the swap is "the keys that would
+// quit", not "esc and q specifically".
+func TestSidebarSwapFollowsRebind(t *testing.T) {
+	km, err := ResolveKeymap([]KeySpec{{Command: "quit", Key: "Q"}})
+	if err != nil {
+		t.Fatalf("ResolveKeymap: %v", err)
+	}
+	grid := Model{keymap: km}
+	if got := grid.km().Command("Q"); got != "quit" {
+		t.Errorf("grid: Q should quit, got %q", got)
+	}
+	side := Model{keymap: km, sidebar: true}
+	if got := side.km().Command("Q"); got != "dismiss" {
+		t.Errorf("sidebar: the rebound quit key Q should dismiss, got %q", got)
+	}
+	if got := side.km().Command("esc"); got == "dismiss" {
+		t.Errorf("esc was moved off quit by config, so it should not dismiss either")
+	}
+}

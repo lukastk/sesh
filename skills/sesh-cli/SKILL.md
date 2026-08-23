@@ -262,9 +262,9 @@ the last one the cockpit is told to show (previously the stale preview could lan
 top of the click, so the click "didn't take" and only corrected itself a nav later).
 A stalled preview can't swallow the click — past a short grace the enter goes out
 anyway.
-**esc/q dismiss rather than quit** (as they do everywhere now) — which matters most
-here, since a persistent pane must not die to a stray keystroke and those ✗ error /
-note lines would otherwise persist forever in a pane that never quits. ctrl+c is the
+**esc/q never quit in sidebar mode** — the keymap binds them to `dismiss` there, so
+they clear the ✗ error / note lines (which would otherwise persist forever in a pane
+that never quits) instead of killing a pane the cockpit depends on. ctrl+c is the
 deliberate kill; hide/show is the cockpit toggle's job. A successful nav or follow
 also clears a stale error.
 Entering a thread from `/` search exits search (query cleared, cursor on the entered
@@ -300,9 +300,12 @@ Every action the grid can perform is a named **command** (`flag`, `archive`,
 `?` shows the whole keymap in a scrollable popup (one binding per line, keyless
 commands included). The bottom line carries only a dim **`? keys · p commands`** hint.
 
-**`ctrl+c` always quits** and cannot be rebound — it is the guaranteed way out.
-Note `q`/`esc` no longer quit: they DISMISS the ✗ error / note lines (which
-otherwise persist until the next action). `quit` is a palette command.
+`q`/`esc` quit as they always have. **`ctrl+c` also always quits** and — unlike
+every other binding — cannot be rebound or unbound, so no config can leave the TUI
+with no way out. In **sidebar mode** the keymap binds `q`/`esc` to `dismiss`
+instead (clearing the ✗ error / note lines), because a persistent cockpit pane
+must not die to a stray keystroke; a `?` popup inside a sidebar shows that. `quit`
+chosen explicitly from the palette still quits, even there.
 
 Keymap (normal mode) — the commands that carry a default key:
 
@@ -355,7 +358,7 @@ K            tickets view (the selected thread's tickets — see below)
 x            stop      a  archive/unarchive (INSTANT)
 U            undo the last archive (LIFO across this session's archives)
 ?            the keymap popup
-q / esc      dismiss the ✗ error / note lines
+q / esc      quit (in SIDEBAR mode: dismiss the ✗ error / note lines instead)
 ctrl+c       quit (always available, never rebindable)
 ```
 
@@ -381,7 +384,7 @@ fork             copy the selected thread into a new HEADLESS thread (same conve
                  anything — enter the copy to continue; the source is untouched.
 delete           delete the record (asks y/n)
 toggle-offline   show / hide the threads of OFFLINE mesh machines (hidden by default)
-quit             quit the TUI
+dismiss          clear the ✗ error / note lines (esc/q do this in sidebar mode)
 ```
 
 **Setting a parent interactively (`set-parent`).** Run it on the CHILD: a picker opens

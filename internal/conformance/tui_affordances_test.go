@@ -188,12 +188,11 @@ func typeText(t *testing.T, m tui.Model, text string) tui.Model {
 	return nm.(tui.Model)
 }
 
-// claimQuitEsc: while the line prompt is open, Esc closes the PROMPT and does not
-// quit. In normal mode Esc no longer quits either — since the command palette
-// landed, esc/q DISMISS the message lines and `quit` lives in the palette, with
-// ctrl+c as the always-available kill. This claim pins all three against a real
-// daemon, because "the TUI won't close" and "the TUI closed when I hit esc" are
-// both things you only notice in the real thing.
+// claimQuitEsc: Esc quits from normal mode; while the line prompt is open, Esc
+// only closes the PROMPT. Both against a real daemon, because "the TUI won't
+// close" and "the TUI closed when I hit esc" are things you only notice in the
+// real thing. Also pins that ctrl+c quits and cannot be configured away, and
+// that `quit` is reachable from the command palette.
 func claimQuitEsc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -205,8 +204,7 @@ func claimQuitEsc(t *testing.T) {
 	// WithExec/WithLocal are REQUIRED for any claim whose model performs a routed
 	// action: without them the TUI shells out to os.Executable() — which under
 	// `go test` is the TEST BINARY — and re-runs the whole suite as a subprocess
-	// instead of running `sesh`. (This claim only opened popups before, so it got
-	// away with the bare constructor; the reparent below does not.)
+	// instead of running `sesh`.
 	bin := seshBin(t)
 	env := []string{"SESH_HOME=" + sb.Home, "SESH_MACHINE=" + sb.Machine}
 	m := tui.New(sb.Home+"/daemon.sock", false).WithExec(bin, env).WithLocal(sb.Machine, sb.TmuxSocket)
@@ -228,27 +226,13 @@ func claimQuitEsc(t *testing.T) {
 		t.Errorf("Esc did not close the prompt")
 	}
 
-	// Normal mode: Esc DISMISSES rather than quitting. Give it something to
-	// dismiss first — a real refused action on a real record — so the assertion
-	// cannot pass vacuously against an already-empty message line.
-	m = runCommand(t, m, "set-parent-uuid")
-	m = typeText(t, m, "not-a-real-uuid")
-	m = runSpecial(t, m, tea.KeyEnter)
-	if !waitUntil(10*time.Second, func() bool {
-		m, _ = render(t, m)
-		return m.ActionErr() != nil
-	}) {
-		t.Fatalf("reparent to a bogus uuid should have set a loud action error")
+	// Normal mode: Esc quits.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatalf("Esc in normal mode returned no command (want quit)")
 	}
-	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = nm.(tui.Model)
-	if cmd != nil {
-		if _, quit := cmd().(tea.QuitMsg); quit {
-			t.Fatalf("Esc in normal mode must NOT quit any more — quit moved to the palette")
-		}
-	}
-	if m.ActionErr() != nil {
-		t.Errorf("Esc in normal mode should dismiss the error line, still: %v", m.ActionErr())
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Errorf("Esc in normal mode did not quit (got %T)", cmd())
 	}
 
 	// ctrl+c is the always-available kill and cannot be configured away.
@@ -260,9 +244,8 @@ func claimQuitEsc(t *testing.T) {
 		t.Errorf("ctrl+c did not quit (got %T)", cmd())
 	}
 
-	// And `quit` really is reachable from the palette.
-	m2 := runCommandNoApply(t, m, "quit")
-	if m2 == nil {
+	// And `quit` really is reachable from the command palette.
+	if runCommandNoApply(t, m, "quit") == nil {
 		t.Errorf("quit is not reachable from the command palette")
 	}
 }

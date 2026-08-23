@@ -91,8 +91,8 @@ var commands = []Command{
 	{ID: "toggle-offline", Desc: "show / hide offline machines"},
 	{ID: "refresh", Desc: "force refresh", Keys: []string{"R"}},
 	{ID: "help", Desc: "keymap help", Keys: []string{"?"}},
-	{ID: "dismiss", Desc: "dismiss the message line", Keys: []string{"esc", "q"}},
-	{ID: "quit", Desc: "quit"},
+	{ID: "dismiss", Desc: "dismiss the message line"},
+	{ID: "quit", Desc: "quit", Keys: []string{"esc", "q"}},
 }
 
 // Commands exposes the registry (help rendering, tests, docs).
@@ -120,6 +120,14 @@ const hardQuitKey = "ctrl+c"
 type Keymap struct {
 	byKey map[string]string   // key string -> command id
 	byCmd map[string][]string // command id -> its keys, in display order
+	// sidebar is this same map with every key bound to `quit` rebound to
+	// `dismiss` — the SIDEBAR variant. A persistent cockpit pane must not die to a
+	// stray keystroke (its pane would vanish and take the traveling slot with it),
+	// so esc/q dismiss the message lines there instead of quitting; ctrl+c stays
+	// the deliberate kill. Built once at resolve time rather than derived per
+	// lookup, and it is a real second keymap so the `?` popup rendered INSIDE a
+	// sidebar tells the truth about what esc/q do there. nil on the variant itself.
+	sidebar *Keymap
 }
 
 // Command returns the command id bound to key, or "" when nothing is.
@@ -273,7 +281,32 @@ func ResolveKeymap(specs []KeySpec) (*Keymap, error) {
 			km.byCmd[c.ID] = keys[c.ID]
 		}
 	}
+	km.sidebar = km.withQuitAsDismiss()
 	return km, nil
+}
+
+// withQuitAsDismiss returns a copy in which every key bound to `quit` runs
+// `dismiss` instead — the sidebar variant (see Keymap.sidebar). It follows a
+// REBOUND quit too: the rule is "the keys that would quit dismiss instead", not
+// "esc and q specifically".
+func (k *Keymap) withQuitAsDismiss() *Keymap {
+	out := &Keymap{byKey: make(map[string]string, len(k.byKey)), byCmd: make(map[string][]string, len(k.byCmd))}
+	for key, id := range k.byKey {
+		if id == "quit" {
+			id = "dismiss"
+		}
+		out.byKey[key] = id
+	}
+	for id, keys := range k.byCmd {
+		if id == "quit" {
+			continue
+		}
+		out.byCmd[id] = keys
+	}
+	if qk := k.byCmd["quit"]; len(qk) > 0 {
+		out.byCmd["dismiss"] = append(append([]string(nil), qk...), out.byCmd["dismiss"]...)
+	}
+	return out
 }
 
 // commandIDs lists every registered command id (for the unknown-command error).
@@ -337,10 +370,17 @@ func sampleKeyNames() []string {
 // struct-literal Model, and without it those models would have NO keys at all and
 // so would exercise nothing like the shipped TUI (the H80 zero-value lesson).
 func (m Model) km() *Keymap {
-	if m.keymap != nil {
-		return m.keymap
+	base := m.keymap
+	if base == nil {
+		base = defaultKeymap
 	}
-	return defaultKeymap
+	// SIDEBAR mode swaps in the quit-as-dismiss variant, so esc/q clear the message
+	// lines instead of killing a pane the cockpit depends on. ctrl+c is unaffected —
+	// it is outside the registry and stays the deliberate kill.
+	if m.sidebar && base.sidebar != nil {
+		return base.sidebar
+	}
+	return base
 }
 
 // WithKeymap injects the resolved [[tui.key]] bindings (cmd/sesh/tui.go).

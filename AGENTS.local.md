@@ -1,5 +1,87 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H89 — NEW cockpit commands (ticket 318aa457): thread/box NOTES (myvault) + DOC bulk hold/unhold + create-null/create-tmp (2026-08-23, myrig 9e45c47; NO sesh change; render-only + conf source-file, deployed ALL SIX; mysrs note added; ticket 318aa457 done)
+Lukas ticket 318aa457 "New mmt and mt commands" — a batch of cockpit commands, all
+MYRIG-ONLY (no sesh change), wrapping existing sesh/boxyard/vaultiel surfaces + reusing the
+`_mt_*` helpers. Conferred 4 decisions (AskUserQuestion) before building; the DOC hold rule
+is the load-bearing one. (Numbered H89 — a concurrent session took H88 for the TUI palette;
+renumbered mine, kept both — the H80/H87 collision convention.)
+
+THREAD/BOX NOTES — a myvault note per thread (by UUID) / box (by box_id), PLAIN markdown
+created on demand at `trunk/thread-notes/<uuid>.md` and `trunk/box-notes/<box_id>.md`
+(box_id = the `YYYYMMDD_<sub>` prefix, NOT the `__name` index; the ticket's URI example
+`20260705_2x9e6y` confirmed this). `mt-open-current-{box,thread}-note` open in `$EDITOR`
+(popup) — base prefix+j/+k; the `-in-window` twins open a new tmux window;
+`mmt-open-current-{box,thread}-note-in-obsidian` open via adv-uri
+(`obsidian://adv-uri?vault=myvault&openmode=tab&filepath=<@uri>`) on the DESKTOP (the master
+host, where obsidian + the vault live) — master prefix+j/+k. "Current box" = the pressing
+pane's cwd (base, via `boxyard which` — resolves box SUBFOLDERS too) / the active master
+window thread's `cwd_rel` (master, parsed to box_id, no ssh). New helpers `_mt_vault_root`
+(LOUD if no local vault — a machine may hold no vault copy), `_mt_thread_box_id`,
+`_mt_current_box_id`, `_mt_open_obsidian`, `_mt_open_note_editor`. Folders were GREENFIELD
+(`trunk/` existed; the two subfolders did not).
+
+DOC (Domain of Concern = myvault notes with `DOC: true`, mysystem's `inDOC` predicate) bulk
+hold/unhold across the mesh, REACHABLE machines only (grid --all-machines skips offline):
+  - `mmt-setup-the-DOC` — hold (until tomorrow) every non-archived thread EXCEPT pinned,
+    in-DOC, or vault-UNLINKED. Lukas's DECISION on the ambiguous edge: a thread is HELD iff
+    `!pinned && !inDOC && (uuid attached to a note OR in a box attached to a note)` — so a
+    thread in a box attached to NO note is KEPT (treated as detached), not held. `inDOC` =
+    uuid in a DOC note's `ms-data.threads` OR box_id in a DOC note's `ms-data.boxes`.
+  - `mmt-unhold-DOC` — clear hold on the in-DOC threads.
+  - `mmt-unhold-all-threads` — clear hold on every thread (`grid --all-machines --archived`).
+Helpers `_mt_doc_frontmatter_sets` (ONE `vaultiel all-frontmatter` pass → 4 membership sets
+dt/db/at/ab) + `_mt_doc_plan` (PURE read-only classifier: `id⇥machine⇥decision⇥reason⇥inDOC⇥
+held_now` — the way to PREVIEW setup-the-DOC without mutating). "until tomorrow" = zsh
+`strftime %Y-%m-%d $((EPOCHSECONDS+86400))` (portable — the Macs have no GNU `date -d
+tomorrow`); Lukas asked for "the default hold value, until tomorrow". Hold is deadline-based/
+auto-expiring; H26 hold INHERITANCE still applies (a kept child under a held ancestor stays
+effectively held — documented in the code + cards, not worked around).
+
+CREATE: refactored `_mt_create_box` into a shared `_mt_new_box` (echoes
+`machine⇥index⇥dir⇥name`) + `_mt_enter_box_session` (create-box behaviour UNCHANGED).
+`mmt-/mt-create-null` (new box, blank name → `null`), `-create-null-and-thread` (+ an agent
+thread), `-create-tmp-and-thread` (cross-machine `cd-tmp` = `mktemp -d` on the target, then
+an agent thread; an absolute `--cwd` is used verbatim on the owner, like the existing box
+path).
+
+BINDINGS: master + base prefix+j/+k (both keys were FREE at both levels). Master j/k → the
+obsidian openers (carry `SESH_MT_MASTER_MACHINE=#{window_name}`); base j/k → the `$EDITOR`
+openers (carry `SESH_MT_PANE=#{pane_id}` — THE WHICH-CLIENT LAW). `menus.sh`: the new
+commands added to the prefix+m quick palettes; the prefix+M group palettes pick them up from
+their `-g mmt`/`-g mt` `my_alias`. mysrs cards at myvault `mysrs/misc/mycockpit.md`
+(`mysrs-deck: mysrs::mycockpit`; syncs via obsidian, reconciled by the mysrs vault-sync).
+Docs: myrig AGENTS.md + mysetup-navigator SKILL.
+
+BUG FOUND+FIXED during the read-only classifier preview (the value of previewing): the first
+`_mt_doc_plan` iterated `grid | jq | while` — a PIPELINE, whose `while` runs in a zsh
+SUBSHELL where a BARE `local name` (no assignment) ECHOES `name=value` to stdout. 141 of 189
+output lines were stray `bid=`/`decision=`/`reason=` from `local bid` / `local decision
+reason`. FIX: declare ALL locals ONCE up-front + iterate a captured var via a here-string
+(`<<<"$rows"`, function scope, no subshell). Also moved the possibly-empty `cwd_rel` LAST in
+the `@tsv` so an empty middle field can't collapse under `IFS=$'\t' read`. REUSABLE GOTCHA.
+
+VERIFIED (read-only + scratch): rendered jinja + `zsh -n` clean; `_mt_doc_plan` on the live
+fleet = 48 threads → 26 hold(box-attached) / 16 keep(detached) / 5 keep(pinned) / 1
+keep(in-DOC), 0 stray lines — cross-checked the SOLE DOC box (`20260705_2x9e6y`) against the
+live threads (0 notes attach a thread by uuid today, so all attachment is via boxes); box_id
+parse (incl. worktree subfolders) + adv-uri encoding unit-checked; note openers smoke-tested
+in a THROWAWAY vault with a fake editor/open (no real vault touched — confirmed
+`trunk/{box,thread}-notes` absent in the real vault after); hold mechanics round-tripped on a
+disposable scratch thread (held until 2026-08-24 00:00 = start of tomorrow, cleared, deleted).
+Did NOT run `mmt-setup-the-DOC` on the live fleet — Lukas's call (it would park ~7 new
+threads + refresh 19 already held).
+
+DEPLOY: render-only (shell.sh is rendered jinja → `install-home` per machine; confs +
+menus.sh are symlinks → `git pull`) + conf `source-file` to make the new bindings live on
+running servers. ALL SIX at 9e45c47: mymain (local install-home), ideapad + pocket4 + termux
+(python3), macbook + macstudio (`uv run --with jinja2` — their system python3 lacks jinja2,
+H46). `mmt-reload-conf-all` re-sourced every work server; `tmux.master.conf` source-file'd on
+the 4 machines running a `sesh-master` (mymain/ideapad/macbook/termux); termux's WORK server
+source-file'd separately (it's an outbound leaf, absent from `mmt-reload-conf-all`'s peer
+set). All 15 new commands verified registered (`-g mmt`/`mt`) + j/k bound on every server. NO
+daemon restart, no sesh binary change (pure myrig).
+
 ## H88 — TUI COMMAND PALETTE + config-rebindable keymap, and an INTERACTIVE reparent picker (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; tickets 7e01fe7e + 9ecfbdeb; NOT YET DEPLOYED)
 Two tickets, one commit's worth of surface. Lukas: "Currently `sesh tui` has loads of keyboard
 shortcuts. Way too many. Instead of that we shall adopt a *command palette* approach. Pressing

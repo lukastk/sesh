@@ -27,6 +27,18 @@ func main() {
 		return
 	}
 
+	// `--allow-unverified` is a pseudo-global too (see extractAllowUnverifiedFlag):
+	// strip it and record it before anything reads the subcommand, so it works
+	// whether it precedes or follows the verb.
+	if allow, rest := extractAllowUnverifiedFlag(os.Args[1:]); allow {
+		allowUnverifiedCurrent = true
+		os.Args = append([]string{os.Args[0]}, rest...)
+		if len(os.Args) < 2 {
+			usage()
+			os.Exit(2)
+		}
+	}
+
 	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X is
 	// a remote peer, forward the command there over the peer's EXPLICIT transport —
 	// ssh (a real ssh hop) or http (the peer's TCP API). Local-only meta commands

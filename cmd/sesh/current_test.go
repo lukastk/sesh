@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -161,5 +164,229 @@ func TestGuardEmptyPositionalRef(t *testing.T) {
 	}
 	if err := guardEmptyPositionalRef(true, "abc"); err != nil {
 		t.Errorf("supplied non-empty positional should be fine: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PROVENANCE / no-pane corroboration (ticket d7be88ef).
+//
+// The incident: an agent in the boxyard-go thread (cwd ~/dev/…__boxyard-go) ran
+// as a detached background job, so it had NO tmux pane; its inherited
+// $SESH_THREAD_ID named the unrelated "mysetup - sesh" thread (cwd
+// ~/mysetup/sesh). `sesh info` reported that thread as "the current thread"
+// with no hedging, and a self-compact runner built on that answer compacted the
+// victim and injected a foreign handover prompt into it.
+//
+// The previously-covered case was stale-env-vs-LIVE-PANE (the pane wins, drift
+// noted). This is env-with-NO-pane, where there is no pane to lose to — which
+// is exactly how it got through.
+
+// realDir makes a directory UNDER base that survives canonicalDir's symlink
+// resolution (t.TempDir() sits under a symlinked /tmp on macOS, so comparing an
+// unresolved path against a resolved one would read as two unrelated trees —
+// the very false positive the resolution exists to avoid).
+//
+// It takes an explicit base because t.TempDir() mints a NEW directory on every
+// call: building a parent and its child from two separate t.TempDir() calls
+// makes them siblings under different roots, and the containment cases then
+// "fail" against perfectly correct code.
+func realDir(t *testing.T, base string, parts ...string) string {
+	t.Helper()
+	p := filepath.Join(append([]string{base}, parts...)...)
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", p, err)
+	}
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatalf("evalsymlinks %s: %v", p, err)
+	}
+	return resolved
+}
+
+// TestCwdContradicts pins the corroboration truth table, including every case
+// that must read as "no contradiction". Only a POSITIVE contradiction may
+// refuse (H82's one-directional evidence rule): a false positive is a loud
+// error the user can work around, a false negative is someone else's session.
+func TestCwdContradicts(t *testing.T) {
+	base := t.TempDir()
+	root := realDir(t, base, "root")
+	sub := realDir(t, base, "root", "pkg", "deep")
+	other := realDir(t, base, "elsewhere")
+
+	cases := []struct {
+		name       string
+		threadCwd  string
+		callerCwd  string
+		contradict bool
+	}{
+		{"identical", root, root, false},
+		{"caller in a subdirectory of the thread cwd", root, sub, false},
+		{"caller is a parent of the thread cwd (ambiguous, not proof)", sub, root, false},
+		{"unrelated trees — the reported incident", root, other, true},
+		{"no thread cwd is no evidence", "", other, false},
+		{"no caller cwd is no evidence", root, "", false},
+		{"both empty", "", "", false},
+		{"relative thread cwd is not comparable", "some/relative", other, false},
+		{"trailing slashes do not matter", root + "/", sub, false},
+		{"sibling prefix is NOT containment", root, root + "-sibling", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cwdContradicts(tc.threadCwd, tc.callerCwd); got != tc.contradict {
+				t.Errorf("cwdContradicts(%q, %q) = %v, want %v", tc.threadCwd, tc.callerCwd, got, tc.contradict)
+			}
+		})
+	}
+}
+
+// TestResolveCurrentThreadProvenance is the core regression: it drives the
+// inference truth table with the pane, the env and the calling directory all
+// injected, and asserts BOTH the id and its provenance.
+func TestResolveCurrentThreadProvenance(t *testing.T) {
+	const (
+		mine    = "1777a4ac-83e7-40cc-abc6-6e9c9697f497" // boxyard-go
+		foreign = "093da760-ea1c-40a3-b5bb-29aa566eea7f" // "mysetup - sesh"
+	)
+	base := t.TempDir()
+	box := realDir(t, base, "dev", "20260822_tsl6xn__boxyard-go")
+	boxSub := realDir(t, base, "dev", "20260822_tsl6xn__boxyard-go", "internal")
+	seshRepo := realDir(t, base, "mysetup", "sesh")
+	c := fakeMeshThreadClient{local: []api.Thread{
+		{ID: mine, Name: "boxyard-go", Cwd: box},
+		{ID: foreign, Name: "mysetup - sesh", Cwd: seshRepo},
+	}}
+
+	t.Run("pane marker is verified and needs no corroboration", func(t *testing.T) {
+		// Even standing somewhere unrelated: in a pane the marker is read from
+		// the pane this process actually runs in, so cwd is irrelevant.
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{paneID: mine, cwd: seshRepo})
+		if err != nil || id != mine || src != srcPane {
+			t.Fatalf("got (%s, %s, %v), want (%s, pane, nil)", id, src, err, mine)
+		}
+		if !src.verified() {
+			t.Error("a pane-derived id must be verified")
+		}
+		if len(notes) != 0 {
+			t.Errorf("no notes expected, got %v", notes)
+		}
+	})
+
+	t.Run("pane beats a disagreeing env and says so", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{paneID: mine, env: foreign, cwd: box})
+		if err != nil || id != mine || src != srcPane {
+			t.Fatalf("got (%s, %s, %v), want (%s, pane, nil)", id, src, err, mine)
+		}
+		if len(notes) != 1 || !strings.Contains(notes[0], "stale") {
+			t.Errorf("expected a drift note, got %v", notes)
+		}
+	})
+
+	t.Run("env with no pane resolves but is flagged UNVERIFIED", func(t *testing.T) {
+		// The legitimate no-pane case: a headless turn, whose cwd is its
+		// thread's. It must still work — and must still say it is unverified.
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{env: mine, cwd: box})
+		if err != nil || id != mine || src != srcEnv {
+			t.Fatalf("got (%s, %s, %v), want (%s, env, nil)", id, src, err, mine)
+		}
+		if src.verified() {
+			t.Error("an env-derived id must NOT be verified")
+		}
+		if len(notes) != 1 || !strings.Contains(notes[0], "unverified") {
+			t.Errorf("expected an unverified note, got %v", notes)
+		}
+	})
+
+	t.Run("env with no pane, caller in a subdirectory, still resolves", func(t *testing.T) {
+		id, _, _, err := resolveCurrentThreadFrom(c, currentInputs{env: mine, cwd: boxSub})
+		if err != nil || id != mine {
+			t.Fatalf("a subdirectory of the thread cwd must corroborate: got (%s, %v)", id, err)
+		}
+	})
+
+	t.Run("THE INCIDENT: env names an unrelated thread and is REFUSED", func(t *testing.T) {
+		id, _, _, err := resolveCurrentThreadFrom(c, currentInputs{env: foreign, cwd: box})
+		if err == nil {
+			t.Fatalf("resolved %s from an env id whose thread cwd is unrelated to the caller — "+
+				"this is the reported bug (a self-compact then hijacked that thread)", id)
+		}
+		if id != "" {
+			t.Errorf("a refusal must return no id, got %q", id)
+		}
+		var ue *unverifiedError
+		if !errors.As(err, &ue) {
+			t.Fatalf("want an *unverifiedError (so optional-inference callers can tell it apart from "+
+				"'not in a thread'), got %T: %v", err, err)
+		}
+		for _, want := range []string{"093da760", "--id", "--allow-unverified"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal must name %q; got: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("--allow-unverified overrides the refusal, loudly", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{env: foreign, cwd: box, allowUnverified: true})
+		if err != nil || id != foreign || src != srcEnv {
+			t.Fatalf("got (%s, %s, %v), want (%s, env, nil)", id, src, err, foreign)
+		}
+		joined := strings.Join(notes, "\n")
+		if !strings.Contains(joined, "--allow-unverified") || !strings.Contains(joined, "unverified") {
+			t.Errorf("the override must still announce itself, got %v", notes)
+		}
+	})
+
+	t.Run("a thread with no recorded cwd is no evidence — still resolves", func(t *testing.T) {
+		// A virtual/grouping thread has no cwd; absence must never refuse.
+		cNoCwd := fakeMeshThreadClient{local: []api.Thread{{ID: foreign, Name: "group"}}}
+		if id, _, _, err := resolveCurrentThreadFrom(cNoCwd, currentInputs{env: foreign, cwd: box}); err != nil || id != foreign {
+			t.Fatalf("got (%s, %v), want (%s, nil)", id, err, foreign)
+		}
+	})
+
+	t.Run("nothing at all is a loud error", func(t *testing.T) {
+		_, _, _, err := resolveCurrentThreadFrom(c, currentInputs{cwd: box})
+		if err == nil {
+			t.Fatal("expected a loud error with neither pane nor env")
+		}
+		var ue *unverifiedError
+		if errors.As(err, &ue) {
+			t.Error("'not inside a sesh thread' must NOT be an unverifiedError — thread new " +
+				"treats those differently (root thread quietly vs a loud refusal)")
+		}
+	})
+
+	t.Run("an env id the daemon does not know is a loud error", func(t *testing.T) {
+		if _, _, _, err := resolveCurrentThreadFrom(c, currentInputs{env: "dead-thread", cwd: box}); err == nil {
+			t.Fatal("expected a loud error for an unknown env id")
+		}
+	})
+}
+
+// TestExtractAllowUnverifiedFlag pins the pseudo-global stripping: it is
+// accepted anywhere in the args (before or after the verb) and is REMOVED, so
+// the subcommand flagsets — which do not declare it — never see it.
+func TestExtractAllowUnverifiedFlag(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantAllow bool
+		wantRest  []string
+	}{
+		{"absent", []string{"info"}, false, []string{"info"}},
+		{"after the verb", []string{"info", "--allow-unverified"}, true, []string{"info"}},
+		{"before the verb", []string{"--allow-unverified", "info"}, true, []string{"info"}},
+		{"single dash", []string{"info", "-allow-unverified"}, true, []string{"info"}},
+		{"among other flags", []string{"thread", "archive", "--allow-unverified", "--json"}, true, []string{"thread", "archive", "--json"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			allow, rest := extractAllowUnverifiedFlag(tc.args)
+			if allow != tc.wantAllow {
+				t.Errorf("allow = %v, want %v", allow, tc.wantAllow)
+			}
+			if strings.Join(rest, " ") != strings.Join(tc.wantRest, " ") {
+				t.Errorf("rest = %v, want %v", rest, tc.wantRest)
+			}
+		})
 	}
 }

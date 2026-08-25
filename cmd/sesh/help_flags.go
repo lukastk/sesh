@@ -115,6 +115,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"info": {
 		{"--id", "thread id or unique prefix to describe (default: the current thread)"},
+		{"--allow-unverified", "resolve the current thread from $SESH_THREAD_ID even when the named thread's cwd is unrelated to this directory (by default that contradiction is a loud refusal). Pseudo-global: accepted by every verb that infers the current thread"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},

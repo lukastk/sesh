@@ -35,7 +35,8 @@ verbs infer the **current** thread when you omit `--id` (from the calling pane's
 `@sesh-thread-id` marker first, then `$SESH_THREAD_ID`, or a loud error if neither
 resolves). The pane marker wins because it is re-stamped on adopt/reparent while
 `$SESH_THREAD_ID` is frozen at launch and can drift stale; on disagreement the pane is
-used and a drift note is printed to stderr. Inference happens **only when `--id` is
+used and a drift note is printed to stderr. **See "Am I really this thread?" below —
+outside a pane the answer is UNVERIFIED and may be refused.** Inference happens **only when `--id` is
 omitted entirely**: passing an *explicitly empty* `--id ""` (or an empty positional id,
 e.g. from an unset shell variable) is a **loud error**, never silently treated as the
 current thread — so a stray empty `$VAR` can't make a verb act on the wrong thread. The
@@ -44,6 +45,38 @@ same holds for the other selectors that default to "everything"/"the current thr
 being destructive, they **never** infer at all (an omitted `--id` is also an error), so
 they always need an explicit `--id`. The TUI shows the short 8-char form (`i` toggles the
 ID column; `y` shows the full UUID, `c` copies it).
+
+## Am I really this thread? (provenance)
+
+Inference has two sources and they are **not** equally trustworthy:
+
+- **pane** — read from the `@sesh-thread-id` marker on the tmux pane the command
+  actually runs in. **Verified**: a process elsewhere cannot inherit it.
+- **env** — `$SESH_THREAD_ID` alone, when there is no pane. **Unverified**: that variable
+  is frozen at launch and inherited by every descendant, so a detached or background
+  process (a claude bg job/agent, hosted by a machine-global `claude daemon run` that
+  froze whichever pane started it) carries a perfectly *valid* id belonging to an
+  *unrelated* thread.
+
+`sesh info` reports which it used — a `source:` line, or `"source"` / `"verified"` in
+`--json`. An env-derived answer is announced on stderr, and it is **corroborated against
+the calling directory**: if the named thread's cwd is unrelated to where you are standing,
+sesh **refuses** instead of guessing. Pass `--id`, or `--allow-unverified` to proceed
+anyway (a pseudo-global — every verb that infers accepts it).
+
+> ⚠️ **Before you do anything destructive to "yourself"** — compacting, sending, stopping,
+> archiving — **require verified provenance.** This is not hypothetical: an agent with no
+> pane asked `sesh info` who it was, was confidently told it was an unrelated thread, and
+> its self-compact runner compacted that thread and injected a foreign handover prompt
+> into it.
+>
+> ```bash
+> TID=$(sesh info --json | jq -r 'select(.source == "pane") | .thread.id')
+> [ -n "$TID" ] || { echo "not pane-verified — refusing to act on myself"; exit 1; }
+> ```
+
+Corroboration is evidence, not proof: an inherited id that happens to name a thread in the
+*same* directory tree still resolves. Outside a pane, `--id` is the only certainty.
 
 ## Before running commands
 
@@ -616,11 +649,16 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 
 > ⚠️ **PARENT INFERENCE — read this before you create a thread.** `sesh thread new`
 > defaults to making the new thread a **CHILD** of the thread you are running inside. With
-> no `--parent` and no `--no-parent`, it infers a parent from your environment
-> (`$SESH_THREAD_ID`, set in every sesh-managed pane, then the calling pane's
-> `@sesh-thread-id` marker). **So an agent that spawns a thread will, by default, create a
-> child of itself — silently.** This is correct only when you genuinely mean to delegate a
-> sub-task.
+> no `--parent` and no `--no-parent`, it infers a parent using the ordinary current-thread
+> precedence (the calling pane's `@sesh-thread-id` marker first, then `$SESH_THREAD_ID`).
+> **So an agent that spawns a thread will, by default, create a child of itself.** This is
+> correct only when you genuinely mean to delegate a sub-task.
+>
+> The inferred parent is **announced on stderr**, naming the thread and the provenance it
+> came from (`sesh: parenting under "boxyard-go" (1777a4ac) — inferred from pane …`), so a
+> mis-parent is visible immediately rather than a day later. If the id here is *unverified
+> and contradicted* (see **Am I really this thread?**), it refuses to infer, says so, and
+> creates a **root** thread.
 >
 > **If the thread is meant to stand alone (a top-level/independent thread), you MUST pass
 > `--no-parent`.** Otherwise it will be a child. Be explicit:

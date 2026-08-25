@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -32,7 +33,7 @@ func runInfo(cfg config.Config, args []string) error {
 	if err := guardEmptyPositionalRef(refSupplied, ref); err != nil {
 		return err
 	}
-	rid, err := resolveThreadID(cfg, ref)
+	rid, src, err := resolveCurrentThread(cfg, ref)
 	if err != nil {
 		return err
 	}
@@ -56,7 +57,15 @@ func runInfo(cfg config.Config, args []string) error {
 
 	if *asJSON {
 		return emitJSON(map[string]any{
-			"schema":     st.Schema,
+			"schema": st.Schema,
+			// source/verified are the PROVENANCE of the answer: how sesh decided
+			// this is the thread you are asking about. "pane" (the calling pane's
+			// live marker) and "explicit" (you named it) are verified; "env" means
+			// the answer rests on an inherited $SESH_THREAD_ID with no pane to
+			// check it against. A caller about to do something destructive to
+			// "itself" should require source == "pane".
+			"source":     string(src),
+			"verified":   src.verified(),
 			"thread":     th,
 			"head":       st.Head,
 			"busy":       st.Busy,
@@ -67,6 +76,7 @@ func runInfo(cfg config.Config, args []string) error {
 		})
 	}
 	fmt.Printf("id:         %s\n", th.ID)
+	fmt.Printf("source:     %s\n", describeSource(src))
 	fmt.Printf("name:       %s\n", th.Name)
 	fmt.Printf("agent:      %s\n", th.AgentKind)
 	fmt.Printf("machine:    %s\n", th.Machine)
@@ -98,4 +108,19 @@ func runInfo(cfg config.Config, args []string) error {
 		fmt.Printf("tickets:    %d (%d open)\n", n, open)
 	}
 	return nil
+}
+
+// describeSource renders the provenance line of the human `sesh info` output.
+// An unverified answer says so in the same breath as the id it qualifies —
+// the whole point is that it must not read like a fact.
+func describeSource(src idSource) string {
+	switch src {
+	case srcExplicit:
+		return "explicit (you named this thread)"
+	case srcPane:
+		return "pane (verified — the calling pane's @sesh-thread-id marker)"
+	case srcEnv:
+		return "env (UNVERIFIED — $" + agents.EnvThreadID + ", no tmux pane to confirm it)"
+	}
+	return string(src)
 }

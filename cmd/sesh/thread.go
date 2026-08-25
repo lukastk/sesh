@@ -717,9 +717,30 @@ func threadNew(cfg config.Config, args []string) error {
 		}
 		resolvedParent = rp
 	case !*noParent:
-		if rp, err := resolveThreadID(cfg, ""); err == nil {
+		// Inferred parenting is SILENT on success no more (ticket 6ea1f6eb): a
+		// mis-parent used to be invisible until someone went looking — one sat
+		// undetected for ten hours. Announce what it parented under and, just as
+		// importantly, WHERE that came from, so an inherited $SESH_THREAD_ID is
+		// visible the moment it acts rather than a day later.
+		rp, src, err := resolveCurrentThread(cfg, "")
+		switch {
+		case err == nil:
 			resolvedParent = rp
+			name := rp
+			if th, ok := lookupThread(daemonClient(cfg), rp); ok && th.Name != "" {
+				name = fmt.Sprintf("%q (%s)", th.Name, short8(rp))
+			}
+			fmt.Fprintf(os.Stderr, "sesh: parenting under %s — inferred from %s. Pass --no-parent for a root thread, or --parent <id>.\n",
+				name, describeSource(src))
+		case errors.As(err, new(*unverifiedError)):
+			// Refused, not absent: an id IS present here but is contradicted. A
+			// root thread is the safe outcome, but say so loudly — silently
+			// dropping the parent is how the mis-parent class hides.
+			fmt.Fprintf(os.Stderr, "sesh: NOT inferring a parent — %v.\n", err)
+			fmt.Fprintln(os.Stderr, "sesh: creating a ROOT thread; pass --parent <id> to place it, or --no-parent to silence this.")
 		}
+		// Any other error is the ordinary "not inside a sesh thread" — a root
+		// thread with nothing to report.
 	}
 	if *yolo && *sandboxF {
 		return errors.New("thread new: --yolo and --sandbox are mutually exclusive")

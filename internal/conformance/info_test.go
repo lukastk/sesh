@@ -3,8 +3,10 @@ package conformance
 // thread.info cells (PARITY_ROADMAP F1): `sesh info` + the current-thread
 // inference resolver, against REAL threads. Local exercises all four
 // resolution sources (explicit prefix, $SESH_THREAD_ID, the calling pane's
-// birth-stamp, and the loud no-context error) plus a retrofitted verb
-// (`thread status` with no --id). Remote = routed `info --id … --machine peer`.
+// birth-stamp, and the loud no-context error), the PROVENANCE the answer
+// carries, the no-pane refusal when an env-derived id is contradicted by the
+// caller's directory (ticket d7be88ef), and a retrofitted verb (`thread status`
+// with no --id). Remote = routed `info --id … --machine peer`.
 
 import (
 	"encoding/json"
@@ -28,6 +30,16 @@ func init() {
 // inject.
 func runWithEnv(t *testing.T, sb *Sandbox, extra map[string]string, args ...string) (string, string, error) {
 	t.Helper()
+	return runWithEnvDir(t, sb, "", extra, args...)
+}
+
+// runWithEnvDir is runWithEnv from a specific WORKING DIRECTORY. The caller's
+// cwd is now an inference input — it corroborates an unverified
+// ($SESH_THREAD_ID-derived) id — so a cell that exercises env inference has to
+// stand where the real caller would stand. A headless turn's process cwd IS its
+// thread's cwd; dir "" inherits the test process's, which is the repo.
+func runWithEnvDir(t *testing.T, sb *Sandbox, dir string, extra map[string]string, args ...string) (string, string, error) {
+	t.Helper()
 	lr, ok := sb.Runner.(*localRunner)
 	if !ok {
 		t.Fatalf("runWithEnv needs a local sandbox")
@@ -41,6 +53,7 @@ func runWithEnv(t *testing.T, sb *Sandbox, extra map[string]string, args ...stri
 	}
 	cmd := exec.Command(lr.bin, args...)
 	cmd.Env = sandboxEnv(env)
+	cmd.Dir = dir
 	return runCmd(cmd)
 }
 
@@ -91,13 +104,37 @@ func testInfoLocal(t *testing.T) {
 		t.Errorf("unknown-prefix error does not echo the ref: %s", stderr)
 	}
 
-	// 3. $SESH_THREAD_ID (the env every spawned pane/turn carries).
-	out, stderr, err = runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": other.ID}, "info")
+	// 3. $SESH_THREAD_ID (the env every spawned pane/turn carries), from the
+	// thread's own cwd — where a real headless turn runs. It resolves, but as
+	// an UNVERIFIED answer: there is no pane here to confirm the id, so both
+	// the source field and stderr must say so.
+	out, stderr, err = runWithEnvDir(t, sb, other.Cwd, map[string]string{"SESH_THREAD_ID": other.ID}, "info")
 	if err != nil {
 		t.Fatalf("info via env: %v\n%s", err, stderr)
 	}
 	if !strings.Contains(out, "otherthread") {
 		t.Errorf("env inference described the wrong thread:\n%s", out)
+	}
+	if !strings.Contains(out, "UNVERIFIED") {
+		t.Errorf("env-derived info must declare itself unverified:\n%s", out)
+	}
+	if !strings.Contains(stderr, "unverified") {
+		t.Errorf("env-derived info must announce the unverified answer on stderr: %q", stderr)
+	}
+	out, _, err = runWithEnvDir(t, sb, other.Cwd, map[string]string{"SESH_THREAD_ID": other.ID}, "info", "--json")
+	if err != nil {
+		t.Fatalf("info --json via env: %v", err)
+	}
+	var prov struct {
+		Source   string `json:"source"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &prov); err != nil {
+		t.Fatalf("info --json decode: %v\n%s", err, out)
+	}
+	if prov.Source != "env" || prov.Verified {
+		t.Errorf("env inference reported source=%q verified=%v, want env/false — a caller doing "+
+			"something destructive keys off exactly this", prov.Source, prov.Verified)
 	}
 
 	// 3b. A STALE env id falls through (here: to no-context, loud) — never a
@@ -106,6 +143,67 @@ func testInfoLocal(t *testing.T) {
 		t.Errorf("stale env id succeeded silently")
 	} else if !strings.Contains(stderr, "not inside a sesh thread") {
 		t.Errorf("stale-env failure not the loud no-context error: %s", stderr)
+	}
+
+	// 3c. THE INCIDENT (ticket d7be88ef), reproduced end to end against a real
+	// daemon: NO tmux pane, and $SESH_THREAD_ID naming a thread whose cwd is
+	// unrelated to where the caller stands. That is what a detached background
+	// job looks like — its inherited env names a perfectly VALID thread that is
+	// simply not this one. sesh answered confidently; a self-compact runner
+	// built on that answer compacted the victim thread and injected a foreign
+	// handover prompt into it.
+	//
+	// Both directories are siblings under the SAME temp root: t.TempDir() lives
+	// under /tmp, so a thread parked at "/tmp" would CONTAIN the caller and read
+	// as corroboration. The contradiction has to be between two unrelated trees.
+	incidentBase := t.TempDir()
+	victimCwd := filepath.Join(incidentBase, "mysetup", "sesh")
+	callerCwd := filepath.Join(incidentBase, "dev", "20260822_tsl6xn__boxyard-go")
+	for _, d := range []string{victimCwd, callerCwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	victim := sb.newHeadlessThreadAt(t, "pi", "mysetup-sesh-victim", victimCwd)
+
+	_, stderr, err = runWithEnvDir(t, sb, callerCwd, map[string]string{"SESH_THREAD_ID": victim.ID}, "info")
+	if err == nil {
+		t.Errorf("info reported an unrelated thread as the current one with no pane to verify it — " +
+			"the reported bug (a self-compact then hijacked that thread)")
+	} else {
+		for _, want := range []string{victim.ID[:8], "--id", "--allow-unverified"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("the refusal must name %q so the caller can act on it; got: %s", want, stderr)
+			}
+		}
+	}
+
+	// The same call must be refused for a MUTATING verb too — a contradicted id
+	// must not be able to act on the victim either.
+	if _, stderr, err := runWithEnvDir(t, sb, callerCwd,
+		map[string]string{"SESH_THREAD_ID": victim.ID}, "thread", "tag", "--add", "hijacked"); err == nil {
+		t.Errorf("a mutating verb acted on a contradicted env id:\n%s", stderr)
+	}
+	out, _, err = sb.Runner.Run(t, "info", "--id", victim.ID, "--json")
+	if err != nil {
+		t.Fatalf("victim info: %v", err)
+	}
+	if strings.Contains(out, "hijacked") {
+		t.Errorf("the refused tag reached the victim thread anyway:\n%s", out)
+	}
+
+	// --allow-unverified is the deliberate override: same call, now resolves,
+	// and still says out loud what it did.
+	out, stderr, err = runWithEnvDir(t, sb, callerCwd,
+		map[string]string{"SESH_THREAD_ID": victim.ID}, "info", "--allow-unverified")
+	if err != nil {
+		t.Fatalf("info --allow-unverified: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(out, "mysetup-sesh-victim") {
+		t.Errorf("--allow-unverified did not resolve the env thread:\n%s", out)
+	}
+	if !strings.Contains(stderr, "allow-unverified") {
+		t.Errorf("the override must announce itself on stderr: %q", stderr)
 	}
 
 	// 4. The calling pane's birth-stamp: $TMUX (socket path) + $TMUX_PANE of
@@ -118,6 +216,19 @@ func testInfoLocal(t *testing.T) {
 	}
 	if !strings.Contains(out, "describeme") {
 		t.Errorf("pane inference described the wrong thread:\n%s", out)
+	}
+	// A pane-derived answer is VERIFIED — that is the provenance a destructive
+	// caller (self-compact) must require before acting on "itself".
+	out, _, err = runWithEnv(t, sb,
+		map[string]string{"TMUX": sockPath + ",1,0", "TMUX_PANE": pane}, "info", "--json")
+	if err != nil {
+		t.Fatalf("info --json via pane: %v", err)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &prov); err != nil {
+		t.Fatalf("info --json decode: %v\n%s", err, out)
+	}
+	if prov.Source != "pane" || !prov.Verified {
+		t.Errorf("pane inference reported source=%q verified=%v, want pane/true", prov.Source, prov.Verified)
 	}
 
 	// 4b. DRIFT: the pane marker is thread B (describeme) while $SESH_THREAD_ID
@@ -141,7 +252,7 @@ func testInfoLocal(t *testing.T) {
 	}
 
 	// 5. A retrofitted verb infers identically: `thread status` with no --id.
-	out, stderr, err = runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": th.ID}, "thread", "status")
+	out, stderr, err = runWithEnvDir(t, sb, th.Cwd, map[string]string{"SESH_THREAD_ID": th.ID}, "thread", "status")
 	if err != nil {
 		t.Fatalf("thread status inferred: %v\n%s", err, stderr)
 	}

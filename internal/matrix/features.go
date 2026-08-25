@@ -77,7 +77,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.info",
-		Description: "sesh info [id|prefix]: describe one thread; with no arg the CURRENT thread is inferred (explicit > $SESH_THREAD_ID > the calling pane's birth-stamp > loud)",
+		Description: "sesh info [id|prefix]: describe one thread; with no arg the CURRENT thread is inferred (explicit > the calling pane's @sesh-thread-id marker > $SESH_THREAD_ID > loud) and the answer reports its PROVENANCE (source pane|env|explicit + verified). An env-derived id has no pane to confirm it, so it is announced as unverified and REFUSED when the named thread's cwd is unrelated to the caller's (--allow-unverified overrides)",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

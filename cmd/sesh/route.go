@@ -105,6 +105,30 @@ func extractMachineFlag(args []string) (machine string, rest []string) {
 	return machine, rest
 }
 
+// extractAllowUnverifiedFlag pulls the pseudo-global `--allow-unverified` out of
+// args (from anywhere), returning whether it was present and the args with it
+// removed. It is the escape hatch for current-thread inference refusing an
+// UNVERIFIED ($SESH_THREAD_ID-derived) id whose thread cwd is unrelated to the
+// calling directory — see the provenance block in current.go.
+//
+// Handled here, before dispatch, for the same reason as `--machine`: ~20 verbs
+// infer the current thread and none of them should have to declare the flag.
+// Stripped BEFORE `--machine` routing, so it governs THIS process's inference
+// and is not forwarded to an ssh-routed peer — where the local env means nothing
+// anyway (the peer re-runs the command with its own environment).
+func extractAllowUnverifiedFlag(args []string) (allow bool, rest []string) {
+	rest = make([]string, 0, len(args))
+	for _, a := range args {
+		switch a {
+		case "--allow-unverified", "-allow-unverified":
+			allow = true
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return allow, rest
+}
+
 // httpRoutable reports whether `--machine` routing for this command MAY go over the
 // peer's HTTP API (when the peer has one). The carve-outs need remote EXECUTION and
 // stay on ssh regardless of the peer's transport: daemon lifecycle (you cannot start

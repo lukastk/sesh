@@ -468,8 +468,30 @@ does not wrap can be driven straight against the tmux server.`,
 	},
 	"info": {
 		summary:  "describe one thread: record, both state axes, attachment, tmux locator, and its tickets (current thread inferred when no id)",
-		usage:    "sesh info [<id>] [--id <id>] [--machine <m>] [--json]",
-		examples: []string{"sesh info", "sesh info 1a2b3c4d --json"},
+		usage:    "sesh info [<id>] [--id <id>] [--machine <m>] [--json] [--allow-unverified]",
+		examples: []string{"sesh info", "sesh info 1a2b3c4d --json", "sesh info --json | jq -r 'select(.verified) | .thread.id'"},
+		long: `Describe one thread. With no id the CURRENT thread is inferred, and the output
+says HOW it was inferred — the "source" line (JSON: "source" + "verified"):
+
+  explicit  you named the thread; nothing was guessed.
+  pane      VERIFIED — read from the @sesh-thread-id marker on the tmux pane this
+            command actually runs in. It cannot be inherited by a process
+            living somewhere else.
+  env       UNVERIFIED — there is no tmux pane here, so the answer rests on
+            $SESH_THREAD_ID alone. That variable is frozen at launch and
+            INHERITED by every descendant, so a detached or background process
+            can carry a perfectly valid id belonging to an unrelated thread.
+
+An UNVERIFIED answer is announced on stderr, and it is corroborated against the
+calling directory: if the named thread's cwd is unrelated to where you are
+standing, sesh REFUSES rather than guess. Pass --id to say which thread you
+mean, or --allow-unverified to use $SESH_THREAD_ID anyway. (--allow-unverified
+is a pseudo-global: every verb that infers the current thread accepts it.)
+
+Before doing anything DESTRUCTIVE to "yourself" — compacting, sending, stopping
+— require verified provenance:
+
+  sesh info --json | jq -e '.source == "pane"' >/dev/null || exit 1`,
 	},
 	"mesh": {
 		summary:  "print the merged cross-machine view from the local daemon's cache (every machine's threads with live state + freshness)",

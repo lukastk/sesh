@@ -12,20 +12,24 @@ package main
 //     for "which thread owns this pane right now": it is re-stamped on
 //     adopt/reparent, so it tracks the live ownership of the pane;
 //  3. $SESH_THREAD_ID — injected into every spawned pane and headless turn
-//     process. This is FROZEN into the process env at launch and can drift
-//     stale (an adopted/reparented agent still carries its old, possibly still
-//     -valid, id), so it ranks BELOW the live pane marker. It is the source of
-//     truth only when there is no pane (headless turns inject the env and have
-//     no tmux pane);
+//     process. This is FROZEN into the process env at launch and INHERITED by
+//     every descendant, so it can name a thread that is not this one at all
+//     (an adopted/reparented agent carries its old id; a detached background
+//     job carries whatever started it). It ranks BELOW the live pane marker,
+//     and when it is the ONLY source the answer is UNVERIFIED — see the
+//     provenance block further down: it is corroborated against the calling
+//     directory and REFUSED when contradicted, and always announced as
+//     unverified on stderr.
 //
 // When the env and a valid pane marker DISAGREE, the pane wins and a one-line
 // drift note is emitted to stderr (loud, not silent). If nothing resolves it is
 // a LOUD error. `delete` deliberately does NOT infer (destructive + ambient
 // context is a footgun — always explicit).
 //
-// Inherent limitation: a detached background job (no $TMUX_PANE) cannot read a
-// pane marker, so it can only ever self-resolve via the env and cannot detect
-// drift — unavoidable; this targets in-pane agents (the common case).
+// Residual limitation: a detached job whose inherited id happens to name a
+// thread rooted in the SAME directory tree is still indistinguishable from the
+// real thing — cwd is corroboration, not proof. Passing --id remains the only
+// certainty available outside a pane.
 
 import (
 	"context"
@@ -33,6 +37,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -128,33 +133,195 @@ func resolveIDOrPositional(cfg config.Config, fs *flag.FlagSet) (string, error) 
 
 // resolveThreadID resolves the thread a verb acts on (see the package comment
 // above for the precedence). The returned id is always a full, daemon-known
-// uuid.
+// uuid. Callers that care HOW the id was arrived at use resolveCurrentThread.
 func resolveThreadID(cfg config.Config, explicit string) (string, error) {
+	id, _, err := resolveCurrentThread(cfg, explicit)
+	return id, err
+}
+
+// resolveCurrentThread is resolveThreadID plus the PROVENANCE of the answer
+// (see the block below). It reads the process state — env, pane, cwd — and
+// emits any notes to stderr.
+func resolveCurrentThread(cfg config.Config, explicit string) (string, idSource, error) {
 	c := daemonClient(cfg)
 	if explicit != "" {
-		return resolveIDPrefix(c, explicit)
+		id, err := resolveIDPrefix(c, explicit)
+		return id, srcExplicit, err
 	}
-	env := os.Getenv(agents.EnvThreadID)
+	paneID, _ := paneThreadID() // ("", err) is a legitimate not-here; treat as unmarked
+	cwd, _ := os.Getwd()
+	id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+		env:             os.Getenv(agents.EnvThreadID),
+		paneID:          paneID,
+		cwd:             cwd,
+		allowUnverified: allowUnverifiedCurrent,
+	})
+	for _, n := range notes {
+		fmt.Fprintln(os.Stderr, "sesh: "+n)
+	}
+	return id, src, err
+}
+
+// ---------------------------------------------------------------------------
+// PROVENANCE: how much the resolved "current thread" can be trusted.
+//
+// Inference has two sources and they are NOT equally trustworthy:
+//
+//   - the live pane marker is VERIFIED — it is read from the pane this process
+//     actually runs in, so it cannot be inherited by a process living somewhere
+//     else;
+//   - $SESH_THREAD_ID is UNVERIFIED — it is frozen into the process env at
+//     launch and is inherited by every descendant, including descendants that
+//     are no longer that thread. A claude BACKGROUND job/agent is hosted by a
+//     machine-global `claude daemon run` that froze whichever pane's env
+//     happened to start it, so its shells carry a VALID id belonging to an
+//     UNRELATED thread (H82). From sesh's side the id looks perfectly good.
+//
+// That is not a hypothetical: on 2026-08-25 an agent in the boxyard-go thread
+// asked `sesh info` who it was, was told (confidently) that it was the
+// "mysetup - sesh" thread, and its self-compact runner then compacted that
+// thread and injected a foreign handover prompt into it. The answer was wrong
+// and nothing said so.
+//
+// So an env-derived answer now (a) always says it is unverified, and (b) is
+// CORROBORATED against the calling directory: if the named thread's cwd and the
+// caller's cwd are unrelated, the id is contradicted and inference REFUSES
+// rather than guessing. `--allow-unverified` overrides it.
+//
+// The corroboration follows H82's ONE-DIRECTIONAL EVIDENCE rule: only a
+// POSITIVE contradiction may refuse. Missing cwd, an unreadable path, or
+// containment in either direction all read as "no contradiction" and still
+// resolve. A false positive costs one loud, actionable error; a false negative
+// costs someone else's session.
+
+// idSource is the provenance of a resolved thread id.
+type idSource string
+
+const (
+	srcExplicit idSource = "explicit" // the caller passed an id/prefix
+	srcPane     idSource = "pane"     // the calling pane's @sesh-thread-id marker
+	srcEnv      idSource = "env"      // $SESH_THREAD_ID, with no pane to check it against
+)
+
+// verified reports whether the id came from something the calling process could
+// not have merely INHERITED. Only an unverified id is corroborated/refusable.
+func (s idSource) verified() bool { return s == srcExplicit || s == srcPane }
+
+// allowUnverifiedCurrent is the pseudo-global `--allow-unverified` escape hatch,
+// stripped from os.Args before dispatch (see extractAllowUnverifiedFlag). It is
+// process-wide because current-thread inference is reached from ~20 verbs; the
+// resolver itself takes it as an argument so it stays testable.
+var allowUnverifiedCurrent bool
+
+// unverifiedError is the refusal raised when an env-derived id is positively
+// contradicted by the calling directory. It is a distinct type so callers that
+// infer OPTIONALLY (thread new's parent) can tell "you are not in a thread"
+// (fine, carry on with no parent) apart from "the id here is not to be trusted"
+// (loud — the mis-parent this prevents was invisible for ten hours, 6ea1f6eb).
+type unverifiedError struct {
+	ThreadID  string
+	ThreadCwd string
+	CallerCwd string
+}
+
+func (e *unverifiedError) Error() string {
+	home, _ := os.UserHomeDir()
+	return fmt.Sprintf("$%s=%s names a thread whose cwd (%s) is unrelated to the calling directory (%s) — "+
+		"refusing to guess which thread this is. There is no tmux pane here to check the id against, and a "+
+		"detached/background process inherits a stale $%s from whatever started it. "+
+		"Pass --id <thread> to say which thread you mean, or --allow-unverified to use $%s anyway",
+		agents.EnvThreadID, short8(e.ThreadID),
+		config.TildeRelative(e.ThreadCwd, home), config.TildeRelative(e.CallerCwd, home),
+		agents.EnvThreadID, agents.EnvThreadID)
+}
+
+// currentInputs is the process state inference reads. Injected rather than read
+// from the environment inside the resolver so the whole truth table is unit
+// testable without a tmux pane or a rewritten process env.
+type currentInputs struct {
+	env             string // $SESH_THREAD_ID
+	paneID          string // the calling pane's @sesh-thread-id marker ("" = no pane, or unmarked)
+	cwd             string // the calling process's working directory
+	allowUnverified bool
+}
+
+// resolveCurrentThreadFrom is the inference truth table (see the package comment
+// for the precedence and the block above for the trust model). Notes are
+// returned rather than printed so tests can assert on them; the caller emits
+// them to stderr.
+func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, src idSource, notes []string, err error) {
 	// The live pane marker is ground truth and outranks the env: it is
 	// re-stamped on adopt/reparent, whereas the env is frozen at launch and may
 	// carry a stale-but-still-valid id (the SESH_THREAD_ID drift bug).
-	if id, err := paneThreadID(); err == nil && id != "" {
-		if _, ok := lookupThread(c, id); ok {
-			if env != "" && env != id {
-				fmt.Fprintf(os.Stderr, "sesh: $%s=%s is stale; using live pane marker %s (pane adopted/reparented since launch)\n", agents.EnvThreadID, short8(env), short8(id))
+	if in.paneID != "" {
+		if _, ok := lookupThread(c, in.paneID); ok {
+			if in.env != "" && in.env != in.paneID {
+				notes = append(notes, fmt.Sprintf("$%s=%s is stale; using live pane marker %s (pane adopted/reparented since launch)",
+					agents.EnvThreadID, short8(in.env), short8(in.paneID)))
 			}
-			return id, nil
+			return in.paneID, srcPane, notes, nil
 		}
 	}
-	// No pane (e.g. a headless turn — env injected, no tmux pane), or the pane
-	// carries no valid marker: the env is the source of truth. A stale env
+	// No pane (a headless turn — env injected, no tmux pane), or the pane carries
+	// no valid marker: the env is all there is, and it is UNVERIFIED. A stale env
 	// (deleted thread, leaked across homes) falls through to the loud error.
-	if env != "" {
-		if _, ok := lookupThread(c, env); ok {
-			return env, nil
+	if in.env != "" {
+		if th, ok := lookupThread(c, in.env); ok {
+			if cwdContradicts(th.Cwd, in.cwd) {
+				if !in.allowUnverified {
+					return "", "", notes, &unverifiedError{ThreadID: in.env, ThreadCwd: th.Cwd, CallerCwd: in.cwd}
+				}
+				notes = append(notes, fmt.Sprintf("--allow-unverified: using $%s=%s (%q) even though its cwd is unrelated to this directory",
+					agents.EnvThreadID, short8(in.env), th.Name))
+			}
+			notes = append(notes, fmt.Sprintf("unverified current thread %s (%q) — from $%s; there is no tmux pane here to confirm it",
+				short8(in.env), th.Name, agents.EnvThreadID))
+			return in.env, srcEnv, notes, nil
 		}
 	}
-	return "", fmt.Errorf("not inside a sesh thread: no --id, no valid $%s, and no thread-marked tmux pane — pass --id", agents.EnvThreadID)
+	return "", "", notes, fmt.Errorf("not inside a sesh thread: no --id, no valid $%s, and no thread-marked tmux pane — pass --id", agents.EnvThreadID)
+}
+
+// cwdContradicts reports whether the calling directory POSITIVELY contradicts a
+// thread's recorded cwd. Containment in EITHER direction reads as agreement (an
+// agent working in a subdirectory of its thread's cwd is entirely normal, and a
+// thread cwd nested under the caller's is ambiguous rather than contradictory);
+// only two unrelated trees are a contradiction. Anything unknown or unreadable
+// is "no contradiction" — see the one-directional evidence rule above.
+func cwdContradicts(threadCwd, callerCwd string) bool {
+	a, b := canonicalDir(threadCwd), canonicalDir(callerCwd)
+	if a == "" || b == "" {
+		return false // no evidence either way
+	}
+	return !withinDir(a, b) && !withinDir(b, a)
+}
+
+// canonicalDir renders a directory comparable: ~-expanded, absolute, cleaned and
+// symlink-resolved (a box under ~/dev is routinely reached through a symlink, and
+// an unresolved pair would read as two unrelated trees). A path that does not
+// exist keeps its lexical form — it is still comparable, just not resolved.
+func canonicalDir(p string) string {
+	if p == "" {
+		return ""
+	}
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			p = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
+		}
+	}
+	if !filepath.IsAbs(p) {
+		return "" // a relative thread cwd is not comparable to anything — no evidence
+	}
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
+}
+
+// withinDir reports whether child is dir itself or sits underneath it.
+func withinDir(dir, child string) bool {
+	return child == dir || strings.HasPrefix(child, strings.TrimRight(dir, "/")+string(filepath.Separator))
 }
 
 // resolveIDPrefix resolves a full uuid or unique id prefix against the

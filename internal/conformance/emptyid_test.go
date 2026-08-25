@@ -40,9 +40,15 @@ func TestEmptyIDFlagIsLoud(t *testing.T) {
 		}
 		env = append(env, e)
 	}
+	// Run from the thread's OWN cwd: this cell is about the EMPTY-SELECTOR
+	// footgun, not about provenance, and an env-derived id is corroborated
+	// against the caller's directory (ticket d7be88ef) — standing anywhere else
+	// would refuse before the guard under test was ever reached, testing the
+	// wrong thing.
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = env
+		cmd.Dir = th.Cwd
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}

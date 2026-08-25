@@ -34,8 +34,10 @@ func TestTailCLIForms(t *testing.T) {
 		t.Errorf("transcript dump missing the real reply: %v\n%s", err, stderr)
 	}
 
-	// Inference: bare `sesh tail` inside the thread's env context.
-	out, stderr, err = runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": th.ID}, "tail")
+	// Inference: bare `sesh tail` inside the thread's env context — run from the
+	// thread's OWN cwd, where a real agent of that thread stands. An env-derived
+	// id is corroborated against the caller's directory (ticket d7be88ef).
+	out, stderr, err = runWithEnvDir(t, sb, th.Cwd, map[string]string{"SESH_THREAD_ID": th.ID}, "tail")
 	if err != nil || !strings.Contains(out, "SAFFRON") {
 		t.Errorf("inferred tail wrong: %v\n%s", err, stderr)
 	}

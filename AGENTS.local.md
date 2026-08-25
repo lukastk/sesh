@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED 4/6 — termux + pocket4 offline, pending)
+## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8+f462537; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED 4/6 — termux + pocket4 offline, pending)
 Lukas's ticket d7be88ef: "`sesh info` silently resolves to ANOTHER thread's id when the calling
 shell has no tmux pane, and a self-compact routine acted on that answer — compacting an
 unrelated agent's session and injecting a foreign handover prompt into it." An agent in
@@ -85,10 +85,28 @@ they now run from `th.Cwd` via a new `runWithEnvDir`. No assertion relaxed, no a
 CORROBORATION** — my first contradiction fixture could not be staged and passed vacuously. Stage
 a contradiction as two UNRELATED SIBLINGS under one base, never against a `/tmp` thread.
 
-GREEN: every non-conformance package plain AND `-race`; `go vet ./...`; blast-radius cells
-thread.info ×2, thread.parent ×2, thread.tail, thread.empty-id, ticket.list-current,
-ticket.list-by-thread ×2, ticket.needs-input ×2 = **9 pass, 0 fail**. The FULL 253-cell matrix was
-NOT run (~40min) — do not read this as all-green. `gofmt -l` still flags the usual pre-existing
+GREEN: every non-conformance package plain AND `-race`; `go vet ./...`.
+**FULL 253-CELL MATRIX RUN (48min, sesh f462537): 250 pass, 3 fail, 0 skip, 0 missing, 0 not-run,
+2 justified n/a.** All three reds established as NOT mine rather than assumed:
+`thread.transcript/codex/{local,remote}` reproduce BYTE-IDENTICALLY on a clean detached worktree
+at a10ff42 (`last_reply = ""`, `reply_count = 0`) and the cell passes `--id` at every call site so
+it never touches inference — pre-existing, unfixed here; `thread.codex-session-capture/codex/local`
+passes serially 2/2 on this HEAD and on clean a10ff42, red only under full-suite concurrent load =
+the real-codex flake class H62 recorded for this exact cell.
+**THE FULL RUN CAUGHT TWO FAILURES MY BLAST-RADIUS PASS HAD MISSED, and the reason is the lesson:
+`-run 'TestMatrix/...'` EXCLUDES EVERY NON-MATRIX TEST IN THE PACKAGE.** `TestEmptyIDFlagIsLoud`
+and `TestTailCLIForms` had the same test-process-cwd fixture problem as the three cells I did fix,
+and I never ran them. Filtering by subtest path is not a substitute for running the package —
+`go test ./internal/conformance` includes plenty that no `TestMatrix/` filter reaches. Both fixed
+the same faithful way (tail via `runWithEnvDir`, emptyid via `cmd.Dir` on the exec.Command it
+builds itself; the emptyid comment records why it matters THERE specifically — that cell is about
+the empty-SELECTOR footgun, and refusing on provenance before the guard under test is reached
+would silently test the wrong thing).
+**SECOND `-run` TRAP, same session: a `/` INSIDE an alternation group is read by go test as a
+SUBTEST-LEVEL SEPARATOR**, so `-run 'TestMatrix/(thread.transcript/codex|thread.codex-session-
+capture)'` silently ran only ONE of the two cells and reported `ok` — I nearly concluded from it
+that the transcript cells passed on clean HEAD when they had never executed. Give each cell its
+own `-run`, and confirm with `-v` that the cells you expected actually appear. `gofmt -l` still flags the usual pre-existing
 toolchain-drift files (H48); every file I touched is clean.
 LIVE-SMOKED in a fully isolated sandbox (own SESH_HOME/daemon/short `/tmp/sk.XXX` sockets, every
 inherited SESH_* stripped, sandbox daemon killed by EXPLICIT pid and the tree removed; the live
@@ -102,7 +120,7 @@ step-1 snippet run verbatim in this very thread returns `source=pane verified=tr
 SWEPT (H75 leak class, not mine): four leaked `/tmp/sesh-conformance-*` sandbox daemons, 1.8 and
 7 days old, killed by EXPLICIT pid (never `pkill -f` — H22/H74) with no suite running.
 DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (CLI-side only, so a mixed
-fleet is trivially safe). Live on **4/6** at 6271fb8 — mymain, macbook, macstudio, ideapad, every
+fleet is trivially safe). Live on **4/6** at f462537 — mymain, macbook, macstudio, ideapad, every
 installed binary `vcs.modified=false`; all three remote checkouts were verified clean on main with
 nothing unpushed BEFORE pulling (H49/H63). **termux and pocket4 OFFLINE** (ssh timed out; pocket4
 has been pending since H90/H91) → PENDING, harmless. When they return: `cd ~/mysetup/sesh && git

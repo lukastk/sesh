@@ -1,5 +1,109 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H93 — CODEX SUBSCRIPTIONS HAD SILENTLY STOPPED DELIVERING: codex dropped `event_msg`/`agent_message` from its rollouts between 0.146 and 0.149.1, so `LastReply` returned ("",0) for every codex thread; fix = read the `response_item` conversation record — and match ONE shape, because legacy rollouts carry BOTH (2026-08-25, sesh e7b3a0d; NO schema/API change; DAEMON rebuild + RESTART; DEPLOYED ALL SIX; **FULL MATRIX 253/253 ALL GREEN**)
+Found by running the full matrix after H92 (Lukas: "work on the 3 failures"). `thread.transcript/
+codex` was red on `last_reply=""` / `reply_count=0` while the transcript LINES clearly contained the
+sentinel — i.e. the file was found and read, only the reply EXTRACTION failed.
+
+ROOT CAUSE: `codexfs.LastReply` keyed on `{type:"event_msg", payload:{type:"agent_message",
+message:…}}`. **codex stopped emitting that line entirely** somewhere between 0.146 (H61/H62's
+version) and 0.149.1 (this box). Measured, not guessed: a rollout captured from a real 0.149.1 turn
+has ZERO `agent_message` lines; the reply appears as `{type:"response_item", payload:{type:
+"message", role:"assistant", content:[{type:"output_text", text:…}]}}` (plus two other views of the
+same thing — see the double-count trap below).
+
+**THIS WAS A LIVE DEFECT, NOT A RED CELL.** `LastReply` feeds `thread transcript`'s last_reply AND
+the SUBSCRIBE ENGINE's dedup marker. In `deliverCompletion` an empty reply means 12 retries at
+250ms and then a bare `return` — so **every subscription from a codex thread had been silently
+delivering nothing**, after stalling 3s per turn. Nothing surfaced it because the failure is a
+silent no-op on the delivery path.
+
+THE FIX READS THE CONVERSATION RECORD (`response_item`/`message`/`role:"assistant"`, concatenating
+`content[].text`) — the same shape claude and pi are read through. **TWO CODEX FORMATS EXIST AND
+ONLY ONE DRIFTED:** the `codex exec --json` STDOUT stream still emits `item.completed` /
+`agent_message`, and `parseCodexExec` (agents/headless.go) reads THAT one — which is exactly why
+headless codex turns stayed green throughout and why the bug looked narrower than it was. Don't
+conflate the rollout format with the exec-stream format.
+
+**THE TRAP THAT DECIDES THE WHOLE DESIGN — do not "add legacy support for compatibility".** The
+obvious instinct is to match the old `agent_message` line as well, for the rollouts already on
+disk. MEASURED across ALL 513 live rollouts (2026-07-06..2026-08-25): 232 files carry the legacy
+line, and every one of them ALSO carries the `response_item` message **for the same reply, in equal
+numbers, with identical text**. Matching both DOUBLES the count on 232 real files — corrupting the
+very dedup marker the compatibility was meant to protect. (A third view, `event_msg`/
+`item_completed` with `item.type:"AgentMessage"`, is a third duplicate of the same reply.) The
+single `response_item` form covers 512/513 files; the one file it misses contains no agent reply at
+all (an aborted turn), where 0 is the correct answer. ONE SHAPE. The anti-gaming test pins it.
+
+`Payload` gained `Role` and a TYPED `Content` slice. Content is a JSON list or null in all 513
+rollouts (139k occurrences), which matters more than usual because **`OffsetReader.ReadNew` BREAKS
+on the first parse error and silently truncates the rest of the file** — a struct that fails to
+unmarshal on some line type would be worse than the bug it fixed. A regression test therefore puts
+unknown line types (`world_state`, `turn_context`, `token_count` — all new in 0.149.1) BEFORE the
+reply and requires it still be found.
+
+TESTS use real line shapes copied from live rollouts, not invented ones: current-format extraction,
+legacy-era no-double-count, non-replies ignored (developer/user/`reasoning`/`function_call` and
+text-less assistant turns), multi-part content concatenation, aborted-session zero, and the
+unknown-line-types guard. ANTI-GAMING (reverse-edited with byte-exact restore verified by `git
+diff`, never git-checkout — H44; `-count=1` — H75): reverting to the `agent_message` key gives
+count=0 (the shipped bug); ALSO matching the legacy line gives 4 instead of 2 (the double-count
+trap). Real-agent cells green: thread.transcript **6/6** (was 4/6), thread.subscribe 2/2,
+thread.await 6/6, thread.codex-session-capture 1/1.
+
+**COVERAGE LESSON WORTH KEEPING: `thread.subscribe` is registered `AgentAgnostic`, so the codex
+reply-extraction path is never exercised there — it was `thread.transcript`'s PER-AGENT axes that
+caught a defect in a different, agent-agnostic feature.** The per-agent axis earned its keep on a
+row where it looked redundant. Consider this before declaring a future row agent-agnostic: the
+delivery MECHANISM is agent-independent, but the reply EXTRACTION it depends on is not.
+
+THE THIRD RED (`thread.codex-session-capture/codex/local`) — **I COULD NOT REPRODUCE IT, and say so
+rather than claim a fix.** It passes serially on this HEAD and on clean a10ff42, and it survived a
+deliberate 48-way CPU-contention run (16 cores × 3 busy loops) unchanged at ~51s. The signature is
+what the change is reasoned from: it got PAST `headedTurn`'s 150s settle and then failed
+`waitStamped`'s 30s. codex is the one agent with NO authoritative turn state (justified N/A on
+thread.state-authority), so "settled" is the CONTENT-DIFF HEURISTIC, and a pane stalled on a slow
+provider call stops animating and reads as IDLE (H58's frozen-pane class; a full-suite run has many
+real agents competing for the same provider). When that fires early, `waitStamped` is still in
+truth waiting for the turn — with a third of the time a turn is allowed. Its bound now MATCHES
+headedTurn's, the assertion is unchanged, and the failure message distinguishes "still busy" (the
+heuristic fired early) from "idle" (the notify chain is broken) because those are different bugs.
+
+**FULL MATRIX: 253 cells — 253 pass, 0 fail, 0 skip, 0 missing, 0 not-run, 2 justified n/a. ALL
+GREEN** (46min). NB when the suite PASSES, `go test` streams nothing and the log is two lines — the
+grid is persisted, so read it with `go run ./cmd/sesh matrix grid`, not from the test output.
+
+TRAPS HIT THIS SESSION, all variants of documented ones, all worth re-reading:
+- **`-run 'TestMatrix/…'` EXCLUDES EVERY NON-MATRIX TEST IN THE PACKAGE.** My blast-radius pass
+  after H92 missed two failing tests entirely for this reason. Filtering by subtest path is not
+  running the package.
+- **A `/` INSIDE a `-run` alternation group is read as a SUBTEST-LEVEL SEPARATOR**, so
+  `-run 'TestMatrix/(thread.transcript/codex|thread.codex-session-capture)'` silently ran only ONE
+  cell and printed `ok`. I nearly concluded from it that the transcript cells passed on clean HEAD
+  when they had never executed. One `-run` per cell, and confirm with `-v` that the cells you
+  expected actually appear.
+- **`pgrep -f` SELF-MATCH, AND THE BRACKET TRICK DOES NOT ALWAYS SAVE YOU (new variant).** On
+  termux `pgrep -f "sesh daemon run"` matched my own ssh shell; switching to `grep "[s]esh daemon
+  run"` ALSO self-matched, because the pattern text is itself in my command's cmdline. It made a
+  1h-old daemon look like it was restarting every 3s, and made a script wrongly conclude the
+  zshenv guard had relaunched the daemon. **Use the daemon's OWN self-reported pid
+  (`sesh daemon status`) and confirm via `/proc/<pid>/exe`** — which is also how the real problem
+  showed up: the exe read `…/sesh (deleted)`, i.e. still the old inode after `mv`, proving the
+  restart was genuinely needed.
+
+DEPLOY: **NO schema/API/wire change, so a mixed fleet is safe — but `LastReply` runs in the DAEMON
+(subscriptions.go + threadops.go), so this is a rebuild AND RESTART, unlike H92's binary-only.**
+LIVE ON ALL SIX at e7b3a0d, `vcs.modified=false` everywhere; every remote checkout verified clean
+before pulling (H49/H63). mymain/ideapad/pocket4 native + `supervisorctl restart sesh-daemon`,
+macbook/macstudio `/opt/homebrew/bin/go` + supervisor, termux PLAIN `go build` (CGO_ENABLED=1 /
+android, H22) with the old daemon killed by EXPLICIT pid and the zshenv login-guard relaunching it
+(H36/H89) — verified afterwards that its exe is no longer `(deleted)` and it carries the right four
+SESH_* vars (no SESH_API_ADDR: inbound-less leaf, the H75 warning is EXPECTED there).
+LIVE-PROVEN on the real fleet, read-only, after deploy: four real codex threads that would every
+one have read `reply_count=0 last_reply=""` now report 22 / 163 / 1155 replies with real text on
+mymain, and 22 on macstudio ROUTED over the mesh.
+
+
 ## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8+f462537; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED ALL SIX)
 Lukas's ticket d7be88ef: "`sesh info` silently resolves to ANOTHER thread's id when the calling
 shell has no tmux pane, and a self-compact routine acted on that answer — compacting an

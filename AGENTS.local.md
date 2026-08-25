@@ -1,5 +1,116 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED 4/6 — termux + pocket4 offline, pending)
+Lukas's ticket d7be88ef: "`sesh info` silently resolves to ANOTHER thread's id when the calling
+shell has no tmux pane, and a self-compact routine acted on that answer — compacting an
+unrelated agent's session and injecting a foreign handover prompt into it." An agent in
+1777a4ac (boxyard-go, cwd `~/dev/…__boxyard-go`) asked `sesh info` who it was, was told
+093da760 ("mysetup - sesh", cwd `~/mysetup/sesh`), and its runner compacted THAT thread and fed
+it someone else's handover. Lukas intercepted before the victim acted; the compaction is not
+reversible.
+
+ROOT CAUSE IS H82's, AT A THIRD CALL SITE. `resolveThreadID` falls back to `$SESH_THREAD_ID`
+when there is no pane — correct for a headless turn, fatal for a claude BACKGROUND job, which is
+hosted by a machine-global `claude daemon run` that froze whichever pane's env started it. So the
+env names a **valid** thread that is simply not this one, and from sesh's side it looks perfect.
+That is also exactly what ticket 6ea1f6eb's 2026-07-10 investigation found for `thread new`'s
+silent mis-parent — it concluded "sesh can't detect this" and parked. It can: **the caller's cwd
+is evidence**, the same lever H82 used for the session stamp.
+
+CONFERRED FOUR DECISIONS before building (AskUserQuestion); Lukas took all four recommendations.
+(1) Warn ALWAYS on an env-derived answer AND refuse on a cwd clash (`--allow-unverified`
+overrides). (2) Mutating verbs get NO separate rule — they inherit (1), so a headless turn whose
+cwd matches keeps working while a contradicted id can mutate nothing. (3) SKIP the floated
+`thread send` slash-command guard: supervisor→worker sends are a core workflow, and the
+self-compact runner fires from the **tmux server** with no thread identity at all, so a
+"caller must equal target" rule would break the very skill it was meant to protect — and (1)
+blocks it at the source anyway, before a wrong id is ever computed. (4) Fold in 6ea1f6eb.
+
+MECHANISM (all CLI-side — cmd/sesh only). The truth table moved into a PURE, injectable
+`resolveCurrentThreadFrom(client, currentInputs{env,paneID,cwd,allowUnverified}) → (id,
+idSource, notes, err)`; `resolveThreadID` keeps its signature so all ~20 inferring call sites are
+untouched, `resolveCurrentThread` exposes the source. `srcPane`/`srcExplicit` are VERIFIED — a
+process elsewhere cannot inherit them; `srcEnv` is not, is announced on stderr, and is
+corroborated against `os.Getwd()`. Contradiction ⇒ a typed `*unverifiedError` naming both paths,
+`--id` and `--allow-unverified`. `sesh info` renders a `source:` line and `"source"`/`"verified"`
+in `--json`, so a destructive caller can require `pane`. `--allow-unverified` is a PSEUDO-GLOBAL
+stripped in main like `--machine`, so every inferring verb accepts it without declaring it (only
+`info`'s usage line lists it, which keeps the help meta-test honest).
+
+**H82's ONE-DIRECTIONAL EVIDENCE RULE IS THE LOAD-BEARING CONSTRAINT AGAIN:** only a POSITIVE
+contradiction may refuse. Missing cwd (a virtual thread has none), a relative/unreadable path,
+and containment in EITHER direction all still resolve. Paths are ~-expanded, absolutised and
+`EvalSymlinks`'d first — a `~/dev` box reached through a symlink would otherwise read as an
+unrelated tree — and containment tests on a SEPARATOR boundary, so `root-sibling` is not "inside"
+`root`. A false positive costs one loud, actionable error; a false negative costs someone else's
+session.
+
+6ea1f6eb, same commit: `thread new` now ANNOUNCES the parent it inferred AND its provenance
+(silent success is how the mis-parent hid for ten hours), and on a contradicted id refuses to
+infer, says so, and makes a ROOT — distinguished from the ordinary "not inside a sesh thread" by
+`errors.As(*unverifiedError)`, which is why the sentinel type exists. Fixed the two stale doc
+sites that still described the OLD env-first precedence and misled that ticket's diagnosis:
+`internal/matrix/features.go` (thread.info) and the sesh-cli SKILL's ⚠️ PARENT INFERENCE box.
+SKILL also gains an "Am I really this thread?" section with the copy-pasteable `select(.source ==
+"pane")` guard.
+
+**THE FIX ONLY HALF-WORKS WITHOUT THE SKILL, so myagent 1869f39 too**: `self-compact` step 1 said
+`sesh info` is "more reliable than $SESH_THREAD_ID" — true ONLY in a pane; with no pane it IS
+that variable, so the skill inherited the drift it claimed to avoid. Step 1 now filters
+`select(.source == "pane")` and aborts when empty, with the reasoning inline so nobody drops the
+filter: corroboration is evidence, not proof — an inherited id naming a thread in the SAME tree
+still resolves as `env`, so requiring `pane` is what actually closes it.
+
+TESTS. Units: the corroboration truth table incl. every must-NOT-refuse case, and the full
+provenance table (pane needs no corroboration even standing elsewhere; pane beats a disagreeing
+env with the drift note; env-no-pane resolves but flagged; a subdirectory corroborates; THE
+INCIDENT refused as `*unverifiedError`; the override loud; a cwd-less thread is no evidence; and
+"not inside a sesh thread" is deliberately NOT an unverifiedError). `thread.info/local`
+reproduces the incident against a REAL daemon and asserts a MUTATING verb is refused too and the
+tag never reaches the victim; `thread.parent` gained the announce + refuse-to-infer assertions.
+ANTI-GAMING (all reverse-edited, never git-checkout — H44; all `-count=1` — H75): corroboration
+disabled → cell RED with the exact user report AND "hijacked" landing on the victim; naive prefix
+in `withinDir` → sibling case RED; unverified note dropped → env case RED; refusal disabled →
+thread.parent RED "silently parented … — the mis-parent bug". Each reversed and re-run green
+(H88's rule: a reversal is not verified until green).
+
+**BLAST RADIUS WAS REAL AND THE FIX WAS FAITHFULNESS, NOT WEAKENING.** Three cells
+(thread.parent, ticket.list-current, and info's own env steps) drove inference with
+`$SESH_THREAD_ID` set while standing in the TEST PROCESS's cwd (the repo) against threads parked
+at `/tmp` — i.e. they were shaped exactly like the incident, and were correctly refused. A real
+agent of a thread stands IN that thread's cwd (a headless turn's process cwd IS its thread's), so
+they now run from `th.Cwd` via a new `runWithEnvDir`. No assertion relaxed, no axis dropped.
+**TRAP, and I walked into it in the very cell where I had already written the warning:
+`t.TempDir()` lives under `/tmp`, so a thread parked at `/tmp` CONTAINS it and reads as
+CORROBORATION** — my first contradiction fixture could not be staged and passed vacuously. Stage
+a contradiction as two UNRELATED SIBLINGS under one base, never against a `/tmp` thread.
+
+GREEN: every non-conformance package plain AND `-race`; `go vet ./...`; blast-radius cells
+thread.info ×2, thread.parent ×2, thread.tail, thread.empty-id, ticket.list-current,
+ticket.list-by-thread ×2, ticket.needs-input ×2 = **9 pass, 0 fail**. The FULL 253-cell matrix was
+NOT run (~40min) — do not read this as all-green. `gofmt -l` still flags the usual pre-existing
+toolchain-drift files (H48); every file I touched is clean.
+LIVE-SMOKED in a fully isolated sandbox (own SESH_HOME/daemon/short `/tmp/sk.XXX` sockets, every
+inherited SESH_* stripped, sandbox daemon killed by EXPLICIT pid and the tree removed; the live
+daemon verified untouched): the incident refused verbatim; the legit no-pane case and a
+subdirectory both resolve flagged `env`/unverified; the override works and announces itself; a
+mutating verb rc=1 with the victim untagged; `thread new` announced a legit inferred parent and
+made a ROOT (loudly) from the contradicting directory — both parents confirmed in the records.
+Also LIVE-VERIFIED READ-ONLY on macbook against its REAL daemon and real threads (resolve from
+the thread's cwd, refuse from `/usr` — the `~`-shortening renders on macOS too), and the skill's
+step-1 snippet run verbatim in this very thread returns `source=pane verified=true`.
+SWEPT (H75 leak class, not mine): four leaked `/tmp/sesh-conformance-*` sandbox daemons, 1.8 and
+7 days old, killed by EXPLICIT pid (never `pkill -f` — H22/H74) with no suite running.
+DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (CLI-side only, so a mixed
+fleet is trivially safe). Live on **4/6** at 6271fb8 — mymain, macbook, macstudio, ideapad, every
+installed binary `vcs.modified=false`; all three remote checkouts were verified clean on main with
+nothing unpushed BEFORE pulling (H49/H63). **termux and pocket4 OFFLINE** (ssh timed out; pocket4
+has been pending since H90/H91) → PENDING, harmless. When they return: `cd ~/mysetup/sesh && git
+pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new
+~/.local/bin/sesh` (termux: PLAIN `go build`, H22; no daemon restart on either).
+**A running TUI/sidebar keeps the binary it launched with (H70), but nothing here changes the TUI.**
+
+
 ## H91 — TUI `goto-uuid`: jump the cursor to a thread by UUID, switching to the FIRST view that shows it (2026-08-23, sesh <this commit>; NO schema/API change; BINARY-ONLY, no daemon restart; ticket 83d1edbd)
 Lukas ticket 83d1edbd "new sesh tui command - go to thread with given uuid": "opens up a prompt
 where you have to type in the full UID of the thread or the short form of the UID. It then takes

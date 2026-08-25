@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8+f462537; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED 4/6 — termux + pocket4 offline, pending)
+## H92 — `sesh info` CONFIDENTLY NAMED ANOTHER THREAD when the caller had no pane, and a self-compact hijacked it: fix = inference reports PROVENANCE + refuses an env id contradicted by the caller's cwd (2026-08-25, sesh 0c69e41+6271fb8+f462537; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; tickets d7be88ef + 6ea1f6eb done; DEPLOYED ALL SIX)
 Lukas's ticket d7be88ef: "`sesh info` silently resolves to ANOTHER thread's id when the calling
 shell has no tmux pane, and a self-compact routine acted on that answer — compacting an
 unrelated agent's session and injecting a foreign handover prompt into it." An agent in
@@ -120,12 +120,15 @@ step-1 snippet run verbatim in this very thread returns `source=pane verified=tr
 SWEPT (H75 leak class, not mine): four leaked `/tmp/sesh-conformance-*` sandbox daemons, 1.8 and
 7 days old, killed by EXPLICIT pid (never `pkill -f` — H22/H74) with no suite running.
 DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (CLI-side only, so a mixed
-fleet is trivially safe). Live on **4/6** at f462537 — mymain, macbook, macstudio, ideapad, every
-installed binary `vcs.modified=false`; all three remote checkouts were verified clean on main with
-nothing unpushed BEFORE pulling (H49/H63). **termux and pocket4 OFFLINE** (ssh timed out; pocket4
-has been pending since H90/H91) → PENDING, harmless. When they return: `cd ~/mysetup/sesh && git
-pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new
-~/.local/bin/sesh` (termux: PLAIN `go build`, H22; no daemon restart on either).
+fleet is trivially safe). **LIVE ON ALL SIX** at 304ef59, every installed binary
+`vcs.modified=false`; every remote checkout was verified clean on main with nothing unpushed
+BEFORE pulling (H49/H63). mymain/ideapad native, macbook+macstudio /opt/homebrew/bin/go, termux
+PLAIN `go build` (verified CGO_ENABLED=1 / GOOS=android on the box, H22). **pocket4 needed
+nothing** — it came back already at 304ef59 with its supervised daemon started 4s AFTER the binary
+was written (myrig's post phase builds sesh per machine), so it had self-healed its whole H90/H91
+backlog too; verified rather than assumed by comparing daemon start time against binary mtime.
+termux has no local threads, so its check is `sesh help info` carrying the new text — the
+resolution path cannot be exercised there.
 **A running TUI/sidebar keeps the binary it launched with (H70), but nothing here changes the TUI.**
 
 

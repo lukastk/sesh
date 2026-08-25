@@ -36,10 +36,19 @@ const (
 type Line struct {
 	Type    string `json:"type"` // session_meta | event_msg | response_item | turn_context
 	Payload struct {
-		Type    string `json:"type"`    // (event_msg) task_started | task_complete | turn_aborted | agent_message | ...
-		ID      string `json:"id"`      // (session_meta) the session uuid
-		Cwd     string `json:"cwd"`     // (session_meta)
-		Message string `json:"message"` // (event_msg agent_message) the reply text
+		Type string `json:"type"` // (event_msg) task_started | task_complete | turn_aborted | ...; (response_item) message | reasoning | function_call | ...
+		ID   string `json:"id"`   // (session_meta) the session uuid
+		Cwd  string `json:"cwd"`  // (session_meta)
+		Role string `json:"role"` // (response_item message) user | assistant | developer
+		// (response_item message) the message parts. Always a JSON list or null
+		// across all 513 live rollouts (2026-07-06 .. 2026-08-25), so a typed
+		// slice is safe here — which matters more than usual because
+		// OffsetReader.ReadNew BREAKS on the first parse error and silently
+		// truncates the rest of the file.
+		Content []struct {
+			Type string `json:"type"` // output_text (assistant) | input_text (user)
+			Text string `json:"text"`
+		} `json:"content"`
 	} `json:"payload"`
 }
 
@@ -82,12 +91,32 @@ func DeriveTurnStatus(lines []Line) TurnStatus {
 	return status
 }
 
-// LastReply returns the text of the last agent_message event in the rollout,
-// plus the count of agent_message events. The event_msg/agent_message payload
-// carries the final reply text directly in payload.message (phase
-// "final_answer") — re-verified against live rollouts (exp14). The count is a
-// monotone marker the two-way send path uses to detect a NEW reply after
-// `tmux send-keys` (the attached path).
+// LastReply returns the text of the conversation's last ASSISTANT message in the
+// rollout, plus the number of them. The count is a monotone marker the two-way
+// send path uses to detect a NEW reply after `tmux send-keys` (the attached
+// path), and it is the subscribe engine's dedup contract.
+//
+// It reads the `response_item` conversation record — {type:"response_item",
+// payload:{type:"message", role:"assistant", content:[{text:…}]}} — which is the
+// same shape claude and pi are read through.
+//
+// IT USED TO READ {type:"event_msg", payload:{type:"agent_message", message:…}}
+// AND THAT SHAPE IS GONE: codex stopped emitting it somewhere between 0.146 and
+// 0.149.1, so this silently returned ("", 0) on every current rollout — no
+// last_reply and no reply count for any codex thread, which is a live
+// subscribe/delivery defect and not merely a test failure. (The `codex exec
+// --json` STDOUT stream is a DIFFERENT format and still emits item.completed /
+// agent_message; parseCodexExec in agents/headless.go reads that one and was
+// never affected. Two formats, only one drifted.)
+//
+// DO NOT "also" match the legacy event_msg/agent_message line, or
+// event_msg/item_completed with item.type "AgentMessage", as a compatibility
+// measure. Measured against all 513 live rollouts: the 232 legacy-era files
+// carry BOTH shapes for the SAME reply, in equal numbers and with identical
+// text, so matching more than one DOUBLES the count on every one of them —
+// corrupting the dedup marker rather than protecting it. The single
+// response_item form covers 512/513 files; the one file it misses contains no
+// agent reply at all (an aborted turn), where 0 is the right answer.
 func LastReply(path string) (text string, count int, err error) {
 	r := NewOffsetReader(path)
 	lines, err := r.ReadNew()
@@ -95,10 +124,18 @@ func LastReply(path string) (text string, count int, err error) {
 		return "", 0, err
 	}
 	for _, l := range lines {
-		if l.Type == "event_msg" && l.Payload.Type == "agent_message" && l.Payload.Message != "" {
-			count++
-			text = l.Payload.Message
+		if l.Type != "response_item" || l.Payload.Type != "message" || l.Payload.Role != "assistant" {
+			continue
 		}
+		var b strings.Builder
+		for _, c := range l.Payload.Content {
+			b.WriteString(c.Text)
+		}
+		if b.Len() == 0 {
+			continue // an assistant turn with no text (tool call only) is not a reply
+		}
+		count++
+		text = b.String()
 	}
 	return text, count, nil
 }

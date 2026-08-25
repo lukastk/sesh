@@ -45,14 +45,34 @@ func (sb *Sandbox) headedTurn(t *testing.T, id, pane, text string) {
 
 // waitStamped waits for the notify->report-state chain to record the thread's
 // codex session id and returns it.
+//
+// The bound MATCHES headedTurn's settle bound, and that is deliberate rather
+// than generous. codex is the one agent with NO authoritative turn state (it is
+// a justified N/A on thread.state-authority), so headedTurn's "the turn
+// settled" is the CONTENT-DIFF HEURISTIC — and a pane that stops animating
+// reads as idle even when the turn is merely stalled (H58's frozen-pane class;
+// under a full-suite run there are many real agents competing for the same
+// provider, so a stall on a slow API call is ordinary). When that happens
+// headedTurn returns early and this wait is still, in truth, waiting for the
+// turn to finish. Giving it less time than a turn is allowed to take makes the
+// cell fail for a reason that has nothing to do with what it tests.
+//
+// The ASSERTION is unchanged: the id must be stamped, or the cell is red.
 func (sb *Sandbox) waitStamped(t *testing.T, id string) string {
 	t.Helper()
 	var sid string
-	if !waitUntil(30*time.Second, func() bool {
+	if !waitUntil(150*time.Second, func() bool {
 		sid = sb.getThread(t, id).AgentSessionID
 		return sid != ""
 	}) {
-		t.Fatalf("agent_session_id never stamped for %s — is the codex notify reporter wired?", id)
+		// Report the busy axis too: "still busy" means the turn really was
+		// mid-flight and the heuristic had declared it settled early; "idle"
+		// means the turn ended and the notify->report-state chain itself failed.
+		// Those are different bugs and the message should not conflate them.
+		t.Fatalf("agent_session_id never stamped for %s after 150s (thread busy=%s) — "+
+			"if busy, the turn was still running and headedTurn's heuristic settle fired early; "+
+			"if idle, the codex notify -> report-state chain is broken",
+			id, sb.threadStatus(t, id).Busy)
 	}
 	return sid
 }

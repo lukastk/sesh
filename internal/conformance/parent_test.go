@@ -7,6 +7,8 @@ package conformance
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,7 +38,20 @@ func testParentLocal(t *testing.T) {
 	}
 	sb := newSandbox(t, matrix.Local)
 	sb.startDaemon(t)
-	root := sb.newHeadlessThread(t, "pi", "rootth")
+	// The root thread gets its OWN directory rather than the shared /tmp: env
+	// inference is corroborated against the caller's cwd, and a thread parked at
+	// /tmp CONTAINS every t.TempDir(), so the contradiction case below could
+	// never be staged against it (it would read as corroboration and pass
+	// vacuously). rootCwd and strayCwd are unrelated siblings under one base.
+	base := t.TempDir()
+	rootCwd := filepath.Join(base, "rootthread")
+	strayCwd := filepath.Join(base, "elsewhere")
+	for _, d := range []string{rootCwd, strayCwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	root := sb.newHeadlessThreadAt(t, "pi", "rootth", rootCwd)
 
 	// Explicit --parent (prefix form exercises F1's resolver too).
 	if _, stderr, err := sb.Runner.Run(t, "thread", "new", "--agent", "pi", "--name", "child1", "--cwd", "/tmp", "--headless", "--parent", root.ID[:8]); err != nil {
@@ -48,16 +63,41 @@ func testParentLocal(t *testing.T) {
 	}
 
 	// Inference: `new` run "inside" the root (its env carrier) defaults to it.
-	if _, stderr, err := runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": root.ID},
-		"thread", "new", "--agent", "pi", "--name", "child2", "--cwd", "/tmp", "--headless"); err != nil {
+	// Run it from the root's OWN cwd, which is where a real agent of that thread
+	// stands — an env-derived id is corroborated against the caller's directory
+	// (ticket d7be88ef), so standing anywhere else is a different scenario, tested
+	// immediately below. The inferred parent must also be ANNOUNCED (6ea1f6eb):
+	// a silent mis-parent once went unnoticed for ten hours.
+	_, stderr, err := runWithEnvDir(t, sb, root.Cwd, map[string]string{"SESH_THREAD_ID": root.ID},
+		"thread", "new", "--agent", "pi", "--name", "child2", "--cwd", "/tmp", "--headless")
+	if err != nil {
 		t.Fatalf("new inferred parent: %v\n%s", err, stderr)
 	}
 	if got := threadByName(t, sb, "child2").Parent; got != root.ID {
 		t.Errorf("inferred parent = %q, want %s", got, root.ID)
 	}
+	if !strings.Contains(stderr, "parenting under") || !strings.Contains(stderr, root.ID[:8]) {
+		t.Errorf("inferred parent not announced on stderr (want it to name %s): %q", root.ID[:8], stderr)
+	}
+
+	// A CONTRADICTED env id must NOT parent silently: standing in a directory
+	// unrelated to the named thread's cwd is what a detached background job looks
+	// like, and its inherited id names someone else's thread. Refuse to infer,
+	// say so, and make a ROOT — never a silent child of a stranger.
+	_, stderr, err = runWithEnvDir(t, sb, strayCwd, map[string]string{"SESH_THREAD_ID": root.ID},
+		"thread", "new", "--agent", "pi", "--name", "notinferred", "--cwd", "/tmp", "--headless")
+	if err != nil {
+		t.Fatalf("new from a contradicted cwd should still create a ROOT thread: %v\n%s", err, stderr)
+	}
+	if got := threadByName(t, sb, "notinferred").Parent; got != "" {
+		t.Errorf("a contradicted env id silently parented the new thread under %q — the mis-parent bug", got)
+	}
+	if !strings.Contains(stderr, "NOT inferring a parent") {
+		t.Errorf("refusing to infer must be loud, not silent: %q", stderr)
+	}
 
 	// --no-parent forces a root even inside a thread.
-	if _, stderr, err := runWithEnv(t, sb, map[string]string{"SESH_THREAD_ID": root.ID},
+	if _, stderr, err := runWithEnvDir(t, sb, root.Cwd, map[string]string{"SESH_THREAD_ID": root.ID},
 		"thread", "new", "--agent", "pi", "--name", "rooted", "--cwd", "/tmp", "--headless", "--no-parent"); err != nil {
 		t.Fatalf("new --no-parent: %v\n%s", err, stderr)
 	}

@@ -158,15 +158,12 @@ func testTicketListCurrent(t *testing.T) {
 		t.Fatalf("bind active: %v\n%s", err, stderr)
 	}
 
-	// Inference path: a runner whose env carries SESH_THREAD_ID = the thread, as a
-	// spawned pane/headless turn would (resolveThreadID validates it against the daemon).
-	lr := sb.Runner.(*localRunner)
-	env := map[string]string{"SESH_THREAD_ID": th.ID}
-	for k, v := range lr.env {
-		env[k] = v
-	}
-	cur := &localRunner{bin: lr.bin, env: env}
-	stdout, stderr, err := cur.Run(t, "ticket", "list", "--current", "--json")
+	// Inference path: SESH_THREAD_ID = the thread, run FROM the thread's own cwd,
+	// exactly as a spawned pane or headless turn would (resolveThreadID validates
+	// the id against the daemon, and corroborates an env-derived one against the
+	// caller's directory — ticket d7be88ef).
+	stdout, stderr, err := runWithEnvDir(t, sb, th.Cwd, map[string]string{"SESH_THREAD_ID": th.ID},
+		"ticket", "list", "--current", "--json")
 	if err != nil {
 		t.Fatalf("ticket list --current: %v\n%s", err, stderr)
 	}

@@ -1,5 +1,110 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H96 — FOUR DERIVED-BOX cockpit commands (clone a GitHub repo / copy a box / worktree a box), mmt- + mt- (2026-08-27, myrig 0e0307d; NO sesh change; render-only deploy, 5/6 — termux sshd down, pending; ticket 120735f9 done)
+Lukas ticket 120735f9 "Create mmt and mt commands". MYRIG-ONLY (no sesh change), all four
+sharing create-box's machinery: `*-create-box-from-repo` (fzf my GitHub repos),
+`*-create-box-from-repo-name` (type `<owner>/<repo>`), `*-create-box-from-box` (copy an
+existing box), `*-create-worktree-box`. Conferred three decisions first (AskUserQuestion) —
+naming, what a BLANK branch means for a worktree, and whether to widen his copy rule; he took
+the `create-box-from-*` family name, "a worktree REQUIRES a branch", and his own owner-only
+copy rule verbatim.
+
+DESIGN POINTS WORTH KEEPING. (a) `_mt_new_box` was split: `_mt_new_box_on <machine> <name>
+[boxyard-new-args…]` is the raw `boxyard new` core (extra flags forwarded, each `${(q)}`-quoted
+for the ssh hop), `_mt_new_box` stays the prompt-and-pick wrapper — so the four new commands,
+which collect ALL their input up front and then pass `--git-clone`/`--from`/`-g`/`--parent`, do
+not each re-implement box creation. (b) EVERY prompt is answered BEFORE any slow work, so a
+clone/copy is never interrupted and cancelling at the last prompt has created nothing.
+(c) `_mt_prompt_line` — he asked for backspace AND arrow keys, which `read -r` cannot do
+(line-disciplined: an arrow inserts a raw escape sequence INTO the value). **`vared` WORKS IN A
+NON-INTERACTIVE `zsh -c` as long as it has a real tty** — which the cockpit's `zsh -lc` popups
+do — and MEASURED: ZLE draws the prompt and the edited line to the TTY, never to stdout, so
+`x=$(_mt_prompt_line …)` shows the prompt and captures ONLY the value. `[[ -t 0 ]]` guards the
+tty-less caller down to `read -r`. The older prompts in shell.sh still use bare `read -r`; the
+helper is there if he wants them retrofitted.
+
+**FIVE TRAPS, all measured, all worth re-reading before touching this area:**
+1. **`${#arr}` INSIDE A JINJA TEMPLATE IS A COMMENT OPENER.** `"${#"` contains `"{#"`, so jinja
+   swallowed the template from there to the next `#}` and the rendered file died with a parse
+   error 300 lines later at EOF. shell.sh.jinja ALREADY documents this (the `$#folders` NB) and
+   I walked into it anyway. Use `$#arr`; `"$#arr count"` interpolates fine in double quotes.
+2. **`boxyard new --from` MOVES the tree with `os.rename`, so it fails across filesystems**
+   ("Invalid cross-device link"). Staging in `mktemp -d` (i.e. /tmp) works on mymain and FAILS
+   on ideapad, whose /tmp is tmpfs. But **`boxyard copy --dest` REFUSES any destination under
+   the user boxes path** ("not allowed to prevent conflicts with managed boxes"), so ~/dev is
+   out too. `~/.cache` is the only place satisfying both: outside ~/dev, under $HOME, same
+   filesystem. Also: `--from` moves the copy OUT of the staging dir and leaves the parent
+   behind ON SUCCESS as well as failure — remove it either way, or ~/.cache accumulates.
+3. **`boxyard list-groups` prints its FAILURES to STDOUT** ("Box with index name `…` not
+   found."). Piping that straight into `boxyard new -g` fails deep inside pydantic with the
+   error text quoted back as the group name. Check the exit status AND validate each line
+   against `^[A-Za-z0-9_/-]+$` — a line that is not a legal group name is a REPORT.
+4. **`boxyard new` applies `-g` groups AFTER creating the box, OUTSIDE its rollback.** So a bad
+   group leaves a real box behind even though the command exits non-zero — that is how trap 3
+   left an orphan on ideapad. The fix is to validate before creating anything, which is what
+   the code now does.
+5. **`boxyard new` does NOT claim ownership**: a box created moments ago has `write_owner =
+   null`. On this yard 320 of 592 boxes have no owner (only 5 of those are checked out on
+   mymain). It matters because his copy rule keys on the owner, so a fresh box takes the
+   remote-store path where it does not exist — the command detects exactly that case and names
+   `boxyard claim` rather than leaving boxyard's bare "not found on remote storage".
+
+HIS COPY RULE, implemented literally as he chose: owner known AND box checked out THERE AND
+that machine reachable ⇒ copy straight off it (`cp -a` when the owner is also the target, else
+a tar stream over ONE ssh hop, target-pulls-from-owner — peer↔peer ssh works fleet-wide and
+`ssh-target` allocates no pty, so the stream stays binary-clean); anything else ⇒ the remote
+boxyard store. The command prints WHICH of the four it chose and why. NOT widened: a box that
+is checked out on the TARGET but owned by someone else still goes to the remote store — his
+call, and defensible (a non-owner's copy can hold drift it can never push), but it is the one
+place this could be made faster if it ever annoys him.
+
+GROUP INHERITANCE (copy + worktree): the source's groups MINUS `ctx/*` (a machine-context tag —
+the new box gets its own from $DEFAULT_BOX_GROUPS, and carrying the source's would label a box
+on ideapad `ctx/mymain`) and MINUS $MYRIG_BOXYARD_HIDDEN_GROUPS (a box you just made is not
+`archived`; inheriting that would hide it from the very picker you would look for it in).
+Worktrees additionally keep mysystem's `ms-new-worktree-box` contract: `-g worktrees` + parented
+to the source, which is what boxyard's active-worktrees/archived-worktrees views expect.
+
+GITHUB ACCOUNTS ARE CONFIG, NOT CODE (he asked for this explicitly): `[github].accounts` in
+myrig's config.toml → `$MYRIG_GITHUB_ACCOUNTS` via a new `^all^github.sh.jinja`, the
+`[boxyard].hidden_groups` → `$MYRIG_BOXYARD_HIDDEN_GROUPS` pattern. Adding an account is the
+whole change; the command is LOUD when the variable is unset rather than guessing. The repo
+list PRE-FLIGHTS the clone with `git ls-remote` on the TARGET machine — boxyard sends `git
+clone`'s output to /dev/null, so without it a no-access repo fails with the reason discarded;
+with it you get "ERROR: Repository not found." and nothing is created.
+
+TESTED against the real fleet, everything created then deleted (mymain, ideapad, and the
+hetzner store all verified clean afterwards, incl. the propagated meta): real clone (right
+remote, right branch, upstream history); pasted-URL normalisation; a nonexistent repo refused
+by the pre-flight; all FOUR copy-source branches (owner-direct, owner-offline, no-owner,
+owner-hasn't-got-it) driven through the real decision code; local `cp -a` copy; cross-machine
+tar copy mymain→ideapad (the strong ctx/ proof — the new box came out `ctx/ideapad` + inherited
+`physics`, no `ctx/mymain`, no `archived`); remote-store rclone copy; worktree local and ON
+IDEAPAD (real `.git` pointer, registered in the source's `worktree list`, source untouched on
+its own branch); blank branch refused; an already-existing branch → git fails → the box is
+deleted again; copying a WORKTREE box warns loudly and skips the branch. `_mt_pick_box_id_on
+ideapad` really restricted the picker to ideapad's 4 boxes vs mymain's 126. The full
+interactive chain was driven in a real tmux: fzf over 248 repos across both accounts, then
+vared prompts edited with arrow keys + backspace. Regression-checked the refactor: `create-box`
+and `create-null` behave exactly as before. `zsh -n` clean on the rendered file.
+
+DEPLOY: render-only (shell.sh is rendered jinja → install-home per machine; menus.sh is a
+symlink → the pull is its deploy; the NEW github.sh.jinja needs install-home to exist at all).
+NO daemon restart, NO conf re-source (no binding changed), NO sesh binary change. LIVE ON 5/6 at
+myrig 0e0307d — mymain (local), ideapad + pocket4 (python3), macbook + macstudio (`uv run --with
+jinja2`, H46), each verified in a FRESH login shell for both `$MYRIG_GITHUB_ACCOUNTS` and the
+eight functions, and in the prefix+m quick menus. **termux PENDING — its sshd is down**
+(`android-main:8022` connection refused; nothing restarts it but a Termux session or a reboot,
+H83). When it returns: `cd ~/mysetup/myrig && git pull && python3 scripts/install-home.py
+"$MYRIG_TARGETS"` (its python3 has jinja2; /tmp is unwritable there, so don't redirect the log
+to /tmp — H38).
+NOTED, not mine: pushing my commit also pushed Lukas's already-committed but unpushed
+`2eaa590` ("boxyard: turn merge_diverged_boxmetas on, mymain first") — unavoidable, mine sat on
+top of it. Harmless: that setting is `{% if current == 'mymain' %}`-guarded in the template, so
+rendering it on the four peers produced no change, VERIFIED (`merge_diverged_boxmetas` absent
+from every peer's config.toml, present on mymain). ideapad's myrig checkout still carries the
+stray uncommitted `home/.zshrc` append from H94; it does not touch any file in this change.
+
 ## H95 — "SUBSCRIPTIONS DON'T WORK" was H92's guard doing its job + a supervisor hiding stderr; the REAL defect was the refusal naming a flag that command does not have (2026-08-27, sesh a28acf8; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — macbook asleep, pending)
 Lukas: thread f9ba7068 (jackfruit-hq supervisor) "recently tried to subscribe to a few child
 threads but it seems like it didn't get a message back when the subscribees ended their turns."

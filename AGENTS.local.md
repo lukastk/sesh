@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H94 — the `S` SHELLS VIEW had NO VIEWPORT (the cursor walked off the pane), + `mt-promote-session-here` could not be driven from the prefix+m popup (2026-08-27, sesh d1729cb + myrig 75694cf; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
+## H94 — the `S` SHELLS VIEW had NO VIEWPORT (the cursor walked off the pane), + `mt-promote-session-here` could not be driven from the prefix+m popup (2026-08-27, sesh d1729cb + myrig 75694cf; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED ALL SIX)
 Lukas, three asks: (1) an mmt- twin of `mt-promote-session-here` + both in the prefix+m quick
 menus; (2) "I just tried mt-promote-session-here and it didn't work"; (3) "I tried the shells view
 in sesh tui, and it seems a bit broken. It should work similarly or pretty much the same as the
@@ -87,13 +87,15 @@ to 4/78, and a real SGR mouse click landed on exactly the row clicked. The myrig
 a popup-shaped context (TMUX_PANE unset, SESH_MT_PANE=<scratch pane>): the new form promotes the
 right session where the old form fails; scratch session + record cleaned up.
 DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (a pure TUI-client feature) +
-a render-only myrig change. **LIVE ON 5/6** at sesh d1729cb / myrig 75694cf — mymain, ideapad,
+a render-only myrig change. **LIVE ON ALL SIX** at sesh d1729cb+ / myrig 75694cf — mymain, ideapad,
 macbook, macstudio, termux (plain `go build`, CGO_ENABLED=1 / android verified on the box, H22;
-render logs to `$HOME`, /tmp is unwritable there — H38); every installed binary `vcs.modified=false`
-and `sesh help tui` carrying the new text. **pocket4 OFFLINE** (ssh :22 timed out) → PENDING,
-harmless; when it returns: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new
-./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh` + `cd ~/mysetup/myrig && git pull &&
-python3 scripts/install-home.py "$MYRIG_TARGETS"`.
+render logs to `$HOME`, /tmp is unwritable there — H38) and pocket4; every checkout was verified
+clean on main BEFORE pulling (H49/H63), every installed binary reports `vcs.modified=false`, and
+`sesh help tui` carries the new text on each. pocket4 was OFFLINE for the first pass (ssh :22 timed
+out) and came back ~an hour later; it was deployed the same way (native `go build`, python3 render)
+at 341f240 — a doc-only commit ahead of the others, which is harmless and simply what its checkout
+had by then. No daemon was restarted anywhere and none needed to be: pocket4's supervised daemon
+still runs its old inode, which is correct for a TUI-client change.
 **A running SIDEBAR keeps the binary it launched with (H70), so none of this exists inside his
 sidebar until `prefix+r` (or mmt-kill/mmt-start)** — and his was pid 69163 from 2026-08-18, i.e.
 already five batches behind before this change.

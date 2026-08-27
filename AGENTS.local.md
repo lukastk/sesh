@@ -1,5 +1,83 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H95 — "SUBSCRIPTIONS DON'T WORK" was H92's guard doing its job + a supervisor hiding stderr; the REAL defect was the refusal naming a flag that command does not have (2026-08-27, sesh a28acf8; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — macbook asleep, pending)
+Lukas: thread f9ba7068 (jackfruit-hq supervisor) "recently tried to subscribe to a few child
+threads but it seems like it didn't get a message back when the subscribees ended their turns."
+
+**SUBSCRIPTIONS WERE NEVER BROKEN. The edges never existed.** The diagnosis order is the reusable
+part, and it is three commands long:
+1. `sesh subscriptions --json` → the three child edges DID exist by the time I looked.
+2. `sqlite3 -readonly ~/.sesh/sesh.db "select subscribee,last_count from subscriptions where
+   subscriber like 'f9ba7068%'"` → the NINE older edges carried counts of 5..118 (so the engine
+   works) while the three new ones read **0** (so nothing had ever been delivered on them).
+3. `grep '\[sesh\].*completed a turn'` in the SUBSCRIBER'S OWN TRANSCRIPT, with timestamps →
+   deliveries flowing 10:41→14:56 for the previous batch, nothing for the new one. That is the
+   observable that settles it: the delivery text is `[sesh] <name> (<uuid>) completed a turn`, it
+   lands IN the subscriber's conversation, and it is timestamped.
+Then the parent's transcript again, grepped for the COMMANDS it ran: at **15:15:17** it ran, in a
+loop, `sesh subscribe $ID >/dev/null 2>&1` followed by `echo "$lane -> $ID (…, subscribed)"`. Every
+call was REFUSED — and the loop discarded stderr and printed success anyway. It re-ran the same
+command visibly at 16:32, and the refusal was right there in the tool result.
+
+**THE REFUSAL WAS CORRECT AND H92 EARNED ITS KEEP HERE.** `$SESH_THREAD_ID=ce3e3811` named a thread
+whose cwd is `~/mysetup/mysystem`, unrelated to the caller's `~/dev/…jackfruit-hq-mymain/jackfruit`,
+with no tmux pane to check it against — the H82 signature of a claude Bash call hosted by the
+machine-global `claude daemon run`, which freezes whichever thread's env started it. Without the
+guard those three children would have been subscribed to a STRANGER'S thread in another repo, and
+their turn reports would have been delivered into it. This is the second time that guard has caught
+a real mis-identification in the wild.
+
+**THE ONE REAL DEFECT, and it is why the incident cost an hour instead of a minute: the refusal's
+remedy named a flag the command does not have.** It hardcoded `Pass --id <thread>`, and
+`sesh subscribe` has NO `--id` — its subscriber flag is `--from`. MEASURED: `sesh subscribe <id>
+--id X` → `flag provided but not defined: -id`. So an agent that follows the loud, actionable error
+verbatim gets a parse failure. Same mismatch in `ticket list --current` and `hooks test`, which take
+`--thread`. A refusal that offers a remedy the caller cannot type is only half a loud error.
+FIX: the flag travels WITH the refusal — `unverifiedError.Flag` (empty = `--id`) fed from
+`currentInputs.idFlag`, so H92's pure truth table is unchanged and still unit-testable, and the
+sibling "not inside a sesh thread" error (same hardcoded remedy, same bug) uses it too.
+`resolveThreadIDFor` / `resolveMeshThreadIDFor` are the flag-aware variants; `resolveThreadID` keeps
+its signature so the ~20 ordinary `--id` call sites are untouched, and only the three commands whose
+flag differs pass their own.
+
+TESTS. Unit (cmd/sesh): defaults to `--id`; names `--from`/`--thread` when the command does; must
+NOT mention `--id` in those cases; the not-in-a-thread refusal too. **The WIRING is covered where it
+belongs** — `thread.info/-/local`, the cell that already reproduces the H92 incident against a real
+daemon, now also runs a real `sesh subscribe` from the contradicting directory and requires the
+refusal to name `--from` and not `--id`. ANTI-GAMING (reverse-edited, never git-checkout — H44;
+`-count=1` — H75): passing `""` from subscribe's call site turns the CELL red with the verbatim old
+message, while the unit test stays green — which is the honest split, the unit covers the resolver
+and the cell covers the wiring.
+GREEN: cmd/sesh plain and -race; `go vet ./...`; cells thread.info 2/2, ticket.list-current 1/1,
+daemon.hooks 2/2, thread.subscribe 2/2.
+**`-run` TRAP AGAIN (H92 recorded it; I walked into the other half): the matrix subtest path carries
+the AGENT AXIS even when the feature is agent-agnostic** — it is `TestMatrix/thread.info/-/local`,
+so `-run 'TestMatrix/thread.info/local'` matched NOTHING and printed `ok` in 0.00s. Confirm with
+`-v` that the cells you expected actually appear.
+
+LIVE-PROVEN, read-only, on the real fleet: after the supervisor re-subscribed at 16:33 WITH
+`--from`, deliveries resumed within four minutes and all three edges now carry counts (31 / 7 / 26)
+with 30 `completed a turn` blocks in the parent's conversation. Also confirmed along the way that
+`busy` on those children was HONEST and not an H58/H64 stuck authority: `thread capture` tail alone
+LOOKED idle (claude always renders its `❯` input box), and only diffing two captures 3s apart showed
+`✽ Billowing… (3m 12s · still thinking with xhigh effort)` — **do not read a claude pane's prompt
+line as idle; diff the pane.**
+
+SKILL: the provenance section now names the per-command flags AND carries an agents' note — a claude
+Bash call often has no pane, so scripted work should name the thread explicitly
+(`sesh subscribe <child> --from <me>`) and must never discard stderr; `>/dev/null 2>&1` around a
+loop of sesh calls is exactly how this failed silently for an hour.
+NOT CHANGED, deliberately: nothing about inference itself. Corroboration refusing here is the
+designed behaviour, and "infer from the cwd instead" would be guessing (several threads share a cwd).
+
+DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (CLI-side only, so a mixed
+fleet is trivially safe). LIVE ON 5/6 at a28acf8 — mymain, ideapad, macstudio, pocket4, termux
+(plain `go build`, CGO_ENABLED=1 / android, H22); every installed binary `vcs.modified=false`.
+**macbook ASLEEP** (ssh :22 timed out; it had been reachable earlier today and dropped off the mesh
+mid-session) → PENDING, harmless; when it wakes: `cd ~/mysetup/sesh && git pull &&
+/opt/homebrew/bin/go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new
+~/.local/bin/sesh`.
+
 ## H94 — the `S` SHELLS VIEW had NO VIEWPORT (the cursor walked off the pane), + `mt-promote-session-here` could not be driven from the prefix+m popup (2026-08-27, sesh d1729cb + myrig 75694cf; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED ALL SIX)
 Lukas, three asks: (1) an mmt- twin of `mt-promote-session-here` + both in the prefix+m quick
 menus; (2) "I just tried mt-promote-session-here and it didn't work"; (3) "I tried the shells view

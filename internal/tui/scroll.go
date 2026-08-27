@@ -128,18 +128,13 @@ func (m *Model) halfPage() int {
 	return 1
 }
 
-// ensureCursorVisible scrolls the viewport just enough to keep the cursor in view.
+// ensureCursorVisible scrolls the viewport just enough to keep the cursor in view
+// (the shared list-window rule — see listwindow.go).
 func (m *Model) ensureCursorVisible() {
 	if m.height <= 0 {
 		return
 	}
-	h := m.bodyHeight()
-	if m.cursor < m.vOffset {
-		m.vOffset = m.cursor
-	}
-	if m.cursor >= m.vOffset+h {
-		m.vOffset = m.cursor - h + 1
-	}
+	m.vOffset = listEnsureVisible(m.vOffset, m.cursor, m.bodyHeight())
 	m.clampVOffset()
 }
 
@@ -168,16 +163,7 @@ func (m *Model) scrollRows(delta int) {
 }
 
 func (m *Model) clampVOffset() {
-	maxOff := len(m.visibleMatches()) - m.bodyHeight()
-	if maxOff < 0 {
-		maxOff = 0
-	}
-	if m.vOffset > maxOff {
-		m.vOffset = maxOff
-	}
-	if m.vOffset < 0 {
-		m.vOffset = 0
-	}
+	m.vOffset = listClampOffset(m.vOffset, len(m.visibleMatches()), m.bodyHeight())
 }
 
 // horizontalWindow returns [start:end) of cols that fits in avail columns, always

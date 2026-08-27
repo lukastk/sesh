@@ -39,6 +39,22 @@ func TestPopupFramesFitPaneHeight(t *testing.T) {
 				return m
 			}},
 			{"view-picker", func(m Model) Model { m.viewPicker = true; return m }},
+			{"shells", func(m Model) Model {
+				m.shells, m.shellRows = true, manySessions(40)
+				return m
+			}},
+			{"shells-with-chrome", func(m Model) Model {
+				// The states that ADD lines: fan-out errors, a note, an applied
+				// filter and the kill confirmation (whose warning WRAPS). Each one
+				// has to come out of the row budget, or the frame outgrows the pane
+				// and bubbletea drops the title and the top rows.
+				m.shells, m.shellRows = true, manySessions(40)
+				m.shellErrs = []string{"macbook: dial tcp 100.114.33.83:7878: connect: connection refused"}
+				m.shellNote = "killed mymain:scratch"
+				m.shellQuery = []rune("sess")
+				m.shellConfirmKill = true
+				return m
+			}},
 			{"grid", func(m Model) Model { return m }},
 			// NOT covered: the `I` details popup. It renders a FIXED ~23-line field
 			// list with no scrolling at all, so on a short pane it overflows by

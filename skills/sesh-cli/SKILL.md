@@ -172,9 +172,15 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
     marker and leaves the session running as a ghost you can re-promote. To get it out of
     the active view while still working in it, **archive** it.
   - In the TUI: **`S`** opens the **shells view** — every live session on every reachable
-    machine, classified. `enter` jumps to one, **`P`** promotes it to a tracked shell
-    thread, `x` kills it (confirmed; the confirmation names any agent threads that would
-    die with it), `R` refreshes, `esc` closes.
+    machine, classified. It is a list surface like the grid and behaves like one: ↑/↓ (or
+    j/k) move and the viewport FOLLOWS the selection, ^j/^k scroll a half-page, `/` filters
+    (fuzzy, over session name + machine + path + the agent threads inside — enter applies,
+    esc clears), the wheel moves the selection, a click selects a session and a double
+    click enters it. `enter` jumps to one, **`P`** promotes it to a tracked shell thread,
+    `x` kills it (confirmed; the confirmation names any agent threads that would die with
+    it), `R` refreshes, `esc` closes (clearing an active filter first). The cursor is
+    ANCHORED to its session across a refresh, so a promote/kill never slides it onto a
+    different one.
 - **Virtual threads** (`thread new --virtual --name X`, or the `new-virtual` command in the TUI) are
   grouping nodes WITHOUT an
   agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
@@ -423,9 +429,12 @@ I            thread details: a read-only popup of ALL of the selected thread's
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
 S            SHELLS view — every live tmux session on every reachable machine,
-             classified shell/agent/ghost/stale. enter jumps to one, P promotes it
-             to a tracked shell thread, x kills it (confirmed), R refreshes, esc
-             closes. This is where sessions sesh did NOT create become visible.
+             classified shell/agent/ghost/stale. Scrolls/filters/clicks like the
+             grid (↑↓ j/k, ^j/^k half-page, / filter, wheel, click = select,
+             double-click = enter). enter jumps to one, P promotes it to a tracked
+             shell thread, x kills it (confirmed), R refreshes, esc closes (an
+             active filter first). This is where sessions sesh did NOT create
+             become visible.
 x            stop      a  archive/unarchive (INSTANT)
 U            undo the last archive (LIFO across this session's archives)
 ?            the keymap popup

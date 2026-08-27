@@ -197,34 +197,13 @@ func (m Model) handleParentPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // parentPickVisibleRows is how many candidate lines fit (height unknown = all).
 func (m Model) parentPickVisibleRows(n int) int {
-	if m.height <= 0 {
-		return n
-	}
-	avail := m.height - parentPickChrome
-	if avail < 1 {
-		avail = 1
-	}
-	if avail > n {
-		avail = n
-	}
-	return avail
+	return listVisibleRows(n, m.height, parentPickChrome)
 }
 
 // ensureParentPickVisible scrolls the window so the cursor stays on screen.
 func (m *Model) ensureParentPickVisible(n int) {
 	avail := m.parentPickVisibleRows(n)
-	if m.parentPickCursor < m.parentPickOffset {
-		m.parentPickOffset = m.parentPickCursor
-	}
-	if m.parentPickCursor >= m.parentPickOffset+avail {
-		m.parentPickOffset = m.parentPickCursor - avail + 1
-	}
-	if max := n - avail; m.parentPickOffset > max {
-		m.parentPickOffset = max
-	}
-	if m.parentPickOffset < 0 {
-		m.parentPickOffset = 0
-	}
+	m.parentPickOffset = listClampOffset(listEnsureVisible(m.parentPickOffset, m.parentPickCursor, avail), n, avail)
 }
 
 // parentPickView renders the picker. Like the palette and the `?` popup, both

@@ -1,6 +1,8 @@
 package conformance
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -111,6 +113,60 @@ func claimShellsView(t *testing.T) {
 	// The agent session must be untouched — a kill is one session, never a sweep.
 	if out, err := sb.rawTmux(t, "has-session", "-t", "agentsess"); err != nil {
 		t.Fatalf("killing the ghost also took agentsess: %v\n%s", err, out)
+	}
+
+	// --- the viewer SCROLLS to its selection ---------------------------------
+	//
+	// The reported bug, against a REAL fan-out: with more live sessions than fit
+	// the pane, moving the cursor down must bring the selected session onto the
+	// screen. Before this the viewer had no viewport at all, so the cursor walked
+	// off the bottom and the selected row simply was not rendered.
+	for i := range 24 {
+		name := fmt.Sprintf("scroll-%02d", i)
+		if out, err := sb.rawTmux(t, "new-session", "-d", "-s", name); err != nil {
+			t.Fatalf("new-session %s: %v\n%s", name, err, out)
+		}
+	}
+	m = sendMsg(t, m, tea.WindowSizeMsg{Width: 120, Height: 14})
+	m = runKeyDeep(t, m, "R") // re-fan-out over the real work server
+	if n := m.ShellSessionCount(); n < 25 {
+		t.Fatalf("fan-out found %d sessions, want at least the 25 just created", n)
+	}
+	// Walk down past the bottom of a 14-line pane with real keypresses.
+	for range 20 {
+		m = runKeyDeep(t, m, "j")
+	}
+	sel, ok := m.ShellSelectedName()
+	if !ok {
+		t.Fatalf("no session under the cursor after 20 moves")
+	}
+	frame := m.View()
+	if lines := strings.Count(frame, "\n") + 1; lines > 14 {
+		t.Fatalf("the viewer rendered a %d-line frame into a 14-row pane — bubbletea drops the TOP lines to fit:\n%s", lines, frame)
+	}
+	cursorLine := ""
+	for _, ln := range strings.Split(frame, "\n") {
+		if strings.HasPrefix(stripANSI(ln), "> ") {
+			cursorLine = stripANSI(ln)
+		}
+	}
+	if cursorLine == "" || !strings.Contains(cursorLine, sel) {
+		t.Fatalf("the selected session %q is not the row rendered under the cursor (cursor line %q) — the viewport did not follow the selection:\n%s",
+			sel, cursorLine, frame)
+	}
+
+	// The `/` filter narrows the REAL list, and the cursor then acts on what is
+	// on screen.
+	m = runKeyDeep(t, m, "/")
+	for _, r := range "scroll-07" {
+		m = runKeyDeep(t, m, string(r))
+	}
+	m = sendMsg(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // apply
+	if n := m.ShellVisibleCount(); n != 1 {
+		t.Fatalf("filter left %d sessions visible, want just scroll-07", n)
+	}
+	if sel, _ := m.ShellSelectedName(); sel != "scroll-07" {
+		t.Fatalf("under the filter the cursor is on %q, want scroll-07", sel)
 	}
 }
 

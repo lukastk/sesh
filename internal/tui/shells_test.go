@@ -99,16 +99,23 @@ func shellModel(rows ...sessionRow) Model {
 func TestShellViewerKeys(t *testing.T) {
 	rows := []sessionRow{ghostRow("mymain", "a"), ghostRow("mymain", "b")}
 
-	t.Run("cursor moves and clamps", func(t *testing.T) {
+	t.Run("cursor moves and WRAPS, like the grid's", func(t *testing.T) {
 		m := shellModel(rows...)
 		next, _ := m.handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 		if next.(Model).shellCursor != 1 {
 			t.Fatalf("cursor = %d, want 1", next.(Model).shellCursor)
 		}
-		// past the end: clamps rather than running off
+		// Past the end it WRAPS to the top. This viewer used to clamp; the grid has
+		// always wrapped (the fzf --cycle feel), and a list that stops dead next to
+		// one that wraps reads as broken.
 		next, _ = next.(Model).handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		if next.(Model).shellCursor != 0 {
+			t.Fatalf("cursor = %d, want it wrapped to 0", next.(Model).shellCursor)
+		}
+		// ...and backwards from the top wraps to the bottom.
+		next, _ = next.(Model).handleShellKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
 		if next.(Model).shellCursor != 1 {
-			t.Fatalf("cursor = %d, want it clamped at 1", next.(Model).shellCursor)
+			t.Fatalf("cursor = %d, want it wrapped to 1", next.(Model).shellCursor)
 		}
 	})
 

@@ -147,34 +147,13 @@ func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // paletteVisibleRows is how many command lines fit. Height unknown (tests, before
 // the first WindowSizeMsg) = show everything.
 func (m Model) paletteVisibleRows(n int) int {
-	if m.height <= 0 {
-		return n
-	}
-	avail := m.height - paletteChrome
-	if avail < 1 {
-		avail = 1
-	}
-	if avail > n {
-		avail = n
-	}
-	return avail
+	return listVisibleRows(n, m.height, paletteChrome)
 }
 
 // ensurePaletteVisible scrolls the window so the cursor stays on screen.
 func (m *Model) ensurePaletteVisible(n int) {
 	avail := m.paletteVisibleRows(n)
-	if m.paletteCursor < m.paletteOffset {
-		m.paletteOffset = m.paletteCursor
-	}
-	if m.paletteCursor >= m.paletteOffset+avail {
-		m.paletteOffset = m.paletteCursor - avail + 1
-	}
-	if max := n - avail; m.paletteOffset > max {
-		m.paletteOffset = max
-	}
-	if m.paletteOffset < 0 {
-		m.paletteOffset = 0
-	}
+	m.paletteOffset = listClampOffset(listEnsureVisible(m.paletteOffset, m.paletteCursor, avail), n, avail)
 }
 
 // paletteView renders the palette. The two indicator lines are ALWAYS present

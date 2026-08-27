@@ -528,11 +528,14 @@ type Model struct {
 	// recorded. See shells.go and _dev/SHELL.md.
 	shells           bool // the viewer is open
 	shellRows        []sessionRow
-	shellCursor      int
+	shellCursor      int // indexes visibleSessions(), NOT shellRows (a query narrows it)
+	shellOffset      int // the viewport's first rendered row — the cursor scrolls it
 	shellLoading     bool
 	shellErrs        []string // per-machine fan-out failures (one bad peer must not blank the view)
 	shellNote        string   // transient status line (e.g. "killed mymain:scratch")
 	shellConfirmKill bool     // the y/n kill confirmation is up
+	shellQuery       []rune   // the `/` filter query (empty = every session)
+	shellFiltering   bool     // typing that query (it owns the keyboard while up)
 }
 
 // New builds a model talking to the daemon at socketPath.
@@ -1136,6 +1139,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// While the SHELLS VIEWER is up: the wheel moves its selection (viewport
+		// following, like the grid), a left click selects a session and a double
+		// click enters it.
+		if m.shells {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if s := wheelTick(&m.wheelAccV, -1, m.scrollDivV); s != 0 {
+					m.moveShellCursor(s)
+				}
+			case tea.MouseButtonWheelDown:
+				if s := wheelTick(&m.wheelAccV, 1, m.scrollDivV); s != 0 {
+					m.moveShellCursor(s)
+				}
+			case tea.MouseButtonLeft:
+				if msg.Action == tea.MouseActionPress {
+					return m.handleShellClick(msg)
+				}
+			}
+			return m, nil
+		}
 		// While the COMMAND PALETTE is up: the wheel moves its selection, a left
 		// click on a command line RUNS it (click outside the list is a no-op — the
 		// palette stays, esc dismisses).
@@ -1413,11 +1436,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.attachTarget, m.attachThread = msg.target, msg.thread
 		return m, tea.Quit
 	case shellsLoadedMsg:
+		// ANCHOR the cursor to the session it was on before the fan-out, wherever
+		// that session now sorts. A positional cursor would silently slide onto a
+		// different session when the list changes under it (H42) — and this viewer
+		// has a `kill` key, so acting on the wrong row is the worst outcome it has.
+		anchor := ""
+		if row, ok := m.selectedSession(); ok {
+			anchor = sessionKey(row)
+		}
 		m.shellLoading = false
 		m.shellRows, m.shellErrs = msg.rows, msg.errs
-		if m.shellCursor >= len(m.shellRows) {
-			m.shellCursor = max(0, len(m.shellRows)-1)
-		}
+		m.reanchorShellCursor(anchor)
 		return m, nil
 	case shellActionMsg:
 		if msg.err != nil {
@@ -3575,22 +3604,15 @@ func (m Model) renderLegend() string {
 	return styleDim.Render(text)
 }
 
+// helpChrome is the `?` popup's fixed non-row line count: title, the two
+// more-indicators, and the footer.
+const helpChrome = 4
+
 // helpVisibleRows is how many binding lines fit: the height minus the fixed
 // chrome (title, the two more-indicators, the footer). Height unknown (tests,
 // no WindowSizeMsg yet) = everything.
 func (m Model) helpVisibleRows() int {
-	n := len(m.helpBindings())
-	if m.height <= 0 {
-		return n
-	}
-	avail := m.height - 4
-	if avail < 1 {
-		avail = 1
-	}
-	if avail > n {
-		avail = n
-	}
-	return avail
+	return listVisibleRows(len(m.helpBindings()), m.height, helpChrome)
 }
 
 // helpMaxOffset is the largest useful scroll offset.

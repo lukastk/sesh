@@ -1,5 +1,111 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H94 — the `S` SHELLS VIEW had NO VIEWPORT (the cursor walked off the pane), + `mt-promote-session-here` could not be driven from the prefix+m popup (2026-08-27, sesh d1729cb + myrig 75694cf; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
+Lukas, three asks: (1) an mmt- twin of `mt-promote-session-here` + both in the prefix+m quick
+menus; (2) "I just tried mt-promote-session-here and it didn't work"; (3) "I tried the shells view
+in sesh tui, and it seems a bit broken. It should work similarly or pretty much the same as the
+threads view (and should reuse the code). Right now it doesn't seem to scroll towards the currently
+selected row."
+
+(1) WITHDRAWN by him mid-session once the semantics were laid out: promoting "the session you are
+sitting in" only ever means the machine you are on, so a cross-machine twin has nothing to name.
+Only `mt-promote-session-here` exists, and it is now in MT_QUICK_CMDS.
+
+**(2) IS THE INTERESTING ONE AND ITS DIAGNOSIS IS THE REUSABLE PART.** He said the shell thread
+never appeared in his sidebar — which reads as a rendering/visibility bug. It was not: `thread grid
+--all-machines --archived --json | select(.agent_kind=="shell")` across the whole fleet returned
+NOTHING, so no record had ever been created and the promote had simply ERRORED. **Query the store
+before believing a "it didn't show up" report** — presence in the record set splits "the write
+failed" from "the view hid it" in one command, and they have completely different fixes. (Two
+candidate errors, both reproduced: a shell older than 2026-08-23 22:42 has no such function — many
+of his live work-server sessions predate it, `adobe-suite`/`boxyard-go`/`mosaic`/`politick-hq` —
+and a pane on a non-work tmux server gets the daemon's loud 404.) Also ruled out along the way, by
+running the OLD binary against the live daemon: his sidebar process is **c550644 from 2026-08-18**,
+five feature batches stale (H70: a long-running sidebar keeps the binary it launched with), but an
+old TUI renders a shell thread FINE — so staleness was not the cause either. Do not stop at "the
+client is old".
+
+THE FIX THAT MATTERED FOR (1)+(2) IS **THE WHICH-CLIENT LAW, MEASURED**: inside a tmux
+`display-popup`, `$TMUX_PANE` is NOT the pane you pressed the key on — it is inherited from the tmux
+SERVER's environment. In an isolated rig a popup reported `TMUX_PANE=%1226`, the pane of the shell
+that had started the server; on a work server started at boot it is unset entirely. So `sesh shell
+here`, which reads `$TMUX_PANE` itself, either fails outright from the menu or — proven read-only —
+resolves a STALE pane id and would promote a COMPLETELY DIFFERENT session (it resolved
+`mysetup/sesh`, my own agent session). `mt-promote-session-here` therefore now takes the pane from
+`${SESH_MT_PANE:-$TMUX_PANE}` (the prefix+m binding bakes `SESH_MT_PANE=#{pane_id}`), reads its
+session name, and calls **`sesh shell promote --session <name>`** — the by-name verb, which is
+drivable from a popup — exactly as `mt-enter-new-thread-here` already did. It also emits a `tmux
+display-message` on success: from the popup the popup closes the instant the function returns, so
+the printed line is never seen (the binding's `|| sleep 3` only holds on FAILURE).
+
+**(3) THE SHELLS VIEW HAD NO VIEWPORT AT ALL** — `shellsView` looped over every row unconditionally:
+no offset, no indicators, no ensure-visible. With 78 live sessions on the real mesh the cursor
+walked off the bottom and the selected row was simply not on screen (bubbletea keeps the LAST
+`height` lines of an over-tall frame, so the title and the top rows are what get dropped — H70's
+mechanism, third appearance).
+**The "reuse the code" he asked for was real and worth doing: FOUR surfaces each carried their own
+transcription of the same six lines of list-window arithmetic** (grid `scroll.go`, `?` `helpView`,
+command palette, reparent picker) **and the shells viewer carried NONE.** Extracted to
+`internal/tui/listwindow.go` — `listVisibleRows` / `listEnsureVisible` / `listClampOffset`, pure —
+and rewired all four onto it (behaviour unchanged). The viewer then got: viewport-follows-cursor,
+▲/▼ indicators, ^j/^k half-page, a `/` fuzzy filter (name + machine + path + the agent threads
+inside; enter applies, esc clears, esc only closes the viewer once there is no query left), mouse
+(wheel moves, click selects, double-click enters), and a WRAPPING cursor — it used to clamp, and a
+list that stops dead next to one that wraps reads as broken (the test that asserted clamping now
+asserts wrapping, deliberately).
+TWO DESIGN POINTS WORTH KEEPING. (a) **Geometry is resolved ONCE** (`shellResolveLayout`) and read
+by BOTH the renderer and the click mapping, instead of the renderer being hand-mirrored by a chrome
+count — that mirror is the H41 drift class, and its symptom is clicks landing on the wrong row.
+(b) **The cursor is ANCHORED to its session across a re-fan-out** (H42's rule): promote/kill reload
+the list, and a positional cursor would slide onto a DIFFERENT session — the one thing a viewer
+with a `kill` key must never do. The kill confirmation also moved ABOVE the rows (where the grid
+puts its own): an armed y/n prompt must be unmissable, and anything below a full list is the first
+thing a short pane cuts. Long errors/warnings are wrapped to the width and COUNTED, and the frame
+is clamped to the pane height keeping the TOP.
+NOT FIXED, and recorded rather than quietly skipped: the `I` details popup still renders a fixed
+~23-line field list with no scrolling (H88 noted it; still excluded from the popup-frame guard).
+
+TESTS. Units: listwindow truth tables; viewport-follows-cursor + half-page asserted on the RENDER,
+not the offset; `shellRowAtY` round-tripped against the render at five chrome/scroll/width
+combinations; the filter; anchoring incl. the killed-session case; the mouse. The shells view is
+added to `TestPopupFramesFitPaneHeight` with and without its optional chrome. Conformance claim
+`shells-view` EXTENDED against a REAL daemon and 24 REAL extra tmux sessions: after 20 real `j`
+presses the selected session must be the row rendered under the cursor and the frame must fit a
+14-row pane, then `/` narrows the real list. ANTI-GAMING (reverse-edited, never git-checkout — H44;
+`-count=1` — H75): neutering ensureShellCursorVisible turns the unit test AND the claim red with
+the exact user report; dropping the reload anchor slides the cursor onto another session; dropping
+the offset from `shellRowAtY`, and forgetting the ▲ line occupies a row, each turn the drift guard
+red. All reversed and re-run green (H88's rule).
+GREEN: internal/tui plain and -race; every non-conformance package plain and -race; `go vet ./...`;
+the FULL TUI claims suite serially (183s, ALL GREEN — no pre-existing reds on this box, unlike the
+macbook runs in H80/H88/H91). `gofmt -l` still flags the usual pre-existing drift files (H48); every
+file I touched is clean. The full 253-cell matrix was NOT run — do not read this as all-green.
+LIVE-SMOKED READ-ONLY against the real mymain daemon and its 78 real sessions (isolated tmux, no
+P/x/enter — a double-click would have ATTACHED this terminal to a live work-server session, the H69
+resize hazard): 40 × j scrolled to "▲ 23 more" with the cursor row on screen, `/boxyard` narrowed
+to 4/78, and a real SGR mouse click landed on exactly the row clicked. The myrig side was smoked in
+a popup-shaped context (TMUX_PANE unset, SESH_MT_PANE=<scratch pane>): the new form promotes the
+right session where the old form fails; scratch session + record cleaned up.
+DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (a pure TUI-client feature) +
+a render-only myrig change. **LIVE ON 5/6** at sesh d1729cb / myrig 75694cf — mymain, ideapad,
+macbook, macstudio, termux (plain `go build`, CGO_ENABLED=1 / android verified on the box, H22;
+render logs to `$HOME`, /tmp is unwritable there — H38); every installed binary `vcs.modified=false`
+and `sesh help tui` carrying the new text. **pocket4 OFFLINE** (ssh :22 timed out) → PENDING,
+harmless; when it returns: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new
+./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh` + `cd ~/mysetup/myrig && git pull &&
+python3 scripts/install-home.py "$MYRIG_TARGETS"`.
+**A running SIDEBAR keeps the binary it launched with (H70), so none of this exists inside his
+sidebar until `prefix+r` (or mmt-kill/mmt-start)** — and his was pid 69163 from 2026-08-18, i.e.
+already five batches behind before this change.
+TRAP HIT: `ssh-target macstudio` failed twice with `mux_client_request_session: session request
+failed: Session open refused by peer` while the mesh said macstudio was REACHABLE (its http API was
+fine). It was a STALE ControlMaster socket, not the host: `ssh -O exit -o ControlPath=~/.ssh/cm/%C
+<userhost>` cleared it and the next connection worked. Do not read that error as "the machine is
+down" — check the mesh first, then drop the mux socket.
+NOTED, not touched: ideapad's myrig checkout carries an uncommitted 2-line `home/.zshrc` append
+(a stray `. "$HOME/.local/share/../bin/env"` from some installer). It does not conflict with this
+change; it is not mine to commit.
+
 ## H93 — CODEX SUBSCRIPTIONS HAD SILENTLY STOPPED DELIVERING: codex dropped `event_msg`/`agent_message` from its rollouts between 0.146 and 0.149.1, so `LastReply` returned ("",0) for every codex thread; fix = read the `response_item` conversation record — and match ONE shape, because legacy rollouts carry BOTH (2026-08-25, sesh e7b3a0d; NO schema/API change; DAEMON rebuild + RESTART; DEPLOYED ALL SIX; **FULL MATRIX 253/253 ALL GREEN**)
 Found by running the full matrix after H92 (Lukas: "work on the 3 failures"). `thread.transcript/
 codex` was red on `last_reply=""` / `reply_count=0` while the transcript LINES clearly contained the

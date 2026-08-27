@@ -105,6 +105,86 @@ rendering it on the four peers produced no change, VERIFIED (`merge_diverged_box
 from every peer's config.toml, present on mymain). ideapad's myrig checkout still carries the
 stray uncommitted `home/.zshrc` append from H94; it does not touch any file in this change.
 
+### H96 follow-up — boxyard 0.5.17/0.5.18 landed under the feature: three of H96's five traps are GONE, trap 5 is INVERTED, and a REAL bug in my own worktree path surfaced (2026-08-27, myrig 050fa5a; still no sesh change; render-only, DEPLOYED ALL FIVE)
+Lukas fixed all three boxyard issues I filed (#16 cross-device `--from` → `shutil.move`;
+#17 orphan box → validate `-g`/`--parent` BEFORE creating; #18 errors on stdout → 28 sites
+gained `err=True`, incl. 2 in multi-sync I had not spotted), shipped them as **v0.5.18**, and
+separately made `boxyard new` CLAIM the box for the creating machine (**v0.5.17**). Whole fleet
+is now on 0.5.18 with `machine_name` set — macbook came back online and got both the myrig
+render and the pending `uv tool install --force git+…` (it was on 0.5.13).
+
+**CORRECTION TO H96, and it is the load-bearing one: trap 5 is now INVERTED.** `boxyard new`
+DOES claim. A freshly created box is owned by its creator, so the create-box-from-box no-owner
+branch is no longer the common case — it is left for LEGACY unowned boxes (320 of 592 on this
+yard predate the change) and for a machine still on an older boxyard. LIVE-PROVEN: copying a
+just-created box now reports "direct from its owner, mymain" and succeeds, where before it fell
+to the remote store and FAILED there ("not found on remote storage") because a fresh box has
+never been pushed. So the feature got strictly better without a code change. Traps 3 and 4 are
+fixed upstream; **trap 3's guard STAYS in the code anyway** — the fleet is not upgraded
+uniformly (macbook sat on 0.5.13 for a day), and an older boxyard still prints failures to
+stdout.
+ALSO CORRECTED, and I got this wrong in my summary to Lukas before he pushed back: **`boxyard
+copy --dest` refusing `~/dev` is NOT a bug.** It is an explicit `# Safety check` in
+`12_copy_from_remote.pct.py` guarding BOTH `boxyard_data_path` and `user_boxes_path`, so you
+cannot leave something that looks like a box in ~/dev but is not registered. My code complies
+with it; nothing was filed. A fourth thing I had worked around — `--git-clone` discarding git's
+stderr — turned out to be ALREADY FIXED in 0.5.16 (`stderr=subprocess.PIPE`), so no issue there
+either. The `git ls-remote` pre-flight stays because it fails BEFORE any box exists, which is
+still better than failing after.
+
+**READ THE INSTALLED VERSION, NOT THE CHECKOUT.** I first read `~/mysetup/boxyard` and reasoned
+from it: it sits on branch `feat/write-owner-claim` at **v0.5.2**, 35 commits behind
+origin/main, while the installed uv tool was **0.5.16**. Per boxyard's own AGENTS.local.md the
+global CLI is a uv tool at `~/.local/share/uv/tools/boxyard`, NOT editable from the repo — so
+the checkout can be arbitrarily stale. Re-verify with `git show origin/main:<path>` (read-only —
+that checkout is someone's WIP branch, do not switch it), and cross-check `boxyard --version`.
+All three issues did survive into 0.5.16, so nothing was mis-filed, but that was luck.
+
+**THE REAL BUG THIS PASS FOUND, in MY code, and it was reachable in ordinary use:**
+`_mt_inherited_box_groups` read `boxyard list-groups` from THIS machine's catalog. But
+`mmt-create-worktree-box`'s picker is `_mt_pick_box_id_on <target>`, restricted to the TARGET's
+~/dev — and `boxyard-groups.py` DELIBERATELY offers a box that is on disk there but absent from
+this machine's catalog (its own comment: "a box checked out on disk but absent from the catalog
+still shows"). So picking one aborted with `box groups: boxyard could not list "<index>"'s
+groups: Box with index name ... not found.` Trigger: create a box on a peer — with
+`mmt-create-box-from-box`, say — then worktree it before its boxmeta has propagated (the meta
+push is DETACHED and takes ~10-15s). I first saw this in a test and wrote it off as a harness
+artifact because I had stubbed the propagation; it is not — reading boxyard-groups.py settled
+it. **A failure you can only produce with a stub is worth one more look, not a shrug.**
+FIX: the helper takes a `<machine>` and reads there. Worktree passes the TARGET (the box is
+checked out there by construction, and it is the catalog `boxyard new` resolves `--parent`
+against anyway); copy keeps reading HERE, deliberately, because its picker is the plain
+fleet-wide one so the box is in this catalog by construction and may not exist on the target at
+all. Verified against a real box present on ideapad and absent from mymain's catalog: red
+before, green after.
+
+CLAIM-ON-CREATE, checked rather than assumed: every one of the four commands creates the box ON
+the machine that will hold and work on it, so the creator IS the right owner and `--no-claim` is
+needed nowhere. Proven both ways — a box created on ideapad by the cross-machine copy comes out
+`write_owner=ideapad`, not mymain. The worktree failure path's `boxyard delete` also runs ON the
+owning machine (it routes through `ssh-target <m>`), so it needs no `claim --steal`; proven by
+forcing a `git worktree add` failure on ideapad and watching the ideapad-owned box be removed.
+
+**TRAP WORTH KEEPING — a python process that exits 120 with NO output is a WRITE failure, not a
+crash.** `install-home … > /tmp/ih.log 2>&1` on ideapad returned rc=120 with a 0-byte log; run
+without redirection it returned **0** and did all its work. Cause: ideapad's `/tmp` is a tmpfs
+mounted **`usrquota`** and lukastk's quota is exhausted — `echo hello > /tmp/x` fails with
+`write error: disk quota exceeded`. CPython exits 120 when it cannot flush stdout at exit, which
+looks exactly like a failed deploy while the deploy actually succeeded. **Do not read rc=120 +
+empty log as "it failed"; re-run without the redirect, and test `/tmp` writability.** `df` is
+MISLEADING here — it showed 1.6G Avail, because that is the filesystem's free space, not the
+USER's remaining quota (inodes were only 7% used). The culprit was 6.1G / 21,640 files of
+`/tmp/pytest-of-lukastk` (14 runs, 20:08–22:15 the same day, no pytest still running) — left by
+the boxyard test suite. NOT deleted: 6.1G of someone else's scratch is Lukas's call, and it is
+unrelated to this change. Reported to him.
+NB my own staging deliberately uses `~/.cache`, not `/tmp` (H96 trap 2), so the derived-box
+commands kept working on ideapad throughout — the right choice for a second, unforeseen reason.
+
+DEPLOY: render-only again, NO daemon restart, NO conf re-source. **LIVE ON ALL FIVE** at myrig
+050fa5a — mymain (local), ideapad + pocket4 (python3), macstudio + macbook (`uv run --with
+jinja2`), each verified in a FRESH login shell. boxyard 0.5.18 on all five. termux is still the
+one machine with neither (its sshd is down — H83).
+
 ## H95 — "SUBSCRIPTIONS DON'T WORK" was H92's guard doing its job + a supervisor hiding stderr; the REAL defect was the refusal naming a flag that command does not have (2026-08-27, sesh a28acf8; NO schema/API/daemon change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — macbook asleep, pending)
 Lukas: thread f9ba7068 (jackfruit-hq supervisor) "recently tried to subscribe to a few child
 threads but it seems like it didn't get a message back when the subscribees ended their turns."

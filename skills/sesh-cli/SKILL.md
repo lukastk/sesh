@@ -62,7 +62,17 @@ Inference has two sources and they are **not** equally trustworthy:
 `--json`. An env-derived answer is announced on stderr, and it is **corroborated against
 the calling directory**: if the named thread's cwd is unrelated to where you are standing,
 sesh **refuses** instead of guessing. Pass `--id`, or `--allow-unverified` to proceed
-anyway (a pseudo-global — every verb that infers accepts it).
+anyway (a pseudo-global — every verb that infers accepts it). The refusal names the flag
+**that command** takes, which is not always `--id`: `subscribe`/`unsubscribe` take
+`--from`, `ticket list --current` and `hooks test` take `--thread`.
+
+> **Agents: a claude Bash call often has NO pane.** A tool call hosted by claude's
+> machine-global daemon (any session showing background agents) runs with no `$TMUX_PANE`
+> and a `$SESH_THREAD_ID` frozen from whichever thread started that daemon — so
+> current-thread inference there is refused, correctly. **Name the thread explicitly in
+> scripted work** (`sesh subscribe <child> --from <me>`), and **never discard stderr**:
+> `sesh subscribe $ID >/dev/null 2>&1` in a loop is how three subscriptions silently
+> failed to exist for an hour on 2026-08-27 while the loop printed "subscribed".
 
 > ⚠️ **Before you do anything destructive to "yourself"** — compacting, sending, stopping,
 > archiving — **require verified provenance.** This is not hypothetical: an agent with no

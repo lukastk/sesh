@@ -139,10 +139,25 @@ func resolveThreadID(cfg config.Config, explicit string) (string, error) {
 	return id, err
 }
 
+// resolveThreadIDFor is resolveThreadID for a command whose "say which thread"
+// flag is NOT --id: subscribe/unsubscribe take --from, `ticket list --current`
+// and `hooks test` take --thread. A refusal has to name a flag the caller can
+// actually pass, or the remedy it offers fails to parse.
+func resolveThreadIDFor(cfg config.Config, explicit, idFlag string) (string, error) {
+	id, _, err := resolveCurrentThreadWith(cfg, explicit, idFlag)
+	return id, err
+}
+
 // resolveCurrentThread is resolveThreadID plus the PROVENANCE of the answer
 // (see the block below). It reads the process state — env, pane, cwd — and
 // emits any notes to stderr.
 func resolveCurrentThread(cfg config.Config, explicit string) (string, idSource, error) {
+	return resolveCurrentThreadWith(cfg, explicit, "")
+}
+
+// resolveCurrentThreadWith is resolveCurrentThread with the calling command's
+// explicit-thread flag name, used in any refusal it raises.
+func resolveCurrentThreadWith(cfg config.Config, explicit, idFlag string) (string, idSource, error) {
 	c := daemonClient(cfg)
 	if explicit != "" {
 		id, err := resolveIDPrefix(c, explicit)
@@ -155,6 +170,7 @@ func resolveCurrentThread(cfg config.Config, explicit string) (string, idSource,
 		paneID:          paneID,
 		cwd:             cwd,
 		allowUnverified: allowUnverifiedCurrent,
+		idFlag:          idFlag,
 	})
 	for _, n := range notes {
 		fmt.Fprintln(os.Stderr, "sesh: "+n)
@@ -222,6 +238,22 @@ type unverifiedError struct {
 	ThreadID  string
 	ThreadCwd string
 	CallerCwd string
+	// Flag is the flag THIS command accepts for naming a thread explicitly.
+	// Empty means the usual --id. It exists because the remedy in a loud error
+	// has to be a remedy the caller can actually type: `sesh subscribe` takes
+	// --from and has no --id at all, so telling its caller to "pass --id" sends
+	// them to `flag provided but not defined: -id`. That is not hypothetical —
+	// a supervisor thread hit exactly this on 2026-08-27 and its subscriptions
+	// silently never existed for an hour.
+	Flag string
+}
+
+// idFlagOr returns the flag name to suggest, defaulting to --id.
+func idFlagOr(flag string) string {
+	if flag == "" {
+		return "--id"
+	}
+	return flag
 }
 
 func (e *unverifiedError) Error() string {
@@ -229,10 +261,10 @@ func (e *unverifiedError) Error() string {
 	return fmt.Sprintf("$%s=%s names a thread whose cwd (%s) is unrelated to the calling directory (%s) — "+
 		"refusing to guess which thread this is. There is no tmux pane here to check the id against, and a "+
 		"detached/background process inherits a stale $%s from whatever started it. "+
-		"Pass --id <thread> to say which thread you mean, or --allow-unverified to use $%s anyway",
+		"Pass %s <thread> to say which thread you mean, or --allow-unverified to use $%s anyway",
 		agents.EnvThreadID, short8(e.ThreadID),
 		config.TildeRelative(e.ThreadCwd, home), config.TildeRelative(e.CallerCwd, home),
-		agents.EnvThreadID, agents.EnvThreadID)
+		agents.EnvThreadID, idFlagOr(e.Flag), agents.EnvThreadID)
 }
 
 // currentInputs is the process state inference reads. Injected rather than read
@@ -243,6 +275,7 @@ type currentInputs struct {
 	paneID          string // the calling pane's @sesh-thread-id marker ("" = no pane, or unmarked)
 	cwd             string // the calling process's working directory
 	allowUnverified bool
+	idFlag          string // the flag THIS command takes for an explicit thread ("" = --id)
 }
 
 // resolveCurrentThreadFrom is the inference truth table (see the package comment
@@ -269,7 +302,7 @@ func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, 
 		if th, ok := lookupThread(c, in.env); ok {
 			if cwdContradicts(th.Cwd, in.cwd) {
 				if !in.allowUnverified {
-					return "", "", notes, &unverifiedError{ThreadID: in.env, ThreadCwd: th.Cwd, CallerCwd: in.cwd}
+					return "", "", notes, &unverifiedError{ThreadID: in.env, ThreadCwd: th.Cwd, CallerCwd: in.cwd, Flag: in.idFlag}
 				}
 				notes = append(notes, fmt.Sprintf("--allow-unverified: using $%s=%s (%q) even though its cwd is unrelated to this directory",
 					agents.EnvThreadID, short8(in.env), th.Name))
@@ -279,7 +312,8 @@ func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, 
 			return in.env, srcEnv, notes, nil
 		}
 	}
-	return "", "", notes, fmt.Errorf("not inside a sesh thread: no --id, no valid $%s, and no thread-marked tmux pane — pass --id", agents.EnvThreadID)
+	return "", "", notes, fmt.Errorf("not inside a sesh thread: no %s, no valid $%s, and no thread-marked tmux pane — pass %s",
+		idFlagOr(in.idFlag), agents.EnvThreadID, idFlagOr(in.idFlag))
 }
 
 // cwdContradicts reports whether the calling directory POSITIVELY contradicts a
@@ -446,8 +480,14 @@ func shortJoin(ids []string, n int) string {
 // explicit ref may name a thread on any machine (await/watchers work across
 // the mesh by id); inference (env/pane) stays local as always.
 func resolveMeshThreadID(c meshThreadClient, cfg config.Config, explicit string) (string, error) {
+	return resolveMeshThreadIDFor(c, cfg, explicit, "")
+}
+
+// resolveMeshThreadIDFor is resolveMeshThreadID for a command whose
+// explicit-thread flag is not --id (see resolveThreadIDFor).
+func resolveMeshThreadIDFor(c meshThreadClient, cfg config.Config, explicit, idFlag string) (string, error) {
 	if explicit == "" {
-		return resolveThreadID(cfg, "")
+		return resolveThreadIDFor(cfg, "", idFlag)
 	}
 	// LOCAL list first: it sees just-created threads immediately (the mesh
 	// snapshot lags one maintainer publish) and archived ones; the mesh pass

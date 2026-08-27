@@ -174,7 +174,7 @@ func expandTicketCurrent(cfg config.Config, args []string) ([]string, error) {
 	if !found {
 		return args, nil
 	}
-	id, err := resolveThreadID(cfg, "")
+	id, err := resolveThreadIDFor(cfg, "", "--thread") // this command's explicit form is --thread
 	if err != nil {
 		return nil, fmt.Errorf("ticket list --current: %w", err)
 	}

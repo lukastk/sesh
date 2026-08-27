@@ -178,6 +178,24 @@ func testInfoLocal(t *testing.T) {
 		}
 	}
 
+	// A REFUSAL MUST NAME A FLAG THE COMMAND ACTUALLY HAS. `sesh subscribe`
+	// takes --from and has no --id at all, so the generic "Pass --id" remedy
+	// sends the caller into `flag provided but not defined: -id`. That happened
+	// for real on 2026-08-27: a supervisor ran `sesh subscribe $ID` from a
+	// pane-less claude Bash call with a stale $SESH_THREAD_ID, was correctly
+	// refused, and its three subscriptions silently did not exist for an hour.
+	if _, stderr, err := runWithEnvDir(t, sb, callerCwd,
+		map[string]string{"SESH_THREAD_ID": victim.ID}, "subscribe", victim.ID); err == nil {
+		t.Errorf("subscribe accepted a contradicted env id as the subscriber:\n%s", stderr)
+	} else {
+		if !strings.Contains(stderr, "--from") {
+			t.Errorf("the subscribe refusal must name --from, the flag this command actually takes; got: %s", stderr)
+		}
+		if strings.Contains(stderr, "--id ") {
+			t.Errorf("the subscribe refusal must NOT suggest --id — `sesh subscribe --id` does not parse; got: %s", stderr)
+		}
+	}
+
 	// The same call must be refused for a MUTATING verb too — a contradicted id
 	// must not be able to act on the victim either.
 	if _, stderr, err := runWithEnvDir(t, sb, callerCwd,

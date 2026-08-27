@@ -44,7 +44,9 @@ func runSubscribe(cfg config.Config, args []string, remove bool) error {
 	if err != nil {
 		return err
 	}
-	subscriber, err := resolveMeshThreadID(c, cfg, *from)
+	// --from, not --id: this command has no --id, so a refusal that suggested
+	// one would hand the caller a flag that does not parse.
+	subscriber, err := resolveMeshThreadIDFor(c, cfg, *from, "--from")
 	if err != nil {
 		return err
 	}

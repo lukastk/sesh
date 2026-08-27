@@ -80,7 +80,7 @@ func runHooks(args []string) error {
 		}
 		tid := ""
 		if *thread != "" {
-			rid, err := resolveThreadID(cfg, *thread)
+			rid, err := resolveThreadIDFor(cfg, *thread, "--thread")
 			if err != nil {
 				return err
 			}

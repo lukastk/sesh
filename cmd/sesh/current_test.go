@@ -390,3 +390,64 @@ func TestExtractAllowUnverifiedFlag(t *testing.T) {
 		})
 	}
 }
+
+// A LOUD refusal has to name a remedy the caller can actually type. Most verbs
+// take --id, but `sesh subscribe`/`unsubscribe` take --from and `ticket list
+// --current` / `hooks test` take --thread — none of those has an --id flag at
+// all, so the generic "Pass --id <thread>" sends the caller straight into
+// `flag provided but not defined: -id`.
+//
+// This is not hypothetical. On 2026-08-27 a supervisor thread ran
+// `sesh subscribe $ID` from a claude Bash call with no tmux pane and a stale
+// $SESH_THREAD_ID; the refusal was correct, but its remedy named a flag the
+// command does not have, and the subscriptions silently did not exist for an
+// hour (the command's own >/dev/null 2>&1 hid the error too).
+func TestRefusalNamesTheCommandsOwnFlag(t *testing.T) {
+	const other = "aaaaaaaa-1111-2222-3333-444444444444"
+	base := t.TempDir()
+	theirs := realDir(t, base, "dev", "someone-else")
+	here := realDir(t, base, "dev", "mine")
+	c := fakeMeshThreadClient{local: []api.Thread{{ID: other, Name: "elsewhere", Cwd: theirs}}}
+	in := currentInputs{env: other, cwd: here} // positively contradicted: siblings
+
+	t.Run("default is --id", func(t *testing.T) {
+		_, _, _, err := resolveCurrentThreadFrom(c, in)
+		var ue *unverifiedError
+		if !errors.As(err, &ue) {
+			t.Fatalf("want an unverifiedError, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "Pass --id <thread>") {
+			t.Fatalf("default refusal should suggest --id:\n%s", err)
+		}
+	})
+
+	t.Run("names the command's own flag", func(t *testing.T) {
+		for _, flag := range []string{"--from", "--thread"} {
+			withFlag := in
+			withFlag.idFlag = flag
+			_, _, _, err := resolveCurrentThreadFrom(c, withFlag)
+			if err == nil {
+				t.Fatalf("%s: want a refusal", flag)
+			}
+			if !strings.Contains(err.Error(), "Pass "+flag+" <thread>") {
+				t.Errorf("refusal for a %s command must suggest %s, got:\n%s", flag, flag, err)
+			}
+			if strings.Contains(err.Error(), "--id") {
+				t.Errorf("refusal for a %s command must NOT suggest --id (that flag does not exist there):\n%s", flag, err)
+			}
+		}
+	})
+
+	// The other refusal from the same resolver — "not inside a sesh thread" —
+	// carries the same remedy and had the same bug.
+	t.Run("the not-in-a-thread refusal too", func(t *testing.T) {
+		empty := fakeMeshThreadClient{}
+		_, _, _, err := resolveCurrentThreadFrom(empty, currentInputs{cwd: here, idFlag: "--from"})
+		if err == nil {
+			t.Fatal("want a refusal with no env and no pane")
+		}
+		if strings.Contains(err.Error(), "--id") || !strings.Contains(err.Error(), "--from") {
+			t.Fatalf("not-in-a-thread refusal must name --from here, got:\n%s", err)
+		}
+	})
+}

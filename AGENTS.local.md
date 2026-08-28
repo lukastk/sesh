@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh <this commit>; NO schema/API/CLI change; BINARY-ONLY, no daemon restart)
+## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh 70f4710; NO schema/API/CLI change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "the current icon for shell threads is not very distinct from the others and it's a bit hard
 to make it out by eye sometimes."
 
@@ -87,6 +87,22 @@ Enter-on-virtual paragraph), `sesh help thread new`'s `--virtual` summary, and `
 NOTHING — its `format.js` only ever renders `●`/`◌` and has no shell or virtual glyph at all.
 **A running SIDEBAR keeps the binary it launched with (H70), so a deployed machine still needs
 `prefix+r` (or mmt-kill/mmt-start) before the sidebar shows the new glyphs.**
+DEPLOY RESULT (2026-08-28, commit 70f4710): live on **5/6** — macbook, mymain, ideapad, macstudio and
+termux, every installed binary reporting `vcs.revision=70f4710` + `vcs.modified=false`, and each one
+behaviourally confirmed to carry the new text (`sesh help thread new` says "renders ≡ in the TUI").
+macbook/macstudio built with `/opt/homebrew/bin/go`, ideapad natively, termux with PLAIN `go build`
+(verified on the box: GOOS=android GOARCH=arm64 CGO_ENABLED=1, H22) — its sshd has come back since
+H96. Installed .new+mv everywhere (never overwrite a running binary in place on macOS, H57). NO daemon
+was restarted anywhere and none needed to be.
+**mymain needed the throwaway-clone route again (H49/H63/H91):** its checkout carries ANOTHER AGENT's
+uncommitted WIP — 7 modified files including `internal/tui/mastertrack.go` (untracked) and
+`internal/tui/model.go`, i.e. THE FILE THIS CHANGE EDITS — so it was never pulled; built from a
+`git clone --depth 1` in /tmp (a shallow clone stamps vcs.revision properly, unlike a linked worktree)
+and the clone removed. Verified afterwards that the WIP is still there, 7 files, HEAD still cff7ff4.
+**pocket4 OFFLINE** (ssh :22 timed out; the mesh already read it unreachable) → PENDING, harmless —
+binary-only and schema-neutral, so it simply renders the old glyphs until it catches up. When it
+returns: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f
+~/.local/bin/sesh.new ~/.local/bin/sesh` (no restart).
 
 ## H96 — FOUR DERIVED-BOX cockpit commands (clone a GitHub repo / copy a box / worktree a box), mmt- + mt- (2026-08-27, myrig 0e0307d; NO sesh change; render-only deploy, 5/6 — termux sshd down, pending; ticket 120735f9 done)
 Lukas ticket 120735f9 "Create mmt and mt commands". MYRIG-ONLY (no sesh change), all four

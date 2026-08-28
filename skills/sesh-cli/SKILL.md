@@ -115,10 +115,12 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   tmux pane; a *headless* thread is a durable conversation with no pane (turns run
   stateless via `--resume`). The two are not a stored mode — they're inferred at runtime.
 - **Two orthogonal state axes** (what the glyphs mean):
-  - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `◇` **virtual**
+  - **head**: `●` headful (a live pane) / `◌` headless (no pane) / `≡` **virtual**
     (a pure grouping node — no agent at all; see *Virtual threads* below) /
-    `▮` **shell thread** with a live tmux session, `▯` one without (see *Shell
-    threads* below).
+    `❯` **shell thread** with a live tmux session, `›` one without (see *Shell
+    threads* below). Each KIND draws from a different stroke class — round for an
+    agent, a prompt chevron for a shell, stacked lines for a group — so the kind
+    reads at a glance rather than by comparing outlines.
   - **busy**: `▶` busy (mid-turn) / `·` idle. **Blank for a shell thread** — it has
     no turn that could be executing, so the axis does not apply.
   - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your
@@ -154,7 +156,7 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).
   Deleting a thread **promotes its children** to the deleted thread's own parent
   (grandparent; root if it had none) — parent ids never dangle.
-- **Shell threads** (`sesh shell …`, glyph `▮`/`▯`, `agent_kind` reads `shell`) are
+- **Shell threads** (`sesh shell …`, glyph `❯`/`›`, `agent_kind` reads `shell`) are
   **tracked tmux SESSIONS**. Where an agent thread's durable content is its conversation,
   a shell thread's is its **working directory**: headful means a live session exists,
   headless means it is a remembered place, and `thread resume` re-creates the session in
@@ -193,7 +195,7 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
     different one.
 - **Virtual threads** (`thread new --virtual --name X`, or the `new-virtual` command in the TUI) are
   grouping nodes WITHOUT an
-  agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `◇`. Use one to
+  agent: no pane, no conversation, `agent_kind` reads `virtual`, glyph `≡`. Use one to
   group threads under a parent that isn't (yet) real work: parent/reparent threads under
   it, tag/archive/hold it (a hold on the group parks the whole subtree via inheritance).
   Every agent verb (`send`, `send-headless`, `headful`/`resume`, `capture`, `transcript`,
@@ -525,7 +527,7 @@ keys actually do. An unknown command id, an unusable key name (a typo like
 `ctlr+f`), two entries fighting over one key, or an attempt to rebind `ctrl+c` are all
 **loud startup errors** — never a key that silently never fires.
 
-On a **virtual** row (`◇` — a grouping node with no agent), Enter and `f` show a
+On a **virtual** row (`≡` — a grouping node with no agent), Enter and `f` show a
 warning instead of acting; convert it first with `sesh thread realize`. Grouping
 commands (hold, tags, rename, set-parent, archive, delete) work normally on it.
 

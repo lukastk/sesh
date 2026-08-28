@@ -326,7 +326,7 @@ func testRealizeRemote(t *testing.T, agent string) {
 
 // claimActionVirtualEnter: Enter on a VIRTUAL row is a loud persistent warning
 // (Lukas's decision: warn, don't fold) — the TUI stays open, nothing shells
-// out, the record is untouched; the row renders the ◇ glyph; f (fork) refuses
+// out, the record is untouched; the row renders the ≡ glyph; f (fork) refuses
 // with a clear message too.
 func claimActionVirtualEnter(t *testing.T) {
 	if testing.Short() {
@@ -344,8 +344,8 @@ func claimActionVirtualEnter(t *testing.T) {
 	// The virtual glyph is on screen.
 	var view string
 	m, view = render(t, m)
-	if !strings.Contains(view, "◇") {
-		t.Errorf("virtual row does not render the ◇ glyph:\n%s", view)
+	if !strings.Contains(view, "≡") {
+		t.Errorf("virtual row does not render the ≡ glyph:\n%s", view)
 	}
 
 	// Enter: loud warning naming virtual + realize; TUI still running.

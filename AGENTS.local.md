@@ -1,5 +1,93 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh <this commit>; NO schema/API/CLI change; BINARY-ONLY, no daemon restart)
+Lukas: "the current icon for shell threads is not very distinct from the others and it's a bit hard
+to make it out by eye sometimes."
+
+**THE DIAGNOSIS IS THE REUSABLE PART, and it is not "pick a nicer shape".** The head cell carried
+five sigils — `● ◌ ◇ ▮ ▯` — and every one of them was THE SAME KIND OF MARK: a small shape centred
+in one cell, differing only in outline and fill. So the shell pair was structurally a COPY of the
+agent pair (solid/hollow) with different corners, and the only thing separating `▮` from `●` was a
+few pixels. At one cell a glyph is read by its STROKE CLASS long before its outline, so the fix is
+to move a kind to a different CHANNEL, not to another silhouette in the same one. The new rule,
+written into HeadGlyph: **one stroke class per kind** — round (agent), chevron (shell), stacked
+lines (virtual). `▮`/`▯` had been squeezed into narrow rectangles by H78 because the virtual `◇`
+occupied the hollow-quadrilateral family; moving virtual to `≡` freed that family as a side effect.
+
+CONFERRED (AskUserQuestion with rendered gutter previews — the H49 swatch method, which works
+because the previews render in HIS terminal font): offered `$`/`~`, `■`/`□`+`≡`, `▬`/`▭`, `❯`/`›`.
+He took the chevrons and then asked for `≡` for virtual as well, i.e. the option's shape plus the
+family-freeing move from a different option.
+
+**TWO CONSTRAINTS I MEASURED, and the first one killed the idea I started out preferring:**
+1. **A pair distinguished purely by INK DENSITY inverts on the selected row.** The selection band is
+   `Reverse(true)`, which swaps ink and ground — so `█`/`▓`/`░` (a "terminal block cursor", the
+   semantically obvious choice for a shell) would render the live shell as the ghost and vice versa
+   on exactly the row you are looking at. Fill-vs-hollow of a BOUNDED shape survives (the outline
+   still reads); cell-filling texture does not. LIVE-CONFIRMED the chevron survives: the captured
+   selected row is `ESC[7m>  ❯` with no separate SGR, i.e. the terminal's own reverse swap, and the
+   wedge is still legible.
+2. **Width.** Every candidate is 1 cell per `go-runewidth`, matching the gutter's one-cell-per-axis
+   assumption. NB the geometric shapes (old and new) are all EastAsianWidth AMBIGUOUS, so a terminal
+   configured to render ambiguous-width as double would misalign the gutter — ASCII is the only
+   class that is unconditionally safe. Not a regression (the old set had the same property), but it
+   is the reason `$`/`~` was on the menu.
+
+**`❯` DOES NOT COLLIDE WITH THE BUSY `▶`, AND THE REASON IS STRUCTURAL RATHER THAN LUCKY:** head and
+busy are DIFFERENT gutter columns, and `BusyGlyph` renders a shell thread's busy cell BLANK (a shell
+has no turn), so the two can only ever appear DIAGONALLY — never side by side on a row, never stacked
+in one column. That property is now pinned by `TestShellRowNeverNeighboursBusyGlyph`, so if a shell
+ever grows a busy axis the head glyph has to be reconsidered and the test is where that lands.
+
+**THE GUARD GAINED A DOCTRINE IT HAD BEEN DODGING.** `TestGutterGlyphsDistinct` refuses two states
+from one confusable FAMILY, but `●`/`◌` are both circles and there was no circle family — the
+question had never been put. A chevron pair forces it. The principle now written down: **a live/dead
+pair on ONE axis is MEANT to look related** (the shared family is what says "same axis, two states");
+H78's failure was two states from DIFFERENT axes looking alike (`⌀` flag-disabled beside `⊘`
+archived). So a pair counts as ONE occupant of its family — the not-live half is exempt, the live
+half is not, which keeps the family protective: a THIRD glyph reaching into it still trips. Three new
+families (`round`, `chevron`, `stacked lines`), one per kind; `hollow quadrilateral` KEPT although
+nothing draws from it any more, as a pure drift guard against walking back into the look that
+constrained the shell pair in the first place.
+
+TESTS. Units: the guard (families + the two pair exemptions), `TestShellRowNeverNeighboursBusyGlyph`,
+`TestVirtualHeadGlyph` re-pinned to `≡`. ANTI-GAMING (reverse-edited, never git-checkout — H44;
+`-count=1` — H75): a THIRD chevron in the gutter (flag-disabled `⌁`→`»`) turns the guard RED naming
+`[head/shell-live ❯ flag/disabled »]`; virtual walked back to `◇` with a hollow-square shell turns it
+RED naming the hollow-quadrilateral pair; reverting virtual to `◇` turns the `action-virtual-enter`
+CLAIM red against a real daemon ("virtual row does not render the ≡ glyph"). All three reversed and
+re-run green (H88's rule).
+GREEN: internal/tui plain and -race; cmd/sesh (the help meta-tests); `go vet ./...`; gofmt clean on
+every touched file; conformance claims `action-virtual-enter` and `shells-view`. FULL TUI CLAIMS
+SUITE serially (177s): 2 reds, both PRE-EXISTING macbook-environment ones recorded in H80/H88/H91 and
+byte-identical here — `action-fork` ("transcript <id>: exit status 1", the pi-transcript class) and
+`uuid-popup-copy` ("clipboard tool was never invoked" — the claim stubs `wl-copy`, a WAYLAND tool, on
+a Mac). Every non-conformance package green plain and -race EXCEPT the long-standing
+`TestMaintainerDropsStaleReportedBusy` "baseline: busy=idle authority=" (H75/H81/H88/H91;
+internal/daemon is not in this diff at all). The full 253-cell matrix was NOT run — do not read this
+as all-green.
+LIVE-SMOKED in a fully isolated sandbox (own SESH_HOME/daemon/tmux sockets under a short `/tmp/sk.XXX`
+path, every inherited `SESH_*` stripped, the binary called by ABSOLUTE PATH — myrig defines a `sesh`
+shell FUNCTION that pins SESH_HOME to the LIVE `~/.sesh`, H91): five real rows, one per kind, rendered
+by the real TUI against a real daemon — the head column reads `≡ ◌ ❯ › ●` down the page. Sandbox
+daemon killed by EXPLICIT pid, both scratch tmux servers killed, tree and sockets removed; the live
+daemon (pid 1242) and its 2 work sessions verified untouched.
+**TRAP RE-CONFIRMED (H93): `tmux -L` takes a socket NAME, not a PATH.** Setting
+`SESH_TMUX_SOCKET=/tmp/sk.XXX/wk` made tmux nest it under `/private/tmp/tmux-501/`, so every spawn
+failed with "error connecting to /private/tmp/tmux-501//tmp/sk.pSJ/wk". Use a short unique NAME.
+**AND AGAIN: `pgrep -af 'sesh daemon run'` SELF-MATCHES** — it reported a second "leaked" daemon
+twice, with a different pid each time, that had vanished by the next `ps`. It was the pattern text in
+my own shell's cmdline. Confirm any suspected leak with `ps -p <pid>` before believing it.
+
+DEPLOY: **binary-only, NO daemon restart, no schema/API/CLI/key change** (a pure TUI-client render),
+so a mixed fleet is trivially safe — a machine still on the old binary just renders the old glyphs.
+Docs synced in the same change: the sesh-cli SKILL (glyph list, shell + virtual sections, the
+Enter-on-virtual paragraph), `sesh help thread new`'s `--virtual` summary, and `_dev/SHELL.md`.
+`_dev/V1_FEATURE_AUDIT.md`'s `◆/◇` is v1 archaeology and was deliberately left. sesh-ui needs
+NOTHING — its `format.js` only ever renders `●`/`◌` and has no shell or virtual glyph at all.
+**A running SIDEBAR keeps the binary it launched with (H70), so a deployed machine still needs
+`prefix+r` (or mmt-kill/mmt-start) before the sidebar shows the new glyphs.**
+
 ## H96 — FOUR DERIVED-BOX cockpit commands (clone a GitHub repo / copy a box / worktree a box), mmt- + mt- (2026-08-27, myrig 0e0307d; NO sesh change; render-only deploy, 5/6 — termux sshd down, pending; ticket 120735f9 done)
 Lukas ticket 120735f9 "Create mmt and mt commands". MYRIG-ONLY (no sesh change), all four
 sharing create-box's machinery: `*-create-box-from-repo` (fzf my GitHub repos),

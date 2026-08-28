@@ -119,7 +119,7 @@ column and every field a shell thread needs already existed).
   `thread send --pane/--window`, `thread stop --force`, `thread new --parent-shell`.
 - **TUI**: `S` shells viewer (classified live sessions; `enter` jump, `P` promote,
   `x` kill with a confirmation naming the agent threads it would take down), the
-  `▮`/`▯` head glyph and a blank busy cell.
+  `❯`/`›` head glyph (a shell prompt) and a blank busy cell.
 - **myrig**: `mt-promote-session-here` → `sesh shell here`, the deliberate way to
   start tracking the session you are in.
   - `_mt_enter_box_session` (the shared tail of enter-box / create-box /

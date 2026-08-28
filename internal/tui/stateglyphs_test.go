@@ -147,13 +147,20 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		"dot":            "·•∙‧⋅",
 		"right triangle": "▶▸►▹",
 		"vertical arrow": "↕↑↓⇕",
-		// Hollow quadrilaterals: a hollow square and the virtual diamond ◇ render
-		// alike at one cell, which is why the shell head glyphs are the NARROW
-		// rectangles ▮/▯ rather than ▣/▢. This family must NOT contain ▮/▯ — the
-		// virtual thread already draws ◇ from it, so adding them would put two
-		// LIVE states in one family and make this guard red on arrival. Its job is
-		// to trip if anyone ever moves a gutter glyph INTO the hollow-quadrilateral
-		// look, not to police the rectangles that deliberately sit outside it.
+		// The three head-axis KIND families, one per kind — this IS the head
+		// vocabulary: agent = round, shell = chevron, virtual = stacked lines.
+		// Reaching into one of these with a new gutter glyph is reaching into a
+		// kind's identity, so it trips here. NB ● lives in "round" but NOT in the
+		// "dot" family above: a filled circle beside a mid dot is the documented
+		// `●·` signature and reads fine.
+		"round":         "●○◯⬤◍◉◌",
+		"chevron":       "❯❮›‹»«⟩⟨",
+		"stacked lines": "≡☰≣⋮⁝",
+		// Hollow quadrilaterals: a hollow square and a diamond render alike at one
+		// cell. NO gutter glyph draws from this family any more — virtual moved off
+		// ◇ to ≡ (2026-08-28), which is also what freed the shell pair from the
+		// narrow rectangles ▮/▯ it had been squeezed into. Kept as a pure drift
+		// guard so nobody walks a gutter glyph back into that look.
 		"hollow quadrilateral": "◇▢▣□◻",
 	}
 	// familyExempt: a state may share ONE named family, with the reason. Keyed by
@@ -163,6 +170,15 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 	familyExempt := map[string]string{
 		"mark/moving|vertical arrow": "↕ is a TRANSIENT move-mode marker on exactly one " +
 			"row, three cells left of the persistent ↓; it never co-occurs as a steady state",
+		// A live/not-live PAIR on ONE axis is MEANT to look related: the shared family
+		// is the signal that says "same axis, two states of it", which is how ●/◌ has
+		// always read. H78's failure was two states from DIFFERENT axes looking alike
+		// (⌀ flag-disabled beside ⊘ archived) — that, not this, is what the guard is
+		// for. So a pair counts as ONE occupant of its family: the not-live half is
+		// exempt, the live half is not, which keeps the family protective — a THIRD
+		// glyph reaching into it still trips.
+		"head/headless|round":     "the not-live half of the agent pair ●/◌ — a pair counts as one occupant",
+		"head/shell-dead|chevron": "the not-live half of the shell pair ❯/› — a pair counts as one occupant",
 	}
 	for family, runes := range families {
 		var hits []string
@@ -192,6 +208,34 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		}
 		if _, ok := families[family]; !ok {
 			t.Errorf("familyExempt names family %q, which is not a confusable family — drop the stale exemption", key)
+		}
+	}
+}
+
+// TestShellRowNeverNeighboursBusyGlyph pins the STRUCTURAL reason the shell head
+// glyph ❯ can share a gutter with the busy ▶ although both point right: they sit in
+// DIFFERENT columns, and a shell thread's busy cell is BLANK (a shell has no turn
+// that could be executing), so the two can only ever appear diagonally — never side
+// by side on a row, never stacked in one column.
+//
+// If a shell thread ever grows a busy axis, that blank goes away, ❯ and ▶ become
+// horizontally adjacent, and the head glyph has to be reconsidered. This test is
+// where that decision lands.
+func TestShellRowNeverNeighboursBusyGlyph(t *testing.T) {
+	live := api.ThreadRow{}
+	live.AgentKind = api.ShellAgentKind
+	live.Head = api.Headful
+	dead := api.ThreadRow{}
+	dead.AgentKind = api.ShellAgentKind
+	dead.Head = api.Headless
+
+	for name, row := range map[string]api.ThreadRow{"live": live, "no-session": dead} {
+		if got := BusyGlyph(row); got != " " {
+			t.Errorf("shell (%s) busy glyph = %q, want blank — a non-blank cell would put "+
+				"the head chevron ❯ directly beside the busy ▶", name, got)
+		}
+		if got := HeadGlyph(row); got == BusyGlyph(api.ThreadRow{Busy: api.BusyBusy}) {
+			t.Errorf("shell (%s) head glyph is the busy glyph %q", name, got)
 		}
 	}
 }

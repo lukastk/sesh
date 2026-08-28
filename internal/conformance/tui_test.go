@@ -79,7 +79,7 @@ var declaredTUIClaims = []string{
 	"tickets-view-filter",       // the K view defaults to showing ACTIVE tickets; Tab opens a status picker (incl. all) that narrows the list
 	"shells-view",               // S lists the REAL tmux sessions incl. ones sesh never made (ghosts), classifies them, and really kills one
 	"tickets-columns",           // the ticket_name + ticket_input columns render a thread's REAL ticket summary (newest open ticket name + active-on-idle needs-input)
-	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ◇ glyph rendered; f refuses too; record untouched
+	"action-virtual-enter",      // Enter on a VIRTUAL row warns loudly (persistent actionErr naming realize) instead of entering; ≡ glyph rendered; f refuses too; record untouched
 	"action-new-virtual",        // v opens a name prompt and creates a ROOT virtual group on the daemon (--no-parent beats inference); empty submit cancels; cursor preselects the new row
 	"action-pin",                // p pins the selected top-level thread on the daemon (row rises above the auto block); u un-pins it
 	"action-reorder",            // m enters move mode; ↑ repositions the pinned row above another on the daemon

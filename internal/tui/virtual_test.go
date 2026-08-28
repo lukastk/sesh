@@ -78,11 +78,11 @@ func TestForkVirtualThreadWarns(t *testing.T) {
 	}
 }
 
-// A virtual row renders the ◇ head glyph (distinct from headless ◌); the busy
+// A virtual row renders the ≡ head glyph (distinct from headless ◌); the busy
 // axis stays the normal idle dot. Non-virtual rows are untouched.
 func TestVirtualHeadGlyph(t *testing.T) {
-	if got := HeadGlyph(virtualRow("mymain")); got != "◇" {
-		t.Fatalf("virtual head glyph: want ◇, got %q", got)
+	if got := HeadGlyph(virtualRow("mymain")); got != "≡" {
+		t.Fatalf("virtual head glyph: want ≡, got %q", got)
 	}
 	real := api.ThreadRow{Thread: api.Thread{AgentKind: "pi"}, Head: api.Headless}
 	if got := HeadGlyph(real); got != "◌" {

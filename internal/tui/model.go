@@ -3754,16 +3754,29 @@ func (m *Model) legendLines() int {
 // HeadGlyph renders the runtime-form axis:
 //
 //	● headful (a live pane — enterable)   ◌ headless (no pane)   ? unknown
-//	◇ virtual (a grouping node — no agent at all; realize to convert)
+//	❯ shell thread with a live tmux session   › one without
+//	≡ virtual (a grouping node — no agent at all; realize to convert)
+//
+// The three KINDS draw from three different STROKE CLASSES — round (agent),
+// chevron (shell), stacked lines (virtual) — not from one family of small centred
+// shapes. That is the whole vocabulary rule: at one cell a glyph is read by its
+// stroke class long before its outline, so the previous set (● ◌ ◇ ▮ ▯) put five
+// states into the single channel the eye is worst at, and the shell pair ▮/▯ was
+// structurally a COPY of the agent pair ●/◌ — a solid/hollow mark differing only
+// in its corners. Do not add a sixth small centred shape here; take a free stroke
+// class instead (see TestGutterGlyphsDistinct for the ones already spoken for).
 func HeadGlyph(row api.ThreadRow) string {
+	// A grouping node draws stacked lines — "a set of things", and the one shape
+	// in the gutter built from horizontal strokes rather than an enclosed blob.
+	// (It was ◇ until the 2026-08-28 vocabulary change; moving it off the diamond
+	// also freed the hollow-quadrilateral family that had constrained the shell pair.)
 	if row.AgentKind == api.VirtualAgentKind {
-		return "◇"
+		return "≡"
 	}
-	// SHELL threads use a RECTANGLE pair with the same head semantics as ●/◌.
-	// It reads as a terminal block cursor, and the silhouette (rectangle) is
-	// distinct from the agent circle ●, the headless dotted circle ◌ and the
-	// virtual diamond ◇ — the sidebar renders only the NAME column, so this
-	// gutter glyph is the ONLY place a shell thread is distinguishable there.
+	// SHELL threads use a CHEVRON pair with the same head semantics as ●/◌ — the
+	// shell's own prompt. The sidebar renders only the NAME column, so this gutter
+	// glyph is the ONLY place a shell thread is distinguishable there, which is
+	// exactly why it must not be another variation on the agent's round mark.
 	if row.AgentKind == api.ShellAgentKind {
 		if row.Head == api.Headful {
 			return ShellLiveGlyph
@@ -3827,18 +3840,23 @@ func FlagGlyph(row api.ThreadRow) string {
 }
 
 // ShellLiveGlyph / ShellDeadGlyph are the head-axis glyphs for a SHELL thread —
-// the same live/not-live semantics as ●/◌, drawn as a terminal block cursor.
+// the same live/not-live semantics as ●/◌, drawn as the shell's own PROMPT.
 //
-// The pair is deliberately a RECTANGLE, not a square or diamond: `▢`/`▣` were
-// rejected because a hollow square and the virtual thread's `◇` are both hollow
-// quadrilaterals, which is precisely the H78 failure mode (`⌀` and `⊘` were
-// distinct codepoints that rendered as the same slashed circle in adjacent
-// gutter cells). TestGutterGlyphsDistinct guards the family; its
-// hollow-quadrilateral family must cover `◇▢▣□◻` and must NOT contain these two,
-// or it would put two live states in one family and be red on arrival.
+// A chevron, not another small centred shape: the head cell is read down its
+// column against ● ◌ ≡, and an open right-pointing wedge separates from those at
+// a glance where the previous `▮`/`▯` did not — those were a solid/hollow pair of
+// small marks, i.e. the agent pair with different corners, which is what made a
+// shell row hard to pick out by eye.
+//
+// `❯` does NOT collide with the busy `▶` despite both pointing right, and the
+// reason is structural rather than lucky: head and busy are DIFFERENT gutter
+// columns, and BusyGlyph renders a shell thread's busy cell BLANK (a shell has no
+// turn that could be executing), so the two can only ever appear diagonally,
+// never side by side and never stacked in one column. TestShellRowNeverNeighbours
+// BusyGlyph pins that blank; TestGutterGlyphsDistinct's chevron family cites it.
 const (
-	ShellLiveGlyph = "▮"
-	ShellDeadGlyph = "▯"
+	ShellLiveGlyph = "❯"
+	ShellDeadGlyph = "›"
 )
 
 // ArchivedGlyph renders the archived slot: a marker on an ARCHIVED thread, blank

@@ -111,6 +111,50 @@ CONCURRENT SESSIONS twice: myrig gained two gh_runner commits and sesh gained H9
 mid-flight; both rebased cleanly (H97 touches the same TUI package but different files), and the
 claim was re-run green AFTER the rebase rather than assumed.
 
+### H98 follow-up — the flag now shows in the base STATUS LINE, and doing it uncovered a field-collapse bug that had been there all along (2026-08-28, myrig 01eb71e; still NO sesh change; render-only, DEPLOYED ALL FIVE)
+Lukas: "Would it be possible to show in the tmux status bar whether it's flagged or not?"
+It was nearly free. The work server's top status row (`status-format[0]` →
+`sesh-current-status`) already renders the thread owning the current pane and already
+fetches that thread's whole record, so the flag cost NO extra call — and that row is what
+you see INSIDE the cockpit anyway, because a master window is an attach into the machine's
+work server. Renders `⚑ FLAGGED` red and `⌁ auto-flag off` grey, the TUI's own gutter
+glyphs, so both surfaces read the same vocabulary. Marker-only, matching the existing
+`🗄 archived` precedent.
+**MEASURED: tmux EXPANDS `#[...]` inside the output of a `#()` command**, so a status
+script can colour its own text (captured `^[[31m` on the glyph from a real attached
+client). The markers must stay LAST on the line — they open a colour and never close it,
+which is only safe at end of line, because a tmux format has no "restore previous" and the
+conf owns the surrounding style. A comment says so at the site.
+
+**THE PRE-EXISTING BUG THIS TURNED UP, and it is the durable lesson: `IFS=$'\t' read`
+COLLAPSES consecutive tabs, because tab is IFS *whitespace*.** `sesh-current-status` had
+always split its jq row that way, so a thread with no tags that was archived arrived as
+`tags="1", archived=""` — the status line showed a tag literally called "1" and no
+archived marker. A NAMELESS thread was eaten the same way from the front (leading IFS
+whitespace is stripped). Adding two more optional fields would have made it worse. Fixed
+with `${(@ps:\t:)row}`, which preserves empty fields — verified across all-empty-tail,
+flag-only, tags+archived+flagged and nameless. This is the H89 gotcha one layer down, and
+H98's own ring hit the same family (session_name moved last in its `@tsv`). **Prefer
+`${(@ps:\t:)}` to `IFS=$'\t' read` whenever ANY field can be empty.**
+
+Also: a toggle now repaints the owning machine's status line at once
+(`_mt_refresh_status_on`). tmux's `status-interval` is its 15s DEFAULT (never set in these
+confs) and the sesh row is a `#()` command re-run only on that beat, so prefix+f looked
+like it had done nothing for up to fifteen seconds. It refreshes EVERY client rather than
+"the current" one — `refresh-client` with no `-t` picks an ambient client (THE
+WHICH-CLIENT LAW) and repainting a status line is harmless to all of them; the remote hop
+is backgrounded and best-effort, since a keypress must never wait on ssh. Proven
+DISCRIMINATING: with the underlying state changed, the bar was still stale 1s later and
+repainted the instant the helper ran.
+DEPLOY: render-only, NO conf change (so no source-file) and NO restart — the status bar
+re-runs `zsh -lc 'sesh-current-status …'` from the rendered shell.sh on its next beat, so
+it picks the new function up by itself. ALL FIVE at myrig 01eb71e; verified with the
+DEPLOYED code on ideapad (unflagged → no marker, flagged → red ⚑, flag restored) and on
+mymain end-to-end. pocket4 still offline.
+NOTED, not mine: a concurrent session landed `5b38667` putting `C-a f` on termux's
+on-screen extra-keys "to toggle the thread flag" — i.e. it DEPENDS on H98's new prefix+f
+binding existing. No collision; the two compose.
+
 ## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh 70f4710; NO schema/API/CLI change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "the current icon for shell threads is not very distinct from the others and it's a bit hard
 to make it out by eye sometimes."

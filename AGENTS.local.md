@@ -155,6 +155,86 @@ NOTED, not mine: a concurrent session landed `5b38667` putting `C-a f` on termux
 on-screen extra-keys "to toggle the thread flag" — i.e. it DEPENDS on H98's new prefix+f
 binding existing. No collision; the two compose.
 
+### H98 follow-up 2 — "the sidebar doesn't move" was NOT the tracker: `display-message -c` does not scope a format, so master-current returned ANOTHER master's thread; plus prefix+f was paying 1s for a boolean and 0.6s for a popup (2026-08-28, sesh 16bfb0a + myrig fa04657; NO schema/API/CLI change; DAEMON rebuild + RESTART; DEPLOYED 4/5 — termux sshd down, pocket4 offline)
+Lukas: "Why is the prefix+f so slow? Also I just tried the ,/. commands and the sidebar
+doesn't move its selected row with it. You can verify it yourself by starting mmt-start
+here and driving it through there."
+
+**THE SIDEBAR BUG WAS IN `MarkerClientCurrent`, NOT IN THE TRACKER — and it had been
+there since master-current was built.** It resolved with `display-message -p -c <client>
+-F …`, but **`-c` says where to PRINT, not what to expand the format against**, so the
+format resolved against whatever tmux ambiently considered current. MEASURED with two
+real clients on two sessions, each pane carrying its own `@sesh-thread-id`:
+    -c /dev/pts/43 => THREAD-B | B      <- WRONG, that is the OTHER client
+    -c /dev/pts/67 => THREAD-B | B
+**The ambient pick follows the most recent `switch-client`** (measured: switch A → both
+read A; switch B → both read B). That is why it hid for so long: with ONE master attached
+to a work server the ambient client IS the right one, and every quiet machine and every
+test had exactly that. It goes wrong the moment several masters watch one machine — the
+normal state of a busy box. LIVE on mymain, whose work server had THREE master clients:
+before the fix all three origins returned the same session; after it each returns its own
+marker client's (mymain→ituc, macbook→mysetup/myrig, termux→empty, its client being gone).
+Since the tracker deliberately acts on a CHANGE in what the cockpit shows, a constant
+ambient answer meant it never moved — exactly the report. The same call also aimed the
+`,`/`.` start point and `mmt-toggle-flag`'s target, so both were mis-resolving too.
+FIX: **one `list-clients -F` pass. list-clients iterates CLIENTS and expands the format
+once per client**, so the pane-scoped `@sesh-thread-id`, the session and the window index
+all resolve against THAT client's own active pane (proven: `/dev/pts/43 tid=THREAD-A
+sess=A win=0`, `/dev/pts/67 tid=THREAD-B sess=B win=1`). It still liveness-checks name AND
+pid, and is one fewer tmux call than before. **GENERAL RULE: to read anything about a
+SPECIFIC client, iterate `list-clients -F`; `display-message -c` is not a client selector.**
+NB `display-message -t "=<session>"` is not an escape hatch either — it returned EMPTY,
+the `=` exact-match prefix being unhonoured here as it is for set-option/show-options (H89).
+
+**THE CONFORMANCE CELL WAS GREEN THROUGHOUT AND COULD NOT HAVE CAUGHT IT** — the H81
+`master.reconnect` shape again, and worth internalising: a cell that exercises the happy
+topology proves nothing about the one that breaks. `tmux.master-current` had a single
+master client. Strengthened with a DECOY thread + its own attached client. **THE FIRST
+DECOY DID NOT DISCRIMINATE — it passed against the old code** — because the master's own
+nav was the last `switch-client`, so the ambient pick was right by luck; the cell only
+became honest once the decoy is switch-client'd AFTER each nav so it is the last mover.
+That is not a contrivance: it is precisely what another master navigating its own window
+does. Do not add a decoy and assume it discriminates — NEUTER AND CHECK.
+Unit regression in internal/tmux: two real nested clients, both markers must resolve to
+their OWN client (one client passes vacuously, so it waits for both), plus a stale marker
+resolving to nothing. ANTI-GAMING: the old implementation turns the unit red ("alpha:
+thread = THREAD-BETA … resolved ANOTHER client's thread") and the cell red naming the
+decoy at both resolve points.
+
+**PREFIX+F SLOWNESS — two causes, both measured, neither guessed.** (a) The toggle read
+the flag with `sesh thread info`: **739ms LOCAL and 3308ms ROUTED**, because it also
+resolves the pane, both state axes, attachment and the thread's TICKETS for a boolean.
+Step-by-step timing put 1033ms of a 1109ms toggle in that one call. `thread list --json
+--archived` gives the same field in 80ms/216ms and is what sesh-current-status already
+reads (`--archived` is required: an archived-but-headful thread is flaggable and shows in
+the active view). (b) **`display-popup -E` BLOCKS its caller until the popup closes** —
+606ms for a 0.5s flash — so the confirmation popup cost half a second to say what the
+status line was about to say anyway. Dropped from the toggle (the ⚑ IS the confirmation,
+and it is repainted immediately); kept for the empty `,`/`.` ring, where there is nothing
+else to show. MEASURED AFTER: local 1109→92ms, routed ~3500→274ms.
+**LESSON: `sesh thread info` is a DIAGNOSTIC verb, not a field read. Never put it on a
+keypress path.**
+
+GREEN: internal/tmux; `go vet ./...`; master.watchers / master.up / master.holding /
+tmux.nav-master-multi / tmux.nav-master-http / tmux.nav-window / tmux.master-current; the
+FULL TUI claims suite serially — 70 pass, 0 fail. The full 253-cell matrix was NOT run.
+LIVE-PROVEN in a REAL cockpit on mymain, as Lukas asked (he was on macbook, and mymain's
+master had no clients, so nothing of his was touched): with the fixed daemon and a
+REFRESHED sidebar, prefix+. / prefix+, walk the flagged ring and the cursor follows every
+time — six presses both directions, wrapping, and landing on a NESTED child whose
+ancestors the tracker expands. Test client detached afterwards; the cockpit left as found.
+**Its sidebar had been running a binary from 2026-08-19, which is the H70 property and the
+OTHER half of why Lukas saw nothing: a deployed fix does not exist inside a running
+sidebar until `prefix+r`.**
+DEPLOY: **DAEMON change (master-current is served by the daemon) — rebuild AND supervised
+restart**, not binary-only. 4/5 at sesh 16bfb0a / myrig fa04657 (mymain, ideapad, macbook,
+macstudio), every binary `vcs.modified=false`, mesh healthy after all four restarts.
+**termux PENDING — its sshd is down again** (H83); pocket4 still offline.
+TRAP: mymain's binary was first built from a DIRTY tree during debugging and stamped
+`vcs.revision=<previous> vcs.modified=true`. The code was right but the stamp lied;
+rebuilt from the committed HEAD so the fleet's provenance is honest. Build from a clean
+tree, or re-build after committing.
+
 ## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh 70f4710; NO schema/API/CLI change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "the current icon for shell threads is not very distinct from the others and it's a bit hard
 to make it out by eye sometimes."

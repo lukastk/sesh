@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // MarkerClientCurrent resolves what the marker's recorded client is CURRENTLY
@@ -153,4 +155,24 @@ func shArg(s string) string {
 		}
 	}
 	return out + "'"
+}
+
+// NavBellPath is the file `sesh tmux nav` touches after every successful nav, on the
+// machine the nav was ISSUED from — which for the cockpit is the master host, the same
+// host a persistent sidebar (`sesh tui --sidebar`) runs on, so the two share it through
+// their common SESH_HOME.
+//
+// It is a BELL, not the answer: it says only "the cockpit just moved", and carries no
+// claim about WHERE, because a nav may have targeted a different origin master or a
+// window this sidebar is not showing. The authoritative read stays MarkerClientCurrent.
+// The point is latency — a sidebar that only polled would lag its own keybindings by
+// its poll interval, which is exactly the confusion the tracking exists to remove.
+func NavBellPath(home string) string { return filepath.Join(home, "nav-bell") }
+
+// RingNavBell records that a nav just happened, for any watching sidebar. BEST-EFFORT
+// BY CONTRACT — the error is deliberately dropped: a nav that actually worked must
+// never be reported as failed because a cosmetic bell could not be written, and a
+// sidebar that misses one still catches up on its backstop poll.
+func RingNavBell(home string) {
+	_ = os.WriteFile(NavBellPath(home), []byte(strconv.FormatInt(time.Now().UnixNano(), 10)+"\n"), 0o644)
 }

@@ -278,6 +278,16 @@ type Model struct {
 	// already-shown thread re-navs nothing.
 	followInFlight bool
 	lastFollowedID string
+
+	// MASTER TRACKING (sidebar): the cursor follows the cockpit — see mastertrack.go.
+	// lastMasterThread is what the active master window was LAST OBSERVED showing; only
+	// a resolve that DIFFERS from it moves the cursor, which is what stops the tracker
+	// fighting a user who has arrowed onto a row the follow policy skips.
+	masterTracking       bool
+	masterTrackBell      string
+	masterTrackSeen      string
+	masterTrackCountdown int
+	lastMasterThread     string
 	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
 	// hide the last-known threads of a mesh machine that is currently unreachable.
 	// Their owner can't be reached, so every action on them would hang on the routing
@@ -986,10 +996,17 @@ type tickMsg time.Time
 // meshMsg — see tickStarted. A non-master-cursor Init stays a lone fetch cmd, which the
 // conformance harness drives directly via Init()().)
 func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.fetch()}
 	if m.masterCursorMachine != "" {
-		return tea.Batch(m.fetch(), m.resolveMasterCursor())
+		cmds = append(cmds, m.resolveMasterCursor())
 	}
-	return m.fetch()
+	if m.masterTracking {
+		cmds = append(cmds, masterTrackTick())
+	}
+	if len(cmds) == 1 {
+		return cmds[0] // a plain Init stays a LONE fetch — the harness drives it as Init()()
+	}
+	return tea.Batch(cmds...)
 }
 
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
@@ -1314,6 +1331,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// is showing. Route it through the persistent preselect so that if the row
 		// isn't published yet, a later fetch still lands it (expanding a nested child's
 		// ancestors). Empty id = nothing to preselect (no master client / plain shell).
+		// Seed the tracking baseline (mastertrack.go): this IS an observation of what
+		// the master window shows, so recording it stops the first tracking resolve
+		// re-landing a cursor that is already in the right place.
+		m.lastMasterThread = msg.id
 		if msg.id != "" {
 			if !m.positionCursorOn(msg.id) {
 				m.preselectID = msg.id
@@ -1329,6 +1350,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(m.fetch(), tick())
+	case masterTrackTickMsg:
+		// Cheap every tick (one small file read); an authoritative resolve only when the
+		// bell rang or the backstop expired — see mastertrack.go.
+		bell := readNavBell(m.masterTrackBell)
+		due, next := masterTrackDue(bell, m.masterTrackSeen, m.masterTrackCountdown)
+		m.masterTrackSeen, m.masterTrackCountdown = bell, next
+		if !due {
+			return m, masterTrackTick()
+		}
+		return m, tea.Batch(m.resolveMasterTrack(), masterTrackTick())
+	case masterCursorMsg:
+		if m.applyMasterCursor(msg) {
+			debugLog("MASTER TRACK cursor -> %s", msg.id)
+		}
+		return m, nil
 	case reconcileMsg:
 		// A fast follow-up reconcile after a successful action (does NOT re-arm the
 		// poll timer — it's a one-shot, scheduled by the actionMsg handler).

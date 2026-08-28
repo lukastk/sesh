@@ -366,8 +366,23 @@ crosses machines: the master window switches and the traveling sidebar rides alo
 (an intent option tells the swap hook to keep focus on the sidebar; an Enter's switch
 focuses the attach pane instead). It previews only live headful threads (it never
 revives a dead one — Enter still does); the sibling machine resolves live from the
-tmux window name ($SESH_TUI_MASTER_MACHINE pins it for static spawners). Every other
-key/view/action works exactly as in the normal grid.
+tmux window name ($SESH_TUI_MASTER_MACHINE pins it for static spawners).
+
+The traffic runs BOTH ways: the sidebar's cursor also **tracks the cockpit**, so a
+thread switch made from the cockpit side — the cycle keys, the last-window toggle, a
+picker, a command that creates a thread and jumps to it — moves the `>` onto that
+thread too. It moves only when what the master window shows actually CHANGES, never
+merely because the cockpit disagrees with the cursor: arrowing onto a row the follow
+policy skips (a headless one) leaves the cockpit where it was, and a disagreement-driven
+tracker would yank the cursor back and make browsing impossible. `sesh tmux nav` rings a
+bell file (`<home>/nav-bell`) after every successful nav, which the sidebar reads on a
+cheap 250ms timer and answers with one authoritative resolve, so a cockpit keypress
+moves the cursor immediately; a 3s backstop catches moves sesh never saw (a native
+prefix+n switch, a pane selected by hand). A thread the current view does not contain —
+on hold, archived while you are on `active`, or dropped by an active filter — leaves the
+cursor alone: no jump and no view switch, unlike `goto-uuid`, which is a command you
+typed rather than an ambient tracker. Every other key/view/action works exactly as in
+the normal grid.
 
 ### Commands, the palette, and the keymap
 

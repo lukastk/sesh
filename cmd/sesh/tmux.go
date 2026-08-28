@@ -91,7 +91,20 @@ func tmuxMasterCurrent(cfg config.Config, args []string) error {
 // primitive. From the mymastertmux client it (1) switches the OUTER client to
 // machine M's window, then (2) drives M's INNER mytmux to switch-client to the
 // target session (over ssh for a remote M), with the detached "bare-shell kick".
+// tmuxNav rings the sidebar's nav bell after a nav that actually succeeded, then
+// delegates. ONE seam rather than a bell at each of tmuxNavRun's success returns
+// (in-client, local master, http peer, ssh peer): a nav path added later inherits it
+// instead of silently not ringing. The --attach path replaces the process and so never
+// gets here, which is correct — it is for a plain shell outside the cockpit entirely.
 func tmuxNav(cfg config.Config, args []string) error {
+	err := tmuxNavRun(cfg, args)
+	if err == nil {
+		tmux.RingNavBell(cfg.Home)
+	}
+	return err
+}
+
+func tmuxNavRun(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("nav", flag.ContinueOnError)
 	to := fs.String("to", "", "target as <machine>:<session> (required)")
 	inClient := fs.Bool("in-client", false, "switch the CURRENT tmux client to the target (local target on the current work socket only; no master)")

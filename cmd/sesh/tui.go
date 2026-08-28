@@ -291,11 +291,22 @@ func runTUI(args []string) error {
 		// between windows by a tmux hook, so the sibling machine changes under
 		// the same process. Unresolvable (not in tmux / renamed window matching
 		// no machine) just disables/skips follow — Enter still navs everything.
+		tracked := false
 		if fm := os.Getenv("SESH_TUI_MASTER_MACHINE"); fm != "" {
 			m = m.WithSidebarFollow(fm)
+			tracked = true
 		} else if wn := sidebarWindowName(); wn != "" {
 			m = m.WithMasterCursor(wn) // start with the cursor on the shown thread, like prefix+s
 			m = m.WithSidebarFollowResolver(sidebarWindowName)
+			tracked = true
+		}
+		// CURSOR TRACKING: keep following the cockpit, not just at startup, so a move
+		// made from the cockpit side (prefix+, / prefix+. , prefix+L, the mmt-* pickers,
+		// a command that makes a thread and jumps to it) moves the sidebar's `>` too.
+		// Gated on a resolvable cockpit context, which is what names the master window
+		// to read; without one there is nothing to track and the ticks would be waste.
+		if tracked {
+			m = m.WithMasterTracking(tmux.NavBellPath(cfg.Home))
 		}
 	}
 	if *filter {

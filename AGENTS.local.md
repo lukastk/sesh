@@ -1,5 +1,116 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H98 — the cockpit ,/. ring became a FLAGGED working set, and the sidebar cursor now TRACKS the cockpit (bell-nudged) (2026-08-28, sesh ceb3f03 + myrig 026cc85/de6bd65; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
+Three asks in one session, arriving in sequence, each changing the last.
+
+**(1) `prefix+,` / `prefix+.` cycle the ACTIVE VIEW, not every headed thread** (myrig 026cc85).
+The keys already existed and cycled every headful thread mesh-wide in (machine, created, id)
+order. MEASURED: 41 threads, **12 of them ON HOLD** — nearly a third of the ring was threads he
+had deliberately parked, which is exactly what hold is for. The set is now the active view's
+predicate copied from `builtinViewAdmits` — (flagged OR not archived OR headful OR busy) AND NOT
+on hold — and the ORDER is the TUI's own tree walk from `internal/tui/filter.go`: roots sorted
+(machine, name, id) with PINNED roots first by fractional key, each root followed by its
+children, a child whose parent the view filtered out promoted to a root. Implemented as one jq
+program over `thread grid --all-machines --archived`.
+**THE VERIFICATION THAT EARNED ITS KEEP:** rather than trust the reimplementation, I captured a
+REAL `sesh tui --all-machines --expand` in an isolated tmux and diffed its rendered rows against
+the jq order — 42 rows, position for position. It immediately caught that my order was missing
+the 3 DIVIDER rows... except it hadn't: dividers have EMPTY names and my comparison script
+filtered empty strings. **A diff that disagrees is not yet a bug — check the harness first.**
+
+**(2) THE RING IS NOW THE FLAGGED SUBSET** (myrig de6bd65), plus `prefix+f` to toggle the flag.
+He asked for a "no flagged active threads" popup, which only makes sense if the ring is flagged;
+asked, and he confirmed the narrowing ("I meant that it should cycle through flagged active
+threads"). So: flag the threads you are juggling, `,`/`.` rotate between them, `prefix+f` curates.
+DESIGN POINTS. The walk is still built over the WHOLE active view and the flagged rows selected
+FROM it, so they keep their on-screen positions. An on-hold thread stays out even when flagged,
+because hold beats flag in the view itself. `sesh thread flag` deliberately has **no toggle verb**
+(explicit `--on`/`--off` only), so the toggle is myrig policy: read `.thread.flagged`, set the
+opposite. `f` was free on BOTH prefix tables.
+**A `run-shell -b` BINDING HAS NOWHERE TO PRINT** — that is why the old empty-ring case looked
+like a dead key, and why `_mt_flash_popup` exists. It obeys THE WHICH-CLIENT LAW (client from
+`$SESH_NAV_CLIENT`, pane from `$SESH_MT_PANE`): tmux cannot map a run-shell subprocess back to the
+client that pressed the key, so without it the flash lands on an arbitrary terminal. The two empty
+cases are reported DIFFERENTLY because they need different actions — "No flagged active threads."
+vs "Flagged threads are all dead." NB its text is interpolated into the command display-popup
+runs, so it must stay a literal owned by that file.
+RE-HIT the H89 gotcha deliberately: the possibly-empty `session_name` goes LAST in the `@tsv`,
+because an empty field in the MIDDLE collapses under `IFS=$'\t' read` and shifts every later one.
+
+**(3) THE SIDEBAR CURSOR NOW TRACKS THE COCKPIT** (sesh ceb3f03) — "I don't think the current
+bindings do this which makes it a bit confusing". Correct: `WithMasterCursor` resolved the master
+window's current thread ONCE at startup and never again, so every cockpit-side move left the `>`
+behind. Conferred first; he chose continuous tracking, leave-the-cursor-alone when the thread is
+not in the view, and — his own refinement — a dedicated poll **with a way to force it**.
+**THE RULE THAT MAKES IT SAFE, and it is the whole design: act on a CHANGE in what the cockpit is
+showing, never on "the cockpit disagrees with the cursor".** They are not the same. Arrowing onto
+a row the follow policy skips (a headless thread — a preview must never revive) leaves the cockpit
+where it was, so a disagreement-driven tracker would yank the cursor straight back on the next
+tick and make the sidebar unbrowsable. `lastMasterThread` records the last OBSERVED value and only
+a differing resolve moves anything — which also makes the sidebar's own follows self-cancelling
+and removes any need for an epoch/sequence guard against a stale in-flight resolve.
+**THE NUDGE IS A BELL, NOT THE ANSWER.** `sesh tmux nav` writes `<home>/nav-bell` at ONE seam
+(`tmuxNav` wrapping `tmuxNavRun`, so a fifth nav path added later inherits it rather than silently
+not ringing). It says only "the cockpit moved" and carries no claim about WHERE, because a nav may
+have targeted a different origin master or a window this sidebar is not showing — the
+authoritative read stays `MarkerClientCurrent`. Every 250ms tick costs one small file read; only a
+rung bell or an expired 3s backstop spends a real resolve (two tmux calls, plus a mesh round trip
+when the active window is REMOTE). That is what buys immediacy without a per-second cross-machine
+call on an all-day process. A no-information resolve (failed, or no cockpit context) must NOT be
+recorded as "the cockpit shows nothing", or the next success looks like a change and jumps the
+cursor — hence `masterCursorMsg.ok`.
+Out-of-view threads leave the cursor alone, deliberately NOT `goto-uuid`'s escalate-to-a-view-that-
+shows-it: that is right for a command someone typed and wrong for an ambient tracker that would
+retitle the list under a reader. No preselect is armed either — it would land minutes later.
+
+TESTS. Units for the cadence truth table, the change-not-disagreement rule, the no-information
+case, the shell-pane observation, the out-of-view no-op, the bell reader, and that a plain `Init`
+stays the LONE fetch cmd. New claim `sidebar-tracks-cockpit` (registered AND declared — the H25
+gotcha) with nothing stubbed: real daemon, two real pi threads, a real tmux client attached to the
+work server and recorded in a real master-client marker, a real `sesh tmux nav` subprocess, the
+real bell, the real resolve — and it asserts the BASELINE cursor position first so it cannot pass
+vacuously. ANTI-GAMING (reverse-edited, never git-checkout — H44; `-count=1` — H75): the
+disagreement rule, never moving the cursor, arming a preselect, ignoring the bell, and removing
+the bell from nav each turn something red, the second reproducing the report verbatim ("the
+sidebar cursor never followed the cockpit onto track-b").
+**TRAP, and it cost a debugging round: `renderUntilRow` drives `Init()()` expecting the lone fetch
+cmd a plain `Init` returns.** A model built with tracking already armed hands the harness a
+`BatchMsg` instead of the mesh, and NO row ever appears — which reads as "the daemon never
+published" rather than "your Init changed shape". The claim arms tracking AFTER the first render.
+**SECOND TRAP, self-inflicted: I restored a neutered file from a snapshot taken BEFORE I had
+appended a function to it, silently deleting the function.** `go build ./...` stayed green because
+the lost function was only used by tests. Snapshot-restore is not `git checkout`; re-verify what
+you restored, and prefer reversing the exact edit.
+
+GREEN: internal/tui plain and -race; internal/tmux; cmd/sesh; `go vet ./...`; the tmux.nav rows
+local and remote (real tmux + real ssh hop) 7/7; the FULL TUI claims suite serially — **70 pass, 0
+fail**, no pre-existing reds on this box. The full 253-cell matrix was NOT run — do not read this
+as all-green.
+LIVE-PROVEN read-only on the real fleet: the flagged ring resolves to the 3 flagged enterable
+threads in the TUI's tree order (next→first, prev→last); all four empty/edge cases driven through
+the real code with a stubbed grid; the toggle round-tripped false→true→false→true on a disposable
+headless thread with the daemon record re-read each time, then deleted; the popup rendered for real
+in an isolated tmux with a NESTED ATTACHED CLIENT and captured from the client's own screen (an
+empty server has no client, so `display-popup` silently draws nothing — that first attempt proved
+nothing); and `sesh tmux nav` rang the bell on the LIVE mymain daemon via a deliberate NO-OP nav
+(target = the session the master was already on, so nothing moved for Lukas).
+
+DEPLOY: **binary-only, NO daemon restart, no schema/API/wire change** (a pure TUI-client feature)
+plus a myrig render + conf `source-file` (prefix+f is a NEW binding, so running servers need it).
+**LIVE ON 5/6** at sesh ceb3f03 / myrig de6bd65 — mymain, ideapad, macbook, macstudio, termux
+(plain `go build`, CGO_ENABLED=1 / android verified on the box, H22; install-home logged to `$HOME`,
+/tmp is unwritable there — H38). Every installed binary `vcs.modified=false`; every checkout
+verified clean before pulling (H49/H63); prefix+f verified bound on every running work and master
+server; the functions verified in FRESH login shells. **pocket4 OFFLINE** (ssh :22 timed out) →
+PENDING, harmless; when it returns: `cd ~/mysetup/myrig && git pull && python3
+scripts/install-home.py "$MYRIG_TARGETS"` then `cd ~/mysetup/sesh && git pull && go build -o
+~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh`.
+**A running SIDEBAR keeps the binary it launched with (H70), so the tracking does not exist inside
+Lukas's sidebar until `prefix+r`** (or mmt-kill/mmt-start). Told him.
+CONCURRENT SESSIONS twice: myrig gained two gh_runner commits and sesh gained H97's head glyphs
+mid-flight; both rebased cleanly (H97 touches the same TUI package but different files), and the
+claim was re-run green AFTER the rebase rather than assumed.
+
 ## H97 — HEAD-GLYPH VOCABULARY: shell threads were another small round-ish blob; fix = one STROKE CLASS per kind — agent `●`/`◌`, shell `❯`/`›`, virtual `◇`→`≡` (2026-08-28, sesh 70f4710; NO schema/API/CLI change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
 Lukas: "the current icon for shell threads is not very distinct from the others and it's a bit hard
 to make it out by eye sometimes."

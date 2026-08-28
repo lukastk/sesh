@@ -26,32 +26,46 @@ func (s *Server) MarkerClientCurrent(markerPath string) (session, threadID strin
 		return "", "", -1, nil
 	}
 	name, pid := f[0], f[1]
-	clients, err := s.run("list-clients", "-F", "#{client_name} #{client_pid}")
+	// ONE list-clients pass answers everything, and it MUST be list-clients.
+	//
+	// `display-message -p -c <client>` does NOT scope its format to that client: -c
+	// says where to PRINT, not what to expand against, so the format resolves against
+	// whatever tmux ambiently considers current. MEASURED on two real clients sitting
+	// on two different sessions, each pane carrying its own @sesh-thread-id:
+	//
+	//     -c /dev/pts/43 => THREAD-B | B      <- WRONG, that is the other client
+	//     -c /dev/pts/67 => THREAD-B | B
+	//
+	// list-clients iterates CLIENTS and expands the format once per client, so the
+	// pane-scoped @sesh-thread-id, the session and the window index all resolve
+	// against THAT client's own active pane:
+	//
+	//     /dev/pts/43  tid=THREAD-A sess=A win=0
+	//     /dev/pts/67  tid=THREAD-B sess=B win=1
+	//
+	// This was invisible for as long as a work server had ONE master attached, because
+	// then the ambient pick happened to be the right client. It goes wrong exactly when
+	// several masters watch one machine — which is the normal state of a busy box — and
+	// it made `master-current` (the sidebar's cursor, the prefix+, / prefix+. start
+	// point, prefix+L) report another master's thread. The same call also does the
+	// liveness check, so a stale marker still resolves to nothing: the recorded client
+	// is matched on name AND pid (a recycled tty must not be mistaken for it).
+	out, err := s.run("list-clients", "-F",
+		"#{client_name}"+fieldSep+"#{client_pid}"+fieldSep+"#{"+ThreadIDOption+"}"+fieldSep+"#{client_session}"+fieldSep+"#{window_index}")
 	if err != nil {
 		return "", "", -1, err
 	}
-	live := false
-	for _, ln := range strings.Split(strings.TrimSpace(clients), "\n") {
-		if strings.TrimSpace(ln) == name+" "+pid {
-			live = true
-			break
+	for _, ln := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Split(strings.TrimRight(ln, "\r"), fieldSep)
+		if len(fields) < 5 {
+			continue
 		}
+		if strings.TrimSpace(fields[0]) != name || strings.TrimSpace(fields[1]) != pid {
+			continue
+		}
+		return strings.TrimSpace(fields[3]), strings.TrimSpace(fields[2]), atoi(strings.TrimSpace(fields[4])), nil
 	}
-	if !live {
-		return "", "", -1, nil // stale marker (the recorded client is gone)
-	}
-	// What the client is CURRENTLY on (its active pane + session + window) — exactly
-	// what the user sees in that master window.
-	out, err := s.run("display-message", "-p", "-c", name, "-F",
-		"#{"+ThreadIDOption+"}"+fieldSep+"#{client_session}"+fieldSep+"#{window_index}")
-	if err != nil {
-		return "", "", -1, err
-	}
-	fields := strings.Split(strings.TrimRight(out, "\n"), fieldSep)
-	if len(fields) < 3 {
-		return "", "", -1, fmt.Errorf("tmux: unexpected master-current output %q", out)
-	}
-	return strings.TrimSpace(fields[1]), strings.TrimSpace(fields[0]), atoi(strings.TrimSpace(fields[2])), nil
+	return "", "", -1, nil // stale marker (the recorded client is gone)
 }
 
 // MarkerClientThreadID is the thread-only view of MarkerClientCurrent (the TUI

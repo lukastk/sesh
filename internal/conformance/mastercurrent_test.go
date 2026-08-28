@@ -45,10 +45,33 @@ func testMasterCurrent(t *testing.T) {
 		t.Fatalf("the peer window's attach never recorded a marker at %s", marker)
 	}
 
+	// A DECOY: a second real client on the peer's work server, parked on a thread the
+	// master window never shows. Without it this cell cannot discriminate, and for a
+	// long time it did not: `display-message -p -c <client>` ignores -c for format
+	// expansion, so master-current returned whatever client tmux ambiently picked —
+	// which, with a single client attached, was the right one by luck. A busy machine
+	// has several masters watching it, and there the answer was another master's
+	// thread. The decoy makes the ambient pick observably wrong.
+	decoy := peer.newThread(t, "pi", "curdecoy", "/tmp")
+	peer.waitThreadReady(t, decoy.ID, "pi")
+	peer.attachViewer(t, decoy.SessionName)
+	decoyClient, _ := peer.workClientOn(t, decoy.SessionName)
+	// MEASURED: tmux's ambient client pick follows the most recent switch-client, so the
+	// decoy only makes this cell discriminating while IT moved last. That is not a
+	// contrivance — it is the ordinary state of a shared work server, where another
+	// master navigating its own window is the last switch-client to land, and it is
+	// exactly when the bug bit.
+	bumpDecoy := func() {
+		if out, err := peer.rawTmux(t, "switch-client", "-c", decoyClient, "-t", decoy.SessionName); err != nil {
+			t.Fatalf("bump decoy client: %v\n%s", err, out)
+		}
+	}
+
 	// Switch the master window's client to curtgt — a deterministic known thread.
 	if _, stderr, err := self.Runner.Run(t, "tmux", "nav", "--to", peer.Machine+":"+tgt.SessionName); err != nil {
 		t.Fatalf("nav to curtgt: %v\n%s", err, stderr)
 	}
+	bumpDecoy() // another master moves last — the ambient pick is now WRONG
 
 	// master-current (routed to the peer) returns curtgt's thread id — what the master
 	// window is now showing.
@@ -57,7 +80,12 @@ func testMasterCurrent(t *testing.T) {
 		return err == nil && strings.TrimSpace(out) == tgt.ID
 	}) {
 		out, _, _ := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine)
-		t.Errorf("master-current did not return the shown thread %s; got %q", tgt.ID, strings.TrimSpace(out))
+		got := strings.TrimSpace(out)
+		if got == decoy.ID {
+			t.Errorf("master-current returned the DECOY client's thread %s instead of the master window's %s — the resolve is not scoped to the recorded client", decoy.ID, tgt.ID)
+		} else {
+			t.Errorf("master-current did not return the shown thread %s; got %q", tgt.ID, got)
+		}
 	}
 	// --session returns the SESSION name the window shows (the prefix+a picker preselect).
 	if out, _, err := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine, "--session"); err != nil {
@@ -71,12 +99,18 @@ func testMasterCurrent(t *testing.T) {
 	if _, stderr, err := self.Runner.Run(t, "tmux", "nav", "--to", peer.Machine+":"+peerw.SessionName); err != nil {
 		t.Fatalf("nav to peerw: %v\n%s", err, stderr)
 	}
+	bumpDecoy() // another master moves last — the ambient pick is now WRONG
 	if !waitUntil(10*time.Second, func() bool {
 		out, _, err := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine)
 		return err == nil && strings.TrimSpace(out) == peerw.ID
 	}) {
 		out, _, _ := self.Runner.Run(t, "tmux", "master-current", "--machine", peer.Machine, "--origin", self.Machine)
-		t.Errorf("master-current did not TRACK the nav to peerw (%s); got %q", peerw.ID, strings.TrimSpace(out))
+		got := strings.TrimSpace(out)
+		if got == decoy.ID {
+			t.Errorf("master-current returned the DECOY client's thread %s instead of tracking the nav to %s", decoy.ID, peerw.ID)
+		} else {
+			t.Errorf("master-current did not TRACK the nav to peerw (%s); got %q", peerw.ID, got)
+		}
 	}
 
 	// DAEMON-SIDE routing (schema 36): the TUI's master-cursor preselect for a REMOTE

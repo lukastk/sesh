@@ -175,8 +175,15 @@ empty log as "it failed"; re-run without the redirect, and test `/tmp` writabili
 MISLEADING here — it showed 1.6G Avail, because that is the filesystem's free space, not the
 USER's remaining quota (inodes were only 7% used). The culprit was 6.1G / 21,640 files of
 `/tmp/pytest-of-lukastk` (14 runs, 20:08–22:15 the same day, no pytest still running) — left by
-the boxyard test suite. NOT deleted: 6.1G of someone else's scratch is Lukas's call, and it is
-unrelated to this change. Reported to him.
+a test suite. Reported to Lukas; he approved clearing it and it was then **NOT deleted, on
+purpose**: by the time the go-ahead came the directory had ROTATED ITSELF down to 36M (pytest
+keeps only its last few numbered basetemps), `/tmp` was back to 4% and writable, and a LIVE
+self-hosted GitHub Actions runner (`gh-runner/instances/lukastk-mosaic-a1`) was mid-run writing
+into it — so the delete would have fixed nothing and broken a running CI job. **RE-CHECK THE
+PRECONDITION BEFORE EXECUTING AN APPROVAL: an approval is for the situation you described, and
+this one had reversed within the hour.** The durable point is that the peak was transient and
+self-limiting; the standing hazard is that ideapad's `/tmp` is a per-user-quota tmpfs and now
+also hosts CI, so a heavy run can exhaust it again — with the rc=120 symptom above.
 NB my own staging deliberately uses `~/.cache`, not `/tmp` (H96 trap 2), so the derived-box
 commands kept working on ideapad throughout — the right choice for a second, unforeseen reason.
 

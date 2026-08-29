@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H99 — TERMUX RESOURCE DIAGNOSIS → THE MESH SCALE PASS: per-thread peer cache rows, diff-fed eventer, O(live) maintainer sweep, hash reconcile (2026-08-29, sesh 0b77422 on branch `termux-optimisation`; store migration 22→23, NO api/wire change — schema stays 47; DAEMON rebuild + supervised RESTART; **NOT DEPLOYED — awaiting Lukas's sign-off**; fleet DB backups TAKEN)
+## H99 — TERMUX RESOURCE DIAGNOSIS → THE MESH SCALE PASS: per-thread peer cache rows, diff-fed eventer, O(live) maintainer sweep, hash reconcile (2026-08-29, sesh 0b77422 merged to main as 69db27c; store migration 22→23, NO api/wire change — schema stays 47; DAEMON rebuild + supervised RESTART; **DEPLOYED ALL SIX**; fleet DB backups taken before AND after)
 Lukas: "explore the possibility of optimizing sesh for Termux. I'm worried that it consumes too
 many resources on my phone… diagnose the issue first and then figure out ways to improve it."
 Then, on seeing the diagnosis: archived threads must NEVER be deleted, and sesh "should be designed
@@ -131,12 +131,28 @@ threads, cross-checking the replicated corpus exactly. Two copies each: local
 **The DESIGNED rollback needs no backup**: reinstall the old binary and recreate the empty
 `peer_snapshots` table (one CREATE TABLE, in the manifest); the cache refills in seconds.
 
-**DEPLOY PLAN (pending sign-off):** merge `termux-optimisation` → main; per machine: FRESH backup
-→ record thread/ticket/subscription counts → install `.new`+`mv` → `supervisorctl restart
-sesh-daemon` (termux: kill by explicit pid + the zshenv guard relaunches it, H36/H89) → verify
-`schema_version: 23`, counts byte-identical, `sesh mesh` healthy, `doctor` clean. Any order, mixed
-fleet safe (no wire change). A running sidebar/TUI keeps working (H70 applies only to TUI-side
-changes; this is daemon-side). Expected: termux daemon ~0.7 % idle; macbook/mymain proportional.
+**DEPLOY RESULT (2026-08-29, Lukas: "merge and deploy"):** merged `--no-ff` as 69db27c, then ALL
+SIX in parallel, each: fresh `VACUUM INTO` backup with counts → build from the machine's clean
+checkout at 69db27c (every binary `vcs.modified=false`) → `.new`+`mv` → `supervisorctl restart
+sesh-daemon` (termux: old pid killed explicitly, the zshenv guard relaunched pid 9633 with the
+right four SESH_* vars, H36) → `schema_version: 23` → a POST-migration backup whose counts are
+BYTE-IDENTICAL to the pre-deploy ones on every machine (mymain 1,813/364/35, macbook 120/43/0,
+macstudio 25/1/0, pocket4 27/3/0, ideapad 6/1/0, termux 0/0/0) → mesh: all five peers reachable,
+synced 0 s, every converted cache serving (live fan-out 1,991 rows), APIs bound, doctor clean.
+Backups live at `~/.sesh/backups/sesh-{pre-deploy,post-v23}-20260829.db` per machine + the
+fleet dir on mymain. LIVE NUMBERS AFTER (real daemons, `/proc` deltas): **termux 0.8 % of a core
+at idle cadence (was 15–18 %), RSS 34 MB (was 40–44), 176 KB/90 s of writes**; ideapad 1.4 % (was
+3.1 %); macbook 3.5 % hooks-pinned (was 6.6 %); **mymain 13.7 % — and that is NOT this pass's
+territory: it has 37 HEADFUL panes, each `capture-pane`d every 300 ms plus a `ps -e` snapshot per
+tick (~125 forks/s), the pre-existing L1 probe cost MESH.md §3 itself flags ("if N ever gets
+large, throttle"). Next lever for an owner with many live panes: stagger/throttle captures and
+cache the `ps` snapshot across ticks — a separate change.** ALSO MEASURED, worth knowing: at
+ACTIVE cadence (a TUI open) termux still writes ~30–50 KB/s — one SQLite transaction per delta
+round (WAL page overhead on a one-row change), not payload; idle cadence is the phone's steady
+state and is near zero. Coalescing rounds into fewer transactions is a possible follow-up if the
+phone's TUI-open time ever matters. NB the macstudio ssh hit the H94 stale-ControlMaster trap
+mid-deploy ("Session open refused by peer"); it fell back to non-multiplexed and completed,
+socket cleared with `ssh -O exit` afterwards.
 
 **FOLLOW-UP DESIGNED, NOT BUILT** (BACKLOG #6): stage D — `/v1/mesh?since=` client deltas,
 serve-from-rows (RAM O(live)), daemon-side archived search. Trigger: the phone's TUI poll or a

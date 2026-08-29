@@ -200,6 +200,9 @@ recipe); no wire/schema change ⇒ any order, mixed fleet safe. The migration ru
 start of the new binary (measured 1.2 s on the phone against a copy of its real
 1,987-row cache).
 
+**Deployed 2026-08-29 to all six machines (main 69db27c); live post-deploy numbers and the
+per-machine verification are in AGENTS.local.md H99.**
+
 ## 7. Measured (2026-08-29, A/B on termux against the real fleet corpus)
 
 Two isolated staging daemons on the phone, one per binary, each syncing read-only from

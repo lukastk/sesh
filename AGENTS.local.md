@@ -1,5 +1,66 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H101 — mmt-enter-box's "extreme slowness" was the box-checkout PROBE: mesh-reachable ≠ ssh-reachable, and the probe had no timeout of its own (2026-08-29, myrig 991a856; NO sesh change; render-only, DEPLOYED 5/6 — macbook asleep, pending)
+Lukas: "why is `mmt-enter-box` so extremely slow? I see no reason why it should be to this extent
+when `mt-enter-box` is not. It opens up the fzf relatively quickly, but the slowness ... is the wait
+after selecting a box and trying to enter it."
+
+**THE ASYMMETRY IS STRUCTURAL and is the whole answer:** scope=all calls
+`_mt_box_checkout_machines` — one ssh per mesh-reachable machine, then a bare `wait` — while
+scope=this resolves from `~/dev` and opens **ZERO** ssh connections (MEASURED 0.00s).
+
+**THE DEFECT: the probe keys on the wrong signal.** `sesh mesh`'s `reachable` is an HTTP fact on a
+cached cadence; ssh-reachable is a DIFFERENT fact, and the two disagree exactly when a laptop
+sleeps. MEASURED on mymain: the mesh reported macbook reachable while `ssh-target macbook true`
+took **52.61s** and then FAILED; a later probe was **still hanging at 177s** when the harness gave
+up. Healthy baseline 0.41–0.49s over ten consecutive samples. macbook flapped
+reachable→false→true→false three times in twenty minutes, and every window where it is still
+listed costs the full hang. Same tax on `mmt-enter-box-thread` and `mmcd`, which share the probe.
+
+**THIS CORRECTS H87**, which recorded this exact residual as "brief" and "bounded by ... a ~45s
+ceiling". It is neither, and the reason is worth keeping: `ConnectTimeout` covers only the TCP
+CONNECT (the wedge connects, then goes silent, falling through to `~/.ssh/config`'s
+ServerAliveInterval 15 × CountMax 3 ≈ 45s); **ServerAlive only applies once the transport is up**,
+so a peer that accepts TCP and stalls in key exchange is bounded by NOTHING (the 177s case); and a
+slave session on a STALE ControlMaster socket hangs on the mux where neither applies (H94).
+
+DIAGNOSIS METHOD, because the bug is invisible on a healthy fleet: every component measured
+sub-second (picker prep identical for both scopes; nav 0.09s; routed `tmux info`/`create-session`
+~0.17s each; `zsh -lc wait` 0.06s, killing the theory that a shell-init background job was blocking
+the bare `wait`). It only surfaced when macbook slept MID-INVESTIGATION. **The one command that
+settled it: print the mesh's claim and a TIMED real ssh for every machine, side by side.**
+
+FIX: a hard wall-clock deadline, `_MT_BOX_PROBE_TIMEOUT=6`. Four details carry it — `exec` so the
+background pid IS the ssh process (a straggler is genuinely killed, not orphaned); BOTH streams
+redirected, because a background job still holding the function's stdout keeps the caller's `$( )`
+blocked on EOF and would reinstate the very hang the deadline removes; the answer is the probe's
+**EXIT STATUS**, never its stdout, so an ssh banner cannot be collected as if it were a machine name
+(this also dropped the temp dir entirely); and a machine that misses the deadline is named LOUDLY
+and treated as "not checked out there" — never silently, since silence would turn an unreachable
+machine into a confident wrong answer.
+
+**ZSH TRAP, cost a debugging round: `assoc[key]=$!` stores the LITERAL "$!"** when the assignment
+target carries a subscript (`pid=$!; assoc[key]=$pid` and `assoc[key]="$!"` are both fine). It fails
+SILENTLY — every `kill -0` then misses, so the deadline never sees a straggler and the function
+returns instantly having waited for nothing. Commented at the site.
+
+VERIFIED: identical results to the old code on five real boxes ([mymain], [ideapad], [ideapad],
+[macstudio], []); healthy timing unchanged at 0.42–0.50s; against a wedged peer 6.12s instead of
+52s-unbounded, with the loud line; multi-machine aggregation still correct and sorted (stub-driven —
+no box is currently checked out on two machines, and fabricating one in `~/dev` is forbidden); no
+orphaned processes; `zsh -n` clean; scope=this untouched.
+**CAUTION on cleanup: my process sweep matched a bare `sleep 120` and killed two processes belonging
+to OTHER agents' polling loops** (harmless — those loops just polled a cycle early, and both parents
+were verified still alive). Match on the stub's PATH, never on a generic command line.
+
+DEPLOY: render-only — no conf/binding change (so no `source-file`), no daemon restart, no sesh
+binary change. **5/6 at myrig 991a856** — mymain (local), ideapad + pocket4 + termux (python3),
+macstudio (`uv run --with jinja2`, H46) — each verified in a FRESH login shell (the constant is 6,
+the loaded function is the bounded one, and a real probe returns the right machine). **macbook
+ASLEEP** (ssh :22 timed out, twice) → PENDING, harmless: it just keeps the unbounded probe until it
+catches up. When it wakes: `cd ~/mysetup/myrig && git pull && uv run --with jinja2 python3
+scripts/install-home.py "$MYRIG_TARGETS"`.
+
 ## H100 — CONFIGURED DEFAULT AGENT: `[defaults] agent = "pi"`; owner-resolved, explicit override, no hidden built-in (2026-08-29, sesh 9a73116 + myrig d8044a2; NO schema/wire change; DAEMON rebuild + restart; DEPLOYED 5/6 — macbook asleep, pending)
 Ticket 978c8543: "Does sesh have a way to set the default agent harness … If not … add [it] … set the default to pi." It did NOT for the CLI/API: `thread new` rejected an omitted `--agent`. sesh-ui separately already had `ui_config.toml default_agent`, but that is only a modal preselection (and an empty value already falls back to pi in the app); it is deliberately not the mechanism default.
 

@@ -703,6 +703,12 @@ child's screen to see if it stalled on a multiple-choice prompt. It routes cross
 >   from outside any thread.
 > - `--no-parent` — force a **root** thread regardless of context.
 
+> **AGENT HARNESS POLICY:** When an agent creates an ordinary thread with `sesh thread new`,
+> it MUST omit `--agent` unless the user explicitly requested a particular harness. Let the
+> owning daemon apply its configured `[defaults] agent`; do not hard-code the current agent's
+> harness or choose one on the user's behalf. (`--fork-from` inherits the source thread's
+> harness before consulting the configured default.)
+
 `--cwd` accepts a **relative path** (expanded against the directory where you run the
 command) or **`~` / `~/…`** and **defaults to the current dir (`.`)** when omitted. A
 leading `~` is **resolved by the OWNING daemon against THAT machine's home**, not the

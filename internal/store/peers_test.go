@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -65,15 +66,15 @@ func TestUpsertPeerThreadsDelta(t *testing.T) {
 	}
 
 	// Delta: a changes, b removed, c added.
-	if err := s.UpsertPeerThreads("peer1", 150, []api.ThreadSnapshot{
+	if err := s.UpsertPeerThreads("peer1", []api.ThreadSnapshot{
 		snapT("a", "peer1", "alpha", api.BusyBusy),
 		snapT("c", "peer1", "gamma", api.BusyIdle),
 	}, []string{"b"}); err != nil {
 		t.Fatalf("delta: %v", err)
 	}
 	pc, _ := cacheFor(t, s, "peer1")
-	if pc.SyncedAtUnix != 150 {
-		t.Errorf("delta did not touch synced_at: %d", pc.SyncedAtUnix)
+	if pc.SyncedAtUnix != 100 {
+		t.Errorf("delta wrote peer_meta (synced_at=%d): freshness must ride the periodic flush, not cost a page per round", pc.SyncedAtUnix)
 	}
 	got := map[string]api.ThreadSnapshot{}
 	for _, th := range pc.Threads {
@@ -88,7 +89,7 @@ func TestUpsertPeerThreadsDelta(t *testing.T) {
 
 	// A re-created id appears in BOTH lists: removal first, then the upsert —
 	// the row must exist afterwards.
-	if err := s.UpsertPeerThreads("peer1", 160, []api.ThreadSnapshot{snapT("b", "peer1", "beta-again", api.BusyIdle)}, []string{"b"}); err != nil {
+	if err := s.UpsertPeerThreads("peer1", []api.ThreadSnapshot{snapT("b", "peer1", "beta-again", api.BusyIdle)}, []string{"b"}); err != nil {
 		t.Fatalf("re-create delta: %v", err)
 	}
 	pc, _ = cacheFor(t, s, "peer1")
@@ -204,7 +205,7 @@ func TestThreadsRevTriggers(t *testing.T) {
 	if err := s.ReplacePeerThreads("p", 1, []api.ThreadSnapshot{snapT("x", "p", "x", api.BusyIdle)}); err != nil {
 		t.Fatalf("peer write: %v", err)
 	}
-	if err := s.UpsertPeerThreads("p", 2, nil, []string{"x"}); err != nil {
+	if err := s.UpsertPeerThreads("p", nil, []string{"x"}); err != nil {
 		t.Fatalf("peer delta: %v", err)
 	}
 	if r5 := rev(); r5 != r4 {
@@ -220,8 +221,19 @@ func TestMigrationBlobToRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sesh.db")
 
 	// Build the pre-23 schema by applying every migration BEFORE the blob->rows
-	// one, exactly as migrate() would have on an old binary.
-	pre := len(migrations) - 1
+	// one, exactly as migrate() would have on an old binary. Located by content,
+	// not position, so appending later migrations (e.g. 24's WITHOUT ROWID
+	// rebuild) keeps this test staging the BLOB-era schema.
+	pre := -1
+	for i, m := range migrations {
+		if strings.Contains(m, "DROP TABLE peer_snapshots") {
+			pre = i
+			break
+		}
+	}
+	if pre < 0 {
+		t.Fatalf("blob->rows migration not found")
+	}
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)", path))
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
@@ -287,6 +299,14 @@ func TestMigrationBlobToRows(t *testing.T) {
 	// The blob table is GONE — a rollback reads loudly, never stale.
 	if _, err := s.db.Query(`SELECT * FROM peer_snapshots`); err == nil {
 		t.Fatalf("peer_snapshots still exists — a rolled-back binary would silently serve the frozen blob")
+	}
+	// Migration 24: the rows table is clustered (one leaf per row write).
+	var ddl string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='peer_threads'`).Scan(&ddl); err != nil {
+		t.Fatalf("peer_threads ddl: %v", err)
+	}
+	if !strings.Contains(ddl, "WITHOUT ROWID") {
+		t.Fatalf("peer_threads is a rowid table (separate PK autoindex = two pages per row write): %s", ddl)
 	}
 
 	// The rev machinery arrived and is live.

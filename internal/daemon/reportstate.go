@@ -83,9 +83,17 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		// pane that has since cd'd) would otherwise lose its busy/idle tracking
 		// too. A refused stamp merely keeps the stored id — the pre-schema-46
 		// behaviour, safe and self-healing; a wrong stamp is corruption.
-		if other, foreign := agents.ForeignSessionCwd(agents.Kind(th.AgentKind), req.AgentSessionID, th.Cwd, agents.ResolveHomes(d.cfg.CodexHome)); foreign {
+		homes := agents.ResolveHomes(d.cfg.CodexHome)
+		if other, foreign := agents.ForeignSessionCwd(agents.Kind(th.AgentKind), req.AgentSessionID, th.Cwd, homes); foreign {
 			log.Printf("report-state: REFUSED to stamp thread %s (cwd %s) with agent session %s reported by %s — that conversation's transcript lives under project dir %s, a DIFFERENT working directory, so the reporter is not this thread's agent (a claude background agent inherits SESH_THREAD_ID from whatever started claude's daemon). Keeping stored id %q.",
 				th.ID, th.Cwd, req.AgentSessionID, req.Source, other, th.AgentSessionID)
+		} else if agents.EphemeralCodexSession(agents.Kind(th.AgentKind), req.AgentSessionID, homes) {
+			// codex 0.151's title-generation sub-thread fires the notify hook
+			// with ITS OWN id, ~100 ms after the real turn's notify — stamping
+			// it left single-turn threads pointing at a conversation codex
+			// cannot resume. No rollout on disk = not the pane's conversation.
+			log.Printf("report-state: REFUSED to stamp thread %s with agent session %s reported by %s — no rollout exists for that id, so it is an unpersisted internal sub-thread (codex 0.151 title generation fires notify too), not the pane's conversation. Keeping stored id %q.",
+				th.ID, req.AgentSessionID, req.Source, th.AgentSessionID)
 		} else {
 			if th.AgentSessionID != "" {
 				log.Printf("report-state: thread %s agent session id corrected %s -> %s (reported by %s; the stored id was stale or mis-discovered)",

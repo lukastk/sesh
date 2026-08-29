@@ -74,6 +74,19 @@ func (s *Server) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// runSplit is run() that also hands back stdout on FAILURE: a tmux command
+// LIST (`cmd ; cmd ; ...`) aborts at the first failing sub-command, and the
+// caller needs everything the succeeding ones printed to decide what to retry.
+func (s *Server) runSplit(args ...string) (stdout, stderr string, err error) {
+	full := append(s.base(), args...)
+	cmd := exec.Command("tmux", full...)
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	err = cmd.Run()
+	return out.String(), errb.String(), err
+}
+
 // runStdin is run() with input piped to tmux's stdin. It exists for load-buffer,
 // which reads its payload from stdin (or a file) rather than as an argv. That
 // distinction is load-bearing: tmux's client->server imsg protocol caps a single

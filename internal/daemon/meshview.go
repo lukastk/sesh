@@ -140,7 +140,7 @@ func (v *meshView) applyDelta(machine string, syncedAt int64, changed []api.Thre
 	if !haveBase {
 		return false, nil
 	}
-	if err := v.st.UpsertPeerThreads(machine, syncedAt, changed, removed); err != nil {
+	if err := v.st.UpsertPeerThreads(machine, changed, removed); err != nil {
 		return false, err
 	}
 	v.contentWrites.Add(1)
@@ -171,7 +171,7 @@ func (v *meshView) applyDelta(machine string, syncedAt int64, changed []api.Thre
 	}
 	ps.syncedAt = syncedAt
 	ps.reachable = true
-	ps.metaDirty = false
+	ps.metaDirty = true // rows are persisted; freshness rides the periodic flush (one page per round saved)
 	v.mu.Unlock()
 	v.emit(changes)
 	return true, nil

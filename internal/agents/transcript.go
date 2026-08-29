@@ -89,6 +89,27 @@ func ForeignSessionCwd(kind Kind, agentSessionID, cwd string, homes Homes) (stri
 	return claude.ForeignProjectDir(homes.Claude, cwd, agentSessionID)
 }
 
+// EphemeralCodexSession reports whether a codex-reported session id has NO
+// rollout on disk — positive evidence the reporter is an internal, unpersisted
+// sub-thread rather than the pane's conversation. codex 0.151 generates a
+// session TITLE after the first turn by running a sub-thread and fires the
+// notify hook for it too, with the SUB-thread's id ~100 ms AFTER the real
+// turn's notify — so the last stamp of a single-turn thread was an id codex
+// itself cannot resume ("no rollout found"). The real thread's rollout exists
+// from turn START, and notify fires at turn END, so absence at report time is
+// evidence, not a race; and the check is structural (what codex persists),
+// never a match on the title prompt's wording. false for non-codex kinds and
+// on any read error — only certain absence refuses (the one-directional
+// evidence rule: a false positive costs one un-stamped id, self-healed by the
+// next turn's notify; a false negative is a wrong stamp).
+func EphemeralCodexSession(kind Kind, agentSessionID string, homes Homes) bool {
+	if kind != Codex || agentSessionID == "" {
+		return false
+	}
+	path, err := codex.FindRolloutByID(homes.Codex, agentSessionID)
+	return err == nil && path == ""
+}
+
 // TranscriptPath resolves a thread conversation's transcript file.
 // found=false means it isn't on disk yet (no turn taken, or another machine's
 // thread) — a legitimate state, not an error.

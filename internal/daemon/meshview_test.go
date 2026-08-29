@@ -115,10 +115,22 @@ func TestViewApplyDelta(t *testing.T) {
 	if dr := v.rowsWritten.Load() - rows0; dr != 2 {
 		t.Fatalf("delta wrote %d rows, want 2 (one upsert + one removal)", dr)
 	}
-	// The rows are PERSISTED (a fresh view seeded from this store sees them).
+	// The rows are PERSISTED (a fresh view seeded from this store sees them)
+	// while the freshness meta rides the periodic flush (one fewer page per
+	// round): stale in the store until flushMeta, fresh in the view throughout.
 	cache, err := st.LoadPeerCache()
 	if err != nil || len(cache) != 1 || len(cache[0].Threads) != 1 || cache[0].Threads[0].Busy != api.BusyBusy {
 		t.Fatalf("persisted rows = %+v (%v)", cache, err)
+	}
+	if cache[0].SyncedAtUnix != 100 {
+		t.Fatalf("delta persisted meta eagerly (synced_at=%d) — that is the extra page per round", cache[0].SyncedAtUnix)
+	}
+	if mv := v.machineViews(); mv[0].SyncedAtUnix != 150 {
+		t.Fatalf("view freshness after delta = %d, want 150", mv[0].SyncedAtUnix)
+	}
+	v.flushMeta()
+	if cache, _ := st.LoadPeerCache(); cache[0].SyncedAtUnix != 150 {
+		t.Fatalf("flushMeta did not persist the delta's freshness")
 	}
 
 	// An equal-valued "changed" row (e.g. a formatting-only refetch): row still

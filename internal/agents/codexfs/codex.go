@@ -177,7 +177,10 @@ func FindRolloutByID(home, sessionID string) (string, error) {
 	var matches []string
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable dirs
+			// Absence is evidence for the codex 0.151 ephemeral-session
+			// guard, so an unreadable/missing tree must remain distinguishable
+			// from a complete walk that found no rollout.
+			return err
 		}
 		if d.IsDir() {
 			return nil

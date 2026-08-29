@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -125,3 +126,6 @@ func NewProcSnapshot() (*ProcSnapshot, error) {
 func (p *ProcSnapshot) AgentUnderPane(panePID int) (AgentProc, bool) {
 	return p.idx.findAgent(panePID, 4)
 }
+
+// currentPID is a test seam (os.Getpid, indirected for the proc-walk test).
+func currentPID() int { return os.Getpid() }

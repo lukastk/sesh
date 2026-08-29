@@ -287,25 +287,56 @@ func (m *maintainer) tick() {
 		return
 	}
 	m.probedPanes++
-	// The process table is only consulted to resolve the agent under a MARKED pane
-	// (refreshThread touches procs only on the found-pane path). If no local thread
-	// currently occupies a pane — every thread is headless/idle — skip the `ps`
-	// enumeration; those threads resolve to headless·idle (or turn-in-flight via the
-	// registry) without it. procs stays nil and is never dereferenced.
-	var procs *tmux.ProcSnapshot
-	if len(panes) > 0 {
-		procs, err = tmux.NewProcSnapshot()
-		if err != nil {
-			return
-		}
-		m.probedProcs++
-	}
-
 	sweep := threads
 	if !needFull {
 		sweep = m.unsettled(threads, panes, shellSessions)
 	}
 	m.sweptThreads += len(sweep)
+	// The process snapshot is only consulted to resolve the agent under a MARKED
+	// pane (refreshThread touches procs only on the found-pane path). If no local
+	// thread currently occupies a pane — every thread is headless/idle — skip it;
+	// those threads resolve to headless·idle (or turn-in-flight via the registry)
+	// without it. procs stays nil and is never dereferenced. The snapshot is
+	// TARGETED: only the subtrees under the marked panes' pids (a /proc walk on
+	// Linux — `ps -e` over mymain's ~1,100 processes cost 70 ms of CPU per tick
+	// to answer a question about a few dozen subtrees).
+	var procs *tmux.ProcSnapshot
+	if len(panes) > 0 {
+		pids := make([]int, 0, len(panes))
+		for _, loc := range panes {
+			pids = append(pids, loc.PanePID)
+		}
+		procs, err = tmux.NewProcSnapshotFor(pids)
+		if err != nil {
+			return
+		}
+		m.probedProcs++
+	}
+	// Capture every sweep-set pane in ONE batched tmux invocation. As separate
+	// per-thread forks this cost a tmux client connect per headful pane per tick
+	// — measured 92 % of a core in reaped clients on mymain's 37 panes — where
+	// one batch is ~10 ms. A pane the batch could not capture (vanished between
+	// enumeration and capture) is simply absent from the map: refreshThread
+	// treats that exactly like the old per-pane capture error.
+	var contents map[string]string
+	{
+		var capIDs []string
+		for _, th := range sweep {
+			if th.AgentKind == api.ShellAgentKind {
+				continue // a shell thread's runtime is a session; nothing is captured
+			}
+			if loc, ok := panes[th.ID]; ok {
+				capIDs = append(capIDs, loc.Pane)
+			}
+		}
+		if len(capIDs) > 0 {
+			contents, err = m.d.tmux.CapturePanes(capIDs)
+			if err != nil {
+				log.Printf("maintainer: batched capture failed (retrying next tick): %v", err)
+				return
+			}
+		}
+	}
 	// Probe threads concurrently: each thread's liveState is independent and only the
 	// m.st structure (guarded by m.mu) is shared, so a bounded worker pool collapses
 	// the per-thread capture-pane cost without races.
@@ -317,7 +348,7 @@ func (m *maintainer) tick() {
 		go func(th api.Thread) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			m.refreshThread(th, attached, m.cachedTickets, panes, shellSessions, procs, now, m.cachedHolds[th.ID])
+			m.refreshThread(th, attached, m.cachedTickets, panes, shellSessions, procs, contents, now, m.cachedHolds[th.ID])
 		}(th)
 	}
 	wg.Wait()
@@ -421,7 +452,7 @@ func (m *maintainer) recordTombstoneLocked(id string) {
 
 // refreshThread recomputes one thread's live snapshot. The expensive bit
 // (capture-pane) runs WITHOUT the lock; only publishing the snapshot takes it.
-func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, shellSessions map[string]api.TmuxSession, procs *tmux.ProcSnapshot, now time.Time, effHoldUntil int64) {
+func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tickets map[string]store.TicketDigest, panes map[string]api.PaneLocator, shellSessions map[string]api.TmuxSession, procs *tmux.ProcSnapshot, contents map[string]string, now time.Time, effHoldUntil int64) {
 	m.mu.Lock()
 	st := m.st[th.ID]
 	if st == nil {
@@ -500,9 +531,10 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		snap.AttachedActivityUnix = act
 	}
 
-	content, err := m.d.tmux.CapturePane(loc.Pane)
-	if err != nil {
-		// Pane vanished mid-tick: no runtime after all.
+	content, captured := contents[loc.Pane]
+	if !captured {
+		// Pane vanished mid-tick (absent from the batched capture): no runtime
+		// after all.
 		m.d.clearAuthority(th.ID)
 		snap.Head = api.Headless
 		snap.Busy = api.BusyIdle

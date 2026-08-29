@@ -10,6 +10,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/agents/claude"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/tmux"
 )
@@ -230,7 +231,17 @@ func TestReportStateStampsAgentSession(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	defer st.Close()
-	d := &Daemon{store: st}
+	codexHome := t.TempDir()
+	rollouts := filepath.Join(codexHome, "sessions", "2026", "08", "29")
+	if err := os.MkdirAll(rollouts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"codex-session-1", "codex-session-2"} {
+		if err := os.WriteFile(filepath.Join(rollouts, "rollout-2026-08-29T00-00-00-"+id+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &Daemon{store: st, cfg: config.Config{CodexHome: codexHome}}
 	if err := st.InsertThread(api.Thread{ID: "tid-cx", Machine: "test", SessionName: "s", AgentKind: "codex"}); err != nil {
 		t.Fatalf("InsertThread: %v", err)
 	}
@@ -386,5 +397,68 @@ func TestReportStateRefusesForeignSessionStamp(t *testing.T) {
 	}
 	if got := storedID(); got != "sess-unwritten" {
 		t.Fatalf("stored id = %q, want sess-unwritten — a not-yet-written transcript must not be read as foreign", got)
+	}
+}
+
+// TestReportStateRefusesEphemeralCodexSession: codex 0.151 generates a session
+// title in an internal sub-thread and fires the notify hook for it too — with
+// the SUB-thread's id, ~100 ms after the real turn's notify. The daemon must
+// refuse to stamp an id that has NO rollout on disk (the sub-thread persists
+// nothing), and keep stamping ids that do. Otherwise every single-turn codex
+// thread ends up pointing at a conversation codex itself answers "no rollout
+// found for thread id" about.
+func TestReportStateRefusesEphemeralCodexSession(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "sesh.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	codexHome := t.TempDir()
+	const realID = "01a04e27-9612-78b1-a9ad-9bed203aee73"
+	const ghostID = "01a04e27-bd13-7f82-ab6d-a93a69cd9cbf"
+	day := filepath.Join(codexHome, "sessions", "2026", "08", "29")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(day, "rollout-2026-08-29T15-33-30-"+realID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: st, cfg: config.Config{Machine: "test", CodexHome: codexHome}, auth: map[string]*authorityState{}}
+	if err := st.InsertThread(api.Thread{ID: "cx1", Machine: "test", SessionName: "s", AgentKind: "codex", Cwd: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The real turn's notify stamps (rollout exists).
+	if code, err := d.reportState(api.ReportStateRequest{ThreadID: "cx1", Source: "sesh:codex-notify",
+		Event: api.ReportTurnEndedNoAuthority, Seq: 1, AgentSessionID: realID}, 100); err != nil {
+		t.Fatalf("real-id report refused: %d %v", code, err)
+	}
+	th, _ := st.GetThread("cx1")
+	if th.AgentSessionID != realID {
+		t.Fatalf("real id not stamped: %q", th.AgentSessionID)
+	}
+
+	// The title sub-thread's notify (no rollout) must NOT overwrite it — this
+	// is the exact 0.151 sequence: the ghost id arrives AFTER the real one.
+	if code, err := d.reportState(api.ReportStateRequest{ThreadID: "cx1", Source: "sesh:codex-notify",
+		Event: api.ReportTurnEndedNoAuthority, Seq: 2, AgentSessionID: ghostID}, 101); err != nil {
+		t.Fatalf("ghost-id report errored (the STAMP is refused, never the event): %d %v", code, err)
+	}
+	th, _ = st.GetThread("cx1")
+	if th.AgentSessionID != realID {
+		t.Fatalf("ghost id overwrote the record: %q — single-turn codex threads become unresumable", th.AgentSessionID)
+	}
+
+	// And a thread whose FIRST report is the ghost stays unstamped (empty id is
+	// better than a wrong one — the next real turn's notify self-heals it).
+	if err := st.InsertThread(api.Thread{ID: "cx2", Machine: "test", SessionName: "s2", AgentKind: "codex", Cwd: "/tmp"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.reportState(api.ReportStateRequest{ThreadID: "cx2", Source: "sesh:codex-notify",
+		Event: api.ReportTurnEndedNoAuthority, Seq: 1, AgentSessionID: ghostID}, 102); err != nil {
+		t.Fatalf("ghost-first report errored: %v", err)
+	}
+	if th, _ := st.GetThread("cx2"); th.AgentSessionID != "" {
+		t.Fatalf("ghost id stamped onto a fresh thread: %q", th.AgentSessionID)
 	}
 }

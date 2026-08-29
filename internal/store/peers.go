@@ -62,10 +62,12 @@ func (s *Store) ReplacePeerThreads(machine string, syncedAtUnix int64, threads [
 }
 
 // UpsertPeerThreads applies a DELTA sync round: removals first (a re-created id
-// appears in both lists), then changed-row upserts, then the freshness touch —
-// one transaction. This is the O(changed) write path that replaced the
-// full-blob rewrite.
-func (s *Store) UpsertPeerThreads(machine string, syncedAtUnix int64, changed []api.ThreadSnapshot, removed []string) error {
+// appears in both lists), then changed-row upserts — one transaction. This is
+// the O(changed) write path that replaced the full-blob rewrite. It deliberately
+// does NOT touch peer_meta: that would dirty a second page on every round for a
+// freshness value the view holds authoritatively and flushMeta persists within
+// 60 s (a crash can only under-claim boot freshness — the safe direction).
+func (s *Store) UpsertPeerThreads(machine string, changed []api.ThreadSnapshot, removed []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("store: upsert peer threads %q: begin: %w", machine, err)
@@ -85,9 +87,6 @@ func (s *Store) UpsertPeerThreads(machine string, syncedAtUnix int64, changed []
 			machine, th.ID, string(b)); err != nil {
 			return fmt.Errorf("store: upsert peer threads %q: upsert %s: %w", machine, th.ID, err)
 		}
-	}
-	if err := upsertPeerMetaTx(tx, machine, syncedAtUnix, true); err != nil {
-		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: upsert peer threads %q: commit: %w", machine, err)

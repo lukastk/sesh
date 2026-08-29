@@ -204,6 +204,22 @@ var migrations = []string{
 	CREATE TRIGGER tickets_rev_ins AFTER INSERT ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
 	CREATE TRIGGER tickets_rev_upd AFTER UPDATE ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
 	CREATE TRIGGER tickets_rev_del AFTER DELETE ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;`,
+	// 24: peer_threads WITHOUT ROWID. As a rowid table its (machine, id) PRIMARY
+	// KEY was a SEPARATE autoindex, so a one-row delta upsert dirtied two b-tree
+	// leaves (table + index) — measured 12–16 KB of WAL per round with the
+	// in-transaction meta touch, i.e. ~30–50 KB/s of flash on the phone at
+	// active cadence. A clustered WITHOUT ROWID table is ONE leaf per row (4 KB
+	// per round, the meta touch now batched into the periodic flush). Rebuild
+	// by copy-rename (no triggers live on this table). APPENDED last.
+	`CREATE TABLE peer_threads_new (
+		machine  TEXT NOT NULL,
+		id       TEXT NOT NULL,
+		snapshot TEXT NOT NULL,
+		PRIMARY KEY (machine, id)
+	) WITHOUT ROWID;
+	INSERT INTO peer_threads_new (machine, id, snapshot) SELECT machine, id, snapshot FROM peer_threads;
+	DROP TABLE peer_threads;
+	ALTER TABLE peer_threads_new RENAME TO peer_threads;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

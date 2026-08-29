@@ -1,9 +1,12 @@
 package tmux
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -199,6 +202,104 @@ func (s *Server) SessionFirstPane(session string) (string, error) {
 // mid-turn (working); a byte-stable pane is idle (waiting).
 func (s *Server) CapturePane(pane string) (string, error) {
 	return s.run("capture-pane", "-t", pane, "-p")
+}
+
+// capturePanesChunk bounds how many panes one CapturePanes invocation carries:
+// the whole argv travels to the tmux server as ONE imsg (MAX_IMSGSIZE 16 KiB), so
+// keep each batch far below it (~40 bytes per pane).
+const capturePanesChunk = 100
+
+// CapturePanes captures MANY panes in ONE tmux invocation (`capture-pane -p -t A ;
+// display-message -p <sentinel> ; capture-pane -p -t B ; ...`), returning each
+// pane's text keyed by pane id. The maintainer probes every headful pane every
+// ~300 ms; as separate forks that cost 37 client connects per tick on mymain —
+// measured 92 % of a core in reaped tmux clients plus the daemon's own fork/exec
+// overhead — where one batched invocation costs ~10 ms. The per-pane text is
+// byte-identical to CapturePane's (same sub-command), so the content-diff busy
+// heuristic is unchanged.
+//
+// A pane that vanished between enumeration and capture makes tmux abort the
+// REST of the command list ("can't find pane: %N" on stderr, the earlier
+// captures already on stdout). That pane is dropped (absent from the result —
+// the caller's "pane vanished mid-tick" path) and the remainder is retried in a
+// fresh batch. Any other failure is returned loudly, never as partial data.
+func (s *Server) CapturePanes(panes []string) (map[string]string, error) {
+	out := make(map[string]string, len(panes))
+	remaining := append([]string(nil), panes...)
+	for len(remaining) > 0 {
+		chunk := remaining
+		if len(chunk) > capturePanesChunk {
+			chunk = chunk[:capturePanesChunk]
+		}
+		sentinel := "@@sesh-capture-" + randomHex(16) + "@@"
+		args := make([]string, 0, len(chunk)*8)
+		for i, p := range chunk {
+			if i > 0 {
+				args = append(args, ";")
+			}
+			args = append(args, "capture-pane", "-p", "-t", p, ";", "display-message", "-p", sentinel)
+		}
+		stdout, stderr, err := s.runSplit(args...)
+		captured := splitBySentinel(stdout, sentinel)
+		if len(captured) > len(chunk) {
+			return nil, fmt.Errorf("tmux capture-pane batch: %d captures for %d panes (sentinel collision?)", len(captured), len(chunk))
+		}
+		for i, c := range captured {
+			out[chunk[i]] = c
+		}
+		if err == nil {
+			if len(captured) != len(chunk) {
+				return nil, fmt.Errorf("tmux capture-pane batch: %d captures for %d panes with no error", len(captured), len(chunk))
+			}
+			remaining = remaining[len(chunk):]
+			continue
+		}
+		// Aborted: the failing sub-command is the one right after the last
+		// complete capture. Only a vanished pane is retryable.
+		failed := cantFindPane(stderr)
+		if failed == "" || len(captured) >= len(chunk) || chunk[len(captured)] != failed {
+			return nil, fmt.Errorf("tmux capture-pane batch: %w: %s", err, strings.TrimSpace(stderr))
+		}
+		remaining = remaining[len(captured)+1:] // skip the vanished pane, retry the rest
+	}
+	return out, nil
+}
+
+// splitBySentinel splits a batched capture-pane output into per-pane texts.
+// Each pane's text is the lines between sentinels, joined exactly as
+// capture-pane -p prints them (trailing newline included); a pane with no
+// lines (all blank) is the empty string.
+func splitBySentinel(stdout, sentinel string) []string {
+	var out []string
+	var cur strings.Builder
+	for _, line := range strings.SplitAfter(stdout, "\n") {
+		if strings.TrimSuffix(line, "\n") == sentinel {
+			out = append(out, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteString(line)
+	}
+	return out
+}
+
+var cantFindPaneRe = regexp.MustCompile(`can't find pane:?\s*(%\d+)`)
+
+// cantFindPane extracts the pane id from tmux's "can't find pane: %N" (empty
+// if the stderr is anything else).
+func cantFindPane(stderr string) string {
+	if m := cantFindPaneRe.FindStringSubmatch(stderr); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // CapturePaneLines returns the text of a pane. lines==0 captures only the visible

@@ -1,5 +1,123 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H102 — THE THREE H99 LOOSE ENDS: Codex 0.151 title-subthread stamp guard, one tmux capture client per maintainer tick, and one WAL leaf per peer delta (2026-08-29, sesh 66d2e6e merged to concurrent main as 1db958e; store migration 23→24, NO API/wire change — schema stays 47; **DEPLOYED ALL SIX** with pre/post DB backups)
+Ticket 752c3e66, plus the Codex regression ticket aab369a9. This entry is H102 rather than the
+requested H100 because the default-agent and mmt-enter-box sessions landed H100/H101 on main while
+this ticket's full matrix was running; never overwrite concurrent history.
+
+**(1) CODEX 0.151'S SECOND NOTIFY WAS A DIFFERENT, UNPERSISTED CONVERSATION.** After a first
+headed turn, Codex 0.151.0 generates the session title in an internal sub-thread and invokes the
+same notify hook for it. Measured ordering: the real conversation notified at 15:33:45.099 (rollout
+already on disk); the title helper notified at 15:33:45.220 with a different id and NO rollout;
+the real conversation notified again on the next turn at 15:33:51.915. H62 deliberately lets a
+later reported id correct an earlier stored one, so a one-turn thread ended stamped with the helper
+id, which Codex itself refused with `no rollout found for thread id`. The four red cells were the
+external effect: `thread.resume/codex/local`, `thread.send.headless/codex/{local,remote}`, and
+`thread.codex-session-capture`.
+
+The reporter now refuses a Codex id only when a COMPLETE rollout-tree walk positively finds no
+matching file (`agents.EphemeralCodexSession` beside the H82 Claude foreign-cwd arm). It never
+matches title-prompt text. The asymmetry is load-bearing: a persisted id stamps; certain absence
+does not; any read error is uncertainty and therefore does NOT refuse. The inherited
+`FindRolloutByID` swallowed `WalkDir` errors, contradicting that rule; it now propagates them, with
+a direct missing-tree/empty-tree/persisted-rollout unit. A refused stamp keeps the old id (or empty)
+and still accepts the state event, so the next real notify self-heals. Anti-gaming: neutering the
+arm made the Codex cells fail with the exact `no rollout found` symptom (resume escaped the ~100 ms
+race once, then failed on repeat); reversing the edit restored `reportstate.go` byte-identically
+(MD5 `aeea3cdb0013681728cd85afe86dce21`) and all four passed with `-count=1`.
+
+**(2) MYMAIN'S 37-PANE MAINTAINER WAS MOSTLY FORK TAX.** H99 measured daemon own 15.2 % of one
+core, **92.2 % in reaped children**, and tmux server 6 %: every ~300 ms tick ran one `ps -e` over
+~1,100 processes and one `tmux capture-pane` client per headful pane. `CapturePanes` now sends one
+tmux command list for the whole sweep, with a crypto-random line sentinel after each real
+`capture-pane -p`. Every returned pane string is byte-identical to single `CapturePane` — essential
+because formatting drift would look like activity. Tmux aborts the REST of a command list when one
+pane vanished, while preserving earlier stdout and writing `can't find pane: %N`; the batch maps
+those earlier captures, drops exactly the failed pane, and retries the remainder. Any other error
+fails the tick loudly. The maintainer captures before its worker pool and passes the immutable map
+to `refreshThread`; an absent key is the old pane-vanished path.
+
+On Linux, `NewProcSnapshotFor` walks only each marked pane PID's subtree via
+`/proc/<pid>/task/*/children` + `cmdline`, depth-bounded exactly like agent resolution. Reading only
+`task/<pid>/children` was subtly wrong: Go can spawn the child from a non-leader OS thread, so every
+task's file is unioned/deduped/sorted. An unreadable root falls back to the full `ps` snapshot,
+never a plausible empty tree; macOS keeps `ps`. Test traps: the pane fixture needed to wait until
+its command had rendered, and a 12-row tmux left the fourth pane only one line high and scrolled
+`gamma` away — use a 40-row isolated server. Anti-gaming: reversing pane→capture assignment made
+the exact equality test red; the reversal restored `threads.go` byte-identically (MD5
+`8fcd5dadf0f6c8d14b866536ada6d751`).
+
+**(3) ONE-ROW PEER DELTAS NOW DIRTY ONE 4 KB LEAF.** Migration 24 rebuilds `peer_threads` as
+`WITHOUT ROWID`: the `(machine,id)` primary key is the table b-tree rather than a second autoindex.
+`UpsertPeerThreads` no longer updates `peer_meta` in the same transaction; view freshness is
+authoritative, `applyDelta` marks meta dirty, and the existing 60 s `flushMeta` persists it. A hard
+crash can only under-claim freshness on boot — the safe direction. Measured write amplification was
+12–16 KB per one-row round before and ~4 KB after. Rehearsed BEFORE deployment against fresh
+`VACUUM INTO` copies, never live DBs: mymain schema 23→24 with 1,816 threads / 366 tickets / 35
+subscriptions / 178 peer rows / 4 peer-meta rows; termux 0/0/0 / 1,994 / 5. Every count survived
+and `sqlite_master` contained `WITHOUT ROWID`.
+
+**GATES, INCLUDING THE UNPRETTY RUN.** Gofmt on every touched file (the three known drift files
+untouched); `go vet ./...`; every non-conformance package plain then `-race` (never concurrent);
+full TUI claims in 207.340 s; mesh ×6; state-authority ×4; flagged Pi ×2; runtime-state ×6. One
+runtime-state Codex remote run under row load stayed busy past its bound, then passed immediately
+serially; the final full run passed it. The first full matrix was honestly **244/253**, all nine
+reds Claude-only: its real binary said `You've hit your session limit · resets 5:50pm (UTC)` and
+the remaining cells timed out busy behind that response. After the reset, a fresh FULL run took
+2,455.189 s and was **253/253 pass, 0 fail, 0 skip, 0 missing, 0 not-run, 2 justified N/A**.
+
+Concurrent main then added H100's `thread.default-agent/{local,remote}`, making the merged registry
+255 cells. A second back-to-back full real-Claude sweep would likely have exhausted the newly reset
+allowance again, so do not misreport one: on the exact merge 1db958e, every non-conformance package
+passed plain/race + vet, the two new cells passed, and the affected integration blast passed Codex
+4/4 (each its own exact `-run`), runtime-state 6/6, state-authority 4/4, flagged Pi 2/2, mesh 6/6.
+The 253-cell full artifact belongs to the feature tree; the two merged additions have focused green
+evidence, exactly as H100 records for their own change.
+
+**DEPLOY RESULT (2026-08-29).** Feature commit 66d2e6e; fetched concurrent main ee1ebb1; required
+`--no-ff` merge 1db958e; both branches pushed. Per machine: fresh consistent `VACUUM INTO` copy +
+verified counts at schema 23 → build from a CLEAN checkout at exactly 1db958e (mymain's real
+checkout had another session's uncommitted CLI work, so it was not touched; build used throwaway
+`/tmp/sesh-h100-mymain.cXNPOh`) → every binary `vcs.modified=false` → `.new` + `mv` → supervised
+restart. Termux built natively with CGO=1, killed only explicit old daemon PID 30380, and a fresh
+SSH login's zshenv guard relaunched PID 19521. Macbook was closed/asleep: its exact LAN identity
+`macbookpro.mynet` / `ea:a8:b4:5b:15:92` was resolved from Mac Studio, an exact WoL packet opened a
+dark-wake window, and a verified 33 KB incremental Git bundle (known base 69db27c → main 1db958e)
+avoided the GitHub fetch that repeatedly outlived dark wake; `/opt/homebrew/bin/go` built it and
+supervisor relaunched PID 37447. `caffeinate` does NOT defeat closed-lid sleep — do not rely on it.
+
+Pre→post thread/ticket/subscription counts were BYTE-IDENTICAL on every machine (hook mutes also 0):
+**mymain 1,820/370/35; macbook 120/44/0; macstudio 25/1/0; ideapad 6/1/0; pocket4 27/3/0;
+termux 0/0/0.** Every post DB reported schema 24. Both copies live locally as
+`~/.sesh/backups/sesh-{pre,post}-v24-h100-20260829.db` and centrally on mymain under
+`~/.sesh/backups/fleet/<machine>-sesh-{pre,post}-v24-h100-20260829.db` (SHA-256 recorded). Final
+mymain mesh: self + all four inbound API peers reachable and current; doctors exited 0 on all six
+at their deployment check (Termux retains its designed inbound-less/no-Claude/no-Codex warnings).
+After the final fleet check, Android remained online but Termux sshd and its daemon briefly died;
+when SSH returned, the fresh-login guard self-healed it again as PID 17613. Final recheck: schema
+24, revision 1db958e, `vcs.modified=false`, and doctor saw ALL five peers (Macbook included) current.
+The transient outage is recorded rather than silently omitted; no store/history changed.
+
+**LIVE MEASUREMENTS.** Two 20 s `/proc/<pid>/stat` samples on mymain with **39** marked panes:
+daemon own 19.3–20.0 %; reaped children **8.6–9.9 %** (was 92.2 %, a 9.3–10.7× collapse); tmux
+server 8.0–9.35 % (was 6 %). The remaining child cost is the one batched client plus the other
+pre-existing tmux probes; same-pane capture work still costs the server, and in-process targeted
+walk/parsing makes daemon-own slightly higher than the 15.2 % baseline — report all three, not just
+the dramatic win. Termux's first genuine idle-cadence 20 s window: daemon own **0.70 %** (was
+0.8 %), reaped helpers 1.75 %, total 2.45 %, RSS 45,548 KB.
+
+**CODEX 0.151 LIVE SMOKE ON THE FIXED DAEMON.** Disposable headed thread 707b24d7 took exactly ONE
+turn; its stored session `01a04edf-7ccb-7510-9fea-871888bc4a14` had rollout
+`rollout-2026-08-29T18-54-24-...jsonl`. Stop/resume retained that exact resumable id. Fork created
+thread 44a7423a with its own persisted rollout-backed session
+`66b2f6ca-acc3-4e6d-b6c9-fbf49877e700`. Both records were stopped and deleted.
+
+**SMALL DEPLOY/HARNESS TRAPS:** `status` is a read-only special variable in zsh (the first post
+check stopped before writing its backup; use `daemon_json`); `git bundle create A..B` refuses an
+empty unnamed bundle (use named `main ^A`, verify prerequisites/tip at both ends); old H99 backup
+helpers safely open schema 24 because the migration loop is append-only and do not rewrite it; and
+the Codex `/tmp` helper-binary warning remains cosmetic under isolated test homes.
+
 ## H101 — mmt-enter-box's "extreme slowness" was the box-checkout PROBE: mesh-reachable ≠ ssh-reachable, and the probe had no timeout of its own (2026-08-29, myrig 991a856; NO sesh change; render-only, DEPLOYED 5/6 — macbook asleep, pending)
 Lukas: "why is `mmt-enter-box` so extremely slow? I see no reason why it should be to this extent
 when `mt-enter-box` is not. It opens up the fzf relatively quickly, but the slowness ... is the wait

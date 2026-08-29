@@ -203,6 +203,10 @@ start of the new binary (measured 1.2 s on the phone against a copy of its real
 **Deployed 2026-08-29 to all six machines (main 69db27c); live post-deploy numbers and the
 per-machine verification are in AGENTS.local.md H99.**
 
+**Follow-up deployed all six 2026-08-29 (main 1db958e): batched maintainer pane captures +
+targeted Linux `/proc` walks, and migration 24's `peer_threads WITHOUT ROWID` / deferred meta
+touch; pre/post history counts and live CPU measurements are in AGENTS.local.md H102.**
+
 ## 7. Measured (2026-08-29, A/B on termux against the real fleet corpus)
 
 Two isolated staging daemons on the phone, one per binary, each syncing read-only from

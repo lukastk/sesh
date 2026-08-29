@@ -163,6 +163,47 @@ var migrations = []string{
 	`ALTER TABLE threads ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE threads ADD COLUMN flag_reason TEXT NOT NULL DEFAULT '';
 	 ALTER TABLE threads ADD COLUMN flag_disabled INTEGER NOT NULL DEFAULT 0;`,
+	// 23: THE MESH SCALE PASS (_dev/MESH_SCALE.md) — replace the per-machine
+	// peer-snapshot JSON blob with PER-THREAD rows, so a one-row delta costs a
+	// one-row write (the blob forced a full re-marshal + full rewrite of every
+	// peer thread on ANY change — 1.4 MB of flash per active round on the
+	// phone), plus the `revs` change counter + triggers that let the maintainer
+	// sweep only live threads. Existing blobs are converted via JSON1
+	// (json_each), guarded by json_valid: a corrupt cache row is SKIPPED, the
+	// same as the old decode path skipped an undecodable blob — the peer cache
+	// is derived data and the next sync heals it. peer_snapshots is then
+	// DROPPED deliberately: a rolled-back binary must fail LOUDLY ("no such
+	// table") rather than silently serve a frozen stale blob; the rollback
+	// recipe (recreate the empty table, resync refills it in seconds) is in
+	// _dev/MESH_SCALE.md. NB the triggers attach to the CURRENT threads/tickets
+	// tables — any future rebuild-by-copy-rename migration (the #12 pattern)
+	// silently drops them and MUST recreate them. APPENDED last.
+	`CREATE TABLE peer_threads (
+		machine  TEXT NOT NULL,
+		id       TEXT NOT NULL,
+		snapshot TEXT NOT NULL,
+		PRIMARY KEY (machine, id)
+	);
+	CREATE TABLE peer_meta (
+		machine        TEXT PRIMARY KEY,
+		synced_at_unix INTEGER NOT NULL,
+		reachable      INTEGER NOT NULL
+	);
+	INSERT INTO peer_meta (machine, synced_at_unix, reachable)
+		SELECT machine, synced_at_unix, reachable FROM peer_snapshots;
+	INSERT OR REPLACE INTO peer_threads (machine, id, snapshot)
+		SELECT ps.machine, json_extract(je.value, '$.id'), je.value
+		FROM peer_snapshots ps, json_each(ps.payload) je
+		WHERE json_valid(ps.payload) AND json_extract(je.value, '$.id') IS NOT NULL;
+	DROP TABLE peer_snapshots;
+	CREATE TABLE revs (name TEXT PRIMARY KEY, rev INTEGER NOT NULL);
+	INSERT INTO revs (name, rev) VALUES ('threads', 0);
+	CREATE TRIGGER threads_rev_ins AFTER INSERT ON threads BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER threads_rev_upd AFTER UPDATE ON threads BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER threads_rev_del AFTER DELETE ON threads BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER tickets_rev_ins AFTER INSERT ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER tickets_rev_upd AFTER UPDATE ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER tickets_rev_del AFTER DELETE ON tickets BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

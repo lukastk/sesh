@@ -83,6 +83,30 @@ type maintainer struct {
 	started bool
 	stop    chan struct{}
 	done    chan struct{}
+	// The rev-gated sweep (_dev/MESH_SCALE.md C3): record reads and the
+	// per-thread refresh are O(live), not O(total). lastRev mirrors the store's
+	// trigger-bumped change counter; while it is unchanged (and no hold
+	// deadline has passed) the cached record list is reused and only UNSETTLED
+	// threads — those with live runtime, which can change without a record
+	// write — are re-derived. Any record write bumps the rev (schema triggers,
+	// so no write path can dodge it) and forces one FULL sweep.
+	lastRev        int64
+	haveRev        bool
+	cachedThreads  []api.Thread
+	cachedTickets  map[string]store.TicketDigest
+	cachedHolds    map[string]int64
+	nextHoldExpiry int64 // earliest future effective-hold deadline (0 = none): its passing flips OnHold with NO record write, so it forces a full sweep
+	// emitting gates change-pair emission to the eventer: false during the
+	// FIRST sweep after daemon start (the baseline — existing state must not
+	// re-announce), true after. Guarded by m.mu.
+	emitting bool
+
+	// fullSweeps / sweptThreads make the O(live) property observable to tests
+	// (the probedPanes pattern): fullSweeps counts record re-reads, sweptThreads
+	// accumulates per-tick refresh work.
+	fullSweeps   int
+	sweptThreads int
+
 	// probedPanes / probedProcs count ticks that actually ran the (expensive)
 	// per-tick tmux pane enumeration / ps process-table snapshot. They make the
 	// idle early-out observable to tests — the per-tick fork/exec cost this guards
@@ -189,33 +213,63 @@ func (m *maintainer) run() {
 	}
 }
 
-// tick refreshes the state of every local thread once.
+// tick refreshes local thread state. Record reads are REV-GATED
+// (_dev/MESH_SCALE.md C3): the store's trigger-bumped change counter is one
+// integer read; unchanged — and no hold deadline passed — means no record
+// mutated, so the cached record list is reused and only UNSETTLED threads
+// (live runtime, which changes without record writes) are re-derived. A
+// settled archived thread costs nothing per tick.
 func (m *maintainer) tick() {
-	threads, err := m.d.store.ListThreads(true) // include archived — they still have live state
-	if err != nil {
-		return // transient store error: skip this tick, try again next
+	now := time.Now()
+	rev, revErr := m.d.store.ThreadsRev()
+	needFull := revErr != nil || !m.haveRev || rev != m.lastRev ||
+		(m.nextHoldExpiry > 0 && now.Unix() >= m.nextHoldExpiry)
+	if needFull {
+		threads, err := m.d.store.ListThreads(true) // include archived — they still have live state
+		if err != nil {
+			return // transient store error: skip this tick, try again next (haveRev unchanged => still full)
+		}
+		tickets, err := m.d.store.OpenTicketDigests()
+		if err != nil {
+			tickets = map[string]store.TicketDigest{} // transient store error: refresh next full sweep
+		}
+		m.cachedThreads, m.cachedTickets = threads, tickets
+		// Effective hold deadlines (own + inherited from same-machine ancestors),
+		// computed on record changes so a held parent parks its whole subtree —
+		// and the EARLIEST future deadline, whose passing must force the next
+		// full sweep (OnHold auto-expiry has no record write to bump the rev).
+		m.cachedHolds = effectiveHolds(threads)
+		m.nextHoldExpiry = nextHoldDeadline(m.cachedHolds, now.Unix())
+		if revErr == nil {
+			m.lastRev, m.haveRev = rev, true
+		}
+		m.fullSweeps++
 	}
+	threads := m.cachedThreads
 	// Idle early-out: with no local threads there is nothing whose live state needs
 	// a pane/process probe, so skip the per-tick tmux + ps enumeration entirely.
 	// Otherwise the daemon fork/exec's `tmux` + `ps` every ~300ms forever even on a
 	// machine with zero threads — on a wake-locked battery leaf (e.g. termux) that is
 	// a continuous ~10% CPU drain for no work. State is already empty, so just clear.
 	if len(threads) == 0 {
+		var deleted []snapChange
 		m.mu.Lock()
 		for id := range m.st {
+			if sn := m.st[id].snap; sn.Thread.ID != "" && m.emitting {
+				sn := sn
+				deleted = append(deleted, snapChange{old: &sn, new: nil})
+			}
 			m.recordTombstoneLocked(id)
 		}
 		clear(m.st)
+		m.emitting = true
 		m.mu.Unlock()
+		m.emit(deleted)
 		return
 	}
 	attached, err := m.d.tmux.AttachedSessions()
 	if err != nil {
 		attached = map[string]int64{} // tmux unreachable => nothing attached
-	}
-	tickets, err := m.d.store.OpenTicketDigests()
-	if err != nil {
-		tickets = map[string]store.TicketDigest{} // transient store error: refresh next tick
 	}
 	// Resolve EVERY thread's pane and the agent process table ONCE per tick — both
 	// are tick-global. Doing them per-thread (FindPaneByThreadID re-enumerates all
@@ -224,7 +278,10 @@ func (m *maintainer) tick() {
 	// latched. If either enumeration fails, skip this tick and retry next.
 	// One walk yields BOTH runtime indices: agent threads by pane marker, shell
 	// threads by session marker (a shell thread's runtime is a whole session, so
-	// it never appears in the pane index).
+	// it never appears in the pane index). The walk runs EVERY tick regardless of
+	// the rev gate: a pane can gain/lose a thread marker with no record write
+	// (that is exactly what makes a thread unsettled), so runtime discovery must
+	// never be gated on record changes.
 	panes, shellSessions, err := m.d.tmux.RuntimeIndex()
 	if err != nil {
 		return
@@ -243,41 +300,111 @@ func (m *maintainer) tick() {
 		}
 		m.probedProcs++
 	}
-	now := time.Now()
 
-	// Effective hold deadlines (own + inherited from same-machine ancestors), computed
-	// ONCE per tick over the full thread set so a held parent parks its whole subtree.
-	effHolds := effectiveHolds(threads)
-
-	present := make(map[string]bool, len(threads))
-	for _, th := range threads {
-		present[th.ID] = true
+	sweep := threads
+	if !needFull {
+		sweep = m.unsettled(threads, panes, shellSessions)
 	}
+	m.sweptThreads += len(sweep)
 	// Probe threads concurrently: each thread's liveState is independent and only the
 	// m.st structure (guarded by m.mu) is shared, so a bounded worker pool collapses
 	// the per-thread capture-pane cost without races.
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maintainerConcurrency)
-	for _, th := range threads {
+	for _, th := range sweep {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(th api.Thread) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			m.refreshThread(th, attached, tickets, panes, shellSessions, procs, now, effHolds[th.ID])
+			m.refreshThread(th, attached, m.cachedTickets, panes, shellSessions, procs, now, m.cachedHolds[th.ID])
 		}(th)
 	}
 	wg.Wait()
 
-	// Drop state for threads that no longer exist (tombstoned for delta sync).
+	if needFull {
+		// Drop state for threads that no longer exist (tombstoned for delta sync,
+		// emitted as deletions). Deletions only happen via record writes, so the
+		// full sweep is the only place this can fire.
+		present := make(map[string]bool, len(threads))
+		for _, th := range threads {
+			present[th.ID] = true
+		}
+		var deleted []snapChange
+		m.mu.Lock()
+		for id := range m.st {
+			if !present[id] {
+				if sn := m.st[id].snap; sn.Thread.ID != "" && m.emitting {
+					sn := sn
+					deleted = append(deleted, snapChange{old: &sn, new: nil})
+				}
+				delete(m.st, id)
+				m.recordTombstoneLocked(id)
+			}
+		}
+		m.mu.Unlock()
+		m.emit(deleted)
+	}
 	m.mu.Lock()
-	for id := range m.st {
-		if !present[id] {
-			delete(m.st, id)
-			m.recordTombstoneLocked(id)
+	m.emitting = true // the baseline sweep is over; changes announce from now on
+	m.mu.Unlock()
+}
+
+// unsettled selects the threads whose state can change WITHOUT a record write:
+// live runtime (a marked pane, a shell session, an in-flight headless turn, a
+// reported authority entry) or a last-published state that claims liveness
+// (a vanished pane/session must be observed flipping headless). Conservative
+// by construction — when in doubt a thread is swept; a settled archived
+// thread (the overwhelming majority) is not.
+func (m *maintainer) unsettled(threads []api.Thread, panes map[string]api.PaneLocator, shells map[string]api.TmuxSession) []api.Thread {
+	out := make([]api.Thread, 0, 16)
+	for _, th := range threads {
+		if _, ok := panes[th.ID]; ok {
+			out = append(out, th)
+			continue
+		}
+		if _, ok := shells[th.ID]; ok {
+			out = append(out, th)
+			continue
+		}
+		if m.d.turnInFlight(th.ID) {
+			out = append(out, th)
+			continue
+		}
+		if _, ok := m.d.reportedState(th.ID); ok {
+			out = append(out, th)
+			continue
+		}
+		m.mu.RLock()
+		st := m.st[th.ID]
+		live := st == nil || st.snap.Thread.ID == "" ||
+			st.snap.Head == api.Headful || st.snap.Busy == api.BusyBusy || st.snap.AgentRunning
+		m.mu.RUnlock()
+		if live {
+			out = append(out, th)
 		}
 	}
-	m.mu.Unlock()
+	return out
+}
+
+// nextHoldDeadline returns the earliest effective-hold deadline still in the
+// future (0 = none): when it passes, OnHold flips with no record write, so the
+// maintainer schedules a full sweep for it.
+func nextHoldDeadline(effHolds map[string]int64, nowUnix int64) int64 {
+	var next int64
+	for _, until := range effHolds {
+		if until > nowUnix && (next == 0 || until < next) {
+			next = until
+		}
+	}
+	return next
+}
+
+// emit forwards change pairs to the eventer (nil-safe for bare test daemons).
+func (m *maintainer) emit(changes []snapChange) {
+	if m.d.evt != nil && len(changes) > 0 {
+		m.d.evt.observe(changes)
+	}
 }
 
 // recordTombstoneLocked logs a deletion for delta sync (caller holds m.mu). At
@@ -496,15 +623,31 @@ func (m *maintainer) publish(st *liveState, snap api.ThreadSnapshot) {
 	// Delta sync: bump the generation only when the published value actually
 	// changed — a byte-stable thread (archived, idle) keeps its changedGen and
 	// therefore never re-transfers. A re-created id supersedes its tombstone.
-	if !reflect.DeepEqual(st.snap, snap) {
+	changed := !reflect.DeepEqual(st.snap, snap)
+	if changed {
 		m.gen++
 		st.changedGen = m.gen
 		if len(m.tombstones) != 0 {
 			delete(m.tombstones, snap.Thread.ID)
 		}
 	}
+	old := st.snap
 	st.snap = snap
+	emitting := m.emitting
 	m.mu.Unlock()
+	// The diff-fed eventer's LOCAL half (_dev/MESH_SCALE.md C2): the change is
+	// observed here, at the moment it is published — never by re-diffing the
+	// whole set. The baseline sweep (emitting=false) absorbs existing state
+	// silently, exactly as the old eventer's first tick did.
+	if changed && emitting {
+		var oldp *api.ThreadSnapshot
+		if old.Thread.ID != "" {
+			o := old
+			oldp = &o
+		}
+		n := snap
+		m.emit([]snapChange{{old: oldp, new: &n}})
+	}
 }
 
 // handleSnapshot serves GET /v1/snapshot: a pure read of the maintained live state

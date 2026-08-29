@@ -134,9 +134,10 @@ levers fixed it, all mixed-mesh safe:
   headers, not payloads. The ssh transport stays unconditional.
 - **Demand-driven cadence.** Full 1 Hz only while the mesh view is consumed — a
   `GET /v1/mesh` read or an all-machines fan-out within the 60s active window — or when
-  `[[hooks]]` are configured (the eventer diffs REMOTE snapshots continuously; a slow
-  sample would silently MISS a remote busy→idle shorter than the interval, i.e. a notify
-  toast that never fires). Otherwise one round per `[mesh] idle_interval` (default 60s;
+  `[[hooks]]` are configured (a slow sample would deliver a remote busy→idle edge late;
+  since the scale pass the DIFF-FED eventer can never *miss* one — the wire round's
+  diff reaches it whole — but a notify toast arriving one idle-interval late is still
+  wrong, so hooks keep pinning full cadence). Otherwise one round per `[mesh] idle_interval` (default 60s;
   `"0s"` = never idle). Demand arriving while idle KICKS an immediate round, so the first
   TUI frame after an idle stretch is fresh within ~an RTT. `daemon status` reports the
   current pace as `mesh_cadence` (active / idle / hooks-pinned / always).
@@ -157,21 +158,23 @@ levers fixed it, all mixed-mesh safe:
   (above) is its invisible replacement — same bytes saved, zero visible change; the
   `mesh.snapshot` cells carry a full-replication guard so slimming can't come back.
 
-**Cache (SQLite-backed, survives restart → instant cold start):**
+**Cache (SQLite-backed, survives restart → offline browsing across reboots):**
 
 ```
-peer_snapshots (
-  machine        TEXT PRIMARY KEY,
-  synced_at_unix INTEGER NOT NULL,   -- last SUCCESSFUL sync
-  reachable      INTEGER NOT NULL,   -- was the most recent attempt ok
-  payload        TEXT NOT NULL       -- the peer's MachineSnapshot JSON
-)
+peer_threads ( machine, id, snapshot JSON, PRIMARY KEY (machine, id) )
+peer_meta    ( machine PRIMARY KEY, synced_at_unix, reachable )
 ```
 
-Storing the snapshot as a per-machine JSON blob (not normalized rows) keeps it dead simple:
-the merged view is assembled in memory by decoding each blob. A failed sync updates
-`reachable=0` but **keeps the last good `payload`** (that is what makes offline browsing
-work).
+PER-THREAD rows — the mesh scale pass (`_dev/MESH_SCALE.md`, store migration 23).
+The original per-machine JSON blob ("keeps it dead simple") was outgrown by the
+archived corpus: any one-row change re-marshaled and rewrote the machine's ENTIRE
+set (1.4 MB of flash per active round on the phone), and every consumer re-decoded
+the world to answer anything. Now a delta round writes O(changed) rows; the merged
+view is ONE in-memory decoded copy (the daemon's `meshView`), seeded from these
+rows once at boot, updated by the sync's own diffs — and the eventer consumes
+those diffs directly instead of re-decoding and re-diffing the whole mesh every
+second. A failed sync flips `reachable=0` but **keeps the last good rows** (that
+is what makes offline browsing work).
 
 `GET /v1/threads/grid?all-machines` (and a new `GET /v1/mesh` returning `MeshSnapshot`)
 read **local snapshot ∪ cached peers** — no ssh at query time. `sesh tui --all-machines`

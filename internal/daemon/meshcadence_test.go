@@ -258,18 +258,20 @@ func (f *meshSync304Fixture) last(t *testing.T) syncResp {
 	return (*f.resps)[len(*f.resps)-1]
 }
 
-func (f *meshSync304Fixture) row(t *testing.T) (syncedAt int64, payload string) {
+// state reads the synced peer's cached view: freshness + the cached ids.
+func (f *meshSync304Fixture) state(t *testing.T) (syncedAt int64, ids map[string]bool) {
 	t.Helper()
-	rows, err := f.d.store.LoadPeerSnapshots()
-	if err != nil {
-		t.Fatalf("LoadPeerSnapshots: %v", err)
-	}
-	for _, r := range rows {
-		if r.Machine == "etagpeer" {
-			return r.SyncedAtUnix, r.Payload
+	ids = map[string]bool{}
+	for _, mv := range f.d.view.machineViews() {
+		if mv.Machine != "etagpeer" {
+			continue
 		}
+		for _, th := range mv.Threads {
+			ids[th.ID] = true
+		}
+		return mv.SyncedAtUnix, ids
 	}
-	return 0, ""
+	return 0, ids
 }
 
 // TestMeshSyncDeltaFetch drives the syncer's delta loop against the real
@@ -283,64 +285,71 @@ func TestMeshSyncDeltaFetch(t *testing.T) {
 	f := newMeshSync304Fixture(t)
 
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { _, p := f.row(t); return strings.Contains(p, "p-1") })
+	waitUntilDaemon(t, 2*time.Second, func() bool { _, ids := f.state(t); return ids["p-1"] })
 	if last := f.last(t); last.code != http.StatusOK || last.body.Delta {
 		t.Fatalf("first sync: code=%d delta=%v, want a full 200", last.code, last.body.Delta)
 	}
-	syncedAt1, payload1 := f.row(t)
+	syncedAt1, _ := f.state(t)
+	writes1 := f.d.view.contentWrites.Load()
 
 	// Force a visibly-later clock second so the touch is observable.
 	time.Sleep(1100 * time.Millisecond)
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { sa, _ := f.row(t); return sa > syncedAt1 })
-	if _, payload2 := f.row(t); payload2 != payload1 {
-		t.Fatalf("payload rewritten on an unchanged snapshot (want the empty-delta/touch path)")
+	waitUntilDaemon(t, 2*time.Second, func() bool { sa, _ := f.state(t); return sa > syncedAt1 })
+	if w := f.d.view.contentWrites.Load(); w != writes1 {
+		t.Fatalf("content persisted on an unchanged snapshot (%d -> %d writes) — the empty-delta/touch path must write NOTHING", writes1, w)
 	}
 	if last := f.last(t); !last.body.Delta || len(last.body.Threads) != 0 || len(last.body.Removed) != 0 {
 		t.Fatalf("steady-state exchange = %+v, want an EMPTY delta", last.body)
 	}
 
 	// One peer row changes => the wire carries EXACTLY that row; the cache ends
-	// up with BOTH threads (delta applied onto the existing set).
+	// up with BOTH threads (delta applied onto the existing set), and the
+	// persisted write is O(changed rows), never the whole set.
+	rows1 := f.d.view.rowsWritten.Load()
 	pubThread(f.peer, snap("p-2", false, api.Headful))
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { _, p := f.row(t); return strings.Contains(p, "p-2") })
+	waitUntilDaemon(t, 2*time.Second, func() bool { _, ids := f.state(t); return ids["p-2"] })
 	last := f.last(t)
 	if !last.body.Delta || len(last.body.Threads) != 1 || last.body.Threads[0].ID != "p-2" {
 		t.Fatalf("change exchange must be a one-row delta, got %+v", last.body)
 	}
-	if _, p := f.row(t); !strings.Contains(p, "p-1") {
+	if _, ids := f.state(t); !ids["p-1"] {
 		t.Fatalf("delta application lost the unchanged row p-1")
+	}
+	if dr := f.d.view.rowsWritten.Load() - rows1; dr != 1 {
+		t.Fatalf("one-row delta wrote %d rows, want 1 (the full-set rewrite is the bug this replaced)", dr)
 	}
 
 	// A peer-side deletion arrives as a removal and is applied.
 	dropThread(f.peer, "p-1")
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { _, p := f.row(t); return !strings.Contains(p, "p-1") })
+	waitUntilDaemon(t, 2*time.Second, func() bool { _, ids := f.state(t); return !ids["p-1"] })
 	if last := f.last(t); !last.body.Delta || len(last.body.Removed) != 1 || last.body.Removed[0] != "p-1" {
 		t.Fatalf("deletion exchange must be a removal delta, got %+v", last.body)
 	}
-	if _, p := f.row(t); !strings.Contains(p, "p-2") {
+	if _, ids := f.state(t); !ids["p-2"] {
 		t.Fatalf("removal application lost the surviving row p-2")
 	}
 }
 
 // TestMeshSyncMissingRowRefetches: a conditional response (empty delta) whose
-// cache row is GONE (peer removed + re-added while the in-memory cursor
-// survived) must drop the conditional state and refetch the full payload in the
-// same round — never leave the peer payload-less while looking freshly synced.
+// cache BASE is GONE (the machine was dropped from the cache — peer removal —
+// while the in-memory cursor survived) must refetch the full payload in the
+// same round — a cursor without its base must never look freshly synced.
 func TestMeshSyncMissingRowRefetches(t *testing.T) {
 	f := newMeshSync304Fixture(t)
 
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { _, p := f.row(t); return strings.Contains(p, "p-1") })
+	waitUntilDaemon(t, 2*time.Second, func() bool { _, ids := f.state(t); return ids["p-1"] })
 
-	// Simulate the remove/re-add: the cache row vanishes, cursor memory stays.
-	if err := f.d.store.DeletePeerSnapshot("etagpeer"); err != nil {
-		t.Fatalf("delete peer snapshot: %v", err)
+	// Simulate the remove/re-add: the cached machine vanishes (view + rows,
+	// the peer-removal path), cursor memory stays.
+	if err := f.d.view.deleteMachine("etagpeer"); err != nil {
+		t.Fatalf("delete peer machine: %v", err)
 	}
 	f.s.tick()
-	waitUntilDaemon(t, 2*time.Second, func() bool { _, p := f.row(t); return strings.Contains(p, "p-1") })
+	waitUntilDaemon(t, 2*time.Second, func() bool { _, ids := f.state(t); return ids["p-1"] })
 	if last := f.last(t); last.code != http.StatusOK || last.body.Delta {
 		t.Fatalf("recovery fetch = code=%d delta=%v, want a trailing full 200", last.code, last.body.Delta)
 	}
@@ -395,7 +404,7 @@ func TestMeshSyncIdleAndKick(t *testing.T) {
 	defer f.s.stopAndWait()
 
 	// Boot round only.
-	f.waitForPayload(t, "sync-1", time.Second)
+	f.waitForID(t, "sync-1", time.Second)
 	time.Sleep(300 * time.Millisecond) // ~15 base ticks
 	if n := f.hits.Load(); n != 1 {
 		t.Fatalf("idle sync still fetched: %d hits, want just the boot round", n)
@@ -403,7 +412,7 @@ func TestMeshSyncIdleAndKick(t *testing.T) {
 
 	// A kick (demand arriving while idle) fires an immediate round.
 	f.s.kick()
-	f.waitForPayload(t, "sync-2", time.Second)
+	f.waitForID(t, "sync-2", time.Second)
 
 	// Demand pins full cadence: several rounds arrive over the next ticks.
 	f.s.d.noteMeshDemand()

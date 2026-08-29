@@ -218,6 +218,9 @@ func LoadTUI(home string) (*TUIConfig, error) {
 // Defaults is the [defaults] table — record-creation defaults the daemon
 // applies (policy knobs, dotfiles-owned like the rest of config.toml).
 type Defaults struct {
+	// Agent is the harness used by thread new when the request omits --agent.
+	// Empty means there is no default: omission stays a loud error.
+	Agent string `toml:"agent"`
 	// Notifications is the notify gate new threads start with. nil = true.
 	Notifications *bool `toml:"notifications"`
 }
@@ -241,6 +244,11 @@ func LoadDefaults(home string) (Defaults, error) {
 	}
 	if f.Defaults == nil {
 		return Defaults{}, nil
+	}
+	switch f.Defaults.Agent {
+	case "", "claude", "codex", "pi":
+	default:
+		return Defaults{}, fmt.Errorf("config: [defaults] agent must be claude, codex, or pi (got %q)", f.Defaults.Agent)
 	}
 	return *f.Defaults, nil
 }

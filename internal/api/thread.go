@@ -208,7 +208,10 @@ const (
 
 // NewThreadRequest is the body of POST /v1/threads.
 type NewThreadRequest struct {
-	Agent    string `json:"agent"`              // claude | codex | pi
+	// Agent is claude | codex | pi. Empty resolves to the owning daemon's
+	// configured [defaults] agent; if that is also empty, creation is refused.
+	// Forks instead inherit their source's agent, and virtual/divider nodes have none.
+	Agent    string `json:"agent"`
 	Name     string `json:"name"`               // thread name (also seeds session name)
 	Cwd      string `json:"cwd"`                // absolute start dir
 	Headless bool   `json:"headless,omitempty"` // headless (no window) vs headed

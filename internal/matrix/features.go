@@ -65,6 +65,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.default-agent",
+		Description: "[defaults] agent: thread new may omit --agent and the OWNER daemon spawns the configured real harness; an explicit --agent overrides it; unset/invalid policy refuses loudly; routed creation uses the target owner's policy",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.new.headless",
 		Description: "spawn a thread with NO pane (a durable conversation, idle until revived or sent a turn) — no tmux session exists, state is the unified idle",
 		Agents:      agentic,

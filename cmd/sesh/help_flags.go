@@ -269,7 +269,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread new": {
 		{"--parent-shell", "parent the new thread under the SHELL THREAD whose session hosts it (--into-session/--into-window/--into-pane), so agents started inside a box's shell session become its children. Opt-in, and LAST in precedence: an explicit --parent wins, then SESH_THREAD_ID inference, then this — so it only ever applies to a thread that would otherwise be a root, and never re-parents anything"},
-		{"--agent", "agent to spawn: claude | codex | pi (required)"},
+		{"--agent", "agent to spawn: claude | codex | pi (default: [defaults] agent in the OWNER daemon's config; loud error when neither is set; a fork inherits its source's agent)"},
 		{"--cwd", "start directory; a relative path expands against the invocation dir, a ~/… path resolves against the OWNER machine's home (portable cross-machine) (default: the current dir '.')"},
 		{"--name", "thread name (optional; empty = a nameless thread)"},
 		{"--model", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default; applied on spawn, resume, and every headless turn)"},

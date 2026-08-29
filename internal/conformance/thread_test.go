@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +34,11 @@ func init() {
 		}
 		matrix.RegisterTest("thread.list", matrix.AgentAgnostic, loc,
 			func(t *testing.T) { testThreadList(t, loc) })
+	}
+	for _, loc := range matrix.AllLocalities {
+		loc := loc
+		matrix.RegisterTest("thread.default-agent", matrix.AgentAgnostic, loc,
+			func(t *testing.T) { testThreadDefaultAgent(t, loc) })
 	}
 
 	// thread.runtime-state + thread.send.headful: the content-diff activity signal
@@ -183,6 +190,70 @@ func testThreadNewHeaded(t *testing.T, agent string, loc matrix.Locality) {
 
 	if !waitUntil(agentStartTimeout, func() bool { return agentRunningUnder(panePID, agent) }) {
 		t.Fatalf("no real %q process running under pane pid %d", agent, panePID)
+	}
+}
+
+// testThreadDefaultAgent proves the configured omission path end to end. The
+// target daemon owns the policy (important for --machine): with agent=pi, a
+// `thread new` carrying NO --agent must spawn a REAL pi process in a real marked
+// pane. An explicit --agent still wins, and omission with no configured policy
+// remains a loud error rather than silently selecting a built-in harness.
+func testThreadDefaultAgent(t *testing.T, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, loc)
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"), []byte("[defaults]\nagent = \"pi\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sb.startDaemon(t)
+
+	stdout, stderr, err := sb.Runner.Run(t, "thread", "new", "--name", "default-pi", "--cwd", "/tmp", "--json")
+	if err != nil {
+		t.Fatalf("thread new without --agent: %v\n%s", err, stderr)
+	}
+	var th api.Thread
+	if err := json.Unmarshal([]byte(stdout), &th); err != nil {
+		t.Fatalf("decode defaulted thread: %v\n%s", err, stdout)
+	}
+	if th.AgentKind != "pi" {
+		t.Fatalf("defaulted agent_kind = %q, want pi", th.AgentKind)
+	}
+	var panePID int
+	if !waitUntil(agentStartTimeout, func() bool {
+		_, pid, marked := sb.markedPane(t, th.ID)
+		panePID = pid
+		return marked && agentRunningUnder(pid, "pi")
+	}) {
+		t.Fatalf("configured default did not spawn a real pi process under pane pid %d", panePID)
+	}
+
+	// Explicit invocation policy overrides the configured default. Headless keeps
+	// this assertion cheap while still observing the authoritative stored record.
+	overrideOut, overrideErr, err := sb.Runner.Run(t, "thread", "new", "--agent", "claude", "--name", "explicit", "--cwd", "/tmp", "--headless", "--json")
+	if err != nil {
+		t.Fatalf("explicit --agent override: %v\n%s", err, overrideErr)
+	}
+	var overridden api.Thread
+	if err := json.Unmarshal([]byte(overrideOut), &overridden); err != nil {
+		t.Fatalf("decode overridden thread: %v\n%s", err, overrideOut)
+	}
+	if overridden.AgentKind != "claude" {
+		t.Fatalf("explicit --agent lost to default: agent_kind=%q", overridden.AgentKind)
+	}
+
+	unset := newSandbox(t, loc)
+	unset.startDaemon(t)
+	if _, noDefaultErr, err := unset.Runner.Run(t, "thread", "new", "--name", "refuse", "--cwd", "/tmp", "--json"); err == nil || !strings.Contains(noDefaultErr, "agent is required") {
+		t.Fatalf("omission without [defaults] agent must refuse loudly: err=%v stderr=%q", err, noDefaultErr)
+	}
+
+	invalid := newSandbox(t, loc)
+	if err := os.WriteFile(filepath.Join(invalid.Home, "config.toml"), []byte("[defaults]\nagent = \"gemini\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, invalidErr, err := invalid.daemonRunner.Run(t, "daemon", "start"); err == nil || !strings.Contains(invalidErr, "[defaults] agent") || !strings.Contains(invalidErr, "gemini") {
+		t.Fatalf("invalid [defaults] agent must prevent daemon start loudly: err=%v stderr=%q", err, invalidErr)
 	}
 }
 

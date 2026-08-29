@@ -23,6 +23,7 @@ var skipReasons = map[string]string{
 	"tmux.stage-file":            "copy local file to machine, return staged path",
 	"tmux.send-text":             "paste/send text into a pane",
 	"thread.new.headed":          "spawn headed thread in a real tmux pane",
+	"thread.default-agent":       "[defaults] agent spawns a real harness when --agent is omitted; explicit override wins; unset refuses; remote uses the owner daemon's config",
 	"thread.new.headless":        "spawn a thread with no pane: no tmux session, unified idle state (stateless-per-turn)",
 	"thread.parent":              "parent/child records: new --parent (+inference/--no-parent) + reparent (cycle guard loud)",
 	"thread.info":                "describe one thread; no-arg = current-thread inference (explicit/prefix > pane stamp > env > loud) with provenance + the unverified-env refusal",

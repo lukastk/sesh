@@ -175,9 +175,9 @@ The TUI stays in sesh/Go because it is performance-sensitive (renders live cross
 
 ## 6. CLI design principles
 
-- **Explicit, no magic defaults.** Every CLI invocation specifies what it means; there are no behavior-changing defaults that could silently shift (v1's `--machine local` sentinel, which meant different things across versions, is the anti-pattern). A flag may default only when its value is a true invariant.
+- **Explicit, no magic defaults.** Every CLI invocation specifies what it means, either with a flag or an explicit user-configured policy. A behavior-changing omission is accepted only when the corresponding config value is present (for example, `thread new` may omit `--agent` only when `[defaults] agent` names `claude`, `codex`, or `pi`); otherwise it fails loudly. There are no built-in defaults that silently shift (v1's `--machine local` sentinel, which meant different things across versions, is the anti-pattern).
 - **Output is a contract too:** structured (`--json`), stable, **versioned schema**.
-- **The CLI is for machines and wrappers, not for ergonomic human typing.** Ergonomics live in myrig shell functions. This is *why* explicitness is acceptable: the wrappers supply the convenience.
+- **The CLI is for machines and wrappers, not for ergonomic human typing.** Ergonomics live in myrig shell functions. Explicit config may supply user-owned policy, while flags always remain available as per-call overrides.
 
 ### Example myrig wrappers (thin, illustrative — these live in myrig, not sesh)
 

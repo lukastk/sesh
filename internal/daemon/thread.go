@@ -133,13 +133,25 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	// refused HERE — before ParseKind, which would otherwise reject the inherited
 	// kind with its generic "unknown agent" message and hide what is actually
 	// wrong. Every client (CLI, TUI, sesh-ui) gets the tailored refusal because
-	// the gate lives at the seam, not in one caller.
+	// the gate lives at the seam, not in one caller. The source kind wins over the
+	// configured default: a fork always stays on the same harness unless the caller
+	// explicitly supplies --agent (and a mismatch is refused by newForkedThread).
 	if req.ForkFrom != "" {
 		if src, serr := d.store.GetThread(req.ForkFrom); serr == nil {
 			if conversationGate(w, src, "fork") {
 				return
 			}
+			if req.Agent == "" {
+				req.Agent = src.AgentKind
+			}
 		}
+	}
+	if req.Agent == "" {
+		req.Agent = d.defaults.Agent
+	}
+	if req.Agent == "" {
+		writeError(w, http.StatusBadRequest, "thread: agent is required (pass --agent claude|codex|pi, or set [defaults] agent in config.toml)")
+		return
 	}
 	kind, err := agents.ParseKind(req.Agent)
 	if err != nil {

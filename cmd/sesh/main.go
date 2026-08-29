@@ -1,6 +1,6 @@
 // Command sesh is the single sesh v2 binary. It is mechanism, not UX: explicit
-// flags, no magic defaults, machine-readable output. Ergonomics live in myrig
-// wrappers, never here.
+// flags or explicit config policy, no hidden magic defaults, machine-readable
+// output. Ergonomics live in myrig wrappers, never here.
 //
 // Phase 0 ships only the `matrix` subcommand, which reports the feature-matrix
 // state. Subsequent phases add daemon/tmux/thread/ticket subcommands.

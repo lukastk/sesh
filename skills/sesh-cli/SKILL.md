@@ -712,12 +712,13 @@ only meaningful locally, so for a cross-machine spawn into a dir outside `~` pas
 absolute path.
 
 ```bash
-sesh thread new --agent claude --name fix-bug --cwd ~/proj          # headed (live pane)
+sesh thread new --name defaulted --cwd ~/proj                       # uses [defaults] agent; loud if unset
+sesh thread new --agent claude --name fix-bug --cwd ~/proj          # explicit agent overrides the configured default
 sesh thread new --agent pi --cwd ~/proj                              # --name is OPTIONAL (a nameless thread)
 sesh thread new --agent pi --name notes --cwd . --headless           # headless; cwd = $PWD
 sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child of a specific thread
 sesh thread new --agent claude --name solo --cwd ~/p --no-parent     # a ROOT thread (standalone; suppress inference)
-sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation
+sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation (agent inherits from source if omitted)
 sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5  # pin an agent model
 
 # --model pins an OPAQUE agent model on the thread (no curated list — a bad model fails
@@ -950,6 +951,7 @@ filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/id
 position = 2                     # optional: 1-based slot in the Tab/picker order among the built-ins (active/on hold/archived/all); omit/0 = appended after the built-ins
 
 [defaults]
+agent = "pi"                    # thread new may omit --agent; explicit --agent wins; unset = loud error
 notifications = true
 
 [mesh]
@@ -965,6 +967,14 @@ from = "busy"
 to = "idle"
 command = "~/.mybin/sesh-notify"
 ```
+
+`[defaults] agent` is resolved by the **owning daemon**, so routed creation with
+`thread new --machine <m>` uses machine `<m>`'s policy. Valid values are exactly
+`pi`, `claude`, and `codex`; an invalid value prevents the daemon from starting
+rather than silently choosing another harness. The daemon reads `[defaults]` at
+startup, so changing it requires a daemon restart through the machine's service
+manager. This is separate from `ui_config.toml`'s `default_agent`, which only
+preselects a value in sesh-ui's New-thread modal.
 
 A hook command runs through `$SHELL -c` with the event described in env vars:
 `SESH_EVENT` (+`SESH_EVENT_FROM`/`SESH_EVENT_TO` on edges), `SESH_THREAD_ID`,

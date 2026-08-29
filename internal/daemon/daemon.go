@@ -73,7 +73,7 @@ type Daemon struct {
 	// feeds it (see eventer.go / hookrunner.go).
 	hooks *hookRunner
 	evt   *eventer
-	// defaults: [defaults] record-creation knobs (notify gate).
+	// defaults: [defaults] record-creation knobs (agent harness + notify gate).
 	defaults config.Defaults
 	// spawn: the [spawn] launch policy (mode + extra args, per agent).
 	spawn config.Spawn

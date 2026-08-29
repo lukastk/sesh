@@ -610,7 +610,7 @@ func threadStatus(cfg config.Config, args []string) error {
 
 func threadNew(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
-	agent := fs.String("agent", "", "agent: claude|codex|pi (required)")
+	agent := fs.String("agent", "", "agent: claude|codex|pi (default: [defaults] agent; required when unset)")
 	name := fs.String("name", "", "thread name (optional; empty = a nameless thread)")
 	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (default: the current dir '.'; expanded against the invocation dir)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
@@ -681,11 +681,10 @@ func threadNew(cfg config.Config, args []string) error {
 	if *doExec && *intoPane == "" {
 		return errors.New("thread new: --exec requires --into-pane")
 	}
-	// --name is OPTIONAL (empty = a nameless thread). --agent is required —
-	// except for a VIRTUAL thread, which by definition has none.
-	if *agent == "" && !*virtual {
-		return errors.New("thread new: --agent is required")
-	}
+	// --name is OPTIONAL (empty = a nameless thread). An ordinary thread's agent
+	// may be omitted: the owning daemon resolves [defaults] agent, or refuses
+	// loudly when no default is configured. Forks inherit the source's agent;
+	// virtual threads have none.
 	// --cwd defaults to the current dir ('.'); --into-pane inherits the pane's cwd
 	// (leave it empty so the daemon takes the pane's path); a fork already defaulted
 	// it to the source's cwd above; a VIRTUAL thread needs no cwd at all (an empty

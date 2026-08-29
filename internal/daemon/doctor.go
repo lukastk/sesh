@@ -105,13 +105,11 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 
 	// Peers: the mesh sync's last-known reachability (no fresh hop — the live
 	// mesh state already reflects it, and a hop here would block the request).
-	if rows, err := d.store.LoadPeerSnapshots(); err == nil {
-		for _, row := range rows {
-			if row.Reachable {
-				add("peer:"+row.Machine, "ok", "synced "+time.Unix(row.SyncedAtUnix, 0).Format("15:04:05"))
-			} else {
-				add("peer:"+row.Machine, "warn", "unreachable (last sync "+time.Unix(row.SyncedAtUnix, 0).Format("15:04:05")+")")
-			}
+	for _, pm := range d.view.metas() {
+		if pm.Reachable {
+			add("peer:"+pm.Machine, "ok", "synced "+time.Unix(pm.SyncedAtUnix, 0).Format("15:04:05"))
+		} else {
+			add("peer:"+pm.Machine, "warn", "unreachable (last sync "+time.Unix(pm.SyncedAtUnix, 0).Format("15:04:05")+")")
 		}
 	}
 

@@ -172,3 +172,32 @@ Design:
 ### Compose
 TUI Enter becomes: headed thread on current socket → #1 switch in place; headless thread →
 #2 promote then #1 enter; anything cross-machine → the cockpit nav path.
+
+## 6. Mesh scale pass, stage D — client-side deltas + serve-from-rows (designed in `_dev/MESH_SCALE.md`, NOT built)
+
+Stages A–C of the scale pass shipped 2026-08-29 (per-thread peer cache rows, the
+diff-fed eventer, the O(live) maintainer sweep, the hash reconcile). What remains
+O(total) is the LAST hop and the in-memory copies:
+
+- **`/v1/mesh?since=`** — the TUI/sidebar/sesh-ui poll the merged view every ~3s and
+  receive + re-decode the whole mesh each time (~1.5 MB at today's ~2k threads). Give
+  it the same cursor treatment `/v1/snapshot` has: full set once, per-machine deltas
+  after (additive api field + schema bump; old clients keep full reads; sesh-ui can
+  adopt it). The daemon side already keeps exactly the per-machine change stream this
+  needs (the view's transitions). This is what makes a 50k-archived-thread TUI cheap.
+- **Serve from rows, RAM O(live)** — the daemon's `meshView` and the maintainer's `m.st`
+  each hold every replicated / local snapshot decoded in RAM (~2–4 MB now, ~15–20 MB
+  at 10k, more at 100k). Once `/v1/mesh` is delta-served, the full set only needs to
+  be marshaled on a client's first fetch: serve it from `peer_threads` rows with a
+  per-machine marshal cache keyed by the view epoch, and evict settled local
+  snapshots from `m.st` to the store.
+- **Daemon-side archived search** — with rows in SQLite, `search through 50k archived
+  threads` becomes a query (generated columns / FTS over `peer_threads.snapshot`)
+  instead of a client-side filter over a downloaded world.
+
+Trigger for building it: the TUI on the phone measurably paying for the full-set poll
+(the A/B left the daemon at 3.2 % of a core with a TUI-shaped poll; the CLIENT's own
+decode is now the larger half), or the mesh passing ~10k threads. Matrix: a
+`mesh.client-delta` cell over the counting proxy (the `mesh.delta-sync.http` pattern)
++ a scale-guard cell seeding thousands of archived virtual records and asserting the
+work counters (`sweptThreads`, `rowsWritten`) stay O(live/Δ).

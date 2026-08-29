@@ -40,10 +40,10 @@ func init() {
 // daemon is started with its TCP API exposed and registered with --api-addr/--api-token,
 // so `local`'s mesh sync pulls the peer's snapshot over HTTP, not ssh. Returns a
 // client to the LOCAL daemon (which serves the merged /v1/mesh) and the peer sandbox.
-func setupMeshPair(t *testing.T, tr meshTransport) (peer *Sandbox, local *client.Client) {
+func setupMeshPair(t *testing.T, tr meshTransport) (peer *Sandbox, localSB *Sandbox, local *client.Client) {
 	t.Helper()
 	ensureSSHLocalhost(t)
-	localSB := newSandbox(t, matrix.Local)
+	localSB = newSandbox(t, matrix.Local)
 	localSB.startDaemon(t)
 
 	// HONESTY: for the http transport the peer's ssh destination is deliberately
@@ -73,7 +73,7 @@ func setupMeshPair(t *testing.T, tr meshTransport) (peer *Sandbox, local *client
 	if _, stderr, err := localSB.Runner.Run(t, add...); err != nil {
 		t.Fatalf("peer add (%s): %v\n%s", tr.name, err, stderr)
 	}
-	return peer, client.New(localSB.Home + "/daemon.sock")
+	return peer, localSB, client.New(localSB.Home + "/daemon.sock")
 }
 
 // peerView returns the merged-mesh view for machine, if present.
@@ -108,7 +108,7 @@ func testMeshOfflineListing(t *testing.T, tr meshTransport) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	peer, c := setupMeshPair(t, tr)
+	peer, localSB, c := setupMeshPair(t, tr)
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
 
 	// First, the peer is reachable and its thread is synced.
@@ -136,6 +136,27 @@ func testMeshOfflineListing(t *testing.T, tr meshTransport) {
 		t.Errorf("downed peer's thread was DROPPED (offline browsing must retain it)")
 	}
 
+	// COLD-BOOT OFFLINE (_dev/MESH_SCALE.md): restart the OBSERVING daemon
+	// while the peer is still down. The persisted peer_threads rows exist for
+	// exactly this — the rebooted daemon must seed its view from them and KEEP
+	// listing the downed peer's last-known threads (marked unreachable, the
+	// eagerly-persisted flag) before any sync could possibly succeed. A boot
+	// seed that silently failed would drop the machine here.
+	if _, stderr, err := localSB.daemonRunner.Run(t, "daemon", "stop"); err != nil {
+		t.Fatalf("stop local daemon: %v\n%s", err, stderr)
+	}
+	localSB.startDaemon(t)
+	mv, ok := peerView(t, c, peer.Machine)
+	if !ok {
+		t.Fatalf("cold boot: downed peer VANISHED from the mesh view (boot seed lost the persisted cache)")
+	}
+	if mv.Reachable {
+		t.Errorf("cold boot: downed peer reads reachable (persisted reachability lost)")
+	}
+	if !hasThreadID(mv, there.ID) {
+		t.Errorf("cold boot: downed peer's thread not listed from the persisted rows")
+	}
+
 	// Bring the peer BACK — it refreshes to reachable.
 	peer.startDaemon(t)
 	if !waitUntil(15*time.Second, func() bool {
@@ -154,7 +175,7 @@ func testMeshSnapshot(t *testing.T, tr meshTransport) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	peer, c := setupMeshPair(t, tr)
+	peer, _, c := setupMeshPair(t, tr)
 	there := peer.newHeadlessThread(t, "pi", "onpeer")
 
 	var pview api.MachineView

@@ -22,17 +22,7 @@ import (
 // (turning an 8-15s dial into an instant "unreachable" row) without ever wrongly
 // skipping a reachable peer on a fresh daemon.
 func (d *Daemon) knownOfflinePeers() map[string]bool {
-	rows, err := d.store.LoadPeerSnapshots()
-	if err != nil {
-		return nil
-	}
-	down := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		if !r.Reachable {
-			down[r.Machine] = true
-		}
-	}
-	return down
+	return d.view.knownOffline()
 }
 
 // fanOutThreads is the mesh fan-out behind GET /v1/threads?all-machines: it

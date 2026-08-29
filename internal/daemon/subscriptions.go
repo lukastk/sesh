@@ -13,7 +13,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -126,22 +125,7 @@ func (d *Daemon) deliverTo(subscriberID, subscribeeID, text string) {
 
 // peerMachineOf finds which peer machine owns a thread (from the mesh cache).
 func (d *Daemon) peerMachineOf(id string) string {
-	rows, err := d.store.LoadPeerSnapshots()
-	if err != nil {
-		return ""
-	}
-	for _, r := range rows {
-		var threads []api.ThreadSnapshot
-		if json.Unmarshal([]byte(r.Payload), &threads) != nil {
-			continue
-		}
-		for _, th := range threads {
-			if th.ID == id {
-				return r.Machine
-			}
-		}
-	}
-	return ""
+	return d.view.ownerOf(id)
 }
 
 // sendIntoThread delivers text to a local thread by its runtime state.

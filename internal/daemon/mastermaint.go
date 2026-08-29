@@ -102,14 +102,9 @@ func (mm *masterMaint) tick() {
 	for _, p := range reg.List() {
 		registered[p.Machine] = true
 	}
-	rows, err := mm.d.store.LoadPeerSnapshots()
-	if err != nil {
-		log.Printf("master selfheal: load peer snapshots: %v", err)
-		return
-	}
-	for _, r := range rows {
-		if r.Reachable && registered[r.Machine] && r.Machine != mm.d.cfg.Machine {
-			desired = append(desired, r.Machine)
+	for _, pm := range mm.d.view.metas() {
+		if pm.Reachable && registered[pm.Machine] && pm.Machine != mm.d.cfg.Machine {
+			desired = append(desired, pm.Machine)
 		}
 	}
 

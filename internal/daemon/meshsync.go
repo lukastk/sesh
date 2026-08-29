@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -39,6 +40,17 @@ const (
 	// previous demand is at least this old — an active consumer's steady polling
 	// rides the 1 Hz ticker instead of stacking extra rounds.
 	meshKickDebounce = 2 * time.Second
+	// metaFlushInterval: how often the view's accumulated freshness meta (the
+	// touch path — 304s/empty deltas) is persisted. Content transitions persist
+	// their meta in-transaction; this only bounds how stale the BOOT-time
+	// freshness can be after a hard crash (an under-claim — the safe direction).
+	metaFlushInterval = 60 * time.Second
+	// meshReconcileInterval: how often a quiet, cursor-synced peer is VERIFIED
+	// against a content hash (_dev/MESH_SCALE.md C4) — belt and braces against a
+	// silent delta-application bug replicating wrongness quietly. The check
+	// rides the existing conditional GET (If-None-Match), costs ~100 B when
+	// consistent, and heals with the full payload it gets back when not.
+	meshReconcileInterval = time.Hour
 )
 
 type meshSync struct {
@@ -83,14 +95,17 @@ type meshSync struct {
 	// always corresponds to its STORED payload (updated only after a successful
 	// upsert), so a 304/empty-delta always means "the cache is current".
 	//   - cursors: the peer's delta-sync Generation (schema 41). While set, the
-	//     fetch asks for a DELTA and `working` holds the decoded thread set the
-	//     stored payload was built from, keyed by id, so a delta patches in place.
+	//     fetch asks for a DELTA, applied onto the mesh VIEW (the in-memory
+	//     decoded authority — _dev/MESH_SCALE.md; its per-thread rows are the
+	//     durable base).
 	//   - etags: the full-payload ETag — the fallback conditional for peers whose
 	//     daemon predates delta sync (no Generation in its responses).
-	emu     sync.Mutex
-	etags   map[string]string
-	cursors map[string]string
-	working map[string]map[string]api.ThreadSnapshot
+	//   - reconciledAt: when each peer's cached content was last PROVEN
+	//     hash-identical to the owner (a full fetch counts; see reconcilePeer).
+	emu          sync.Mutex
+	etags        map[string]string
+	cursors      map[string]string
+	reconciledAt map[string]time.Time
 
 	// Reused HTTP clients for peers on the http transport, keyed by addr+token, so
 	// the ~1s sync keeps connections alive across ticks (the whole point of HTTP
@@ -110,7 +125,7 @@ func newMeshSync(d *Daemon) *meshSync {
 		inflight:     map[string]bool{},
 		etags:        map[string]string{},
 		cursors:      map[string]string{},
-		working:      map[string]map[string]api.ThreadSnapshot{},
+		reconciledAt: map[string]time.Time{},
 		clients:      map[string]*client.Client{},
 	}
 }
@@ -133,6 +148,7 @@ func (s *meshSync) stopAndWait() {
 	s.cancel() // abort in-flight fetches instead of waiting out their timeouts
 	<-s.done
 	s.wg.Wait()
+	s.d.view.flushMeta() // clean shutdown persists the touch-path freshness
 }
 
 func (s *meshSync) run() {
@@ -141,6 +157,7 @@ func (s *meshSync) run() {
 	defer t.Stop()
 	s.tick()
 	lastRound := time.Now()
+	lastFlush := time.Now()
 	for {
 		select {
 		case <-s.stop:
@@ -151,6 +168,10 @@ func (s *meshSync) run() {
 			s.tick()
 			lastRound = time.Now()
 		case <-t.C:
+			if time.Since(lastFlush) >= metaFlushInterval {
+				s.d.view.flushMeta()
+				lastFlush = time.Now()
+			}
 			if s.shouldSync(time.Since(lastRound)) {
 				s.tick()
 				lastRound = time.Now()
@@ -275,7 +296,7 @@ func (s *meshSync) syncPeer(p peers.Peer) {
 		if s.ctx.Err() != nil {
 			return
 		}
-		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck — next tick retries
+		s.d.view.markUnreachable(p.Machine) // next tick retries
 		return
 	}
 
@@ -283,26 +304,80 @@ func (s *meshSync) syncPeer(p peers.Peer) {
 	switch {
 	case notModified:
 		// 304: the full payload is byte-unchanged — refresh freshness only.
-		if !s.touchOrInvalidate(p.Machine, now) {
-			s.syncPeerFull(p) // cache row vanished under us — full refetch
+		if !s.d.view.touch(p.Machine, now) {
+			s.syncPeerFull(p) // cache entry vanished under us — full refetch
+			return
 		}
+		s.maybeReconcile(p)
 	case snap.Delta:
 		if len(snap.Threads) == 0 && len(snap.Removed) == 0 {
 			// Empty delta: nothing changed since the cursor. Same cost class as a
 			// 304 (~100 B), same handling.
-			if !s.touchOrInvalidate(p.Machine, now) {
+			if !s.d.view.touch(p.Machine, now) {
 				s.syncPeerFull(p)
 				return
 			}
 			s.rememberCursor(p.Machine, snap.Generation)
+			s.maybeReconcile(p)
 			return
 		}
-		if !s.applyDelta(p.Machine, snap, now) {
-			s.syncPeerFull(p) // no working base / write failed — full resync
+		ok, err := s.d.view.applyDelta(p.Machine, now, snap.Threads, snap.Removed)
+		if err != nil || !ok {
+			s.clearCondState(p.Machine)
+			s.syncPeerFull(p) // no view base / write failed — full resync
+			return
 		}
+		s.rememberCursor(p.Machine, snap.Generation)
 	default:
 		s.storeFull(p.Machine, snap, newETag, now)
 	}
+}
+
+// maybeReconcile runs the C4 divergence check when due — and ONLY off a
+// provably-quiet round (a 304 / empty delta), so a hash mismatch cannot be
+// ordinary staleness: we are up to the peer's cursor and it reports no change,
+// therefore our content hash must equal its ETag. A mismatch means the cached
+// content drifted from what the owner serves (a delta-application bug, a
+// corrupted row) — logged LOUDLY and healed with the full payload in hand.
+// A never-quiet peer defers verification; any full fetch also counts as
+// reconciled (it IS the ground truth).
+func (s *meshSync) maybeReconcile(p peers.Peer) {
+	s.emu.Lock()
+	last := s.reconciledAt[p.Machine]
+	s.emu.Unlock()
+	if time.Since(last) < meshReconcileInterval {
+		return
+	}
+	ths, ok := s.d.view.threadsSorted(p.Machine)
+	if !ok {
+		return // no cached content — nothing to verify
+	}
+	localHash := snapshotETag(ths)
+	if localHash == "" {
+		return // marshal failure: skip, never a false verdict
+	}
+	snap, newETag, notModified, err := s.fetchPeerSnapshot(p, localHash, "")
+	if err != nil {
+		if s.ctx.Err() != nil {
+			return
+		}
+		s.d.view.markUnreachable(p.Machine)
+		return
+	}
+	now := time.Now().Unix()
+	if notModified {
+		s.d.view.touch(p.Machine, now)
+		s.markReconciled(p.Machine)
+		return
+	}
+	log.Printf("mesh reconcile: cached content for %s does NOT match its owner's hash right after a quiet round — healing with the full payload (possible delta-sync drift; investigate if recurring)", p.Machine)
+	s.storeFull(p.Machine, snap, newETag, now)
+}
+
+func (s *meshSync) markReconciled(machine string) {
+	s.emu.Lock()
+	s.reconciledAt[machine] = time.Now()
+	s.emu.Unlock()
 }
 
 // syncPeerFull drops the peer's conditional state and refetches the whole
@@ -315,80 +390,31 @@ func (s *meshSync) syncPeerFull(p peers.Peer) {
 		if s.ctx.Err() != nil {
 			return
 		}
-		s.d.store.MarkPeerUnreachable(p.Machine) //nolint:errcheck
+		s.d.view.markUnreachable(p.Machine)
 		return
 	}
 	s.storeFull(p.Machine, snap, newETag, time.Now().Unix())
 }
 
-// touchOrInvalidate refreshes an existing cache row's freshness; false means the
-// row is gone (or the touch failed) and the caller must full-refetch — a
-// conditional response with no cached payload behind it must never look synced.
-func (s *meshSync) touchOrInvalidate(machine string, now int64) bool {
-	touched, err := s.d.store.TouchPeerSnapshot(machine, now)
-	return err == nil && touched
-}
-
-// applyDelta patches the peer's cached thread set with a delta response:
-// removals first (a re-created id appears in both lists), then changed rows.
-// Returns false when there is no working base or the write fails — the caller
-// full-resyncs; the working set is dropped either way on failure so a partial
-// patch can never masquerade as current.
-func (s *meshSync) applyDelta(machine string, snap api.MachineSnapshot, now int64) bool {
-	s.emu.Lock()
-	w := s.working[machine]
-	s.emu.Unlock()
-	if w == nil {
-		return false // a cursor without its base is a bug-adjacent state: resync
-	}
-	for _, id := range snap.Removed {
-		delete(w, id)
-	}
-	for _, th := range snap.Threads {
-		w[th.ID] = th
-	}
-	threads := make([]api.ThreadSnapshot, 0, len(w))
-	for _, th := range w {
-		threads = append(threads, th)
-	}
-	payload, err := json.Marshal(sortedSnapshotThreads(threads))
-	if err == nil {
-		err = s.d.store.UpsertPeerSnapshot(machine, now, string(payload))
-	}
-	if err != nil {
-		s.clearCondState(machine)
-		return false
-	}
-	s.rememberCursor(machine, snap.Generation)
-	return true
-}
-
-// storeFull records a full snapshot response and (re)establishes the
-// conditional state: the cursor when the peer speaks delta sync (schema 41+),
-// else the ETag. State updates only after the payload is safely stored.
+// storeFull records a full snapshot response into the view (rows + diff +
+// events) and (re)establishes the conditional state: the cursor when the peer
+// speaks delta sync (schema 41+), else the ETag. State updates only after the
+// payload is safely stored — and a full payload is ground truth, so it also
+// counts as reconciled.
 func (s *meshSync) storeFull(machine string, snap api.MachineSnapshot, etag string, now int64) {
-	payload, err := json.Marshal(snap.Threads)
-	if err != nil {
-		s.d.store.MarkPeerUnreachable(machine) //nolint:errcheck
-		return
+	if err := s.d.view.replaceAll(machine, now, snap.Threads); err != nil {
+		log.Printf("mesh sync: store full snapshot of %s: %v", machine, err)
+		return // next round retries; old conditional state still matches the old content
 	}
-	if s.d.store.UpsertPeerSnapshot(machine, now, string(payload)) != nil {
-		return // next round retries; old conditional state still matches the old payload
-	}
+	s.markReconciled(machine)
 	s.emu.Lock()
 	defer s.emu.Unlock()
 	if snap.Generation != "" {
-		w := make(map[string]api.ThreadSnapshot, len(snap.Threads))
-		for _, th := range snap.Threads {
-			w[th.ID] = th
-		}
 		s.cursors[machine] = snap.Generation
-		s.working[machine] = w
 		delete(s.etags, machine)
 		return
 	}
 	delete(s.cursors, machine)
-	delete(s.working, machine)
 	if etag == "" {
 		delete(s.etags, machine)
 	} else {
@@ -407,7 +433,6 @@ func (s *meshSync) rememberCursor(machine, cursor string) {
 	defer s.emu.Unlock()
 	if cursor == "" {
 		delete(s.cursors, machine)
-		delete(s.working, machine)
 		return
 	}
 	s.cursors[machine] = cursor
@@ -418,7 +443,6 @@ func (s *meshSync) clearCondState(machine string) {
 	defer s.emu.Unlock()
 	delete(s.etags, machine)
 	delete(s.cursors, machine)
-	delete(s.working, machine)
 }
 
 // fetchPeerSnapshot pulls a peer's maintained snapshot over the peer's CONFIGURED
@@ -545,22 +569,6 @@ func (d *Daemon) handleMesh(w http.ResponseWriter, r *http.Request) {
 		Threads:      self.Threads,
 	})
 
-	cached, err := d.store.LoadPeerSnapshots()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	for _, c := range cached {
-		var threads []api.ThreadSnapshot
-		if c.Payload != "" {
-			json.Unmarshal([]byte(c.Payload), &threads) //nolint:errcheck — best-effort decode
-		}
-		resp.Machines = append(resp.Machines, api.MachineView{
-			Machine:      c.Machine,
-			Reachable:    c.Reachable,
-			SyncedAtUnix: c.SyncedAtUnix,
-			Threads:      threads,
-		})
-	}
+	resp.Machines = append(resp.Machines, d.view.machineViews()...)
 	writeJSON(w, http.StatusOK, resp)
 }

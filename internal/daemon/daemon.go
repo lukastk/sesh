@@ -59,6 +59,10 @@ type Daemon struct {
 	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
 	// the cross-machine view (GET /v1/mesh) is a local read.
 	mesh *meshSync
+	// view is the ONE in-memory decoded copy of the peer cache (_dev/MESH_SCALE.md):
+	// the in-process authority every consumer reads; peer_threads/peer_meta rows are
+	// its durable backing.
+	view *meshView
 	// meshDemand is the unix time of the last mesh-view consumption (a /v1/mesh
 	// read or an all-machines fan-out) — the signal the mesh sync's demand-driven
 	// cadence keys on (see meshsync.go).
@@ -150,6 +154,7 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
+	d.view = newMeshView(st)
 	defaults, err := config.LoadDefaults(cfg.Home)
 	if err != nil {
 		return nil, err
@@ -184,6 +189,17 @@ func New(cfg config.Config) (*Daemon, error) {
 	// shorter than the idle interval (a notify hook that never fires).
 	d.mesh.hooksPinned = len(hooks) > 0
 	d.evt = newEventer(d, d.hooks)
+	// The view feeds the eventer change pairs the moment a peer transition
+	// lands; the maintainer does the same for local threads from publish().
+	d.view.onChange = d.evt.observe
+	// Seed the view from the persisted rows BEFORE anything serves or syncs:
+	// offline browsing works from the first frame after a restart, and the
+	// seeded content is the eventer's baseline (emitted changes are diffs
+	// against it — a restart never re-announces existing state).
+	if err := d.view.seedFromStore(); err != nil {
+		st.Close() //nolint:errcheck
+		return nil, err
+	}
 	d.seedSubTracker()
 	if cfg.MasterSelfheal {
 		d.mmaint = newMasterMaint(d)
@@ -213,7 +229,6 @@ func (d *Daemon) Serve() error {
 	d.started = time.Now()
 	d.maint.start()     // begin keeping local thread state fresh in the background
 	d.mesh.start()      // begin syncing peers' snapshots into the local cache
-	go d.evt.run()      // observe the merged mesh + fire [[hooks]]
 	go d.checkPeerDNS() // loudly warn if http peers' hostnames don't resolve (e.g. a CGO=0 termux build)
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the cockpit to one window per connected machine
@@ -258,7 +273,6 @@ func (d *Daemon) Serve() error {
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopAPI(ctx)
-	d.evt.shutdown()
 	if d.mmaint != nil {
 		d.mmaint.stopAndWait()
 	}

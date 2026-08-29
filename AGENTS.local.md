@@ -1,5 +1,147 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H99 — TERMUX RESOURCE DIAGNOSIS → THE MESH SCALE PASS: per-thread peer cache rows, diff-fed eventer, O(live) maintainer sweep, hash reconcile (2026-08-29, sesh 0b77422 on branch `termux-optimisation`; store migration 22→23, NO api/wire change — schema stays 47; DAEMON rebuild + supervised RESTART; **NOT DEPLOYED — awaiting Lukas's sign-off**; fleet DB backups TAKEN)
+Lukas: "explore the possibility of optimizing sesh for Termux. I'm worried that it consumes too
+many resources on my phone… diagnose the issue first and then figure out ways to improve it."
+Then, on seeing the diagnosis: archived threads must NEVER be deleted, and sesh "should be designed
+such that you can have tens of thousands of archived threads… once they're archived they're just
+in history". Design record: `_dev/MESH_SCALE.md` (MESH.md's blob-storage section superseded).
+
+**THE DIAGNOSIS, all measured on the phone (`/proc` deltas, per-task ticks, `/proc/<pid>/io`, adb
+batterystats/top; the method is the reusable part):** the sesh daemon burned **15–18 % of a core
+CONTINUOUSLY with ZERO local threads and ZERO forks** — pure in-process Go work, spread evenly over
+its OS threads (a GC/hot-loop signature), 160 wakeups/s, 40 MB RSS — the **#3 CPU consumer on the
+entire phone** behind system_server and the media provider, running 24/7 under Termux's permanent
+wake lock (77 % of the phone's partial-wakelock time). Cause, proven with an on-device benchmark
+against a copy of the real store: **the eventer re-loaded every peer's snapshot blob from SQLite and
+JSON-decoded the ENTIRE replicated mesh every 1 s tick — 1.48 MB / ~1,990 threads → 146.9 ms per
+tick = 14.7 % of a core, 7.3 MB/s of garbage.** mymain's snapshot alone is 1.38 MB: **1,810 threads,
+1,763 archived**. With the TUI open the daemon doubled to 32 % and wrote **88 KB/s to flash**: at
+active cadence every delta round re-marshaled the whole working set and rewrote the 1.4 MB blob.
+Everything else was small: the maintainer's zero-thread early-out works; `sesh-current-status`
+(a `zsh -lc`, ~0.9 s wall every 15 s) ~1.8 %; tmux servers ~1 %; the cockpit's 5 ssh links ~0.
+Fleet-wide, not phone-specific: macbook (hooks-pinned, full 1 s cadence) 6.6 % on battery, ideapad
+3.1 %. NOT sesh's fault: the phone is memory-starved (swap 96–98 % used) — that is system_server +
+kswapd, the load average of 4–8. **Also confirmed en route: H84's phantom-killer setting SURVIVED
+A REBOOT** (`max_phantom_processes=2147483647` at 17h46m uptime) — that open item is closed.
+
+**WHY ARCHIVED THREADS COST ANYTHING — the structural answer Lukas asked for.** The WIRE was already
+incremental (H44 delta sync: an archived row transfers once). Every layer on either side of it
+treated a machine's thread set as ONE homogeneous value, re-processed whole per tick: the owner
+swept all 1,810 records every 300 ms (`ListThreads(true)` + refreshThread + a `DeepEqual` each);
+the observer stored each peer as one JSON blob (any one-row change = full re-marshal + full
+rewrite), kept 3+ decoded copies (meshsync `working`, eventer `prev` + per-tick `cur`), re-decoded
+the world per second in the eventer and per request in `/v1/mesh`, and loaded the full blobs to
+answer one-bit questions (mastermaint's reachable flag, the fan-out gate, the subscriptions owner
+lookup). MESH.md had recorded the blob as a deliberate simplicity choice ("keeps it dead simple");
+the archive grew ~30× under it. At 10k archived (~7.6 MB) the phone's eventer tick alone would be
+~750 ms — the daemon pegged doing nothing.
+
+**LUKAS'S DESIGN, which IS the fix ("why can't we just have a local cached database of all the
+threads across machines and only poll for diffs, and periodically do a full check that we haven't
+diverged?"):** exactly right, and it maps onto the system as C1–C4 below; the only thing it needed
+adding was that his "not every 300 ms" conflates the OWNER's local pane-probe loop (which stays at
+300 ms but must stop touching archived records) with the cross-machine sync (already 1 s/60 s and
+diff-based on the wire). An interim "write-behind blob checkpoints" fix I had designed was
+SUPERSEDED before being built: per-thread rows make eager writes cheap and exact instead.
+- **C1 — per-thread peer cache rows** (store migration 23: `peer_threads(machine,id,snapshot JSON)`
+  + `peer_meta(machine,synced_at,reachable)`; blobs converted via JSON1 `json_each` guarded by
+  `json_valid` — a corrupt row is skipped like the old undecodable-blob path, the cache is derived
+  data; `peer_snapshots` DROPPED so a rolled-back binary fails LOUDLY instead of serving a frozen
+  blob; `revs` table + AFTER INSERT/UPDATE/DELETE TRIGGERS on threads+tickets). **Verified JSON1 is
+  present in modernc.org/sqlite before relying on it** (1,987 rows extracted from the real termux
+  DB). Rehearsed row-for-row against copies of the REAL termux (1,987 rows / 5 machines) and mymain
+  (178 / 4) stores: zero mismatches; on-device migration of the real cache 1.2 s.
+- **C2 — one shared view + diff-fed events** (`internal/daemon/meshview.go`): ONE decoded copy,
+  seeded from rows at boot (silent baseline), updated by meshsync's transitions — rows FIRST, then
+  view, then `(old,new)` pairs to the eventer (`DeepEqual`-filtered: no phantom pairs from a
+  formatting-only refetch). **The eventer's 1 s ticker is GONE**: `observe(pairs)` fires the same
+  events with the same empty-string guards; zero work when nothing changed; an edge can never be
+  MISSED (the property H44's hooks-pin protected — hooks still pin cadence, but for latency now,
+  not correctness). Touch is view-only with a 60 s `flushMeta` + flush on shutdown — a crash can
+  only UNDER-claim boot freshness; `markUnreachable` persists eagerly. `contentWrites`/
+  `rowsWritten` counters make O(changed-rows) writes test-observable.
+- **C3 — O(live) maintainer sweep**: tick reads `ThreadsRev()` (one integer, trigger-bumped —
+  STRUCTURAL: no write path can dodge it); unchanged rev + no hold deadline passed ⇒ sweep only the
+  UNSETTLED set (marked pane, shell session, in-flight headless turn, authority entry, or a
+  last-published live state), record list + ticket digests cached between full sweeps; `RuntimeIndex`
+  still runs every tick (a hand-stamped pane marker has no record write). Hold expiry (OnHold flips
+  with NO write) forces the full sweep via `nextHoldExpiry`. `publish()` emits the pair, suppressed
+  during the FIRST (baseline) sweep. Counters `fullSweeps`/`sweptThreads`.
+- **C4 — hash reconcile** (Lukas's addition): hourly, ONLY off a provably-quiet round (304/empty
+  delta — otherwise a mismatch could be ordinary staleness), the observer sends a `snapshotETag` of
+  its own view as `If-None-Match`: 304 proves byte-identity for ~100 B, a 200 is a LOUD log + heal
+  with the full payload in hand. Zero API change. ssh peers full-fetch every round anyway.
+
+**THE A/B THAT SETTLES IT** (two isolated staging daemons ON THE PHONE, one per binary, each
+syncing READ-ONLY from the real five peers — 1,988 threads, pocket4 back online — identical
+phases: sync, 75 s cooldown past the 60 s demand window, 120 s idle, 90 s with a TUI-shaped 3 s
+`mesh --json` poll): **idle 10.2 % → 0.7 % of a core; active 23.7 % → 3.2 %; idle flash writes
+4.4 MB → 287 KB per 2 min; RSS 62 → 36 MB.** Active-phase writes stayed ~90–120 KB/s in BOTH runs
+because the full matrix was churning hundreds of real threads on mymain at the time — genuinely
+changed rows. RECIPE WORTH KEEPING: peers.json with tailnet IPs (not names) lets a
+`CGO_ENABLED=0 GOOS=android` cross-build work on the phone (H22's constraint is DNS only); ship the
+script by scp (H83); own `SESH_HOME`/sockets, no API; poll `mesh` only in the setup phase — a mesh
+read is DEMAND and would falsify an idle measurement.
+
+**TRAPS AND FINDINGS:**
+- **`thread.notify/-/remote` does NOT exercise the remote event chain** — it PASSED with view
+  emission neutered (1.7 s: it only round-trips the routed toggle). Found because the neuter run's
+  output was first swallowed by my own grep (a neuter you cannot SEE proves nothing — H88 again);
+  re-run visibly, then the honest guard was identified: `daemon.hooks/-/remote`, the observer-bound
+  hook on a PEER thread's real turn, goes red with "the LOCAL hook never fired for the PEER
+  thread's edge". All four neuters now discriminate with exact messages (view emission →
+  daemon.hooks/remote; boot seed → the NEW cold-boot step in mesh.offline-listing; publish emission
+  → daemon.hooks/local + maintscale; unsettled selection → maintscale), each reversed
+  byte-identically (md5-checked) and re-run green.
+- **The live termux daemon DIED during the A/B window and self-relaunched** (H36's zshenv guard,
+  new pid 7386, correct env, old binary, store untouched at v22). Almost certainly Android memory
+  pressure at ~97 % swap. NB a staging daemon MATCHES the guard's `pgrep -f 'sesh daemon run'`,
+  so while one runs the guard would NOT relaunch a dead live daemon — harmless here, worth knowing.
+- **`-run 'TestMatrix/mesh'` also matches `daemon.mesh-read`** (substring on the path element).
+- **codex 0.149.1 → 0.151.0 landed on mymain since H93 and BROKE resume of headed-TUI codex
+  sessions**: `thread/resume failed: no rollout found for thread id …` plus a new "Refusing to
+  create helper binaries under temporary dir /tmp" warning. Reproduced BYTE-IDENTICALLY on a clean
+  worktree at base 48be613 ⇒ pre-existing, NOT this pass. Isolated probe: `codex exec` + `codex exec
+  resume` work under BOTH a /tmp and a non-/tmp CODEX_HOME (the /tmp warning is cosmetic), so the
+  break is specific to sessions the headed TUI creates — that is `thread.resume/codex/local`,
+  `thread.send.headless/codex/{local,remote}` (headed-born) and `thread.codex-session-capture`.
+  Ticket aab369a9 (triage, full repro + narrowing probe inside); Lukas's live codex threads may be
+  affected on revive — CHECK before assuming.
+
+GREEN: `go vet ./...`; gofmt on every touched file (the 3 pre-existing drift files untouched);
+store units incl. `TestMigrationBlobToRows`; internal/daemon plain + `-race`; the full
+non-conformance sweep; 25 blast-radius cells (mesh ×6 incl. the delta byte-proxy and the new
+cold-boot step, route.parity ×2, daemon.doctor, daemon.hooks ×2, thread.notify ×2,
+thread.state-authority ×4 real claude+pi, thread.flagged/pi ×2, thread.hold ×2, shell.lifecycle
+×2, thread.subscribe ×2, thread.await/pi ×2); the FULL TUI claims suite (209 s). **FULL 253-CELL
+MATRIX: 248 pass, 5 fail, 0 skip, 0 missing, 0 not-run, 2 n/a** — every red pre-existing:
+`thread.resume/pi/remote` passes serially (load flake, the H8/H62 class); the four codex cells are
+the 0.151.0 regression above, identical on the base commit. Read the grid with `go run ./cmd/sesh
+matrix grid` (a passing `go test` streams nothing — H93).
+
+**BACKUPS (Lukas: "make sure to back up the thread databases and stuff so that we don't
+accidentally delete any of my history once we migrate").** Migration 23 never touches `threads`/
+`tickets`, but belt-and-braces: a consistent `VACUUM INTO` snapshot of every machine's live
+`sesh.db`, verified by opening the COPY and counting rows — mymain 1,810 threads/363 tickets/35
+subscriptions, macbook 120/43, macstudio 25/1, pocket4 27/3, ideapad 6/1, termux 0/0 = 1,988
+threads, cross-checking the replicated corpus exactly. Two copies each: local
+`~/.sesh/backups/sesh-pre-v23-20260829.db` and central `mymain:~/.sesh/backups/fleet/` (+
+`MANIFEST.txt` with both recovery paths + `blobs-*.tgz` of the four non-empty blob stores).
+**The DESIGNED rollback needs no backup**: reinstall the old binary and recreate the empty
+`peer_snapshots` table (one CREATE TABLE, in the manifest); the cache refills in seconds.
+
+**DEPLOY PLAN (pending sign-off):** merge `termux-optimisation` → main; per machine: FRESH backup
+→ record thread/ticket/subscription counts → install `.new`+`mv` → `supervisorctl restart
+sesh-daemon` (termux: kill by explicit pid + the zshenv guard relaunches it, H36/H89) → verify
+`schema_version: 23`, counts byte-identical, `sesh mesh` healthy, `doctor` clean. Any order, mixed
+fleet safe (no wire change). A running sidebar/TUI keeps working (H70 applies only to TUI-side
+changes; this is daemon-side). Expected: termux daemon ~0.7 % idle; macbook/mymain proportional.
+
+**FOLLOW-UP DESIGNED, NOT BUILT** (BACKLOG #6): stage D — `/v1/mesh?since=` client deltas,
+serve-from-rows (RAM O(live)), daemon-side archived search. Trigger: the phone's TUI poll or a
+>10k-thread mesh.
+
 ## H98 — the cockpit ,/. ring became a FLAGGED working set, and the sidebar cursor now TRACKS the cockpit (bell-nudged) (2026-08-28, sesh ceb3f03 + myrig 026cc85/de6bd65; NO schema/API/CLI-flag change; BINARY-ONLY, no daemon restart; DEPLOYED 5/6 — pocket4 offline, pending)
 Three asks in one session, arriving in sequence, each changing the last.
 

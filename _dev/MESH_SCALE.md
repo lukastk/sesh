@@ -197,7 +197,25 @@ Invariants, each with a test that fails when violated:
 
 Store migration ⇒ daemon rebuild + supervised restart per machine (termux per its
 recipe); no wire/schema change ⇒ any order, mixed fleet safe. The migration runs at first
-start of the new binary (seconds; the peer cache is small). Expected effect, to be
-verified by the A/B: termux daemon 15–18 % → <1 % of a core steady-state, TUI-open flash
-writes 88 KB/s → O(Δ), RSS ~40 → ~25 MB; proportional wins on macbook (hooks-pinned, on
-battery) and mymain (the 1,810-row owner sweep).
+start of the new binary (measured 1.2 s on the phone against a copy of its real
+1,987-row cache).
+
+## 7. Measured (2026-08-29, A/B on termux against the real fleet corpus)
+
+Two isolated staging daemons on the phone, one per binary, each syncing read-only from
+the real five peers (1,988 threads), identical phases, identical conditions:
+
+| | old (blob cache, schema 22) | new (schema 23) |
+|---|---|---|
+| idle CPU (background, nothing open) | 10.2 % of a core | **0.7 %** |
+| active CPU (a TUI-shaped 3 s mesh poll) | 23.7 % | **3.2 %** |
+| idle flash writes / 2 min | 4.4 MB | 287 KB |
+| RSS | 62 MB | **36 MB** |
+
+Active-phase writes stayed ~90–120 KB/s in BOTH runs because the full conformance
+matrix was concurrently churning hundreds of real threads on mymain — genuinely
+changed rows that must be written; the idle phase is the honest steady-state
+comparison. Migration rehearsed row-for-row against copies of the real termux and
+mymain stores (zero mismatches). Full matrix on the branch: 248/253, the 5 reds all
+pre-existing (4 codex cells failing identically on the base commit under codex 0.151.0
+— its headed-TUI sessions no longer resume, ticketed; 1 load flake passing serially).

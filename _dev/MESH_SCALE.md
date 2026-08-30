@@ -124,9 +124,10 @@ passing. So:
   (`RuntimeIndex` panes + shell sessions, `hlInFlight`, authority entries) — so even a
   hand-stamped pane marker (no record write) is caught within a tick, exactly as today.
   The record list is cached between rev changes (no `ListThreads` per tick either).
-- Changed rev, or `now >= nextHoldExpiry` (min future effective-hold deadline, recomputed
-  each full sweep; hold expiry flips OnHold with NO record write) ⇒ one FULL sweep, as
-  today. Record mutations are human-scale — full sweeps become rare instead of 3.3/s.
+- Changed rev, or `now >= nextHoldExpiry` (recomputed each full sweep by `nextHoldFlip`:
+  the min future instant at which OnHold flips with NO record write — an effective hold
+  lapsing, or, since schema 48, a hold RELEASE lapsing, which snaps an ancestor's hold
+  back on) ⇒ one FULL sweep, as today. Record mutations are human-scale — full sweeps become rare instead of 3.3/s.
 - Counters (`fullSweeps`, `threadsSwept`) make the property test-observable, the
   `probedPanes` precedent.
 

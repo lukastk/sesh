@@ -204,24 +204,28 @@ func TestRowPatchHeadBusyOverrides(t *testing.T) {
 	}
 }
 
-// holdClearPatch: optimistic only when the effective hold is the thread's OWN —
-// a dominating inherited hold means clearing won't un-hold it, so no patch (only
-// the owning daemon derives the inherited max).
-func TestHoldClearPatchInheritedHoldNotOptimistic(t *testing.T) {
+// unholdPatch is optimistic for BOTH un-hold writes (schema 48). Before the
+// release existed, clearing a child dominated by an ancestor's hold did not
+// un-hold it, so that case could not be optimistic; now the un-hold always lands
+// (a clear removes the only deadline, a release beats every ancestor) and the row
+// flips immediately either way.
+func TestUnholdPatchIsOptimisticForBothWrites(t *testing.T) {
 	now := time.Now().Unix()
 	own := api.ThreadRow{Thread: api.Thread{ID: "x", Name: "x", OnHoldUntilUnix: now + 3600}, OnHold: true, OnHoldEffectiveUnix: now + 3600}
-	inherited := api.ThreadRow{Thread: api.Thread{ID: "y", Name: "y", OnHoldUntilUnix: now + 3600}, OnHold: true, OnHoldEffectiveUnix: now + 7200}
+	inherited := api.ThreadRow{Thread: api.Thread{ID: "y", Name: "y"}, OnHold: true, OnHoldEffectiveUnix: now + 7200}
 
 	m := Model{view: ViewHold}
-	p := m.holdClearPatch(own)
-	if p == nil || p.onHold == nil || *p.onHold {
-		t.Fatalf("own-hold clear should patch onHold=false, got %+v", p)
-	}
-	if !p.hide {
-		t.Errorf("clearing in the on-hold view leaves the view — expected an optimistic hide")
-	}
-	if m.holdClearPatch(inherited) != nil {
-		t.Errorf("a dominating inherited hold must NOT be cleared optimistically — the owner derives the max")
+	for _, tc := range []struct {
+		name string
+		row  api.ThreadRow
+	}{{"own hold", own}, {"inherited hold", inherited}} {
+		p := m.unholdPatch(tc.row)
+		if p == nil || p.onHold == nil || *p.onHold {
+			t.Fatalf("%s: un-hold should patch onHold=false, got %+v", tc.name, p)
+		}
+		if !p.hide {
+			t.Errorf("%s: un-holding in the on-hold view leaves the view — expected an optimistic hide", tc.name)
+		}
 	}
 }
 

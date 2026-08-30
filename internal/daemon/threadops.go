@@ -332,10 +332,18 @@ func (d *Daemon) handleThreadNotify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
 }
 
-// handleThreadHold parks/unparks a thread: stores the absolute on-hold-until
-// instant supplied by the caller (0 = clear the hold). The daemon is a pure setter
-// — "on hold right now" is derived live (this > the daemon's clock) by the
-// maintainer/grid, so a past instant stores fine and simply reads as not-on-hold.
+// handleThreadHold writes a thread's hold state: the absolute on-hold-until
+// instant, the absolute release-until instant, or neither (both 0 = clear). The
+// daemon is a pure setter — "on hold right now" / "released right now" are derived
+// live against its clock by the maintainer/grid, so a past instant stores fine and
+// simply reads as lapsed. Both instants at once is REFUSED: held-and-released has
+// no meaning, and silently picking one would be the plausible-but-wrong class.
+//
+// The reply carries the EFFECTIVE deadline after the write plus the ancestor that
+// dominates it, because only the owner can compute inheritance (it spans that
+// machine's whole record set). Without it a caller clearing a child's hold could
+// not tell that an ancestor still parks it — which is exactly how "hold cleared"
+// came to be printed for a thread that stayed on hold.
 func (d *Daemon) handleThreadHold(w http.ResponseWriter, r *http.Request) {
 	var req api.HoldThreadRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -346,7 +354,12 @@ func (d *Daemon) handleThreadHold(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "hold: id is required")
 		return
 	}
-	if err := d.store.SetThreadHold(req.ID, req.OnHoldUntilUnix); err != nil {
+	if req.OnHoldUntilUnix != 0 && req.ReleaseUntilUnix != 0 {
+		writeError(w, http.StatusBadRequest,
+			"hold: on_hold_until_unix and release_until_unix are mutually exclusive — a thread is held, released, or neither")
+		return
+	}
+	if err := d.store.SetThreadHold(req.ID, req.OnHoldUntilUnix, req.ReleaseUntilUnix); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -355,7 +368,25 @@ func (d *Daemon) handleThreadHold(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: th})
+	resp := api.HoldThreadResponse{Schema: api.SchemaVersion, Thread: th}
+	// Resolve the outcome over the FULL record set (archived included — a child's
+	// hold can be inherited through an archived ancestor). A read failure here must
+	// not fail the write that already landed: report the write, omit the derived
+	// part rather than inventing a reassuring one.
+	if all, err := d.store.ListThreads(true); err == nil {
+		now := time.Now().Unix()
+		resp.OnHoldEffectiveUnix = effectiveHolds(all, now)[req.ID]
+		if dom := holdDominator(all, req.ID, now); dom != "" {
+			resp.HeldByID = dom
+			for _, t := range all {
+				if t.ID == dom {
+					resp.HeldByName = t.Name
+					break
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleThreadTranscript is the owner-side transcript read (D0): the raw

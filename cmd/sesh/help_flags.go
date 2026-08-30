@@ -314,9 +314,10 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread hold": {
-		{"--until", "hold until the START of this date (YYYY-MM-DD, local time)"},
-		{"--until-unix", "hold until this absolute unix instant in seconds (the machine-readable form)"},
-		{"--clear", "clear the hold — return the thread to the active view now"},
+		{"--until", "deadline as the START of this date (YYYY-MM-DD, local time) — for the hold, or for --release"},
+		{"--until-unix", "deadline as an absolute unix instant in seconds (the machine-readable form)"},
+		{"--release", "release this thread (and its subtree) from its ANCESTORS' holds until the deadline (default: start of tomorrow) — the escape hatch from inherited holds, since a child's own hold cannot undercut its parent's"},
+		{"--clear", "clear both the hold and the release — the thread inherits from its ancestors again"},
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

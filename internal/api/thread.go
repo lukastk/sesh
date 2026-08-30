@@ -111,6 +111,18 @@ type Thread struct {
 	// derives the live OnHold flag against ITS clock. Auto-expires — once the instant
 	// passes the thread silently returns to the active view (no explicit unhold).
 	OnHoldUntilUnix int64 `json:"on_hold_until_unix,omitempty"`
+	// HoldReleaseUntilUnix is the RELEASE deadline (schema 48): while now < this
+	// value the thread ignores every ANCESTOR's hold, and the inheritance chain
+	// STOPS here — so its own subtree is freed with it. This is the escape hatch
+	// for the max() rule: without it a child could never be active while its
+	// parent was parked (clearing its own hold left it held and said nothing).
+	// Mutually exclusive with OnHoldUntilUnix — setting either zeroes the other,
+	// so a thread is exactly one of held / released / neither (inherit). Dated on
+	// the same clock as a hold, so it AUTO-EXPIRES: the next parking round parks
+	// the thread again like everything else, and a release can never silently
+	// exempt a thread forever. Own holds are unaffected — a released thread that
+	// is then held itself is held.
+	HoldReleaseUntilUnix int64 `json:"hold_release_until_unix,omitempty"`
 	// PinOrder is the manual-ordering sort key. nil = not pinned (the thread sits in
 	// the auto-sorted block); non-nil = pinned, rendered ABOVE the auto block ordered
 	// by this key ascending. Only TOP-LEVEL (parentless) threads may be pinned; a
@@ -463,7 +475,9 @@ type ThreadRow struct {
 	// OnHoldUntilUnix, every same-machine ANCESTOR's own) so a child INHERITS a parent's
 	// hold (a held parent parks its whole subtree). Derived per tick by the owner; 0 =
 	// not held. OnHoldUntilUnix stays the thread's OWN editable value (what `hold`/`H`
-	// set/clear); this is the inherited maximum the view/column read.
+	// set/clear); this is the inherited maximum the view/column read. A thread with a
+	// live HoldReleaseUntilUnix takes NO ancestor into this max (schema 48), and the
+	// walk from its descendants stops at it, so its subtree is released with it.
 	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
 	// StateAuthority is which mechanism decided Busy for a headful thread
 	// (reported vs heuristic); omitted = unknown/not-applicable. Schema 43.
@@ -601,6 +615,33 @@ type NotifyThreadRequest struct {
 type HoldThreadRequest struct {
 	ID              string `json:"id"`
 	OnHoldUntilUnix int64  `json:"on_hold_until_unix"`
+	// ReleaseUntilUnix is the RELEASE deadline (schema 48): until this instant the
+	// thread ignores every ancestor's hold (and its descendants stop inheriting
+	// through it). Both fields are written on every call, so the three states are
+	// structurally exclusive: hold = {until, 0}, release = {0, until}, clear =
+	// {0, 0}. Both non-zero is a LOUD 400 — "held AND released" has no meaning.
+	// A pre-48 client omits it, which reads as 0 and so clears any release: the
+	// pre-48 semantics of "set a hold" / "clear the hold" are preserved exactly.
+	ReleaseUntilUnix int64 `json:"release_until_unix,omitempty"`
+}
+
+// HoldThreadResponse is POST /v1/threads/hold's reply (schema 48): a superset of
+// ThreadResponse — same `schema`/`thread` tags, so a pre-48 client decoding into
+// ThreadResponse is unaffected — plus what the caller CANNOT derive for itself.
+// Inheritance is resolved owner-side over that machine's whole record set, so
+// without this a CLI clearing a child's hold had no way to know the thread was
+// still parked by an ancestor, and printed "hold cleared" while nothing changed.
+type HoldThreadResponse struct {
+	Schema int    `json:"schema"`
+	Thread Thread `json:"thread"`
+	// OnHoldEffectiveUnix is the thread's effective hold deadline AFTER this write
+	// (max over the chain, or its own alone when released); 0 = not held.
+	OnHoldEffectiveUnix int64 `json:"on_hold_effective_unix,omitempty"`
+	// HeldByID/HeldByName name the ANCESTOR whose hold dominates after this write —
+	// set only when the thread is held by something other than its own deadline, i.e.
+	// exactly when a caller's "clear" did not actually unhold it. '' otherwise.
+	HeldByID   string `json:"held_by_id,omitempty"`
+	HeldByName string `json:"held_by_name,omitempty"`
 }
 
 // FlagThreadRequest is POST /v1/threads/flag (schema 44). Action semantics:

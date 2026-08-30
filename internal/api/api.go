@@ -271,7 +271,28 @@ package api
 // Additive and mixed-mesh safe: report-state is owner-local (the reporter
 // talks to its own machine's daemon); a pre-46 daemon simply ignores the
 // unknown JSON field (the pre-46 behavior).
-const SchemaVersion = 47
+// 47: SHELL THREADS. Thread gains session_path/shell_id — a tracked tmux
+// session as a first-class thread (agent_kind "shell"). Additive: a pre-47
+// peer simply omits both fields.
+//
+// 48: HOLD RELEASE (the escape hatch for inherited holds). Thread gains
+// hold_release_until_unix, and HoldThreadRequest gains release_until_unix.
+// Since 35 a thread's effective hold has been max(own, every same-machine
+// ancestor's own), and `own` had only two states — set, or 0 — so there was
+// NO WAY to say "this one is not held" while an ancestor holds it: clearing a
+// child's own hold left it parked and reported success. A thread now carries
+// one of THREE mutually exclusive states: held until T, RELEASED until T
+// (ancestor holds do not apply, and the inheritance chain stops here, so its
+// own subtree is freed with it), or neither (inherit). A release is a dated
+// statement on the same clock as a hold, so it auto-expires and tomorrow's
+// parking round parks the thread again. The hold response is now
+// HoldThreadResponse, a superset of ThreadResponse (same `schema`/`thread`
+// tags) carrying the derived effective deadline + the ancestor that dominates,
+// so the CLI can report the real outcome instead of a silent no-op. Additive
+// and mixed-mesh safe: the derivation is owner-side, so a pre-48 VIEWER reads
+// the correct on_hold either way; a pre-48 OWNER ignores the unknown column
+// and keeps the pre-48 behavior (no release).
+const SchemaVersion = 48
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

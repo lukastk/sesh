@@ -439,8 +439,9 @@ tab          view PICKER: a popup listing every view (active / on hold / archive
              thread, or one on hold — the TUI opens on `all` so the cursor still lands on it)
 p            COMMAND PALETTE (fuzzy-run any command — see above)
 h            hold: park the thread until the start of tomorrow (it drops out of the
-             default view and returns automatically tomorrow); on an already-held thread
-             `h` releases it
+             default view and returns automatically tomorrow); on an already-held
+             thread `h` un-holds it — clearing its own hold, or RELEASING it from an
+             ancestor's hold (with its own subtree) when that is what parks it
 r            rename (line prompt; ←/→ move the cursor, Home/End jump, edit in place)
 f            toggle the flag (⚑; flagging a flag-disabled thread re-enables it)
 ctrl+f       toggle auto-flagging for the thread (⌁ when disabled; also unflags)
@@ -474,7 +475,7 @@ Palette-only commands (id — what it does):
 ```
 goto-uuid        GO TO a thread by uuid (line prompt; the full uuid or the short
                  8-character form, empty = cancel) — see below
-hold-until       hold until an explicit date (line prompt; YYYY-MM-DD, empty = clear)
+hold-until       hold until an explicit date (line prompt; YYYY-MM-DD, empty = un-hold)
 tag-add          add a tag                tag-remove   remove a tag (picker)
 set-parent       set parent by PICKING one from a list — see below
 set-parent-uuid  set parent by pasting a uuid/prefix (empty = root; self/cycle/unknown
@@ -562,9 +563,27 @@ cycle) shows the parked ones. The CLI verb is `sesh thread hold` (see below).
 
 Hold is **inherited down the tree**: a thread's effective hold is `max(its own hold,
 its ancestors' holds)`, so holding a parent parks its whole subtree (the children show
-`↑<date>` in the HOLD column — an inherited hold). `h` manages a thread's OWN hold; a
-child can't be un-held below its parent's hold (that's the `max`). Inheritance is
-resolved per machine (a cross-machine parent's hold is not inherited).
+`↑<date>` in the HOLD column — an inherited hold). Inheritance is resolved per machine
+(a cross-machine parent's hold is not inherited).
+
+**Releasing a child from its parent's hold.** Because the effective hold is a `max`,
+clearing a child's own hold cannot undercut its parent's — so a thread is in exactly
+one of three states, and `sesh thread hold` writes them:
+
+| state | how | effect |
+|---|---|---|
+| **held** until T | `--until <date>` / `--until-unix <n>` | parked; its subtree inherits |
+| **released** until T | `--release [--until <date>]` (default: tomorrow) | ancestors' holds do not apply — to it *or* its own subtree |
+| neither | `--clear` | inherits from its ancestors again |
+
+A release is a **dated** statement like a hold, so it auto-expires: tomorrow's parking
+round parks the thread again like everything else, and no thread is ever silently
+exempt forever. Setting either state clears the other — a thread is never both. In the
+TUI, `h` on a thread parked by an ancestor issues the release for you (and the HOLD
+column shows `~<date>` while a release is in force); `h` on a released thread holds it,
+which clears the release. `--clear` and `--release` **fail loudly** if the thread is
+still on hold afterwards, naming the ancestor responsible — an un-hold that silently
+left the thread parked is exactly the bug this replaced.
 
 **Manual ordering (pinning + dividers).** Threads are otherwise auto-sorted, but you can
 **pin** top-level threads to a manually-ordered block that renders **above** the
@@ -750,7 +769,8 @@ sesh thread headful --id <id>        # promote a live HEADLESS thread into a pan
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first); children promote to the grandparent
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
-sesh thread hold --id <id> --clear                     # release the hold now
+sesh thread hold --id <id> --release                   # release it (+ its subtree) from an ANCESTOR's hold, until tomorrow
+sesh thread hold --id <id> --clear                     # clear both; it inherits from its ancestors again
 
 # Manual ordering: pin a top-level thread ABOVE the auto-sorted list (default: top).
 sesh thread pin --id <id>                              # pin to the top of the manual block

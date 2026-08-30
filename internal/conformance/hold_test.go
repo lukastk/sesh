@@ -9,6 +9,7 @@ package conformance
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,105 @@ func testHoldLocal(t *testing.T) {
 	if !waitUntil(5*time.Second, func() bool { r, ok := snapRowOnHold(t, c, parent.ID); return ok && !r.OnHold }) {
 		t.Errorf("parent should be off-hold after --clear")
 	}
+
+	// --- RELEASE (schema 48): the escape hatch from the inherited max. ---
+	// Fresh three-generation tree, all held by the ROOT alone, so every assertion
+	// below is about inheritance rather than about anything's own deadline.
+	gp := sb.newHeadlessThread(t, "pi", "rel-root")
+	kid := sb.newHeadlessThreadParented(t, "pi", "rel-kid", gp.ID)
+	grandkid := sb.newHeadlessThreadParented(t, "pi", "rel-grandkid", kid.ID)
+	rootHold := time.Now().Add(72 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", gp.ID, "--until-unix", strconv.FormatInt(rootHold, 10)); err != nil {
+		t.Fatalf("hold rel-root: %v\n%s", err, stderr)
+	}
+	// BASELINE first: without it every "is free" assertion below could pass vacuously.
+	if !waitUntil(5*time.Second, func() bool {
+		k, ok1 := snapRowOnHold(t, c, kid.ID)
+		g, ok2 := snapRowOnHold(t, c, grandkid.ID)
+		return ok1 && ok2 && k.OnHold && g.OnHold
+	}) {
+		t.Fatalf("baseline: the whole subtree should be parked by the root's hold")
+	}
+
+	// A --clear on a thread parked by an ANCESTOR must FAIL LOUDLY, naming the
+	// ancestor and the remedy. This is the reported defect: it used to exit 0 with
+	// "hold cleared" while the thread stayed parked, so a caller could not tell that
+	// nothing had happened. The record must also be unchanged in a way that matters.
+	_, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", kid.ID, "--clear")
+	if err == nil {
+		t.Errorf("--clear on a thread held by its ancestor must fail loudly, not report success")
+	} else {
+		if !strings.Contains(stderr, "STILL on hold") || !strings.Contains(stderr, "--release") {
+			t.Errorf("the refusal must say it is still held and name --release, got: %s", stderr)
+		}
+		if !strings.Contains(stderr, "rel-root") {
+			t.Errorf("the refusal must NAME the ancestor responsible, got: %s", stderr)
+		}
+	}
+	if r, _ := snapRowOnHold(t, c, kid.ID); !r.OnHold {
+		t.Errorf("the failed clear should have left the thread held (it is the ancestor's hold)")
+	}
+
+	// --release frees the thread AND its subtree, while the ancestor stays parked —
+	// the whole point: a child can now be worked on without un-parking its parent.
+	relUntil := time.Now().Add(24 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", kid.ID, "--release", "--until-unix", strconv.FormatInt(relUntil, 10)); err != nil {
+		t.Fatalf("release kid: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool {
+		k, ok1 := snapRowOnHold(t, c, kid.ID)
+		g, ok2 := snapRowOnHold(t, c, grandkid.ID)
+		return ok1 && ok2 && !k.OnHold && !g.OnHold
+	}) {
+		k, _ := snapRowOnHold(t, c, kid.ID)
+		g, _ := snapRowOnHold(t, c, grandkid.ID)
+		t.Errorf("release should free the thread and its subtree: kid.on_hold=%v grandkid.on_hold=%v", k.OnHold, g.OnHold)
+	}
+	if r, ok := snapRowOnHold(t, c, gp.ID); !ok || !r.OnHold {
+		t.Errorf("releasing a child must NOT un-park its ancestor")
+	}
+	if got := threadByName(t, sb, "rel-kid").HoldReleaseUntilUnix; got != relUntil {
+		t.Errorf("release deadline not persisted: %d, want %d", got, relUntil)
+	}
+
+	// Setting an own hold on a RELEASED thread clears the release: the two states are
+	// mutually exclusive, so a thread is never both held and released.
+	kidHold := time.Now().Add(12 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", kid.ID, "--until-unix", strconv.FormatInt(kidHold, 10)); err != nil {
+		t.Fatalf("hold a released thread: %v\n%s", err, stderr)
+	}
+	if rec := threadByName(t, sb, "rel-kid"); rec.HoldReleaseUntilUnix != 0 || rec.OnHoldUntilUnix != kidHold {
+		t.Errorf("a hold must replace the release: release=%d hold=%d", rec.HoldReleaseUntilUnix, rec.OnHoldUntilUnix)
+	}
+
+	// A release AUTO-EXPIRES, and the ancestor's hold snaps back on with NO further
+	// write — the maintainer has to schedule a sweep for the release deadline itself.
+	// Nothing is written during the wait, so a missing schedule leaves the row reading
+	// un-held forever. (Short deadline on purpose; the flip must be observed live.)
+	soon := time.Now().Add(2 * time.Second).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", kid.ID, "--release", "--until-unix", strconv.FormatInt(soon, 10)); err != nil {
+		t.Fatalf("short release: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool { r, ok := snapRowOnHold(t, c, kid.ID); return ok && !r.OnHold }) {
+		t.Fatalf("the short release should free the thread first")
+	}
+	if !waitUntil(15*time.Second, func() bool { r, ok := snapRowOnHold(t, c, kid.ID); return ok && r.OnHold }) {
+		t.Errorf("a LAPSED release must re-park the thread under its ancestor's hold, with no record write to prompt it")
+	}
+
+	// Held AND released at once has no meaning: the API refuses it rather than
+	// silently picking one (which would be the plausible-but-wrong class).
+	if err := postBothHoldFields(c, kid.ID); err == nil {
+		t.Errorf("setting a hold and a release together must be refused")
+	}
+}
+
+// postBothHoldFields sends a deliberately contradictory hold request straight at the
+// API — the CLI cannot express it, so this is the only way to prove the daemon (the
+// thing every client shares) refuses it.
+func postBothHoldFields(c *client.Client, id string) error {
+	_, err := c.ThreadHold(context.Background(), id, time.Now().Add(time.Hour).Unix(), time.Now().Add(time.Hour).Unix())
+	return err
 }
 
 func testHoldRemote(t *testing.T) {
@@ -167,5 +267,38 @@ func testHoldRemote(t *testing.T) {
 	}
 	if threadByName(t, sb, "rheld").OnHoldUntilUnix != 0 {
 		t.Errorf("routed --clear did not zero the hold on the peer")
+	}
+
+	// A RELEASE routes over the same real hop, and the OWNER derives its effect: a
+	// child parked by its parent reads off-hold once released, while the parent stays
+	// parked. Asserted on the peer's own snapshot, which is where the derivation lives.
+	parent := sb.newHeadlessThread(t, "pi", "rrel-parent")
+	child := sb.newHeadlessThreadParented(t, "pi", "rrel-child", parent.ID)
+	pHold := time.Now().Add(72 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", parent.ID, "--until-unix", strconv.FormatInt(pHold, 10)); err != nil {
+		t.Fatalf("routed hold parent: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool { r, ok := snapRowOnHold(t, c, child.ID); return ok && r.OnHold }) {
+		t.Fatalf("baseline: the child should be parked by its parent on the peer")
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", child.ID, "--release"); err != nil {
+		t.Fatalf("routed release: %v\n%s", err, stderr)
+	}
+	if !waitUntil(5*time.Second, func() bool { r, ok := snapRowOnHold(t, c, child.ID); return ok && !r.OnHold }) {
+		t.Errorf("a routed release did not free the child on the owning daemon")
+	}
+	if r, ok := snapRowOnHold(t, c, parent.ID); !ok || !r.OnHold {
+		t.Errorf("a routed release must not un-park the parent")
+	}
+	// A bare --release defaults to the start of tomorrow, so it lapses with the
+	// parking round it escapes rather than exempting the thread forever.
+	if got := threadByName(t, sb, "rrel-child").HoldReleaseUntilUnix; got <= time.Now().Unix() || got > time.Now().Add(48*time.Hour).Unix() {
+		t.Errorf("a bare --release should default to a deadline within the next day, got %d", got)
+	}
+	// A routed --clear on a thread its parent parks fails loudly through the hop too.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", child.ID, "--clear"); err == nil {
+		t.Errorf("a routed --clear on an inherited hold must fail loudly")
+	} else if !strings.Contains(stderr, "STILL on hold") {
+		t.Errorf("the routed refusal should say it is still held, got: %s", stderr)
 	}
 }

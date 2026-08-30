@@ -41,10 +41,17 @@ func (c *Client) ThreadNotify(ctx context.Context, id string, on bool) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/notify", api.NotifyThreadRequest{ID: id, On: on}, nil)
 }
 
-// ThreadHold posts POST /v1/threads/hold: park the thread until onHoldUntilUnix
-// (0 = clear the hold). The caller supplies the absolute instant.
-func (c *Client) ThreadHold(ctx context.Context, id string, onHoldUntilUnix int64) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/hold", api.HoldThreadRequest{ID: id, OnHoldUntilUnix: onHoldUntilUnix}, nil)
+// ThreadHold posts POST /v1/threads/hold, writing the thread's hold state: park it
+// until onHoldUntilUnix, RELEASE it from ancestors' holds until releaseUntilUnix,
+// or clear both (0, 0). The caller supplies absolute instants; the two are mutually
+// exclusive and both non-zero is a loud 400. The reply reports the EFFECTIVE
+// deadline after the write and names the ancestor that dominates it (if any) — the
+// only way a caller can tell that a cleared thread is still parked from above.
+func (c *Client) ThreadHold(ctx context.Context, id string, onHoldUntilUnix, releaseUntilUnix int64) (api.HoldThreadResponse, error) {
+	var resp api.HoldThreadResponse
+	err := c.postJSON(ctx, "http://unix/v1/threads/hold",
+		api.HoldThreadRequest{ID: id, OnHoldUntilUnix: onHoldUntilUnix, ReleaseUntilUnix: releaseUntilUnix}, &resp)
+	return resp, err
 }
 
 // ThreadReportState posts POST /v1/threads/report-state — an in-agent

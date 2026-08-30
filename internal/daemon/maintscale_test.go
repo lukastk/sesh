@@ -121,7 +121,7 @@ func TestMaintainerRevGatedSweep(t *testing.T) {
 	// A hold expiry has NO record write — the deadline itself forces the sweep
 	// that flips OnHold off.
 	until := time.Now().Add(1200 * time.Millisecond).Unix()
-	if err := st.SetThreadHold("s1", until); err != nil {
+	if err := st.SetThreadHold("s1", until, 0); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
 	m.tick() // full (rev bump); learns the deadline

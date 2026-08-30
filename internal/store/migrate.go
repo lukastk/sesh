@@ -220,6 +220,16 @@ var migrations = []string{
 	INSERT INTO peer_threads_new (machine, id, snapshot) SELECT machine, id, snapshot FROM peer_threads;
 	DROP TABLE peer_threads;
 	ALTER TABLE peer_threads_new RENAME TO peer_threads;`,
+	// 25: threads.hold_release_until — the RELEASE deadline (api 48). Since the
+	// hold-inheritance rule (effective = max(own, ancestors' own)) a thread's own
+	// hold had only two states, set or 0, so a child could never be un-held while
+	// an ancestor held it: clearing its own hold left it parked and reported
+	// success. While now < this value the thread ignores ancestor holds and the
+	// inheritance walk stops at it (its subtree is freed with it). Mutually
+	// exclusive with on_hold_until — SetThreadHold writes BOTH columns in one
+	// statement, so the exclusivity is structural rather than a convention.
+	// Dated like a hold, so it auto-expires. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN hold_release_until INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

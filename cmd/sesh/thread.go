@@ -1080,61 +1080,108 @@ func threadFlag(cfg config.Config, args []string) error {
 	return nil
 }
 
-// threadHold parks/unparks a thread: sets on_hold_until to an absolute instant so
-// the thread is hidden from the default active view until then (`--until` a date or
-// `--until-unix` an exact instant), or clears the hold (`--clear`). It auto-expires
-// — once the instant passes the thread silently returns to the active view; there
-// is no separate "unhold" beyond letting the deadline lapse or `--clear`.
+// threadHold writes a thread's hold state — the mechanism side of parking work.
+// A thread is in exactly one of three states, and the flags map onto them:
+//
+//	--until / --until-unix   HELD until an instant (hidden from the active view)
+//	--release [--until ...]  RELEASED until an instant: ancestor holds do not apply
+//	--clear                  neither: it inherits from its ancestors again
+//
+// Holds AUTO-EXPIRE (the daemon derives "on hold right now" against its own clock),
+// and so do releases — a release is the same kind of dated statement, so it can
+// never silently exempt a thread from every future parking round.
+//
+// --release exists because hold INHERITANCE is a max over the ancestor chain: with
+// only "held" and "not held" there was no way to say a child is not held while its
+// parent is, and clearing its own hold left it parked while printing success. So
+// both --clear and --release now FAIL LOUDLY when the thread is still held after
+// the write, naming the ancestor responsible — a verb whose whole job is to un-hold
+// something must not exit 0 having left it held.
 func threadHold(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("hold", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id/prefix (default: the current thread)")
-	until := fs.String("until", "", "hold until the START of this date (YYYY-MM-DD, local time)")
-	untilUnix := fs.Int64("until-unix", 0, "hold until this absolute unix instant (seconds)")
-	clear := fs.Bool("clear", false, "clear the hold (return the thread to the active view now)")
+	until := fs.String("until", "", "deadline as the START of this date (YYYY-MM-DD, local time)")
+	untilUnix := fs.Int64("until-unix", 0, "deadline as an absolute unix instant (seconds)")
+	release := fs.Bool("release", false, "release from ANCESTORS' holds (with its subtree) until the deadline; default tomorrow")
+	clear := fs.Bool("clear", false, "clear both the hold and the release (inherit from ancestors again)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Exactly one of --until / --until-unix / --clear.
-	set := 0
-	if *until != "" {
-		set++
+	if *until != "" && *untilUnix != 0 {
+		return errors.New("thread hold: --until and --until-unix are mutually exclusive")
 	}
-	if *untilUnix != 0 {
-		set++
+	if *clear && (*release || *until != "" || *untilUnix != 0) {
+		return errors.New("thread hold: --clear takes no deadline and cannot be combined with --release")
 	}
-	if *clear {
-		set++
+	if !*clear && !*release && *until == "" && *untilUnix == 0 {
+		return errors.New("thread hold: one of --until, --until-unix, --release, or --clear is required")
 	}
-	if set != 1 {
-		return errors.New("thread hold: exactly one of --until, --until-unix, or --clear is required")
-	}
+	// The deadline, shared by hold and release. A bare --release defaults to the
+	// start of tomorrow — the same default a plain hold gets in the TUI, so the two
+	// halves of a parking round expire together.
 	var when int64
 	switch {
 	case *clear:
 		when = 0
 	case *untilUnix != 0:
 		when = *untilUnix
-	default:
+	case *until != "":
 		d, err := time.ParseInLocation("2006-01-02", *until, time.Local)
 		if err != nil {
 			return fmt.Errorf("thread hold: bad --until date %q (want YYYY-MM-DD): %w", *until, err)
 		}
 		when = d.Unix()
+	default: // bare --release
+		when = startOfTomorrowUnix()
 	}
 	rid, err := resolveIDFlag(cfg, fs, id)
 	if err != nil {
 		return err
 	}
+	var holdUntil, releaseUntil int64
+	if *release {
+		releaseUntil = when
+	} else {
+		holdUntil = when
+	}
 	c := daemonClient(cfg)
-	if err := c.ThreadHold(context.Background(), rid, when); err != nil {
+	resp, err := c.ThreadHold(context.Background(), rid, holdUntil, releaseUntil)
+	if err != nil {
 		return err
 	}
-	if when == 0 {
+	// A verb meant to un-hold must not report success while the thread stays parked —
+	// so the outcome is checked BEFORE anything reassuring is printed. Only the OWNER
+	// can know this: inheritance is resolved over its whole record set, which is why
+	// the effective deadline and the dominating ancestor come back with the write
+	// rather than being guessed here.
+	if (*clear || *release) && resp.OnHoldEffectiveUnix > time.Now().Unix() {
+		when := time.Unix(resp.OnHoldEffectiveUnix, 0).Format("2006-01-02 15:04")
+		if resp.HeldByID != "" {
+			who := resp.HeldByID
+			if resp.HeldByName != "" {
+				who = fmt.Sprintf("%q (%s)", resp.HeldByName, resp.HeldByID)
+			}
+			return fmt.Errorf("thread hold: %s is STILL on hold until %s — inherited from its ancestor %s.\n"+
+				"Release it from that hold with: sesh thread hold --id %s --release", rid, when, who, rid)
+		}
+		return fmt.Errorf("thread hold: %s is STILL on hold until %s", rid, when)
+	}
+	switch {
+	case *release:
+		fmt.Printf("%s released from ancestors' holds until %s\n", rid, time.Unix(when, 0).Format("2006-01-02 15:04"))
+	case *clear:
 		fmt.Printf("hold cleared for %s\n", rid)
-	} else {
+	default:
 		fmt.Printf("%s on hold until %s\n", rid, time.Unix(when, 0).Format("2006-01-02 15:04"))
 	}
 	return nil
+}
+
+// startOfTomorrowUnix is midnight at the start of the next LOCAL day — the default
+// deadline for a bare --release, matching the TUI's default hold.
+func startOfTomorrowUnix() int64 {
+	t := time.Now()
+	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location()).Unix()
 }
 
 // threadTranscript prints a thread conversation's raw transcript lines (the

@@ -264,9 +264,13 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh thread notify --on --id 1a2b3c4d", "sesh thread notify --off"},
 	},
 	"thread hold": {
-		summary:  "park a thread until a date (hidden from the default active view), or clear the hold",
-		usage:    "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--clear) [--id <id>] [--machine <m>]",
-		examples: []string{"sesh thread hold --until 2026-07-01 --id 1a2b3c4d", "sesh thread hold --clear"},
+		summary: "park a thread until a date (hidden from the default active view), release it from an ancestor's hold, or clear both",
+		usage:   "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--release|--clear) [--id <id>] [--machine <m>]",
+		examples: []string{
+			"sesh thread hold --until 2026-07-01 --id 1a2b3c4d",
+			"sesh thread hold --release --id 1a2b3c4d",
+			"sesh thread hold --clear",
+		},
 	},
 	"thread flag": {
 		summary:  "flag/unflag a thread (needs-attention marker) or disable/enable its auto-flagging",

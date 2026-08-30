@@ -1,5 +1,114 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh <this commit> + myrig <this commit>; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; NOT YET DEPLOYED)
+Lukas: "It seems like you currently can't unhold a child thread if its parent is on hold. That is
+an issue. How can we solve this?"
+
+**THE MECHANISM, and it was working as specified — the spec was incomplete.** Since H26 a thread's
+effective hold is `max(own, every same-machine ancestor's own)`, and `own` has only TWO states: an
+instant, or 0. So there is no way to express "this one is not held": clearing a child's own hold
+leaves the max unchanged. MEASURED in an isolated sandbox before touching anything:
+
+    hold --clear on an inherited-held child  → prints "hold cleared", EXIT 0 → still on_hold
+    TUI `h` on that child                    → own==0, so the toggle took the SET branch
+                                               → it PARKED it until tomorrow
+    then release the parent                  → the child stays parked, on its own new hold
+
+So the un-hold key did the opposite of its name, and — the compounding part — left behind an own
+hold that OUTLIVED the parent's, converting a transient inherited hold into a durable own one. The
+CLI half is worse than useless: it is a silent wrong success, the class this project exists to
+prevent.
+
+**IT WAS LIVE, NOT THEORETICAL.** On the real mesh at diagnosis: **45 threads held, 29 of them
+(64%) held ONLY by inheritance** — 15 under `trellis`, 10 under `tbi-agent-investigation`, 4 under
+`dagster-netrun`. One is exactly the reported shape: `315f89fc scuttlebug-dagster-build-2` is
+DIRECTLY in the DOC and today's plan says `keep`, but `dagster-netrun` parks it, so
+`mmt-unhold-DOC` could not free it.
+**MEASUREMENT TRAP that produced a false all-clear first: `sesh thread grid --json` emits rows at
+the TOP LEVEL, while `thread list`/mesh wrap them in `.thread`.** My first sweep used `.thread.on_hold`
+against grid output, got null for every row, and reported "0 held threads mesh-wide". Check the shape
+before believing a zero.
+
+**THE DESIGN (conferred; Lukas asked for the recommendation and chose the subtree rule).** A thread
+is now in exactly ONE of three states — held until T, RELEASED until T, or neither (inherit) —
+stored as two mutually exclusive columns written by ONE statement, so no caller can produce a
+held-and-released record. Rules:
+- A live release makes the thread take NO ancestor into its max, and the inheritance walk from any
+  DESCENDANT stops at it, so **releasing a thread frees its own subtree with it** (Lukas's choice:
+  freeing a supervisor while its workers stay parked is never what you meant).
+- A released ancestor's OWN hold still parks its subtree. A release cuts only what flows from ABOVE.
+- **A release is DATED, like a hold.** This is the load-bearing choice over the obvious alternative
+  (a sticky "ignore my ancestors" bit): every other piece of hold expires on the day boundary and
+  the slate is rebuilt daily, so a permanent exemption would be the one piece of state nobody ever
+  remembers — silently absent from every future parking round. A release lapses and the thread is
+  parked again like everything else.
+- Rejected for the record: FANNING OUT holds onto descendants (loses "release the parent frees the
+  subtree", and a thread created under a parked parent silently escapes) and loud-refusal-only (does
+  not do what was asked).
+
+**THE SECOND HALF OF THE FIX IS THE LOUDNESS, and it is independent of the feature.** `--clear` and
+`--release` now check the outcome BEFORE printing anything reassuring, and FAIL (exit 1) naming the
+ancestor and the remedy when the thread is still held. Only the OWNER can know this — inheritance is
+resolved over that machine's whole record set — so the answer rides back with the write:
+`HoldThreadResponse` is a superset of `ThreadResponse` (same `schema`/`thread` tags, so a pre-48
+client decoding the old type is unaffected) carrying the post-write effective deadline plus
+`held_by_id`/`held_by_name` from the new `holdDominator`. The TUI toggle now keys on the
+owner-derived `OnHold` flag rather than the own deadline, and picks clear-vs-release from where the
+hold comes from.
+
+**`nextHoldFlip` REPLACES `nextHoldDeadline`, and forgetting this would have been a silent stale
+view:** the maintainer schedules a full sweep at the earliest instant OnHold flips with no record
+write. That used to be hold expiry only. A RELEASE expiry flips it the other way (an ancestor's hold
+snaps back on) with no write either, so a missed schedule would leave a released thread reading
+un-held indefinitely, with nothing to correct it. `effectiveHolds` therefore takes `now` and is no
+longer a pure function of the record set.
+
+**MYRIG — the DOC commands are where this actually bit.** `mmt-setup-the-DOC` now issues
+`hold --release --until tomorrow` for EVERY kept thread (was `--clear`, and only for threads already
+held). Widening the set is itself a bug fix: `held_now` comes from the plan SNAPSHOT taken before
+anything runs, so a kept thread whose ancestor was ABOUT to be held read held_now=0, nothing released
+it, and the ancestor's hold parked it anyway — the live `315f89fc` case. Releasing unconditionally
+also makes the two batches ORDER-INDEPENDENT (both are absolute-instant statements), which matters
+because `_mt_apply_holds` fires 12 at a time. Checked rather than assumed: keep propagates DOWN the
+tree, so a held thread never has a kept ancestor and releasing every kept thread cannot strand a hold.
+`mmt-unhold-DOC` likewise releases; `mmt-unhold-all-threads` now also selects threads carrying only a
+release marker, so it is a genuine reset. And `_mt_apply_holds` now CAPTURES stderr
+(`2>&1 >/dev/null`) and prints the reason with the failure — it discarded it before, which would have
+turned the new precise refusal into a bare "failed" (the H95 lesson, one layer down).
+
+TESTS. Units: the release truth table (frees the subtree, an unrelated sibling stays held, a LAPSED
+release is inert, a released thread's own hold still applies), `nextHoldFlip` including the release
+direction, `holdDominator`, store exclusivity both ways, and the TUI toggle driven through a REAL
+fake `sesh` on disk that logs argv — the observable is which command is issued, not an internal flag.
+`thread.hold` local+remote EXTENDED against a real daemon over a real ssh hop: a three-generation
+tree parked by the root alone (BASELINE asserted first, or every "is free" check passes vacuously),
+`--clear` refused loudly naming the ancestor, `--release` freeing the thread AND its grandchild while
+the root stays parked, a hold replacing the release, and a 2-second release LAPSING with no further
+write (the nextHoldFlip proof). ANTI-GAMING (reverse-edited, never git-checkout — H44; `-count=1` —
+H75): the old own-hold toggle rule turns the unit RED reproducing the report verbatim ("the un-hold
+key issued a HOLD"); neutering the release branch in `effectiveHolds` turns the derivation units RED;
+neutering the CLI outcome check turns the CELL red at "must fail loudly, not report success". All
+three reversed and re-verified byte-identical by md5, then re-run green.
+GREEN: `go vet ./...`; every non-conformance package plain AND `-race`; cells thread.hold ×2,
+mesh.snapshot, mesh.snapshot.http, daemon.mesh-read, route.parity; the FULL TUI claims suite serially
+— **70 pass, 0 fail**. The full matrix was NOT run — do not read this as all-green.
+LIVE-SMOKED end to end in an isolated sandbox (own SESH_HOME/short sockets, inherited SESH_* stripped,
+daemon killed by EXPLICIT pid afterwards, live daemon verified untouched): the whole reported scenario,
+plus the API refusing a held-AND-released request. The myrig side was driven with a stubbed plan and a
+stubbed `sesh`: setup-the-DOC issues 2 holds + 3 releases covering every kept thread (the old code
+would have released 1), unhold-DOC releases the in-DOC held thread, and a failing op now names the
+machine AND the reason. SWEPT (H75 leak class, not mine): one leaked `/tmp/sesh-conformance-*` daemon
+from 2026-08-29, killed by explicit pid with no suite running.
+
+DEPLOY: **api 47→48 + store migration 24→25 ⇒ rebuild AND supervised restart on all six**, plus a
+myrig render (no conf change, no binding change, so no `source-file`). Additive and mixed-mesh safe in
+both directions: the derivation is owner-side, so a pre-48 VIEWER reads the correct `on_hold` either
+way, and a pre-48 OWNER simply ignores the unknown column and keeps the old behaviour. Take the usual
+pre/post `VACUUM INTO` backups with row counts — migration 25 is a bare ADD COLUMN and touches no
+existing data, but the fleet convention is belt-and-braces.
+FOLLOW-UP FILED, not built: ticket **3128e9d4** — sesh-ui reads `on_hold` (already release-aware) but
+its WRITE surface is pre-48, so an "unhold" in the app on an inherited-held thread still does nothing.
+
 ## H102 — THE THREE H99 LOOSE ENDS: Codex 0.151 title-subthread stamp guard, one tmux capture client per maintainer tick, and one WAL leaf per peer delta (2026-08-29, sesh 66d2e6e merged to concurrent main as 1db958e; store migration 23→24, NO API/wire change — schema stays 47; **DEPLOYED ALL SIX** with pre/post DB backups)
 Ticket 752c3e66, plus the Codex regression ticket aab369a9. This entry is H102 rather than the
 requested H100 because the default-agent and mmt-enter-box sessions landed H100/H101 on main while

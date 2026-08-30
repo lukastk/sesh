@@ -48,7 +48,7 @@ func (d *Daemon) handleThreadGrid(w http.ResponseWriter, r *http.Request) {
 			holdThreads = all
 		}
 	}
-	effHolds := effectiveHolds(holdThreads)
+	effHolds := effectiveHolds(holdThreads, time.Now().Unix())
 	rows := make([]api.ThreadRow, len(threads))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, gridConcurrency)

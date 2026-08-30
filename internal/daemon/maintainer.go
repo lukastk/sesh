@@ -95,7 +95,7 @@ type maintainer struct {
 	cachedThreads  []api.Thread
 	cachedTickets  map[string]store.TicketDigest
 	cachedHolds    map[string]int64
-	nextHoldExpiry int64 // earliest future effective-hold deadline (0 = none): its passing flips OnHold with NO record write, so it forces a full sweep
+	nextHoldExpiry int64 // earliest future hold-flip instant (0 = none) — an effective hold lapsing, or a RELEASE lapsing (an ancestor's hold snapping back on). Either flips OnHold with NO record write, so it forces a full sweep. See nextHoldFlip.
 	// emitting gates change-pair emission to the eventer: false during the
 	// FIRST sweep after daemon start (the baseline — existing state must not
 	// re-announce), true after. Guarded by m.mu.
@@ -238,8 +238,8 @@ func (m *maintainer) tick() {
 		// computed on record changes so a held parent parks its whole subtree —
 		// and the EARLIEST future deadline, whose passing must force the next
 		// full sweep (OnHold auto-expiry has no record write to bump the rev).
-		m.cachedHolds = effectiveHolds(threads)
-		m.nextHoldExpiry = nextHoldDeadline(m.cachedHolds, now.Unix())
+		m.cachedHolds = effectiveHolds(threads, now.Unix())
+		m.nextHoldExpiry = nextHoldFlip(m.cachedHolds, threads, now.Unix())
 		if revErr == nil {
 			m.lastRev, m.haveRev = rev, true
 		}
@@ -416,19 +416,6 @@ func (m *maintainer) unsettled(threads []api.Thread, panes map[string]api.PaneLo
 		}
 	}
 	return out
-}
-
-// nextHoldDeadline returns the earliest effective-hold deadline still in the
-// future (0 = none): when it passes, OnHold flips with no record write, so the
-// maintainer schedules a full sweep for it.
-func nextHoldDeadline(effHolds map[string]int64, nowUnix int64) int64 {
-	var next int64
-	for _, until := range effHolds {
-		if until > nowUnix && (next == 0 || until < next) {
-			next = until
-		}
-	}
-	return next
 }
 
 // emit forwards change pairs to the eventer (nil-safe for bare test daemons).

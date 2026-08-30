@@ -159,10 +159,13 @@ func TestThreadOpsRenameTagArchive(t *testing.T) {
 	}
 }
 
-// TestThreadHold round-trips the on_hold_until column: a thread starts not held
-// (0), a set persists the absolute instant, and a clear returns it to 0. The
-// "on hold now" derivation lives at the daemon layer (against its clock) — the
-// store only persists the deadline.
+// TestThreadHold round-trips the hold columns: a thread starts neither held nor
+// released, a set persists the absolute instant, and a clear returns both to 0.
+// The hold and the release are MUTUALLY EXCLUSIVE by construction — one write
+// statement sets both — so setting either must zero the other; a thread that could
+// be held and released at once would have no defined effective state. The "on hold
+// now" derivation lives at the daemon layer (against its clock); the store only
+// persists deadlines.
 func TestThreadHold(t *testing.T) {
 	s := openTestStore(t)
 	th := api.Thread{ID: "h1", Machine: "m", SessionName: "s1", Cwd: "/x", AgentKind: "pi", Name: "n", Tags: []string{}}
@@ -172,19 +175,33 @@ func TestThreadHold(t *testing.T) {
 	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 0 {
 		t.Fatalf("new thread should not be on hold, got %d", got.OnHoldUntilUnix)
 	}
-	if err := s.SetThreadHold("h1", 1893456000); err != nil {
+	if err := s.SetThreadHold("h1", 1893456000, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 1893456000 {
 		t.Fatalf("hold not persisted: %d", got.OnHoldUntilUnix)
 	}
-	if err := s.SetThreadHold("h1", 0); err != nil {
+	// A RELEASE replaces the hold — never coexists with it.
+	if err := s.SetThreadHold("h1", 0, 1893460000); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 0 {
-		t.Fatalf("hold not cleared: %d", got.OnHoldUntilUnix)
+	if got, _ := s.GetThread("h1"); got.HoldReleaseUntilUnix != 1893460000 || got.OnHoldUntilUnix != 0 {
+		t.Fatalf("release not persisted / hold not zeroed: release=%d hold=%d", got.HoldReleaseUntilUnix, got.OnHoldUntilUnix)
 	}
-	if err := s.SetThreadHold("nope", 123); !errors.Is(err, ErrThreadNotFound) {
+	// ...and a hold replaces the release, the other direction.
+	if err := s.SetThreadHold("h1", 1893456000, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 1893456000 || got.HoldReleaseUntilUnix != 0 {
+		t.Fatalf("hold did not replace the release: hold=%d release=%d", got.OnHoldUntilUnix, got.HoldReleaseUntilUnix)
+	}
+	if err := s.SetThreadHold("h1", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("h1"); got.OnHoldUntilUnix != 0 || got.HoldReleaseUntilUnix != 0 {
+		t.Fatalf("clear left state behind: hold=%d release=%d", got.OnHoldUntilUnix, got.HoldReleaseUntilUnix)
+	}
+	if err := s.SetThreadHold("nope", 123, 0); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("hold on missing thread: want ErrThreadNotFound, got %v", err)
 	}
 }

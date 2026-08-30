@@ -2651,7 +2651,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case promptHold:
 			// Empty input clears the hold; otherwise parse a YYYY-MM-DD date.
 			if input == "" {
-				cmd := m.holdRow(row, 0)
+				cmd := m.unholdRow(row)
 				return m, cmd
 			}
 			d, err := time.ParseInLocation("2006-01-02", input, time.Local)
@@ -3451,20 +3451,38 @@ func (m Model) undoLastArchive() (tea.Model, tea.Cmd) {
 	}
 }
 
-// holdToggleSelected manages the selected thread's OWN hold: if its own hold is
-// active it RELEASES (clears own); otherwise it parks until the start of tomorrow. The
-// decision is on the OWN hold, not the effective one — a thread held only by an inherited
-// parent hold has no own hold to release, so `h` sets its own (you can't un-hold a child
-// below its parent; that follows the max() rule and is reflected on the next fetch).
+// holdToggleSelected toggles the selected thread between held and not held. The
+// decision is the EFFECTIVE state (the owner-derived OnHold flag), not the thread's
+// own deadline: a thread parked only by an ANCESTOR's hold is on hold as far as the
+// user is concerned, so `h` must un-hold it. Keying on the own deadline is what made
+// this key do the opposite of its name — a child held by its parent had no own hold,
+// so the toggle took the "set" branch and parked it HARDER, leaving behind an own
+// hold that outlived the parent's.
 func (m *Model) holdToggleSelected() tea.Cmd {
 	row, ok := m.Selected()
 	if !ok {
 		return nil
 	}
-	if row.OnHoldUntilUnix > time.Now().Unix() { // own hold active → release it
-		return m.holdRow(row, 0)
+	if row.OnHold { // held right now, by its own deadline or an ancestor's
+		return m.unholdRow(row)
 	}
 	return m.holdRow(row, startOfTomorrowUnix())
+}
+
+// unholdRow makes a thread not held. WHICH write that takes depends on where the
+// hold comes from: its own deadline is simply cleared, but a hold INHERITED from an
+// ancestor cannot be undercut by clearing (effective = max over the chain), so that
+// needs a RELEASE — dated to the start of tomorrow, the same default a plain hold
+// gets, so it lapses together with the parking round it escapes. Releasing frees the
+// thread's own subtree with it (the owner stops the inheritance walk there), which
+// the next fetch reflects for the descendant rows.
+func (m *Model) unholdRow(row api.ThreadRow) tea.Cmd {
+	patch := m.unholdPatch(row)
+	if row.OnHoldEffectiveUnix > row.OnHoldUntilUnix { // dominated from above
+		return m.routedVerb(row, patch, "hold", "--release", "--until-unix",
+			fmt.Sprintf("%d", startOfTomorrowUnix()))
+	}
+	return m.routedVerb(row, patch, "hold", "--clear")
 }
 
 // holdRow sets (untilUnix > now) or clears (untilUnix == 0) the thread's OWN hold,
@@ -3477,7 +3495,7 @@ func (m *Model) holdToggleSelected() tea.Cmd {
 // derives the inherited max (H26), so let the next fetch reconcile that case.
 func (m *Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
 	if untilUnix <= time.Now().Unix() {
-		return m.routedVerb(row, m.holdClearPatch(row), "hold", "--clear")
+		return m.unholdRow(row)
 	}
 	patch := &rowPatch{onHold: bptr(true)}
 	next := row
@@ -3488,14 +3506,12 @@ func (m *Model) holdRow(row api.ThreadRow, untilUnix int64) tea.Cmd {
 	return m.routedVerb(row, patch, "hold", "--until-unix", fmt.Sprintf("%d", untilUnix))
 }
 
-// holdClearPatch is the optimistic patch for clearing row's own hold — or nil when
-// a dominating INHERITED hold (effective > own) means clearing won't un-hold it;
-// only the owning daemon derives the inherited max (H26), so that case stays
-// non-optimistic and the next fetch reconciles it.
-func (m Model) holdClearPatch(row api.ThreadRow) *rowPatch {
-	if row.OnHoldEffectiveUnix > row.OnHoldUntilUnix {
-		return nil
-	}
+// unholdPatch is the optimistic patch for un-holding row. Both writes it can drive
+// definitely leave the thread un-held — clearing removes the only deadline there
+// was, and a release beats every ancestor — so unlike the pre-48 clear (which could
+// silently leave a child parked by its parent, and so could not be optimistic at
+// all) this always flips the row.
+func (m Model) unholdPatch(row api.ThreadRow) *rowPatch {
 	patch := &rowPatch{onHold: bptr(false), desc: fmt.Sprintf("release hold on %q", rowDisplayName(row))}
 	next := row
 	next.OnHold = false
@@ -4285,6 +4301,7 @@ func (m Model) detailsView() string {
 		{"created", detailTime(r.CreatedAtUnix)},
 		{"archived", detailArchived(r)},
 		{"on hold", detailHold(r)},
+		{"released", detailRelease(r)},
 		{"notify", yesNo(r.Notify)},
 		{"tickets open", strconv.Itoa(r.TicketsOpen)},
 		{"ticket name", detailTicket(r)},
@@ -4370,6 +4387,17 @@ func detailHold(r api.ThreadRow) string {
 		return "until " + eff + " (inherited)"
 	}
 	return "until " + eff
+}
+
+// detailRelease reports an in-force RELEASE — the thread ignoring its ancestors'
+// holds until an instant. Shown separately from the hold because it is the reason a
+// thread sits in the active view while its parent is parked, which is otherwise
+// invisible: a released thread simply reads "not held".
+func detailRelease(r api.ThreadRow) string {
+	if r.HoldReleaseUntilUnix <= time.Now().Unix() {
+		return "no"
+	}
+	return "until " + time.Unix(r.HoldReleaseUntilUnix, 0).Format("2006-01-02") + " (ignores inherited holds)"
 }
 
 func detailTicket(r api.ThreadRow) string {

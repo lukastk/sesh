@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled),
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled),
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -193,11 +193,15 @@ func (s *Store) SetThreadArchived(id string, archived bool, now int64) error {
 	return nil
 }
 
-// SetThreadHold parks/unparks a thread: stores the absolute on-hold-until instant
-// (0 = clear the hold). The live "on hold now" flag is derived elsewhere against the
-// daemon's clock — this only persists the deadline the user set.
-func (s *Store) SetThreadHold(id string, onHoldUntilUnix int64) error {
-	return s.updateThread(`UPDATE threads SET on_hold_until = ? WHERE id = ?`, onHoldUntilUnix, id)
+// SetThreadHold writes a thread's hold state. BOTH columns are written in one
+// statement, so the three states are structurally exclusive and no caller can
+// leave a thread both held and released: hold = (until, 0), release = (0,
+// until), clear = (0, 0). Deadlines are absolute instants — "on hold right now"
+// / "released right now" are derived live against the owning daemon's clock, so
+// a past instant stores fine and simply reads as lapsed.
+func (s *Store) SetThreadHold(id string, onHoldUntilUnix, holdReleaseUntilUnix int64) error {
+	return s.updateThread(`UPDATE threads SET on_hold_until = ?, hold_release_until = ? WHERE id = ?`,
+		onHoldUntilUnix, holdReleaseUntilUnix, id)
 }
 
 // SetThreadAgentSession records a headed thread's captured agent session id (used
@@ -227,8 +231,12 @@ func (s *Store) SetThreadHeaded(id, sessionName string) error {
 	return nil
 }
 
-func (s *Store) updateThread(query string, arg any, id string) error {
-	res, err := s.db.Exec(query, arg, id)
+// updateThread runs a single-row UPDATE and turns "matched nothing" into
+// ErrThreadNotFound. Args are the query's placeholders in order, so the thread id
+// is simply the LAST one (variadic because a write may set more than one column —
+// SetThreadHold writes hold and release together to keep them exclusive).
+func (s *Store) updateThread(query string, args ...any) error {
+	res, err := s.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("store: update thread: %w", err)
 	}
@@ -245,7 +253,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	var headless, started, archived, notify, flagged, flagDisabled int
 	var meta string
 	var pinOrder sql.NullFloat64
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1

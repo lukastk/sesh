@@ -126,8 +126,18 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string {
 			// The EFFECTIVE on-hold-until date while parked; blank otherwise (a lapsed
 			// hold reads not-on-hold even if a stale timestamp lingers). A "↑" prefix
-			// marks a hold INHERITED from a parent (effective later than this thread's own).
+			// marks a hold INHERITED from a parent (effective later than this thread's own);
+			// a "~" prefix marks a live RELEASE — not held, and specifically not held
+			// DESPITE an ancestor, which is otherwise indistinguishable from an ordinary
+			// un-held row and would leave the user with no way to see why a thread sits in
+			// the active view while its parent is parked. (The release is compared against
+			// the VIEWER's clock; the hold itself uses the owner-derived OnHold flag, which
+			// has no release counterpart. Fleet clocks are NTP-synced, and being a day out
+			// would misdraw one column cell, nothing more.)
 			if !r.OnHold || r.OnHoldEffectiveUnix == 0 {
+				if r.HoldReleaseUntilUnix > time.Now().Unix() {
+					return "~" + time.Unix(r.HoldReleaseUntilUnix, 0).Format("2006-01-02")
+				}
 				return ""
 			}
 			d := time.Unix(r.OnHoldEffectiveUnix, 0).Format("2006-01-02")

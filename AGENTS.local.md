@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh <this commit> + myrig <this commit>; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; NOT YET DEPLOYED)
+## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh 424cc82 + myrig 1a8e94d; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; NOT YET DEPLOYED)
 Lukas: "It seems like you currently can't unhold a child thread if its parent is on hold. That is
 an issue. How can we solve this?"
 

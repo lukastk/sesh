@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh 424cc82 + myrig 1a8e94d; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; NOT YET DEPLOYED)
+## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh 424cc82 + myrig 1a8e94d; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX** with pre/post DB backups)
 Lukas: "It seems like you currently can't unhold a child thread if its parent is on hold. That is
 an issue. How can we solve this?"
 
@@ -106,6 +106,27 @@ both directions: the derivation is owner-side, so a pre-48 VIEWER reads the corr
 way, and a pre-48 OWNER simply ignores the unknown column and keeps the old behaviour. Take the usual
 pre/post `VACUUM INTO` backups with row counts — migration 25 is a bare ADD COLUMN and touches no
 existing data, but the fleet convention is belt-and-braces.
+**DEPLOY RESULT (2026-08-30).** ALL SIX at sesh abd5816 + myrig 1a8e94d, every installed binary
+`vcs.modified=false`, every checkout verified clean BEFORE pulling (the deploy script REFUSES a dirty
+one — H49/H63). Migration REHEARSED first against a fresh `VACUUM INTO` copy of mymain's real
+1,841-thread store: 24→25, every count byte-identical, `hold_release_until` present and 0 everywhere.
+Then per machine: pre-deploy `VACUUM INTO` backup with counts → build → `.new` + `mv` → supervised
+restart → schema/api check → post backup. Pre→post counts BYTE-IDENTICAL on every machine:
+**mymain 1,841/372/40; macbook 120/44/0; macstudio 25/1/0; ideapad 6/1/0; pocket4 27/3/0; termux
+0/0/0** (`~/.sesh/backups/sesh-{pre,post}-v25-h103-20260830.db`). Every daemon reports store schema
+25 and api 48. **Termux has no `sqlite3`**, so its backup is a plain file copy taken while the daemon
+was STOPPED (consistent, and its own store is 0/0 — everything it shows is the replicated peer
+cache); it was built with plain `go build` (go1.27.0 android/arm64, H22), the old daemon killed by
+EXPLICIT pid 13882, and the zshenv login guard relaunched it as pid 14990 (H36). Build BEFORE the
+kill there, so the phone's downtime is only the seconds until the guard fires. myrig rendered on all
+six (python3; the Macs via `uv run --with jinja2`, H46) and verified in FRESH login shells. Mesh
+healthy afterwards: all five API peers reachable and synced 0s, doctor clean.
+**LIVE-PROVEN on the real fleet, on the exact thread from the diagnosis:** `315f89fc
+scuttlebug-dagster-build-2` (in the DOC, parked by `dagster-netrun`) — `--clear` refused loudly
+naming the ancestor, `--release` freed it while `dagster-netrun` stayed parked. Left released: it is
+an in-DOC thread and being parked was the bug.
+**A running SIDEBAR keeps the binary it launched with (H70), so `h` inside Lukas's sidebar still has
+the old toggle until `prefix+r`.**
 FOLLOW-UP FILED, not built: ticket **3128e9d4** — sesh-ui reads `on_hold` (already release-aware) but
 its WRITE surface is pre-48, so an "unhold" in the app on an inherited-held thread still does nothing.
 

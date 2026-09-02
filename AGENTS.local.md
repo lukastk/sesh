@@ -1,5 +1,54 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H105 — "setup-the-DOC holds archived threads" — IT NEVER DID: 1,249 archived threads were held purely by INHERITANCE; fix = archived detaches from the max, like a release (2026-09-02, sesh 30e5add; NO schema/API/CLI change; DAEMON rebuild + RESTART)
+Lukas: "I want it to only hold or unhold non-archived threads. Currently I think it also holds
+archive threads, which is a bit confusing because they are already outside of the active view.
+If I happen to unarchive such a thread, it won't appear in my active view."
+
+**THE PREMISE WAS WRONG AND THE INTENT WAS RIGHT — measure before implementing.** Doing what
+was literally asked would have been a NO-OP: `_mt_doc_plan` builds from `sesh thread grid
+--json --all-machines` with **no `--archived`**, so archived threads are not in the plan at
+all (verified: 61 plan rows, ZERO archived). The decisive query took one line:
+`archived_held_with_OWN_hold: 0, archived_held_INHERITED_only: 1249`. Not one archived thread
+carried a hold of its own; every one was inheriting from a live ancestor a parking round had
+parked. So the fix belongs in the DERIVATION, not the DOC command.
+
+**WHERE THE MASS WAS, since the numbers looked implausible to him** ("when I go around on my
+active view, I don't see that many threads") — and his own guess was right: 2,116 records, only
+**66 non-archived**; held = 1,272 = 23 live + 1,249 archived; the `on hold` view is
+(non-archived AND on hold) = **23 rows**, which is all he ever sees. **1,224 of the 1,249 hang
+under ONE held root** (`ituc-run-supervisor`: 278 children + 971 grandchildren, all archived).
+One held supervisor was silently parking its entire archived worker fleet.
+
+**THE RULE.** A hold parks ACTIVE work temporarily and expires on its own; archiving is the
+permanent kind and already hides the thread from every view. So `effectiveHolds` now treats
+Archived exactly like a release: the thread contributes only its OWN deadline and the walk from
+a descendant STOPS there. Its own hold still applies and still reaches its descendants —
+explicit is explicit; what stops at an archived node is only what flows from ABOVE it.
+Un-archiving returns it to inheriting, so this is about what is parked WHILE archived, not a
+permanent exemption. `holdDominator` mirrors it exactly — otherwise a `--clear` refusal would
+name an ancestor that is no longer the reason, which is the plausible-but-wrong class.
+
+**BLAST RADIUS MEASURED BEFORE WRITING THE CODE:** zero non-archived threads change (no live
+thread is held only via a chain passing through an archived node); 1,249 archived ones stop
+reading as held. That number is also why H104's new ⧖ sigil would otherwise have drawn on 1,249
+archived rows in the `all` view.
+
+TESTS: the archived truth table with a NON-ARCHIVED BASELINE asserted first (without it every
+"is free" check passes vacuously) — does not inherit, does not transmit, a live sibling still
+inherits, its own hold still applies AND transmits, un-archiving restores inheritance; plus
+holdDominator's matching cases. `thread.hold/local` extended against a real daemon: a
+three-generation tree parked by its root, archive the middle → it AND its child detach while the
+root stays parked, un-archive → inheritance returns. ANTI-GAMING (reverse-edited, md5-verified
+restore — H44): letting archived inherit again reddens the unit ("must not inherit … got 5000")
+AND the cell ("archived=true grandchild=false").
+GREEN: `go vet ./...`; every non-conformance package plain AND `-race`; thread.hold ×2,
+mesh.snapshot, daemon.mesh-read; claims view-hold, hold-sigil, view-active-archived-live,
+action-archive. The full matrix was NOT run.
+
+DEPLOY: daemon-side derivation (maintainer + grid), so **rebuild AND supervised restart** — no
+schema/API/CLI change, so a mixed fleet is safe (each owner derives its own threads).
+
 ## H104 — HOLD SIGIL: ⧗ own / ⧖ inherited, in the gutter cell that was already dead space (2026-09-02, sesh 0f3bc89; NO schema/API/CLI change; BINARY-ONLY, no daemon restart)
 Lukas: "It would be good to assemble a sigil uh for threads that are on hold. Could you
 workshop that?" Conferred with rendered gutter previews (the H49/H97 method — they render in

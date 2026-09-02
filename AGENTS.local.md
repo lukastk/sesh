@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H104 — CWD-SCOPED TUI POPUPS: exact directory vs directory tree, with the launch boundary orthogonal to every view and `/` filter (2026-09-02, sesh <this commit> + myrig <this commit>; NO schema/API/daemon change; binary-only + render-only deploy pending)
+## H104 — CWD-SCOPED TUI POPUPS: exact directory vs directory tree, with the launch boundary orthogonal to every view and `/` filter (2026-09-02, sesh 13ca684 + myrig dbefad8/25228da; NO schema/API/daemon change; binary-only + render/conf deploy; **DEPLOYED ALL SIX**)
 Ticket fab27712. Lukas wanted two base-level commands: one grid for threads whose CWD exactly matches
 the pressing pane's directory, one including descendants; both must open the NORMAL sesh TUI in a popup,
 start on `all`, retain every configured view, and stay scoped while filtering/cycling views.
@@ -22,8 +22,8 @@ identity.
 `SESH_MT_PANE` (THE WHICH-CLIENT LAW), open a 95%×90% `display-popup`, and invoke the fast `zsh -fc`
 TUI path at `--view all`. Both are in base `prefix+m`. That menu is already a popup, so its mt menu
 functions export `SESH_MT_POPUP=1`; these commands then reuse the existing popup instead of trying to
-nest one. Direct shell calls create their own popup. No binding was added — Lukas asked for a suggestion;
-base `prefix+g` exact / `prefix+G` tree are both currently free.
+nest one. Direct shell calls create their own popup. Lukas accepted the suggested free bindings and
+asked for cards: base `prefix+g` opens exact scope, base `prefix+G` opens the directory tree.
 
 **TESTS.** Units cover exact/tree, owner-relative Linux↔macOS matching, absolute paths, prefix boundaries,
 view orthogonality, initial built-in/custom views, CLI normalization/conflicts, and goto refusal. New real-
@@ -37,6 +37,16 @@ An isolated real CLI/TUI smoke (own HOME/SESH_HOME/daemon/tmux sockets; daemon k
 captured exact=`scope-exact` only and tree=`scope-exact`+`scope-child`, both `[all]`, while excluding the
 prefix sibling. A rendered-zsh harness proved popup reuse, direct 95%×90% popup argv, path-as-separate-argv,
 and `SESH_MT_POPUP` propagation.
+
+**DEPLOY + CARDS.** sesh binary-only (fresh TUI clients read the new flags; daemon unchanged), myrig
+render for `shell.sh`, and a live `source-file` for the new work-server bindings. **ALL SIX** installed
+at binary revision 13ca684 (`vcs.modified=false`) + myrig 25228da; every fresh login resolves both
+functions and every running work server reports both g/G bindings. Macbook woke during the deploy and
+received its previously pending binary/render/bindings before sleeping again; Termux's first GitHub pull
+failed `Network is unreachable`, then a later pull succeeded normally. Two cards were added to
+`mysrs/misc/mycockpit.md` and synced: misc programme created=2, errors=0; ids `mysrs-37098d87` and
+`mysrs-698cf186`. No daemon was restarted anywhere.
+
 ## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh 424cc82 + myrig 1a8e94d; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX** with pre/post DB backups)
 Lukas: "It seems like you currently can't unhold a child thread if its parent is on hold. That is
 an issue. How can we solve this?"

@@ -330,6 +330,22 @@ a machine with `boxyard` on the daemon's PATH).
 `sesh tui` opens the live cross-machine thread grid (`--all-machines` to fan out). It is a
 thin client — it **emits** actions by driving the CLI verbs, never reimplementing them.
 
+Launch with a directory boundary when a caller needs a project-local grid:
+
+```bash
+sesh tui --cwd . --view all          # exact stored CWD only
+sesh tui --cwd-tree . --view all     # that CWD plus path descendants
+```
+
+The boundary is **launch-time scope**, independent of both the active built-in/custom
+view and `/` fuzzy filtering: Tab still lists every configured view, but no view can
+escape the CWD boundary. `--cwd-tree` uses path containment (`/work/app2` is not under
+`/work/app`). A directory inside the invoking user's home is compared through each
+owner-stamped `cwd_rel`, so `~/mysetup/sesh` matches across Linux and macOS even though
+their absolute home paths differ. `--view <name>` chooses only the initial view and
+does not remove the others. `--cwd` and `--cwd-tree` are mutually exclusive, and neither
+combines with `--cursor`.
+
 **Sidebar mode** (`sesh tui --sidebar`): the persistent-pane variant for a cockpit — a
 narrow NAME-only column preset (the state gutter carries the rest; `[tui] columns` and
 `[[tui.column]]` moves don't apply, an explicit `--columns` wins), and **entering a

@@ -52,6 +52,7 @@ var declaredTUIClaims = []string{
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
 	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME grows to content (untruncated within the cap; see column-max-width)
 	"cwd-label-column",          // the CWD column renders a real thread's real cwd through the [[cwd_label]] rules; unconfigured = ~-relative
+	"cwd-launch-scope",          // --cwd admits only an exact CWD; --cwd-tree adds descendants path-safely; both start in all while retaining configured views
 	"columns-reorder",           // [[tui.column]] position/after/before reposition columns over the default set (config→render)
 	"column-colors",             // [[tui.column_color]] (+ NAME/CWD defaults) tint cells; colour is emitted and does NOT shift column widths/content
 	"filter-narrow",             // / + typing narrows to matching real rows with a live matched/total count

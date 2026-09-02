@@ -171,6 +171,13 @@ This is the v1 `tickets` thesis pushed all the way: *project a lifecycle onto th
 
 The TUI stays in sesh/Go because it is performance-sensitive (renders live cross-machine state).
 
+A TUI launch may apply a **CWD scope** before any view predicate: exact (`--cwd`) or
+path-descendant-inclusive (`--cwd-tree`). This is a boundary on the fetched row universe,
+not a replacement view and not the interactive fuzzy query; every built-in/configured view
+and `/` filter remains usable inside it. Paths under the invoking user's home compare via
+owner-stamped `cwd_rel` (`~/…`) so a cross-machine grid is portable across different home
+roots; paths outside home remain absolute. `--view` selects the initial view only.
+
 ---
 
 ## 6. CLI design principles

@@ -119,6 +119,32 @@ func (m Model) WithViews(views []customView) Model {
 	return m
 }
 
+// WithInitialView selects the view shown by the first fetch. The name may be a
+// built-in (active/on hold/archived/all) or a configured [[tui.views]] name.
+// Ambiguous or unknown names are loud: silently opening a different view would make
+// a launch wrapper look correctly scoped while hiding rows the user asked to see.
+func (m Model) WithInitialView(name string) (Model, error) {
+	var matches []View
+	for i := 0; i < m.viewCount(); i++ {
+		if m.viewNameAt(i) == name {
+			matches = append(matches, View(i))
+		}
+	}
+	switch len(matches) {
+	case 0:
+		var names []string
+		for _, v := range m.orderedViews() {
+			names = append(names, m.viewNameAt(int(v)))
+		}
+		return m, fmt.Errorf("unknown initial TUI view %q (valid: %s)", name, strings.Join(names, ", "))
+	case 1:
+		m.view = matches[0]
+		return m, nil
+	default:
+		return m, fmt.Errorf("initial TUI view %q is ambiguous (%d views have that name)", name, len(matches))
+	}
+}
+
 // buildViewOrder returns the display order of ALL views (built-ins + customs) as
 // a sequence of view indices. Base order = the built-ins followed by unpositioned
 // customs (in config order); positioned customs are then inserted at their 1-based
@@ -382,6 +408,11 @@ type Model struct {
 	// real one. Phrasing it positively would need New() to set it, and a literal
 	// Model would silently search differently from the shipped TUI.
 	filterExcludeChildren bool
+
+	// cwdScope is an optional launch-time restriction, orthogonal to the selected
+	// built-in/custom view and the interactive fuzzy filter. Every fetch applies it
+	// first, so cycling views never escapes the directory tree the caller requested.
+	cwdScope *cwdScope
 
 	// columns is the visible column set (validated names; see columns.go).
 	// userHome powers the CWD column's ~-relative display; cwdLabeler, when set,
@@ -1012,7 +1043,7 @@ func (m Model) Init() tea.Cmd {
 // fetch polls the daemon's merged mesh view (a LOCAL read of the cache — instant,
 // offline-capable) and flattens it to sorted rows. Self-only unless --all-machines.
 func (m Model) fetch() tea.Cmd {
-	c, view, all, preselect, hideOffline := m.client, m.view, m.allMachines, m.preselectID, m.hideOffline
+	c, view, all, preselect, hideOffline, scope := m.client, m.view, m.allMachines, m.preselectID, m.hideOffline, m.cwdScope
 	var pred *Predicate
 	if i := int(view - viewBuiltins); i >= 0 && i < len(m.customViews) {
 		p := m.customViews[i].pred
@@ -1025,7 +1056,7 @@ func (m Model) fetch() tea.Cmd {
 		if err != nil {
 			return meshMsg{err: err}
 		}
-		rows, preselectSeen := flattenMeshRows(mesh.Machines, view, pred, all, hideOffline, preselect)
+		rows, preselectSeen := flattenMeshRows(mesh.Machines, view, pred, scope, all, hideOffline, preselect)
 		return meshMsg{rows: rows, machines: mesh.Machines, fetchedAt: time.Now().Unix(), preselectSeen: preselectSeen}
 	}
 }
@@ -1040,12 +1071,13 @@ func meshRow(t api.ThreadSnapshot) api.ThreadRow {
 }
 
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
-// applying the machine-level and view-level filters. It is a pure function (no client,
-// no clock) so the filtering — especially the offline-hide — is unit-testable without a
-// daemon. all=false keeps self only; hideOffline drops an unreachable peer's last-known
-// threads (self is never dropped). preselectSeen reports whether the preselect id is
-// present in the mesh at all (before the view filter) — it drives the ViewAll auto-switch.
-func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all, hideOffline bool, preselect string) ([]api.ThreadRow, bool) {
+// applying the machine-level, launch-scope, and view-level filters. It is a pure
+// function (no client, no clock) so the filtering — especially offline-hide and CWD
+// scope — is unit-testable without a daemon. all=false keeps self only; hideOffline
+// drops an unreachable peer's last-known threads (self is never dropped).
+// preselectSeen reports whether the preselect id is present in the mesh at all (before
+// the view filter) — it drives the ViewAll auto-switch.
+func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, scope *cwdScope, all, hideOffline bool, preselect string) ([]api.ThreadRow, bool) {
 	var rows []api.ThreadRow
 	var preselectSeen bool
 	for _, mv := range machines {
@@ -1062,6 +1094,9 @@ func flattenMeshRows(machines []api.MachineView, view View, pred *Predicate, all
 			row := meshRow(t)
 			if preselect != "" && t.ID == preselect {
 				preselectSeen = true // present in the mesh, regardless of the view filter
+			}
+			if scope != nil && !scope.admits(row) {
+				continue
 			}
 			if pred != nil {
 				// A custom view sees EVERYTHING its predicate admits

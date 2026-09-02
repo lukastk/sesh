@@ -1,5 +1,42 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H104 — CWD-SCOPED TUI POPUPS: exact directory vs directory tree, with the launch boundary orthogonal to every view and `/` filter (2026-09-02, sesh <this commit> + myrig <this commit>; NO schema/API/daemon change; binary-only + render-only deploy pending)
+Ticket fab27712. Lukas wanted two base-level commands: one grid for threads whose CWD exactly matches
+the pressing pane's directory, one including descendants; both must open the NORMAL sesh TUI in a popup,
+start on `all`, retain every configured view, and stay scoped while filtering/cycling views.
+
+**MECHANISM.** New explicit `sesh tui --cwd <dir>` / `--cwd-tree <dir>` flags establish a launch-time
+row-universe boundary BEFORE built-in/custom view predicates and before the interactive fuzzy filter.
+`--view <name>` selects only the first view (built-ins or configured names, unknown/ambiguous is loud); it
+does not replace the view set. The two scopes are mutually exclusive, and scope+`--cursor` is refused
+because a pane preselect outside the boundary would be contradictory. `goto-uuid` likewise cannot escape
+the launch scope and names it loudly rather than arming a delayed preselect.
+
+Home paths are owner-portable: the invoking path normalizes to `~/…`, then compares each row's owner-
+stamped `CwdRel`, so `/home/lukastk/mysetup/sesh` and `/Users/lukas/mysetup/sesh` represent the same
+cross-machine scope. Paths outside home stay absolute. Descendant matching uses `filepath.Rel`, never a
+string prefix (`/work/app2` is not under `/work/app`) and never symlink resolution, matching stored CWD
+identity.
+
+**MYRIG UX.** `mt-tui-cwd` and `mt-tui-cwd-tree` resolve the ORIGINATING base pane via
+`SESH_MT_PANE` (THE WHICH-CLIENT LAW), open a 95%×90% `display-popup`, and invoke the fast `zsh -fc`
+TUI path at `--view all`. Both are in base `prefix+m`. That menu is already a popup, so its mt menu
+functions export `SESH_MT_POPUP=1`; these commands then reuse the existing popup instead of trying to
+nest one. Direct shell calls create their own popup. No binding was added — Lukas asked for a suggestion;
+base `prefix+g` exact / `prefix+G` tree are both currently free.
+
+**TESTS.** Units cover exact/tree, owner-relative Linux↔macOS matching, absolute paths, prefix boundaries,
+view orthogonality, initial built-in/custom views, CLI normalization/conflicts, and goto refusal. New real-
+daemon TUI claim `cwd-launch-scope` creates exact/child/prefix-sibling rows, archives the exact row to
+prove initial `all`, switches into a configured view without escaping, and drives `/` within the tree.
+ANTI-GAMING: disabling the scope application turns the claim red verbatim with all three rows where only
+the exact row was wanted; the edit was reversed and `model.go` restored byte-identically (MD5
+`b8abf958cc181f0ea7c9ab300bfcdc7e`). Green: every non-conformance package plain + race, `go vet ./...`,
+help meta-tests, and the FULL TUI claims suite serially in 190.061s. The FULL 255-cell matrix was NOT run.
+An isolated real CLI/TUI smoke (own HOME/SESH_HOME/daemon/tmux sockets; daemon killed by explicit pid)
+captured exact=`scope-exact` only and tree=`scope-exact`+`scope-child`, both `[all]`, while excluding the
+prefix sibling. A rendered-zsh harness proved popup reuse, direct 95%×90% popup argv, path-as-separate-argv,
+and `SESH_MT_POPUP` propagation.
 ## H103 — YOU COULD NOT UN-HOLD A CHILD WHILE ITS PARENT WAS PARKED: the max() rule had no "not held" state; fix = a dated RELEASE (third state, detaches the subtree, auto-expires) + the un-hold verbs stop reporting success while the thread stays held (2026-08-30, sesh 424cc82 + myrig 1a8e94d; api 47→48, store migration 24→25; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX** with pre/post DB backups)
 Lukas: "It seems like you currently can't unhold a child thread if its parent is on hold. That is
 an issue. How can we solve this?"

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,46 @@ func sidebarWindowName() string {
 	return strings.TrimSpace(string(out))
 }
 
+// normalizeTUICwdScope turns a caller-relative directory into the portable key the
+// TUI compares against thread rows. Paths inside this user's home become ~-relative
+// because each row's CwdRel is stamped by its OWNER; ~/mysetup/sesh then matches on
+// Linux and macOS despite their different absolute home paths. Paths outside home stay
+// absolute. This is lexical by design, matching how thread CWD identity is stored.
+func normalizeTUICwdScope(dir, userHome string) (string, error) {
+	if dir == "" {
+		return "", errors.New("directory is empty")
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if userHome == "" {
+			return "", errors.New("cannot expand ~: user home is empty")
+		}
+		if dir == "~" {
+			dir = userHome
+		} else {
+			dir = filepath.Join(userHome, strings.TrimPrefix(dir, "~/"))
+		}
+	} else if strings.HasPrefix(dir, "~") {
+		return "", fmt.Errorf("unsupported home path %q (use ~ or ~/…)", dir)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	if userHome == "" {
+		return abs, nil
+	}
+	home := filepath.Clean(userHome)
+	rel, err := filepath.Rel(home, abs)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return abs, nil
+	}
+	if rel == "." {
+		return "~", nil
+	}
+	return filepath.Join("~", rel), nil
+}
+
 // runTUI launches the live thread grid. It is a thin client over the local
 // daemon's HTTP+JSON surface (use --all-machines to fan out across the mesh).
 func runTUI(args []string) error {
@@ -43,12 +84,45 @@ func runTUI(args []string) error {
 	cursor := fs.Bool("cursor", false, "start with the cursor on the current pane's thread ($SESH_TUI_PANE from a popup binding, else $TMUX_PANE)")
 	filter := fs.Bool("filter", false, "start in filter mode (type-to-narrow immediately)")
 	expand := fs.Bool("expand", false, "start with tree nodes expanded (default from [tui] expand_children)")
+	cwdExact := fs.String("cwd", "", "show only threads whose working directory exactly matches this directory")
+	cwdTree := fs.String("cwd-tree", "", "show only threads whose working directory is this directory or one of its descendants")
+	initialView := fs.String("view", "", "initial view name (built-in or configured [[tui.views]]; default: active)")
 	columnsFlag := fs.String("columns", "", "comma-separated visible columns (default from [tui] columns in config.toml; valid: "+strings.Join(tui.ValidColumnNames(), ",")+")")
 	editorFlag := fs.String("editor", "", "editor for in-TUI ticket field edits (default: [tui] editor, then $EDITOR)")
 	sidebarFlag := fs.Bool("sidebar", false, "persistent-pane mode: narrow name-only layout, and entering a thread keeps the TUI open (focus hands to the sibling pane) instead of quitting")
 	sidebarFilterStyle := fs.String("sidebar-filter-style", "", "tmux window-active-style applied to the sidebar's pane WHILE filtering (e.g. \"bg=#3a1620\"), a visual cue that keystrokes go to the filter; only with --sidebar, in tmux")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var cwdExactSet, cwdTreeSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "cwd":
+			cwdExactSet = true
+		case "cwd-tree":
+			cwdTreeSet = true
+		}
+	})
+	if cwdExactSet && cwdTreeSet {
+		return errors.New("tui: --cwd and --cwd-tree are mutually exclusive")
+	}
+	if (cwdExactSet || cwdTreeSet) && *cursor {
+		return errors.New("tui: --cursor cannot be combined with a launch CWD scope (--cwd/--cwd-tree)")
+	}
+	var cwdScopePath string
+	if cwdExactSet || cwdTreeSet {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("tui CWD scope: resolve user home: %w", err)
+		}
+		dir := *cwdExact
+		if cwdTreeSet {
+			dir = *cwdTree
+		}
+		cwdScopePath, err = normalizeTUICwdScope(dir, userHome)
+		if err != nil {
+			return fmt.Errorf("tui CWD scope: %w", err)
+		}
 	}
 	cfg := config.Load()
 	// Column set precedence: --columns flag > sidebar preset (when --sidebar) >
@@ -213,6 +287,18 @@ func runTUI(args []string) error {
 	showOfflineDefault := *showOffline || (tcfg != nil && tcfg.ShowOffline)
 	m := tui.New(cfg.SocketPath(), useAllMachines).WithShowOffline(showOfflineDefault).WithLocal(localMachine, localSocket).WithNavEnv(navEnv).WithColumns(cols).WithViews(compiled).WithColumnColors(colColors).WithGlyphColors(glyphColors).WithEditor(editor).
 		WithMaxColumnWidths(tcfg.MaxColumnWidthsDefault()).WithColumnWidths(colWidths).WithKeymap(keymap)
+	if cwdScopePath != "" {
+		m, err = m.WithCwdScope(cwdScopePath, cwdTreeSet)
+		if err != nil {
+			return fmt.Errorf("tui CWD scope: %w", err)
+		}
+	}
+	if *initialView != "" {
+		m, err = m.WithInitialView(*initialView)
+		if err != nil {
+			return fmt.Errorf("tui --view: %w", err)
+		}
+	}
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

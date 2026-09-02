@@ -152,15 +152,26 @@ func (m Model) gotoUUID(input string) (Model, tea.Cmd) {
 	}
 
 	matches := m.gotoMatches(prefix)
-	var shown []gotoMatch
+	var machineVisible, shown []gotoMatch
 	for _, g := range matches {
-		if g.visible(m.allMachines, m.hideOffline) {
+		if !g.visible(m.allMachines, m.hideOffline) {
+			continue
+		}
+		machineVisible = append(machineVisible, g)
+		if m.cwdScope == nil || m.cwdScope.admits(g.row) {
 			shown = append(shown, g)
 		}
 	}
 	switch {
 	case len(shown) > 1:
 		m.actionErr = fmt.Errorf("goto: %d threads' uuids start with %q (%s) — type more of it", len(shown), prefix, gotoMatchLabels(shown))
+		return m, nil
+	case len(shown) == 0 && len(machineVisible) == 1:
+		g := machineVisible[0]
+		m.actionErr = fmt.Errorf("goto: %s %q is outside this TUI's launch CWD scope (%s)", tid8(g.row.ID), rowDisplayName(g.row), m.cwdScope.describe())
+		return m, nil
+	case len(shown) == 0 && len(machineVisible) > 1:
+		m.actionErr = fmt.Errorf("goto: %d threads' uuids start with %q, but all are outside this TUI's launch CWD scope (%s) — type more of it", len(machineVisible), prefix, m.cwdScope.describe())
 		return m, nil
 	case len(shown) == 0 && len(matches) > 0:
 		m.actionErr = gotoHiddenErr(prefix, matches, m.machine)

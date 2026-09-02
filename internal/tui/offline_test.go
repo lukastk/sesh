@@ -171,7 +171,7 @@ func TestFlattenHidesOfflineMachines(t *testing.T) {
 
 	// hideOffline=true (default): macstudio's two stale threads are dropped; self + the
 	// reachable peer remain.
-	rows, _ := flattenMeshRows(mesh, ViewActive, nil, true /*all*/, true /*hideOffline*/, "")
+	rows, _ := flattenMeshRows(mesh, ViewActive, nil, nil, true /*all*/, true /*hideOffline*/, "")
 	if hasRow(rows, "z1") || hasRow(rows, "z2") {
 		t.Errorf("offline machine's threads should be hidden by default: %v", ids(rows))
 	}
@@ -180,7 +180,7 @@ func TestFlattenHidesOfflineMachines(t *testing.T) {
 	}
 
 	// hideOffline=false (after `o`): they reappear.
-	rows2, _ := flattenMeshRows(mesh, ViewActive, nil, true, false, "")
+	rows2, _ := flattenMeshRows(mesh, ViewActive, nil, nil, true, false, "")
 	if !hasRow(rows2, "z1") || !hasRow(rows2, "z2") {
 		t.Errorf("offline machine's threads should show when hideOffline is off: %v", ids(rows2))
 	}
@@ -192,7 +192,7 @@ func TestFlattenHidesOfflineMachines(t *testing.T) {
 			{Thread: api.Thread{ID: "s1", Name: "self-a", Machine: "mymain"}},
 		}},
 	}
-	rows3, _ := flattenMeshRows(selfUnreach, ViewActive, nil, true, true, "")
+	rows3, _ := flattenMeshRows(selfUnreach, ViewActive, nil, nil, true, true, "")
 	if !hasRow(rows3, "s1") {
 		t.Errorf("self must never be hidden by the offline filter")
 	}

@@ -32,7 +32,7 @@ func gsnap(id, name string, mut func(*api.ThreadSnapshot)) api.ThreadSnapshot {
 func gotoModel(view View, all, hideOffline bool, machines ...api.MachineView) Model {
 	m := Model{machine: "mymain", view: view, allMachines: all, hideOffline: hideOffline,
 		machines: machines, width: 120, height: 40}
-	m.rows, _ = flattenMeshRows(machines, view, nil, all, hideOffline, "")
+	m.rows, _ = flattenMeshRows(machines, view, nil, nil, all, hideOffline, "")
 	return m
 }
 
@@ -246,6 +246,29 @@ func TestGotoUUIDHiddenByDisplaySettingRefuses(t *testing.T) {
 	}
 	if got.selectedID() != peerThread.ID {
 		t.Errorf("cursor on %q, want the peer thread", got.selectedID())
+	}
+}
+
+func TestGotoUUIDCannotEscapeLaunchCwdScope(t *testing.T) {
+	inside := gsnap("abababab-0000-0000-0000-000000000000", "inside", func(s *api.ThreadSnapshot) {
+		s.CwdRel = "~/project"
+	})
+	outside := gsnap("cdcdcdcd-0000-0000-0000-000000000000", "outside", func(s *api.ThreadSnapshot) {
+		s.CwdRel = "~/other"
+	})
+	m := gotoModel(ViewAll, false, true, selfMachine(inside, outside))
+	var err error
+	m, err = m.WithCwdScope("~/project", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := m.selectedID()
+	got, cmd := m.gotoUUID("cdcdcdcd")
+	if got.actionErr == nil || !strings.Contains(got.actionErr.Error(), "launch CWD scope") {
+		t.Fatalf("goto outside scope should be refused with the boundary, got %v", got.actionErr)
+	}
+	if cmd != nil || got.preselectID != "" || got.selectedID() != before {
+		t.Fatalf("refused scoped goto changed state: cmd=%v preselect=%q selected=%q (was %q)", cmd != nil, got.preselectID, got.selectedID(), before)
 	}
 }
 

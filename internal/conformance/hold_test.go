@@ -230,6 +230,57 @@ func testHoldLocal(t *testing.T) {
 	if err := postBothHoldFields(c, kid.ID); err == nil {
 		t.Errorf("setting a hold and a release together must be refused")
 	}
+
+	// --- ARCHIVED detaches from the max, like a release. ---
+	// A hold parks ACTIVE work temporarily; archiving is the permanent kind and
+	// already hides the thread everywhere. Inheriting one into the other parked whole
+	// archived subtrees invisibly, and un-archiving handed back a thread that was
+	// still held with no own hold to clear.
+	ah := sb.newHeadlessThread(t, "pi", "arch-root")
+	ac := sb.newHeadlessThreadParented(t, "pi", "arch-child", ah.ID)
+	ag := sb.newHeadlessThreadParented(t, "pi", "arch-grandchild", ac.ID)
+	ahHold := time.Now().Add(72 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", ah.ID, "--until-unix", strconv.FormatInt(ahHold, 10)); err != nil {
+		t.Fatalf("hold arch-root: %v\n%s", err, stderr)
+	}
+	// BASELINE: while nothing is archived the subtree inherits, so the assertions
+	// below cannot pass vacuously.
+	if !waitUntil(5*time.Second, func() bool {
+		c1, ok1 := snapRowOnHold(t, c, ac.ID)
+		g1, ok2 := snapRowOnHold(t, c, ag.ID)
+		return ok1 && ok2 && c1.OnHold && g1.OnHold
+	}) {
+		t.Fatalf("baseline: the live subtree should inherit arch-root's hold")
+	}
+	// Archive the middle thread: it stops being held, AND the hold no longer reaches
+	// its child THROUGH it, while the root keeps its own hold.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", ac.ID); err != nil {
+		t.Fatalf("archive arch-child: %v\n%s", err, stderr)
+	}
+	if !waitUntil(10*time.Second, func() bool {
+		c1, ok1 := snapRowOnHold(t, c, ac.ID)
+		g1, ok2 := snapRowOnHold(t, c, ag.ID)
+		return ok1 && ok2 && !c1.OnHold && !g1.OnHold
+	}) {
+		c1, _ := snapRowOnHold(t, c, ac.ID)
+		g1, _ := snapRowOnHold(t, c, ag.ID)
+		t.Errorf("archiving must detach from the inherited hold and stop it flowing through: archived=%v grandchild=%v (want both false)",
+			c1.OnHold, g1.OnHold)
+	}
+	if r, ok := snapRowOnHold(t, c, ah.ID); !ok || !r.OnHold {
+		t.Errorf("archiving a child must not un-park the ancestor")
+	}
+	// UN-archiving returns it to inheriting — the point is what is parked WHILE
+	// archived, not a permanent exemption.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", ac.ID, "--unarchive"); err != nil {
+		t.Fatalf("unarchive: %v\n%s", err, stderr)
+	}
+	if !waitUntil(10*time.Second, func() bool {
+		c1, ok := snapRowOnHold(t, c, ac.ID)
+		return ok && c1.OnHold
+	}) {
+		t.Errorf("un-archiving should return the thread to its ancestor's hold")
+	}
 }
 
 // postBothHoldFields sends a deliberately contradictory hold request straight at the

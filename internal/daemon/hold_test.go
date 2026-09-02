@@ -155,4 +155,72 @@ func TestHoldDominator(t *testing.T) {
 	if got := holdDominator(threads, "missing", now); got != "" {
 		t.Errorf("an unknown id must not invent a dominator, got %q", got)
 	}
+	// Archived cuts inheritance, so nothing above an archived thread parks it — and the
+	// dominator must agree with effectiveHolds, or a refusal would name an ancestor that
+	// is not in fact the reason.
+	arch := append(threads,
+		api.Thread{ID: "arch", Parent: "root", Archived: true},
+		api.Thread{ID: "under-arch", Parent: "arch"})
+	if got := holdDominator(arch, "arch", now); got != "" {
+		t.Errorf("an archived thread is not dominated by its ancestor, got %q", got)
+	}
+	if got := holdDominator(arch, "under-arch", now); got != "" {
+		t.Errorf("a hold must not reach through an archived node, got %q", got)
+	}
+}
+
+// An ARCHIVED thread is detached from its ancestors' holds: a parking round must not
+// mark archived subtrees "on hold" (they are already out of every active view), and
+// un-archiving one must not hand back a thread that is silently parked with no own
+// hold to clear. Its OWN hold still applies and still reaches its descendants —
+// only what flows from ABOVE an archived node stops there.
+func TestEffectiveHoldsArchived(t *testing.T) {
+	const now = 1000
+	// root(held 5000) -> arch(ARCHIVED) -> leaf(live)
+	base := func() []api.Thread {
+		return []api.Thread{
+			{ID: "root", OnHoldUntilUnix: 5000},
+			{ID: "arch", Parent: "root", Archived: true},
+			{ID: "leaf", Parent: "arch"},
+			{ID: "live", Parent: "root"},
+		}
+	}
+	// Baseline: without the archived flag the whole subtree inherits, so the
+	// assertions below cannot pass vacuously.
+	plain := base()
+	plain[1].Archived = false
+	if eff := effectiveHolds(plain, now); eff["arch"] != 5000 || eff["leaf"] != 5000 {
+		t.Fatalf("baseline: a non-archived subtree must inherit, got arch=%d leaf=%d", eff["arch"], eff["leaf"])
+	}
+
+	eff := effectiveHolds(base(), now)
+	if eff["arch"] != 0 {
+		t.Errorf("an archived thread must not inherit its ancestor's hold: got %d, want 0", eff["arch"])
+	}
+	if eff["leaf"] != 0 {
+		t.Errorf("the hold must not flow THROUGH an archived node: leaf=%d, want 0", eff["leaf"])
+	}
+	if eff["live"] != 5000 {
+		t.Errorf("a live sibling must still inherit: got %d, want 5000", eff["live"])
+	}
+	if eff["root"] != 5000 {
+		t.Errorf("the ancestor keeps its own hold: got %d, want 5000", eff["root"])
+	}
+
+	// An archived thread's OWN hold is explicit and still applies — to it, and to its
+	// descendants. Only inheritance from above it is cut.
+	th := base()
+	th[1].OnHoldUntilUnix = 3000
+	if eff := effectiveHolds(th, now); eff["arch"] != 3000 || eff["leaf"] != 3000 {
+		t.Errorf("an archived thread's own hold must still apply and transmit: arch=%d leaf=%d, want 3000/3000",
+			eff["arch"], eff["leaf"])
+	}
+
+	// The un-archive path is the user-visible point: clearing the flag returns the
+	// thread to inheriting, so this is about what is parked WHILE archived.
+	th = base()
+	th[1].Archived = false
+	if eff := effectiveHolds(th, now); eff["arch"] != 5000 {
+		t.Errorf("un-archiving returns the thread to its ancestors' hold: got %d, want 5000", eff["arch"])
+	}
 }

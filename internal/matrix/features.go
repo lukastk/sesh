@@ -566,7 +566,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.hold",
-		Description: "park a thread until a future instant (thread hold --until/--until-unix), RELEASE it and its subtree from an ancestor's hold (--release), or clear both (--clear); the owning daemon derives `on_hold` against its clock from max(own, ancestors' own) — a live release detaches the thread from that max and stops the walk there — so holds AND releases auto-expire; a --clear that leaves the thread parked by an ancestor fails loudly naming it; the TUI's default view hides on-hold threads, the `on hold` view shows them",
+		Description: "park a thread until a future instant (thread hold --until/--until-unix), RELEASE it and its subtree from an ancestor's hold (--release), or clear both (--clear); the owning daemon derives `on_hold` against its clock from max(own, ancestors' own) — a live release, or being ARCHIVED, detaches the thread from that max and stops the walk there — so holds AND releases auto-expire; a --clear that leaves the thread parked by an ancestor fails loudly naming it; the TUI's default view hides on-hold threads, the `on hold` view shows them",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

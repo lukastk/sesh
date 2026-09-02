@@ -592,7 +592,13 @@ cycle) shows the parked ones. The CLI verb is `sesh thread hold` (see below).
 Hold is **inherited down the tree**: a thread's effective hold is `max(its own hold,
 its ancestors' holds)`, so holding a parent parks its whole subtree (the children show
 `↑<date>` in the HOLD column — an inherited hold). Inheritance is resolved per machine
-(a cross-machine parent's hold is not inherited).
+(a cross-machine parent's hold is not inherited), and an **archived** thread is detached
+from it: a hold parks *active* work temporarily, archiving is the permanent kind and
+already hides the thread everywhere, so an archived thread neither inherits an
+ancestor's hold nor passes one down to its descendants. Its OWN hold still applies and
+still reaches its children — what stops at an archived node is only what flows from
+above it. (Un-archiving returns the thread to inheriting: this is about what is parked
+*while* archived, not a permanent exemption.)
 
 **Releasing a child from its parent's hold.** Because the effective hold is a `max`,
 clearing a child's own hold cannot undercut its parent's — so a thread is in exactly

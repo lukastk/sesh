@@ -13,6 +13,17 @@ const holdChainCap = 256
 // set — ends the chain: cross-machine ancestry is NOT inherited (the owner resolves only
 // its own records). A cycle or a missing parent stops the walk (visited set + depth cap).
 //
+// ARCHIVING also detaches a thread from that max, and for the same reason a hold
+// exists at all. A hold is a TEMPORARY parking of active work, expiring on its own;
+// archiving is the permanent kind, and an archived thread is already out of every
+// active view. So inheriting one into the other only ever produced surprises: a
+// parking round would silently mark whole archived subtrees "on hold" (measured on
+// the live mesh 2026-09-02: 1,249 archived threads held, every one of them purely by
+// inheritance and NOT ONE with a hold of its own), and un-archiving such a thread
+// left it parked and invisible with no own hold to clear. An archived thread's OWN
+// hold still applies and still reaches its descendants — explicit is explicit; what
+// stops at an archived node is only what flows from ABOVE it.
+//
 // RELEASE (schema 48) is the escape hatch from that max. A thread whose
 // hold_release_until is still in the future (against nowUnix, the owning daemon's
 // clock) is DETACHED from its ancestors: it contributes only its own deadline, and
@@ -26,19 +37,22 @@ func effectiveHolds(threads []api.Thread, nowUnix int64) map[string]int64 {
 	own := make(map[string]int64, len(threads))
 	parent := make(map[string]string, len(threads))
 	released := make(map[string]bool, len(threads))
+	archived := make(map[string]bool, len(threads))
 	for _, t := range threads {
 		own[t.ID] = t.OnHoldUntilUnix
 		parent[t.ID] = t.Parent
 		released[t.ID] = t.HoldReleaseUntilUnix > nowUnix
+		archived[t.ID] = t.Archived
 	}
 	eff := make(map[string]int64, len(threads))
 	for id := range own {
 		best := own[id]
-		if released[id] {
-			// Detached from above: only this thread's own deadline applies. (The
-			// store keeps hold and release mutually exclusive, so `best` is 0 here
-			// in practice; taking own anyway keeps a hand-written record honest —
-			// an explicit hold on the thread itself is never silently dropped.)
+		// Two ways a thread is detached from its ancestors, both leaving only its OWN
+		// deadline: an explicit RELEASE, and being ARCHIVED. (The store keeps hold and
+		// release mutually exclusive, so `best` is 0 for a released thread in practice;
+		// taking own anyway keeps a hand-written record honest — an explicit hold on the
+		// thread itself is never silently dropped.)
+		if released[id] || archived[id] {
 			eff[id] = best
 			continue
 		}
@@ -56,8 +70,11 @@ func effectiveHolds(threads []api.Thread, nowUnix int64) map[string]int64 {
 			if h > best {
 				best = h
 			}
-			if released[cur] {
-				break // this ancestor is detached from ITS ancestors, so we are too
+			if released[cur] || archived[cur] {
+				// This ancestor is detached from ITS ancestors, so we are too. Its own
+				// deadline was taken above and still counts: an explicit hold means what
+				// it says wherever it sits. What stops here is only what flows from further up.
+				break
 			}
 			cur = parent[cur]
 		}
@@ -100,8 +117,8 @@ func holdDominator(threads []api.Thread, id string, nowUnix int64) string {
 		byID[t.ID] = t
 	}
 	self, ok := byID[id]
-	if !ok || self.HoldReleaseUntilUnix > nowUnix {
-		return ""
+	if !ok || self.HoldReleaseUntilUnix > nowUnix || self.Archived {
+		return "" // detached from its ancestors: nothing above it parks it
 	}
 	best, bestID := self.OnHoldUntilUnix, ""
 	seen := map[string]bool{id: true}
@@ -118,8 +135,9 @@ func holdDominator(threads []api.Thread, id string, nowUnix int64) string {
 		if a.OnHoldUntilUnix > best {
 			best, bestID = a.OnHoldUntilUnix, cur
 		}
-		if a.HoldReleaseUntilUnix > nowUnix {
-			break
+		if a.HoldReleaseUntilUnix > nowUnix || a.Archived {
+			break // detached from ITS ancestors — must mirror effectiveHolds exactly,
+			// or a refusal would name an ancestor that is no longer the reason
 		}
 		cur = a.Parent
 	}

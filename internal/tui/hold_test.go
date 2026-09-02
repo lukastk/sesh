@@ -191,3 +191,79 @@ func colSpecByName(t *testing.T, name string) func(*Model, api.ThreadRow) string
 	t.Fatalf("no column named %q", name)
 	return nil
 }
+
+// The hold SIGIL (⧗ own / ⧖ inherited) shares the leading mark cell with move
+// mode's ↕. The pair is the point: the two states need different actions — an own
+// hold is cleared, an inherited one can only be released — so a single "held"
+// marker would hide exactly the distinction that makes the `on hold` view
+// actionable, and would say nothing there at all (every row in it is held).
+func TestHoldGlyphPair(t *testing.T) {
+	now := time.Now().Unix()
+	for _, tc := range []struct {
+		name string
+		row  api.ThreadRow
+		want string
+	}{
+		{"not held", api.ThreadRow{}, " "},
+		{"own hold", api.ThreadRow{
+			Thread: api.Thread{OnHoldUntilUnix: now + 3600}, OnHold: true, OnHoldEffectiveUnix: now + 3600}, "⧗"},
+		{"inherited hold", api.ThreadRow{
+			OnHold: true, OnHoldEffectiveUnix: now + 3600}, "⧖"},
+		{"own hold LATER than the ancestor's still reads as its own", api.ThreadRow{
+			Thread: api.Thread{OnHoldUntilUnix: now + 7200}, OnHold: true, OnHoldEffectiveUnix: now + 7200}, "⧗"},
+		// A released thread is not held, so the cell is blank; the ~<date> in the
+		// HOLD column is what reports a release in force.
+		{"released", api.ThreadRow{Thread: api.Thread{HoldReleaseUntilUnix: now + 3600}}, " "},
+		// A LAPSED hold reads not-held: the owner derives OnHold against its clock,
+		// and a stale deadline lingering on the record must not draw a sigil.
+		{"lapsed hold", api.ThreadRow{Thread: api.Thread{OnHoldUntilUnix: now - 3600}}, " "},
+	} {
+		if got := HoldGlyph(tc.row); got != tc.want {
+			t.Errorf("%s: HoldGlyph = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Move mode owns the mark cell while it is active — exactly one row, transiently —
+// and the hold sigil returns the moment it ends. Sharing the cell is what makes the
+// sigil free; this pins that the sharing has a defined winner.
+func TestMarkGlyph(t *testing.T) {
+	now := time.Now().Unix()
+	held := api.ThreadRow{Thread: api.Thread{OnHoldUntilUnix: now + 3600}, OnHold: true, OnHoldEffectiveUnix: now + 3600}
+	if got := markGlyph(held, true); got != "↕" {
+		t.Errorf("move mode must win the mark cell: got %q, want ↕", got)
+	}
+	if got := markGlyph(held, false); got != "⧗" {
+		t.Errorf("a held row not being moved shows its hold sigil: got %q, want ⧗", got)
+	}
+	if got := markGlyph(api.ThreadRow{}, false); got != " " {
+		t.Errorf("an ordinary row leaves the mark cell blank: got %q", got)
+	}
+}
+
+// The sigil must actually reach the rendered row, in BOTH the ordinary and the
+// selected (reverse-video) branches — the selected branch builds its gutter
+// separately, which is where a new cell is easiest to drop on the floor.
+func TestHoldGlyphRenders(t *testing.T) {
+	now := time.Now().Unix()
+	rows := []api.ThreadRow{
+		{Thread: api.Thread{ID: "own", Name: "own-held", Machine: "m", OnHoldUntilUnix: now + 3600},
+			OnHold: true, OnHoldEffectiveUnix: now + 3600},
+		{Thread: api.Thread{ID: "inh", Name: "inherited-held", Machine: "m"},
+			OnHold: true, OnHoldEffectiveUnix: now + 3600},
+		{Thread: api.Thread{ID: "free", Name: "not-held", Machine: "m"}},
+	}
+	m := Model{rows: rows, machines: reachableMachines("m"), machine: "m", view: ViewAll, width: 80, height: 20}
+	m.machines[0].Self = true
+	out := m.View()
+	for _, want := range []string{"⧗", "⧖"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the rendered grid is missing the %q sigil:\n%s", want, out)
+		}
+	}
+	// ...and with the cursor ON the held row, so the reverse-video branch renders it.
+	m.cursor = 0
+	if sel := m.View(); !strings.Contains(sel, "⧗") {
+		t.Errorf("the SELECTED row lost its hold sigil:\n%s", sel)
+	}
+}

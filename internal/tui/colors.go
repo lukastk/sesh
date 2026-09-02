@@ -78,10 +78,17 @@ const (
 	// flag-disabled marker stays plain (it is a suppression state, not an
 	// attention state).
 	GlyphFlag = "flag"
+	// GlyphHold tints the hold sigil — BOTH halves of the pair (⧗ own, ⧖
+	// inherited), since both mean the same thing to the eye: this row is parked.
+	// It has no built-in colour, like the ⊘ archived marker it sits beside: a
+	// parked thread is the opposite of an attention state, and the defaults are
+	// spent on the glyphs that should pull the eye. Tint it if you want it to
+	// recede further (a grey, e.g. "8") or stand out.
+	GlyphHold = "hold"
 )
 
 // validGlyphNames lists the tintable glyphs, in gutter order (for error messages).
-var validGlyphNames = []string{GlyphBusy, GlyphDescendant, GlyphFlag}
+var validGlyphNames = []string{GlyphHold, GlyphBusy, GlyphDescendant, GlyphFlag}
 
 // GlyphColorSpec is one [[tui.glyph_color]] entry. An empty Color clears the
 // glyph's colour (including a built-in default).

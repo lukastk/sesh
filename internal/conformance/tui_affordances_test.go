@@ -46,6 +46,7 @@ func init() {
 	registerTUIClaim("master-cursor", claimMasterCursor)
 	registerTUIClaim("action-hold", claimActionHold)
 	registerTUIClaim("view-hold", claimViewHold)
+	registerTUIClaim("hold-sigil", claimHoldSigil)
 	registerTUIClaim("view-active-archived-live", claimViewActiveArchivedLive)
 	registerTUIClaim("view-archived-order", claimViewArchivedOrder)
 	registerTUIClaim("column-max-width", claimColumnMaxWidth)
@@ -539,6 +540,114 @@ func claimViewHold(t *testing.T) {
 	}
 	if strings.Contains(view, "parked") {
 		t.Errorf("active view must keep HIDING a flagged on-hold thread (hold beats flag):\n%s", view)
+	}
+}
+
+// gutterMark returns the leading MARK cell of the row whose line contains `name`
+// — rune index 2, straight after the 2-cell cursor column ("> " / "  "). Matching
+// the glyph to a SPECIFIC row is the point: a bare strings.Contains would pass on
+// any row carrying the sigil, including the wrong one.
+func gutterMark(t *testing.T, view, name string) (string, bool) {
+	t.Helper()
+	for _, line := range strings.Split(view, "\n") {
+		if !strings.Contains(line, name) {
+			continue
+		}
+		r := []rune(line)
+		if len(r) < 3 {
+			return "", false
+		}
+		return string(r[2]), true
+	}
+	return "", false
+}
+
+// claimHoldSigil: the hold sigil is a PAIR — ⧗ the thread's own hold, ⧖ an
+// ancestor's — rendered in the leading mark cell against a REAL daemon's own
+// inheritance derivation (only the owner computes the effective max). The pair is
+// what makes the `on hold` view actionable: an own hold is cleared, an inherited
+// one can only be RELEASED, and nothing else on screen says which is which.
+func claimHoldSigil(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	parent := sb.newHeadlessThread(t, "pi", "sigil-parent")
+	child := sb.newHeadlessThreadParented(t, "pi", "sigil-child", parent.ID)
+
+	// WithExpand: the child is NESTED, and a collapsed parent renders `▸ parent`
+	// with the child not on screen at all — so the sigil under test would have
+	// nowhere to appear. This is the honest fix; making them siblings instead would
+	// delete the inheritance the claim exists to prove.
+	m := tui.New(sb.Home+"/daemon.sock", false).WithExpand(true)
+	m = nextView(t, m)
+	m = nextView(t, m)
+	m = nextView(t, m) // active -> on hold -> archived -> all
+	var view string
+	// BASELINE: both rows present in `all` and carrying NO sigil. Without this the
+	// assertions below could pass on a grid that never rendered these threads.
+	if !waitUntil(25*time.Second, func() bool {
+		m, view = render(t, m)
+		return strings.Contains(view, "[all]") && strings.Contains(view, "sigil-parent") && strings.Contains(view, "sigil-child")
+	}) {
+		t.Fatalf("the all view never showed both threads:\n%s", view)
+	}
+	for _, n := range []string{"sigil-parent", "sigil-child"} {
+		if g, ok := gutterMark(t, view, n); !ok || g != " " {
+			t.Fatalf("baseline: %s should carry no sigil before any hold, got %q:\n%s", n, g, view)
+		}
+	}
+
+	// Hold the PARENT: it is held by its own deadline (⧗), the child by the
+	// parent's (⧖) — the child has no own hold at all.
+	future := time.Now().Add(48 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", parent.ID, "--until-unix", strconv.FormatInt(future, 10)); err != nil {
+		t.Fatalf("hold parent: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		m, view = render(t, m)
+		p, ok1 := gutterMark(t, view, "sigil-parent")
+		c, ok2 := gutterMark(t, view, "sigil-child")
+		return ok1 && ok2 && p == "⧗" && c == "⧖"
+	}) {
+		p, _ := gutterMark(t, view, "sigil-parent")
+		c, _ := gutterMark(t, view, "sigil-child")
+		t.Errorf("want parent ⧗ (own) and child ⧖ (inherited), got %q and %q:\n%s", p, c, view)
+	}
+
+	// The child's OWN later hold now dominates, so its sigil flips to ⧗: the
+	// distinction tracks WHERE the effective deadline comes from, not merely
+	// whether the thread has a parent.
+	own := time.Now().Add(240 * time.Hour).Unix()
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", child.ID, "--until-unix", strconv.FormatInt(own, 10)); err != nil {
+		t.Fatalf("hold child: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		m, view = render(t, m)
+		c, ok := gutterMark(t, view, "sigil-child")
+		return ok && c == "⧗"
+	}) {
+		c, _ := gutterMark(t, view, "sigil-child")
+		t.Errorf("the child's own dominating hold should read ⧗, got %q:\n%s", c, view)
+	}
+
+	// RELEASING the child clears the cell entirely — a released thread is not held,
+	// and the sigil must not linger on a row that is back in the active flow.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "hold", "--id", child.ID, "--release"); err != nil {
+		t.Fatalf("release child: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		m, view = render(t, m)
+		c, ok := gutterMark(t, view, "sigil-child")
+		return ok && c == " "
+	}) {
+		c, _ := gutterMark(t, view, "sigil-child")
+		t.Errorf("a RELEASED thread must carry no hold sigil, got %q:\n%s", c, view)
+	}
+	// ...while the parent it was released from is still parked.
+	if p, _ := gutterMark(t, view, "sigil-parent"); p != "⧗" {
+		t.Errorf("releasing the child must not un-park the parent: parent sigil %q:\n%s", p, view)
 	}
 }
 

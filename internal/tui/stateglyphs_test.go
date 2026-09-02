@@ -108,6 +108,9 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 	shellDead := api.ThreadRow{}
 	shellDead.AgentKind = api.ShellAgentKind
 	shellDead.Head = api.Headless
+	heldOwn := api.ThreadRow{OnHold: true, OnHoldEffectiveUnix: 100}
+	heldOwn.OnHoldUntilUnix = 100
+	heldInherited := api.ThreadRow{OnHold: true, OnHoldEffectiveUnix: 100} // own 0 < effective
 	// Every non-blank glyph the gutter can render, by the state it means.
 	glyphs := map[string]string{
 		"head/headful":    HeadGlyph(headful),
@@ -122,7 +125,9 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		"arch/archived":   ArchivedGlyph(archived),
 		"flag/flagged":    FlagGlyph(flagged),
 		"flag/disabled":   FlagGlyph(disabled),
-		"mark/moving":     pinMark(api.ThreadRow{}, true),
+		"mark/moving":     markGlyph(api.ThreadRow{}, true),
+		"hold/own":        HoldGlyph(heldOwn),
+		"hold/inherited":  HoldGlyph(heldInherited),
 	}
 
 	seen := map[string]string{}
@@ -162,6 +167,10 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		// narrow rectangles ▮/▯ it had been squeezed into. Kept as a pure drift
 		// guard so nobody walks a gutter glyph back into that look.
 		"hollow quadrilateral": "◇▢▣□◻",
+		// The hold pair's family. Nothing else in the gutter is an hourglass, and
+		// the point of listing it is the same as every other entry: a THIRD glyph
+		// reaching into this shape later trips the guard.
+		"hourglass": "⧖⧗⌛⏳",
 	}
 	// familyExempt: a state may share ONE named family, with the reason. Keyed by
 	// state+family deliberately — a blanket per-state exemption would also wave the
@@ -179,6 +188,8 @@ func TestGutterGlyphsDistinct(t *testing.T) {
 		// glyph reaching into it still trips.
 		"head/headless|round":     "the not-live half of the agent pair ●/◌ — a pair counts as one occupant",
 		"head/shell-dead|chevron": "the not-live half of the shell pair ❯/› — a pair counts as one occupant",
+		"hold/inherited|hourglass": "the second state of the hold pair ⧗/⧖ (own vs inherited) — " +
+			"one axis, two values, so the pair counts as one occupant",
 	}
 	for family, runes := range families {
 		var hits []string

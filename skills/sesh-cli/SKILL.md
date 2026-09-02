@@ -140,10 +140,22 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   **bright green** by default so live activity pops out — on the SELECTED row the tint
   composes with the reverse-video band (the glyph shows as a coloured chip, so ▶/↓/⚑
   keep their colour when selected); tune or clear per glyph via `[[tui.glyph_color]]`
-  (names `busy`, `descendant`, `flag`). A fourth marker shows attachment (`*` = a tmux
+  (names `hold`, `busy`, `descendant`, `flag`). A fourth marker shows attachment (`*` = a tmux
   client is attached), and a fifth shows **archived** (`⊘` = the thread is archived —
   it appears in the default view only while still headful). The TUI's gutter header for
   the core three is `HBD` (head, busy, descendant).
+  - **hold** (the LEADING cell, before the head): `⧗` the thread is parked by its
+    OWN deadline / `⧖` parked by an ANCESTOR's / blank not parked. The pair is
+    the same shape in two states, like `●`/`◌`, and the split is actionable
+    rather than decorative: an own hold is removed by clearing it, an inherited
+    one **cannot be** — the effective hold is `max(own, ancestors')`, so it needs
+    `thread hold --release`. A RELEASED thread is not parked and so carries no
+    sigil; the `~<date>` in the HOLD column is what reports a release in force.
+    The cell is shared with move mode's `↕`, which wins while a row is being
+    moved — that cell was otherwise blank on every row, which is what lets the
+    sigil cost no width. NB on-hold threads are hidden from the default `active`
+    view, so the sigil is something you see in `all`, `on hold`, and any custom
+    view that admits parked threads.
 - **Machine = origin + owner.** A thread lives on the machine that spawned it; mutations
   route to that owner (`--machine`, or auto for tickets). Cross-machine reads come from
   the mesh.
@@ -596,7 +608,8 @@ A release is a **dated** statement like a hold, so it auto-expires: tomorrow's p
 round parks the thread again like everything else, and no thread is ever silently
 exempt forever. Setting either state clears the other — a thread is never both. In the
 TUI, `h` on a thread parked by an ancestor issues the release for you (and the HOLD
-column shows `~<date>` while a release is in force); `h` on a released thread holds it,
+column shows `~<date>` while a release is in force, while the leading gutter cell
+shows `⧗` own / `⧖` inherited so you can see which rows need which); `h` on a released thread holds it,
 which clears the release. `--clear` and `--release` **fail loudly** if the thread is
 still on hold afterwards, naming the ancestor responsible — an un-hold that silently
 left the thread parked is exactly the bug this replaced.

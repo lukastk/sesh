@@ -242,17 +242,18 @@ func TestDivider(t *testing.T) {
 	}
 }
 
-// TestPinMark: the mark cell carries ONLY the move-mode ↕. A pinned row gets no
-// glyph — it is marked by POSITION (the block above the auto-sorted list), and a
-// • there was both redundant and confusable with the idle · two cells over.
+// TestPinMark: a PINNED row gets no glyph in the mark cell — it is marked by
+// POSITION (the block above the auto-sorted list), and a • there was both
+// redundant and confusable with the idle · two cells over. The cell itself now
+// carries move mode and hold (see TestMarkGlyph); pinning is not part of that.
 func TestPinMark(t *testing.T) {
-	if got := pinMark(pinTestRow("a", "", "m", fptr(1)), false); got != " " {
+	if got := markGlyph(pinTestRow("a", "", "m", fptr(1)), false); got != " " {
 		t.Errorf("pinned mark = %q, want space (position, not a glyph, marks a pin)", got)
 	}
-	if got := pinMark(pinTestRow("a", "", "m", nil), false); got != " " {
+	if got := markGlyph(pinTestRow("a", "", "m", nil), false); got != " " {
 		t.Errorf("unpinned mark = %q, want space", got)
 	}
-	if got := pinMark(pinTestRow("a", "", "m", fptr(1)), true); got != "↕" {
+	if got := markGlyph(pinTestRow("a", "", "m", fptr(1)), true); got != "↕" {
 		t.Errorf("moving mark = %q, want ↕", got)
 	}
 }

@@ -3959,18 +3959,52 @@ func ArchivedGlyph(row api.ThreadRow) string {
 	return " "
 }
 
-// pinMark renders the 1-cell manual-ordering marker at the very left of a row: ↕
-// while the row is being MOVED (move mode), a space otherwise (so columns stay
-// aligned across all rows).
+// HoldGlyph renders a thread's hold state as one of a PAIR — the ●/◌ relationship,
+// one shape in two states, so the cell reads "same axis, two values of it":
 //
-// PINNED rows carry no marker (Lukas): they already render as a block ABOVE the
+//	⧗ held by its OWN deadline    ⧖ held by an ANCESTOR's    (blank) not held
+//
+// The split is not decoration. A thread's effective hold is max(own, every
+// ancestor's own), so the two states need DIFFERENT actions: an own hold is
+// cleared, an inherited one cannot be — it needs `hold --release`, because
+// clearing a child's own deadline leaves the max untouched. That is the whole
+// shape of the H103 bug, and it is invisible without this. It also gives the
+// sigil a job in the `on hold` view, where a plain "held" marker would sit on
+// every row saying nothing.
+//
+// A RELEASED thread is not held, so it renders blank — correct, and the ~<date>
+// in the HOLD column is what says a release is in force.
+func HoldGlyph(row api.ThreadRow) string {
+	if !row.OnHold {
+		return " "
+	}
+	if row.OnHoldEffectiveUnix > row.OnHoldUntilUnix {
+		return "⧖" // dominated from above: `--release`, not `--clear`
+	}
+	return "⧗"
+}
+
+// markGlyph renders the 1-cell mark at the very left of a row. It carries two
+// things that can never both be true of one row at one moment:
+//
+//	↕  this row is being MOVED (move mode) — transient, exactly one row
+//	⧗/⧖  the row is on hold (see HoldGlyph) — the steady state
+//
+// Move mode wins while it is active, and the hold sigil returns the moment it
+// ends. Sharing is deliberate: this cell was DEAD SPACE in steady state (move
+// mode is the only thing that ever drew here), so the hold sigil costs no width
+// at all — the alternative was an 11th gutter cell taxing every row in every
+// view, and the 38-col sidebar's name column, for a marker the default view
+// never even shows (`active` hides on-hold threads).
+//
+// PINNED rows still carry no marker (Lukas): they render as a block ABOVE the
 // auto-sorted list, which is the visible signal — a glyph on top of that was
 // redundant, and its • read as a second idle · in the neighbouring busy cell.
-func pinMark(_ api.ThreadRow, moving bool) string {
+func markGlyph(row api.ThreadRow, moving bool) string {
 	if moving {
 		return "↕"
 	}
-	return " "
+	return HoldGlyph(row)
 }
 
 // dividerLabel is a divider's display label, falling back to "divider" (for messages
@@ -4230,9 +4264,12 @@ func (m Model) viewFrame() string {
 		if row.Attachment == api.Attached {
 			att = "*" // a client is attached
 		}
-		// A 1-cell manual-ordering marker: ↕ while this row is being moved, a space
-		// otherwise (keeps columns aligned; pinned rows are marked by POSITION, not a glyph).
-		mark := pinMark(row, m.reordering && row.ID == m.reorderID)
+		// The 1-cell leading mark: ↕ while this row is being moved, else the hold
+		// sigil ⧗/⧖, else blank (keeps columns aligned; pinned rows are marked by
+		// POSITION, not a glyph).
+		moving := m.reordering && row.ID == m.reorderID
+		mark := markGlyph(row, moving)
+		holdOn := row.OnHold && !moving // tint the hold sigil, never move mode's ↕
 		desc := DescendantGlyph(descRun[row.ID])
 		arch := ArchivedGlyph(row)
 		flag := FlagGlyph(row)
@@ -4252,7 +4289,7 @@ func (m Model) viewFrame() string {
 				}
 				return seg(g)
 			}
-			line := seg("> "+mark+HeadGlyph(row)) +
+			line := seg("> ") + gl(mark, GlyphHold, holdOn) + seg(HeadGlyph(row)) +
 				gl(BusyGlyph(row), GlyphBusy, row.Busy == api.BusyBusy) +
 				gl(desc, GlyphDescendant, descRun[row.ID]) +
 				seg(att+arch) +
@@ -4272,6 +4309,9 @@ func (m Model) viewFrame() string {
 			}
 			if st, ok := m.glyphColors[GlyphFlag]; ok && row.Flagged {
 				flag = st.Render(flag)
+			}
+			if st, ok := m.glyphColors[GlyphHold]; ok && holdOn {
+				mark = st.Render(mark)
 			}
 			line := mark + HeadGlyph(row) + busy + desc + att + arch + flag + " " + m.renderCells(vcols, vwidths, tr, tr.pos, true)
 			b.WriteString("  " + line + "\n")

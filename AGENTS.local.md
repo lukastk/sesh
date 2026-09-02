@@ -1,5 +1,65 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H104 — HOLD SIGIL: ⧗ own / ⧖ inherited, in the gutter cell that was already dead space (2026-09-02, sesh 0f3bc89; NO schema/API/CLI change; BINARY-ONLY, no daemon restart)
+Lukas: "It would be good to assemble a sigil uh for threads that are on hold. Could you
+workshop that?" Conferred with rendered gutter previews (the H49/H97 method — they render in
+HIS font, which is the only test that matters); he picked all three recommendations.
+
+**THE PAIR IS THE DESIGN, not decoration.** A single "held" marker would be nearly useless:
+`active` HIDES on-hold threads, so the sigil is only ever seen in `all`, `on hold`, and custom
+views — and in `on hold` EVERY row is held, so a plain marker sits on all of them saying
+nothing. ⧗ own / ⧖ inherited is actionable instead: effective hold is max(own, ancestors'),
+so an own hold is CLEARED while an inherited one cannot be — it needs `--release`. That is
+precisely the H103 bug's shape, and nothing on screen said which row was which.
+
+**IT COSTS NO WIDTH, and that is why it went in the MARK cell.** `pinMark` drew ↕ for the one
+row being moved in move mode and a blank on every other row, always — the leftmost gutter cell
+was dead space in steady state. The alternative (an 11th cell) would tax every row in every
+view AND the 38-col sidebar's name column for a marker the default view never shows. Move mode
+still wins the cell while active; `pinMark` → `markGlyph` so the name says what it carries.
+
+**MEASURE THE GLYPH BEFORE FALLING FOR IT** (H97's rule, re-applied): every candidate went
+through go-runewidth first. `⌛` is TWO cells (out). `‖`/`∥` — the most legible "paused" — are
+EastAsianWidth AMBIGUOUS, so a terminal rendering ambiguous as double would misalign the
+gutter; that is the same class as the existing ●▶·↓≡, so not a regression, but ⧖⧗☾⏸ are
+unconditionally 1 cell. `⏸` reports 1 cell but lives in the emoji block, where terminals often
+apply emoji presentation — flagged in the preview so he could judge it by eye. The hourglass
+also has the only natural filled/hollow TWIN, which is what made the pair possible at all.
+
+**THE FAMILY GUARD GAINED A THIRD PAIR.** New "hourglass" family (⧖⧗⌛⏳) with
+`hold/inherited|hourglass` exempted by name — a pair counts as ONE occupant, so a THIRD glyph
+reaching into that shape later still trips. **The guard caught my own typo immediately**: I
+wrote the family string with ⧗ twice, and it reported "2 glyphs from the hourglass family
+([hold/own ⧗ hold/own ⧗])" — a duplicate rune reads as a collision with itself.
+
+TESTS. Units: the truth table (own / inherited / an own hold LATER than the ancestor's still
+reads own / released → blank / lapsed → blank), markGlyph's precedence, and that the sigil
+reaches the rendered row in BOTH branches — the selected (reverse-video) branch builds its
+gutter separately and is where a new cell is easiest to drop on the floor. New claim
+`hold-sigil` (registered AND declared — the H25 gotcha) drives a REAL daemon with a real
+parent/child: baseline no sigil, hold the parent → ⧗ parent / ⧖ child, the child's own
+dominating hold flips it to ⧗, `--release` clears the cell while the parent stays parked. It
+matches a glyph to a SPECIFIC row by gutter position (rune index 2) — a bare `Contains` would
+pass on any row carrying it. **TRAP: the child is NESTED, and a collapsed parent renders
+`▸ parent` with the child not on screen at all**, so the first run failed with nothing to
+assert; `WithExpand(true)` is the honest fix — making them siblings would have deleted the
+inheritance the claim exists to prove. ANTI-GAMING (reverse-edited, md5-verified restore, never
+git-checkout — H44): collapsing the pair to one marker reddens the claim AND the unit; dropping
+the sigil from the selected branch reddens the render test.
+GREEN: `go vet ./...`; every non-conformance package plain AND `-race`; the FULL TUI claims
+suite serially — **72 pass, 0 fail**. The full matrix was NOT run.
+LIVE-PROVEN read-only against the real mesh (isolated tmux, never pressed Enter — that would
+revive a real thread): `⧖◌·  ⊘⌁ mymain m11-identity`, a thread whose hold is entirely its
+ancestors' (own=0), rendering the inherited half beside ⊘ archived and ⌁ flag-disabled without
+collision — and on the SELECTED row, so the reverse-video branch is proven on real data too.
+**MEASUREMENT TRAP: `awk 'substr($0,3,1)'` counts BYTES, not runes** — ⧗ is 3 bytes in UTF-8,
+so my first count reported 0 sigils on a screen that plainly had them. Count runes in python.
+
+DEPLOY: **binary-only, NO daemon restart, no schema/API/CLI/key change** — a pure TUI-client
+render, so a mixed fleet is trivially safe (a machine on the old binary just draws no sigil).
+**A running SIDEBAR keeps the binary it launched with (H70), so the sigil does not exist inside
+Lukas's sidebar until `prefix+r`.**
+
 ## H104 — CWD-SCOPED TUI POPUPS: exact directory vs directory tree, with the launch boundary orthogonal to every view and `/` filter (2026-09-02, sesh 13ca684 + myrig dbefad8/25228da; NO schema/API/daemon change; binary-only + render/conf deploy; **DEPLOYED ALL SIX**)
 Ticket fab27712. Lukas wanted two base-level commands: one grid for threads whose CWD exactly matches
 the pressing pane's directory, one including descendants; both must open the NORMAL sesh TUI in a popup,

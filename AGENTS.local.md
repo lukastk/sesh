@@ -1,5 +1,62 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H106 — SIDEBAR ARROW JANK on pocket4: H98's cockpit tracker applied resolves that RACED the sidebar's own follow navs; fix = own navs are observations + epoch-discard + no resolve mid-follow (2026-09-14, sesh f89b563; NO schema/API/daemon change; BINARY-ONLY, deployed 4/6 — macbook + termux unreachable, pending)
+Lukas: "when I use the keyboard up and down keys on my sidebar and cockpit ... it seems to sort of
+jank a bit and pre-select or revert to selecting some of those sessions that I was previously on.
+It seems to jump back and forth. This is happening on my pocket4."
+
+**H98's "the sidebar's own follows are self-cancelling" WAS WRONG, and the reason is the whole
+bug.** It holds only while the cursor is still ON the thread being navved to. Arrowing outruns the
+navs: ↓ fires a follow to b; a second ↓ to c is SWALLOWED (followInFlight — H57's coalesce); b's
+nav lands and rings the nav bell; the bell's resolve reports b; b ≠ the stale baseline a (follows
+never updated lastMasterThread) ⇒ cursor yanked back to b, then forward to c when c's resolve
+lands. Same shape from the 3s backstop, and from ANY resolve issued before a follow and answered
+after it. H98 itself wrote "removes any need for an epoch/sequence guard against a stale in-flight
+resolve" — the guard WAS needed.
+WHY pocket4: its cockpit sits on the **mymain** window (5 windows, active=mymain), so most rows are
+REMOTE: a follow is a `sesh tmux nav` SUBPROCESS (rings the bell) and a resolve is a mesh round
+trip. MEASURED on pocket4: `master-current` local 7ms, `--machine mymain` ~190–205ms — a race window
+an ordinary key-repeat lands in every time. The local fast path (client.TmuxNav) rings no bell, so
+it only races the backstop, which is why a local-window cockpit barely shows it.
+
+FIX (internal/tui/mastertrack.go + model.go): `recordOwnNav(id)` on a successful followDoneMsg AND a
+sidebar navDoneMsg sets lastMasterThread (the sidebar KNOWS what it just put on the cockpit) and
+bumps `masterTrackEpoch`; masterCursorMsg carries the epoch it was issued in; applyMasterCursor
+discards while followInFlight or on an older epoch. The track tick spends NO resolve while a follow
+is in flight and leaves the bell UNCONSUMED, so a genuine cockpit-side move that rang meanwhile is
+still resolved on the first tick after. The change-not-disagreement rule is untouched.
+**Each of the three pieces is load-bearing on its own, proven by neutering each alone:** recording
+closes the coalesced shape; the epoch closes "issued before a follow, answered after" (a case the
+recording itself CREATES — once follows update the baseline, a stale pre-follow reply differs from
+it); the in-flight guard closes "a resolve lands while the second follow is still running". My first
+neuter run showed the in-flight guard was unpinned by any test — added the mid-follow case before
+trusting it. Check coverage per guard, not per fix.
+
+TESTS. Units: DoesNotRevertAFollowInProgress, DiscardsAResolveOvertakenByAFollow (+ a fresh resolve
+of an external move still tracks), OwnNavIsAnObservation (follow + Enter; headless-row rule still
+holds), TickWaitsOutAFollow. New claim `sidebar-arrow-no-revert` (registered AND declared — H25):
+real daemon, three real pi threads, a real nested tmux client in a real master-client marker, the
+follows' real TmuxNav switches, real MarkerClientCurrent resolves; only the MESSAGE ORDER is chosen
+(which is exactly what bubbletea's concurrent cmds produce). ANTI-GAMING (reverse-edited,
+md5-verified restore — H44): pre-fix logic restored ⇒ the claim fails verbatim "cursor = arrow-b —
+the tracker dragged the selection back". NB the claim's `resolveNow` compares a msg against
+`tui.MasterTrackTick()` to skip the rescheduled tick (the msg type is unexported; interface equality
+on an empty struct works).
+GREEN: `go vet ./...`; internal/tui plain + -race; cmd/sesh; the FULL TUI claims suite (213s);
+sidebar-tracks-cockpit, sidebar-nav-stays, the new claim. The full matrix was NOT run.
+NOT LIVE-OBSERVED in Lukas's running sidebar (it was not relaunched with SESH_TUI_LOG — H70/H71
+say reach for that first; I didn't, because it restarts his live sidebar). The evidence is the
+exact phenomenology + the measured race window + the real-component claim reproducing it. **If he
+still sees jank after `prefix+r`, the next step IS the debug log** (`tmux -L sesh-master
+set-environment -g SESH_TUI_LOG /tmp/sesh-sidebar.log`, prefix+r, grep `MASTER TRACK` against
+`KEY`/`FOLLOW` lines).
+DEPLOY: binary-only, no daemon restart. f89b563 on mymain, pocket4, ideapad, macstudio (all
+`vcs.modified=false`). **macbook (ssh :22 timeout) and termux (android-main:8022 timeout) PENDING**,
+harmless: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f
+~/.local/bin/sesh.new ~/.local/bin/sesh` (macbook: /opt/homebrew/bin/go; termux: plain go build,
+H22). **A running sidebar keeps its binary until `prefix+r` (H70)** — pocket4's was pid 28776 from
+13:33 today.
+
 ## H105 — "setup-the-DOC holds archived threads" — IT NEVER DID: 1,249 archived threads were held purely by INHERITANCE; fix = archived detaches from the max, like a release (2026-09-02, sesh 30e5add; NO schema/API/CLI change; DAEMON rebuild + RESTART)
 Lukas: "I want it to only hold or unhold non-archived threads. Currently I think it also holds
 archive threads, which is a bit confusing because they are already outside of the active view.

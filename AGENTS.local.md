@@ -1,5 +1,54 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H107 — the uuid popup's COPY (`y`, then `c`) worked on macOS only: termux is GOOS=android, wl-copy's forked child held the exec PIPE (TUI freeze), popups have no display env (2026-09-14, sesh 060ee4c; NO schema/API change; BINARY-ONLY, DEPLOYED ALL SIX)
+Ticket b7da691e. (Lukas corrected my first read: the key is `y` for the popup, `c` inside it copies.)
+THREE INDEPENDENT DEFECTS, each reproduced on the real box before touching code:
+1. **termux: GOOS=android, not linux** (plain `go build`, H22). `clipboardCmd` switched on
+   "darwin"/"linux" only, so termux hit `default` → "clipboard not supported on android", and the
+   `termux-clipboard-set` candidate filed under linux was unreachable. **Any `runtime.GOOS == "linux"`
+   gate silently excludes termux** — grep for it when a feature "works on Linux but not the phone".
+2. **pocket4 sidebar (Wayland env present): the TUI FROZE.** Measured with a probe of the exact exec
+   shape: rc=124 at a 10s bound. `wl-copy` forks a child that keeps serving the selection and
+   inherits stdio; `CombinedOutput` reads through a pipe, and **Go's Wait blocks until every writer
+   of that pipe closes** — i.e. until something else takes the clipboard. It ran inline in Update.
+   This is H43's xclip-over-ssh trap, in Go. Fix: hand the tool NO pipe — stdin an `*os.File` pipe
+   written+closed before start, stdout nil (/dev/null), stderr a temp FILE read afterwards. Plus a
+   10s CommandContext timeout (termux-clipboard-set without the Termux:API app blocks forever) and
+   the copy now runs as a tea.Cmd (termux-clipboard-set takes ~0.8s).
+3. **pocket4 work-server popup: no WAYLAND_DISPLAY/DISPLAY** (the boot-started tmux server's global
+   env is empty; the SIDEBAR on the master server does have it) → wl-copy "Failed to connect to a
+   Wayland server". Fix: when the process names no display, run the tool with the session env from
+   the systemd user manager — the SAME canonical source the daemon's spawnEnv used (H74). Lifted into
+   `internal/sessionenv` (Graphical() now returns an error instead of logging; spawnEnv logs it) so
+   the TUI and daemon share one implementation. spawnEnv behaviour unchanged.
+Side bug fixed: the copy error went to `lastErr`, which renders "(daemon unreachable: …)" and is
+cleared by the next fetch — now `actionErr`.
+TESTS: `internal/tui/clipboard_test.go` — per-GOOS tool truth table, clipboardEnv, a REAL exec of a
+stub that leaves `sleep 30 &` holding its stdio (must return <5s AND deliver the text), stderr
+surfaced, timeout, model wiring. The `uuid-popup-copy` claim stubbed only `wl-copy` — which is WHY
+it was red on macbook (H80/H88/H91/H97 recorded it as an environment red; it was a test defect) —
+now installs the stub under all three tool names, and forks a lingering child. ANTI-GAMING: stderr
+→ `&strings.Builder{}` (a pipe) turns the unit AND the claim red with the freeze message; reversed
+md5-identical. GREEN: vet; every non-conformance package plain and -race; FULL TUI claims (237s);
+thread.new.headed/pi/local (spawnEnv through the new package). Full matrix NOT run.
+LIVE-PROVEN on pocket4 (isolated tmux, real `sesh tui` vs the live daemon, keys `y` `c` only):
+sidebar-like env AND a display-stripped env both put the popup's uuid into the real Wayland clipboard
+(`wl-paste` read-back; the second run started from a reset clipboard). pocket4's clipboard text was
+saved and restored (its rich HTML flavour was not). termux: the TUI reported "UUID copied" (tool exit
+0), but **read-back is NOT observed** — `termux-clipboard-get` over ssh returns empty because Android
+blocks clipboard reads from a background app, adb has no `cmd clipboard`, and the phone was awake in
+Obsidian so I did not steal focus. Lukas to confirm by pasting on the phone. That smoke OVERWROTE the
+phone's clipboard (unreadable, so unsaveable).
+**MY MISTAKE, recorded so it isn't repeated:** after an anti-gaming run I ran `pkill -f "^sleep 30$"`
+— the H101 trap. The test's cleanup had already killed its own child, so anything it matched belonged
+to someone else's polling loop. Kill test children by recorded pid only (the tests now do).
+NOT CHANGED, noted: the copy targets the clipboard of the machine the TUI RUNS ON, so a popup in a
+cockpit window for a remote machine copies to that machine (SKILL now says so). OSC 52 through the
+tmux chain would reach the viewer's terminal instead — a design change, not built. mymain's X
+display is not inferred (H43's single-socket heuristic lives in myrig, not here).
+DEPLOY: binary-only, no restart, all six at 060ee4c `vcs.modified=false` — which also delivered H106's
+pending binary to macbook and termux. A running sidebar keeps its binary until `prefix+r` (H70).
+
 ## H106 — SIDEBAR ARROW JANK on pocket4: H98's cockpit tracker applied resolves that RACED the sidebar's own follow navs; fix = own navs are observations + epoch-discard + no resolve mid-follow (2026-09-14, sesh f89b563; NO schema/API/daemon change; BINARY-ONLY, deployed 4/6 — macbook + termux unreachable, pending)
 Lukas: "when I use the keyboard up and down keys on my sidebar and cockpit ... it seems to sort of
 jank a bit and pre-select or revert to selecting some of those sessions that I was previously on.

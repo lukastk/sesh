@@ -314,6 +314,11 @@ type Model struct {
 	masterTrackSeen      string
 	masterTrackCountdown int
 	lastMasterThread     string
+	// masterTrackEpoch is bumped every time one of the sidebar's OWN navs lands. A
+	// resolve carries the epoch it was issued in, and one issued before the latest
+	// landing is discarded — it can only report where the cockpit was before this
+	// sidebar moved it (see applyMasterCursor).
+	masterTrackEpoch int
 	// hideOffline (default true; `o` toggles, [tui] show_offline sets the default):
 	// hide the last-known threads of a mesh machine that is currently unreachable.
 	// Their owner can't be reached, so every action on them would hang on the routing
@@ -1388,6 +1393,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case masterTrackTickMsg:
 		// Cheap every tick (one small file read); an authoritative resolve only when the
 		// bell rang or the backstop expired — see mastertrack.go.
+		if m.followInFlight {
+			// The cockpit is mid-change under this sidebar's own follow; a resolve now
+			// would only be discarded. Leave the bell UNCONSUMED so a cockpit-side move
+			// that rang meanwhile is still resolved once the follow lands.
+			return m, masterTrackTick()
+		}
 		bell := readNavBell(m.masterTrackBell)
 		due, next := masterTrackDue(bell, m.masterTrackSeen, m.masterTrackCountdown)
 		m.masterTrackSeen, m.masterTrackCountdown = bell, next
@@ -1476,6 +1487,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionErr = msg.err
 		} else {
 			m.actionErr = nil // successful ambient activity clears a stale error line
+			if msg.id != "" {
+				m.recordOwnNav(msg.id) // the cockpit now shows it (mastertrack.go)
+			}
 		}
 		if msg.id != "" {
 			// Recorded on FAILURE too: the coalesce below re-arms, and without
@@ -1498,6 +1512,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionErr = nil // a successful nav supersedes any stale error line
 			if msg.id != "" {
 				m.lastFollowedID = msg.id // the cockpit now shows it — no follow needed
+				m.recordOwnNav(msg.id)
 			}
 			return m, focusSiblingPane()
 		}

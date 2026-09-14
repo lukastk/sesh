@@ -406,7 +406,10 @@ tracker would yank the cursor back and make browsing impossible. `sesh tmux nav`
 bell file (`<home>/nav-bell`) after every successful nav, which the sidebar reads on a
 cheap 250ms timer and answers with one authoritative resolve, so a cockpit keypress
 moves the cursor immediately; a 3s backstop catches moves sesh never saw (a native
-prefix+n switch, a pane selected by hand). A thread the current view does not contain —
+prefix+n switch, a pane selected by hand). The sidebar's OWN navs never feed back into
+it: while a preview is still landing the tracker waits, and a resolve that raced one of
+the sidebar's navs is discarded — so arrowing faster than the previews land never drags
+the cursor back onto a row you already passed. A thread the current view does not contain —
 on hold, archived while you are on `active`, or dropped by an active filter — leaves the
 cursor alone: no jump and no view switch, unlike `goto-uuid`, which is a command you
 typed rather than an ambient tracker. Every other key/view/action works exactly as in

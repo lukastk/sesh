@@ -201,6 +201,38 @@ func TestMasterTrackTickSpendsResolveOnlyWhenDue(t *testing.T) {
 	}
 }
 
+// TestMasterTrackTickWaitsOutAFollow: while the sidebar's own follow is running, a tick
+// spends no resolve (it would be discarded) and leaves the bell UNCONSUMED — so a bell
+// that rang meanwhile, possibly for a genuine cockpit-side move, is still resolved on the
+// first tick after the follow lands.
+func TestMasterTrackTickWaitsOutAFollow(t *testing.T) {
+	bell := filepath.Join(t.TempDir(), "nav-bell")
+	if err := os.WriteFile(bell, []byte("777\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := trackModel()
+	m.masterTrackBell = bell
+	m.followInFlight = true
+
+	nm, cmd := m.Update(masterTrackTickMsg{})
+	got := nm.(Model)
+	if cmd == nil {
+		t.Fatal("tick during a follow did not reschedule — tracking would stop forever")
+	}
+	if _, isBatch := cmd().(tea.BatchMsg); isBatch {
+		t.Fatal("tick during a follow spent a resolve")
+	}
+	if got.masterTrackSeen != "" {
+		t.Fatalf("masterTrackSeen = %q — the bell was consumed while its resolve was skipped", got.masterTrackSeen)
+	}
+
+	got.followInFlight = false
+	nm, cmd = got.Update(masterTrackTickMsg{})
+	if _, isBatch := cmd().(tea.BatchMsg); !isBatch || nm.(Model).masterTrackSeen != "777" {
+		t.Fatal("the first tick after the follow did not resolve the bell that rang during it")
+	}
+}
+
 // TestReadNavBell: absent, unreadable and empty paths are "" — not an error, and not
 // information the tracker may act on.
 func TestReadNavBell(t *testing.T) {
@@ -255,4 +287,139 @@ func TestMasterTrackPreselectSeedsBaseline(t *testing.T) {
 	}
 }
 
-var _ = api.ThreadRow{}
+// followTrackModel is trackModel with selection-follow armed: every row headful with a
+// live session on the local machine, so each arrow press is follow-eligible. The cockpit
+// starts on "a", where the cursor is. TMUX is scrubbed by the callers, and the follow
+// cmds returned by Update are never RUN — the test delivers the completions itself, in
+// the order that races in real life.
+func followTrackModel() Model {
+	m := trackModel()
+	for i := range m.rows {
+		m.rows[i].Machine = "self"
+		m.rows[i].SessionName = "s_" + m.rows[i].ID
+		m.rows[i].Head = api.Headful
+	}
+	m.machine = "self"
+	m.followResolver = func() string { return "self" }
+	m.lastMasterThread = "a"
+	m.lastFollowedID = "a"
+	return m
+}
+
+func pressKey(t *testing.T, m Model, k tea.KeyType) (Model, tea.Cmd) {
+	t.Helper()
+	nm, cmd := m.Update(tea.KeyMsg{Type: k})
+	return nm.(Model), cmd
+}
+
+// TestMasterTrackDoesNotRevertAFollowInProgress is the pocket4 report (Lukas,
+// 2026-09-14): arrowing down the sidebar "jumps back and forth", re-selecting threads
+// the cursor had already passed. The sidebar's OWN follows are what rang the bell, and
+// the resolve they trigger reports where the cockpit was a moment ago — not where the
+// cursor is now.
+//
+// The interleaving: ↓ to b fires a follow; ↓ to c is swallowed (one follow at a time);
+// b's nav lands and rings the bell; the coalesce fires the follow to c; the bell's
+// resolve reports "b". b differs from the last observation (a), so a change-driven
+// tracker moved the cursor back to b — then forward to c when c's resolve arrived.
+func TestMasterTrackDoesNotRevertAFollowInProgress(t *testing.T) {
+	t.Setenv("TMUX", "")
+	m := followTrackModel()
+
+	m, cmd := pressKey(t, m, tea.KeyDown) // -> b, follow b in flight
+	if cmd == nil || !m.followInFlight {
+		t.Fatalf("baseline: ↓ onto a live row must fire a follow (cmd=%v inflight=%v)", cmd, m.followInFlight)
+	}
+	m, _ = pressKey(t, m, tea.KeyDown) // -> c, swallowed while b runs
+	if id := cursorID(t, m); id != "c" {
+		t.Fatalf("baseline: cursor = %q after two ↓, want c", id)
+	}
+
+	// A resolve (the backstop, or a bell from elsewhere) lands while b's nav is still
+	// running — the cockpit has already switched to b, but the follow has not reported.
+	nm, _ := m.Update(masterCursorMsg{id: "b", ok: true, epoch: m.masterTrackEpoch})
+	m = nm.(Model)
+	if id := cursorID(t, m); id != "c" {
+		t.Fatalf("cursor = %q — a resolve that landed mid-follow reverted the selection", id)
+	}
+
+	nm, cmd = m.Update(followDoneMsg{id: "b"}) // b landed; coalesce fires the follow to c
+	m = nm.(Model)
+	if cmd == nil || !m.followInFlight {
+		t.Fatalf("baseline: b's completion must coalesce-fire the follow to c")
+	}
+
+	// The resolve the b-nav's bell triggered comes back while c's nav is still running.
+	nm, _ = m.Update(masterCursorMsg{id: "b", ok: true})
+	m = nm.(Model)
+	if id := cursorID(t, m); id != "c" {
+		t.Fatalf("cursor = %q — the tracker reverted the user's selection to a thread the sidebar itself had just navved through", id)
+	}
+
+	// c lands. The cursor is where the user left it, and a resolve reporting c is not a move.
+	nm, _ = m.Update(followDoneMsg{id: "c"})
+	m = nm.(Model)
+	nm, _ = m.Update(masterCursorMsg{id: "c", ok: true})
+	m = nm.(Model)
+	if id := cursorID(t, m); id != "c" {
+		t.Fatalf("cursor = %q after c landed, want c", id)
+	}
+}
+
+// TestMasterTrackDiscardsAResolveOvertakenByAFollow: a resolve issued BEFORE a follow
+// changed the cockpit may land AFTER it, carrying the pre-follow thread. It is stale by
+// construction and must not move the cursor, even once the follow has finished.
+func TestMasterTrackDiscardsAResolveOvertakenByAFollow(t *testing.T) {
+	t.Setenv("TMUX", "")
+	m := followTrackModel() // cockpit and cursor on a
+
+	// A backstop resolve goes out while the cockpit still shows a...
+	stale := masterCursorMsg{id: "a", ok: true, epoch: m.masterTrackEpoch}
+	// ...the user arrows to b and its (fast, local) follow completes...
+	m, _ = pressKey(t, m, tea.KeyDown)
+	nm, _ := m.Update(followDoneMsg{id: "b"})
+	m = nm.(Model)
+	// ...and only then does the resolve's reply arrive.
+	nm, _ = m.Update(stale)
+	m = nm.(Model)
+	if id := cursorID(t, m); id != "b" {
+		t.Fatalf("cursor = %q — a resolve issued before the follow moved the cursor after it", id)
+	}
+	// A resolve issued AFTER the follow is fresh and still tracks a real cockpit move.
+	nm, _ = m.Update(masterCursorMsg{id: "c", ok: true, epoch: m.masterTrackEpoch})
+	if id := cursorID(t, nm.(Model)); id != "c" {
+		t.Fatalf("cursor = %q — a fresh resolve of an external move to c was ignored", id)
+	}
+}
+
+// TestMasterTrackOwnNavIsAnObservation: when a follow or an Enter lands, the sidebar
+// KNOWS what the cockpit shows. Recording it is what stops the later bell resolve from
+// reading as a change, and what keeps the headless-row rule honest: arrowing onto a row
+// follow skips, then receiving the resolve of the thread the sidebar last navved to,
+// must leave the cursor alone.
+func TestMasterTrackOwnNavIsAnObservation(t *testing.T) {
+	t.Setenv("TMUX", "")
+	m := followTrackModel()
+	m.rows[2].Head = api.Headless // c is not follow-eligible
+
+	m, _ = pressKey(t, m, tea.KeyDown) // -> b, follow fires
+	nm, _ := m.Update(followDoneMsg{id: "b"})
+	m = nm.(Model)
+	if m.lastMasterThread != "b" {
+		t.Fatalf("lastMasterThread = %q after the follow to b landed, want b", m.lastMasterThread)
+	}
+	m, cmd := pressKey(t, m, tea.KeyDown) // -> c, headless: no follow, cockpit stays on b
+	if cmd != nil {
+		t.Fatalf("baseline: a headless row must not follow")
+	}
+	nm, _ = m.Update(masterCursorMsg{id: "b", ok: true, epoch: m.masterTrackEpoch})
+	if id := cursorID(t, nm.(Model)); id != "c" {
+		t.Fatalf("cursor = %q — the cockpit did not move, yet the cursor was yanked back", id)
+	}
+
+	// Enter records its own landing too.
+	nm, _ = m.Update(navDoneMsg{id: "c"})
+	if got := nm.(Model).lastMasterThread; got != "c" {
+		t.Fatalf("lastMasterThread = %q after an Enter nav to c, want c", got)
+	}
+}

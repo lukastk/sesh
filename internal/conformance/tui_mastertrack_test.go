@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 	"github.com/lukastk/sesh/internal/tui"
 )
@@ -155,6 +156,127 @@ func claimSidebarTracksCockpit(t *testing.T) {
 	// ...and the sidebar's cursor follows it.
 	if !waitUntil(20*time.Second, func() bool { m = track(m); return selected(m) == "track-b" }) {
 		t.Fatalf("the sidebar cursor never followed the cockpit onto track-b (still %q) — the reported bug", selected(m))
+	}
+}
+
+// claimSidebarArrowNoRevert (Lukas, pocket4, 2026-09-14 — "As I go up and down it sort of
+// janks a bit and pre-selects or reverts to selecting some of those sessions that I was
+// previously on. It seems to jump back and forth"): arrowing the sidebar must never have
+// the cockpit tracker drag the cursor back onto a thread the sidebar itself just navved
+// through.
+//
+// The race, reproduced with real parts: ↓ fires a follow to b; a second ↓ to c is
+// swallowed while it runs; b's nav really lands; a tracker resolve issued now really
+// reports b — the thread the cursor has already left. Delivering it before b's follow
+// reports is exactly the ordering bubbletea's concurrent commands produce. A tracker that
+// applied it moved the cursor back to b, then forward to c once c landed.
+//
+// Real: a daemon with three real pi threads, a real tmux client recorded in a real
+// master-client marker, the follows' real TmuxNav switches on the daemon, and the
+// tracker's real MarkerClientCurrent resolve. Only the MESSAGE ORDER is chosen.
+func claimSidebarArrowNoRevert(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	local := newSandbox(t, matrix.Local)
+	local.startDaemon(t)
+	threads := map[string]api.Thread{}
+	for _, name := range []string{"arrow-a", "arrow-b", "arrow-c"} {
+		th := local.newThread(t, "pi", name, "/tmp")
+		local.waitThreadReady(t, th.ID, "pi")
+		threads[name] = th
+	}
+	thA := threads["arrow-a"]
+
+	local.attachViewer(t, thA.SessionName)
+	client, pid := local.workClientOn(t, thA.SessionName)
+	marker := filepath.Join(local.Home, "master-client."+local.Machine)
+	if err := os.WriteFile(marker, []byte(client+" "+pid+"\n"), 0o644); err != nil {
+		t.Fatalf("write master-client marker: %v", err)
+	}
+	master := "sesh-tuiarrow-" + thA.ID[:8]
+	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
+	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+
+	bin := seshBin(t)
+	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
+	m := tui.New(local.Home+"/daemon.sock", false).
+		WithExec(bin, navEnv).
+		WithLocal(local.Machine, local.TmuxSocket).
+		WithTmux("/tmp/notwork,1,1").
+		WithSidebar().
+		WithSidebarFollow(local.Machine)
+	m, _ = renderUntilRow(t, m, "arrow-c") // armed after the first render, as in sidebar-tracks-cockpit
+	m = m.WithMasterTracking(filepath.Join(local.Home, "nav-bell"))
+	t.Setenv("TMUX", "") // never let a focus handoff touch the developer's own tmux
+
+	selected := func() string {
+		if row, ok := m.Selected(); ok {
+			return row.Name
+		}
+		return ""
+	}
+	update := func(msg tea.Msg) tea.Cmd {
+		nm, cmd := m.Update(msg)
+		m = nm.(tui.Model)
+		return cmd
+	}
+	// resolveNow drives tracker ticks until the backstop expires, delivering the resolve
+	// that spends — or, when the tracker deliberately issues none (a follow in flight),
+	// giving up once more ticks have passed than the backstop could ever need. A tick
+	// reschedules itself, so the rescheduled tick in each batch is not re-delivered.
+	resolveNow := func() {
+		for i := 0; i < 16; i++ {
+			for _, msg := range drainCmd(update(tui.MasterTrackTick())) {
+				if msg == tui.MasterTrackTick() {
+					continue
+				}
+				update(msg)
+				return
+			}
+		}
+	}
+	onSession := func(want string) {
+		t.Helper()
+		if !waitUntil(10*time.Second, func() bool { return clientSession(t, local, client) == want }) {
+			t.Fatalf("the cockpit client is on %q, want %q — a follow nav did not land", clientSession(t, local, client), want)
+		}
+	}
+
+	// BASELINE: the cockpit shows arrow-a, and tracking settles the cursor there.
+	if !waitUntil(20*time.Second, func() bool { resolveNow(); return selected() == "arrow-a" }) {
+		t.Fatalf("baseline: cursor never settled on arrow-a (the thread the cockpit shows); got %q", selected())
+	}
+
+	followB := update(tea.KeyMsg{Type: tea.KeyDown})
+	if followB == nil || selected() != "arrow-b" {
+		t.Fatalf("baseline: ↓ onto arrow-b must fire a follow (cmd=%v, cursor=%q)", followB != nil, selected())
+	}
+	if cmd := update(tea.KeyMsg{Type: tea.KeyDown}); cmd != nil || selected() != "arrow-c" {
+		t.Fatalf("baseline: a ↓ during the follow must be swallowed onto arrow-c (cmd=%v, cursor=%q)", cmd != nil, selected())
+	}
+
+	doneB := followB() // b's nav really lands on the daemon...
+	onSession(threads["arrow-b"].SessionName)
+	resolveNow() // ...and the tracker resolves while b's follow has not yet reported
+	if got := selected(); got != "arrow-c" {
+		t.Fatalf("cursor = %q — the tracker dragged the selection back onto a thread the sidebar had just navved through (the reported bug)", got)
+	}
+
+	followC := update(doneB) // the coalesce fires the follow to arrow-c
+	if followC == nil {
+		t.Fatalf("b's completion did not coalesce-fire the follow to arrow-c")
+	}
+	resolveNow()
+	if got := selected(); got != "arrow-c" {
+		t.Fatalf("cursor = %q — a resolve during the follow to arrow-c reverted the selection", got)
+	}
+	update(followC())
+	onSession(threads["arrow-c"].SessionName)
+	resolveNow()
+	if got := selected(); got != "arrow-c" {
+		t.Fatalf("cursor = %q after arrow-c landed, want arrow-c", got)
 	}
 }
 

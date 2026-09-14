@@ -21,9 +21,9 @@ package tui
 //     yank the cursor straight back on the next tick and browsing would be impossible.
 //
 // So lastMasterThread records what the cockpit was LAST OBSERVED showing, and only a
-// resolve that differs from it moves anything. That also makes the sidebar's own
-// follows self-cancelling: the cursor is already on the thread it navved to, so the
-// resulting change resolves to a no-op move.
+// resolve that differs from it moves anything. The sidebar's own navs are observations
+// too (recordOwnNav), and a resolve that raced one of them is discarded rather than
+// applied — see applyMasterCursor for why "the cursor is already there" is not enough.
 //
 // CADENCE is a cheap local file stat plus a rare authoritative resolve. Every tick reads
 // the nav bell (tmux.NavBellPath — a few bytes, no fork, no daemon call, no network);
@@ -60,8 +60,9 @@ type masterTrackTickMsg struct{}
 // ignored entirely — recording it as "the cockpit shows nothing" would make the next
 // successful resolve look like a change and jump the cursor for no reason.
 type masterCursorMsg struct {
-	id string
-	ok bool
+	id    string
+	ok    bool
+	epoch int // the masterTrackEpoch the resolve was issued in
 }
 
 // WithMasterTracking turns on cursor tracking against the nav bell at bellPath. Only
@@ -104,9 +105,27 @@ func masterTrackDue(bell, lastBell string, countdown int) (due bool, next int) {
 // typed, and wrong for an ambient tracker, which would silently retitle the list under
 // someone who is reading it. Nor is a pending preselect armed: it would land minutes
 // later, whenever the row happened to become visible.
+//
+// A resolve that RACED ONE OF THE SIDEBAR'S OWN NAVS is discarded, not applied (Lukas,
+// pocket4, 2026-09-14: arrowing the sidebar "jumps back and forth"). "The sidebar's own
+// follows are self-cancelling" only holds while the cursor is still on the thread being
+// navved to, and arrowing routinely outruns the navs: a second ↓ is swallowed while the
+// first follow runs, the first nav lands and rings the bell, and that bell's resolve
+// reports the thread the cursor has already LEFT. Two guards close it:
+//   - while a follow is in flight, the cockpit is mid-change and any reading is about to
+//     be superseded by it;
+//   - a resolve issued before the latest own-nav landing (its epoch is older) can only
+//     report where the cockpit was before this sidebar moved it.
+//
+// Neither loses information: an own nav's landing is itself recorded as the observation
+// (recordOwnNav), and a genuine cockpit-side move rings the bell again or is caught by
+// the backstop.
 func (m *Model) applyMasterCursor(msg masterCursorMsg) bool {
 	if !msg.ok || msg.id == m.lastMasterThread {
 		return false // no information, or the cockpit has not moved
+	}
+	if m.followInFlight || msg.epoch != m.masterTrackEpoch {
+		return false // raced one of this sidebar's own navs — stale by construction
 	}
 	m.lastMasterThread = msg.id
 	if msg.id == "" {
@@ -122,12 +141,21 @@ func (m *Model) applyMasterCursor(msg masterCursorMsg) bool {
 	return true
 }
 
+// recordOwnNav notes that one of the sidebar's own navs (a follow or an Enter) just put
+// thread id on the cockpit. That is an observation as good as a resolve — better, since
+// no round trip can stale it — so it becomes the tracking baseline, and the epoch moves
+// on so every resolve issued before it is discarded when it lands.
+func (m *Model) recordOwnNav(id string) {
+	m.lastMasterThread = id
+	m.masterTrackEpoch++
+}
+
 // resolveMasterTrack reads what the sidebar's CURRENT master window is showing, off the
 // main loop. The machine comes from the live follow resolver, not a value pinned at
 // construction: the traveling sidebar is swapped between master windows by a tmux hook,
 // so the window it sits in — and therefore the machine to ask — changes underneath it.
 func (m Model) resolveMasterTrack() tea.Cmd {
-	c, origin, resolve := m.client, m.machine, m.followResolver
+	c, origin, resolve, epoch := m.client, m.machine, m.followResolver, m.masterTrackEpoch
 	return func() tea.Msg {
 		if resolve == nil || c == nil {
 			return masterCursorMsg{}
@@ -145,7 +173,7 @@ func (m Model) resolveMasterTrack() tea.Cmd {
 		if err != nil {
 			return masterCursorMsg{} // a failed resolve is not "the cockpit shows nothing"
 		}
-		return masterCursorMsg{id: tid, ok: true}
+		return masterCursorMsg{id: tid, ok: true, epoch: epoch}
 	}
 }
 

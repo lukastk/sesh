@@ -37,6 +37,7 @@ var declaredTUIClaims = []string{
 	"action-nav-quits",          // a SUCCESSFUL nav quits the TUI (popup closes); a FAILED nav stays open with the error
 	"sidebar-nav-stays",         // --sidebar (issue #8): a SUCCESSFUL nav really lands on the master server AND the TUI stays open (persistent pane)
 	"sidebar-tracks-cockpit",    // --sidebar: a nav made from the COCKPIT side rings the nav bell and really moves the sidebar cursor onto that thread
+	"sidebar-arrow-no-revert",   // --sidebar: arrowing past a follow in flight must NOT let the cockpit tracker drag the cursor back onto a thread the sidebar just navved through (pocket4 jank)
 	"action-nav-in-client",      // Enter on a LOCAL thread from the work socket switches EXACTLY this TUI's client (--client), with multiple clients attached
 	"action-nav-remote-dead",    // Enter on a DEAD thread on ANOTHER machine resumes it THERE (routed over the mesh) and enters it
 	"quit-esc",                  // Esc quits from normal mode; inside the line prompt it only closes the prompt
@@ -142,6 +143,7 @@ func init() {
 	registerTUIClaim("action-nav-quits", claimActionNavQuits)
 	registerTUIClaim("sidebar-nav-stays", claimSidebarNavStays)
 	registerTUIClaim("sidebar-tracks-cockpit", claimSidebarTracksCockpit)
+	registerTUIClaim("sidebar-arrow-no-revert", claimSidebarArrowNoRevert)
 	registerTUIClaim("action-nav-in-client", claimActionNavInClient)
 	registerTUIClaim("action-nav-remote-dead", claimActionNavRemoteDead)
 	registerTUIClaim("shells-view", claimShellsView)

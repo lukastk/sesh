@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1166,8 +1167,13 @@ func firstLine(s string) string { return strings.SplitN(s, "\n", 2)[0] }
 // claimUUIDPopupCopy: `y` opens a popup showing the selected thread's FULL real
 // uuid; `c` inside it pipes that uuid through the real clipboard exec path. The
 // system clipboard itself is unreachable on a headless box, so the observable
-// boundary is a PATH-stubbed wl-copy capturing stdin — the TUI's entire copy path
-// (selection -> popup -> exec -> stdin) runs for real.
+// boundary is a PATH-stubbed clipboard tool capturing stdin — the TUI's entire copy
+// path (selection -> popup -> exec -> stdin) runs for real. The stub is installed
+// under EVERY platform's tool name (pbcopy / wl-copy / termux-clipboard-set), so the
+// claim exercises whichever one this platform selects rather than silently
+// assuming Wayland. Like the real wl-copy and xclip, it leaves a child running that
+// holds its stdio: the copy must still complete (ticket b7da691e — the old exec
+// path blocked on that child and froze the TUI).
 func claimUUIDPopupCopy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
@@ -1178,11 +1184,22 @@ func claimUUIDPopupCopy(t *testing.T) {
 
 	stub := t.TempDir()
 	captured := filepath.Join(stub, "captured")
-	script := "#!/bin/sh\ncat > " + captured + "\n"
-	if err := os.WriteFile(filepath.Join(stub, "wl-copy"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	childPid := filepath.Join(stub, "child.pid")
+	script := "#!/bin/sh\ncat > " + captured + "\nsleep 30 &\necho $! > " + childPid + "\n"
+	for _, tool := range []string{"pbcopy", "wl-copy", "termux-clipboard-set"} {
+		if err := os.WriteFile(filepath.Join(stub, tool), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
+	t.Cleanup(func() {
+		if b, err := os.ReadFile(childPid); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
 	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("WAYLAND_DISPLAY", "stub") // a display is present: no session-env lookup
 
 	m := tui.New(sb.Home+"/daemon.sock", false)
 	m, _ = renderUntilRow(t, m, "yankme")
@@ -1192,13 +1209,22 @@ func claimUUIDPopupCopy(t *testing.T) {
 	if !strings.Contains(view, th.ID) {
 		t.Fatalf("uuid popup does not show the FULL real uuid %s:\n%s", th.ID, view)
 	}
-	m = runKey(t, m, "c")
+	copied := make(chan tui.Model, 1)
+	go func() { copied <- runKey(t, m, "c") }()
+	select {
+	case m = <-copied:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("c never completed: the copy is blocked on the child the clipboard tool left running")
+	}
 	got, err := os.ReadFile(captured)
 	if err != nil {
 		t.Fatalf("clipboard tool was never invoked: %v", err)
 	}
 	if strings.TrimSpace(string(got)) != th.ID {
 		t.Errorf("clipboard received %q, want the full uuid %q", strings.TrimSpace(string(got)), th.ID)
+	}
+	if view := m.View(); !strings.Contains(view, "UUID copied to clipboard") {
+		t.Errorf("no copy confirmation after c:\n%s", view)
 	}
 	if strings.Contains(m.View(), th.ID+" ┃") {
 		t.Errorf("popup still open after c")

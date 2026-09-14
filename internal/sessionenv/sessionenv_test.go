@@ -1,4 +1,4 @@
-package daemon
+package sessionenv
 
 import "testing"
 
@@ -21,9 +21,9 @@ func TestParseSessionEnv(t *testing.T) {
 		"UWSM_FINALIZE_VARNAMES=$'HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD XCURSOR_SIZE'\n" +
 		"LANG=C.UTF-8\n"
 
-	env := parseSessionEnv(out)
+	env := Parse(out)
 	if env == nil {
-		t.Fatal("parseSessionEnv returned nil for populated manager env")
+		t.Fatal("Parse returned nil for populated manager env")
 	}
 	want := map[string]string{
 		"WAYLAND_DISPLAY":             "wayland-1",
@@ -48,7 +48,7 @@ func TestParseSessionEnv(t *testing.T) {
 
 // TestParseSessionEnvEmpty proves the graceful no-op path: a manager env with
 // no session vars (headless server, pre-login) yields nil, not an empty map —
-// so spawnEnv injects nothing and behaves as before.
+// so callers inject nothing and behaves as before.
 func TestParseSessionEnvEmpty(t *testing.T) {
 	for _, out := range []string{
 		"",
@@ -56,8 +56,8 @@ func TestParseSessionEnvEmpty(t *testing.T) {
 		"HOME=/home/lukastk\nLANG=C.UTF-8\nPATH=/usr/bin\n",
 		"WAYLAND_DISPLAY=\n", // empty value must not be injected
 	} {
-		if env := parseSessionEnv(out); env != nil {
-			t.Errorf("parseSessionEnv(%q) = %v, want nil", out, env)
+		if env := Parse(out); env != nil {
+			t.Errorf("Parse(%q) = %v, want nil", out, env)
 		}
 	}
 }

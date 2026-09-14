@@ -44,7 +44,13 @@ same holds for the other selectors that default to "everything"/"the current thr
 (`backup`/`restore --id`, `hooks test --thread`). `delete` and `stop` go further still —
 being destructive, they **never** infer at all (an omitted `--id` is also an error), so
 they always need an explicit `--id`. The TUI shows the short 8-char form (`i` toggles the
-ID column; `y` shows the full UUID, `c` copies it).
+ID column; `y` shows the full UUID, `c` copies it). The copy goes to the clipboard of the
+machine the TUI is **running on** — `pbcopy` on macOS, `wl-copy`/`xclip`/`xsel` on Linux,
+`termux-clipboard-set` on termux (needs `pkg install termux-api` *and* the Termux:API
+Android app). So a TUI opened in a cockpit window for a REMOTE machine copies to that
+machine's clipboard, not yours. A TUI with no display in its env (a work-server popup)
+takes the graphical session env from the systemd user manager; a failed copy is a loud
+`✗` line naming the tool's own error.
 
 ## Am I really this thread? (provenance)
 

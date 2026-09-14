@@ -1464,6 +1464,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.fetch(), reconcileAfter(postActionReconcileDelay))
 		}
 		return m, m.fetch() // reconcile against the daemon
+	case clipboardDoneMsg:
+		// An action error, not lastErr: lastErr reads "daemon unreachable" and the
+		// next fetch clears it, which would both mislabel and erase the failure.
+		if msg.err != nil {
+			m.note = ""
+			m.actionErr = fmt.Errorf("copy %s: %w", strings.ToLower(msg.what), msg.err)
+		} else {
+			m.actionErr = nil
+			m.note = msg.what + " copied to clipboard"
+		}
+		return m, nil
 	case pinDoneMsg:
 		// The optimistic pin patch is already applied (instant feel). Success
 		// re-stamps its deadline from confirmation; a failure surfaces loudly,
@@ -2595,16 +2606,13 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleUUIDKey: inside the uuid popup, `c` copies the full uuid to the system
-// clipboard (failure is a LOUD error in the error line); any key closes the popup.
+// clipboard (off the Update loop — see clipboard.go; failure is a LOUD action
+// error); any key closes the popup.
 func (m Model) handleUUIDKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.uuidPopup = false
 	if msg.String() == "c" {
 		if row, ok := m.Selected(); ok {
-			if err := copyToClipboard(row.ID); err != nil {
-				m.lastErr = fmt.Errorf("copy uuid: %w", err)
-			} else {
-				m.note = "UUID copied to clipboard"
-			}
+			return m, copyToClipboardCmd(row.ID, "UUID")
 		}
 	}
 	return m, nil

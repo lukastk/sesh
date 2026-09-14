@@ -224,8 +224,11 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   the conversation. `--cwd` at realize defaults to the cwd stored at creation (creation
   cwd is optional; one is required by realize time).
 - **Tickets** are work items (a name + a prompt) optionally bound to a thread (`needs-input`
-  derives from the thread's axes). Single-owner: every ticket command auto-routes to the
-  configured ticket owner. CLI:
+  derives from the thread's axes). Tickets are **per-daemon**: a ticket lives on the machine of
+  its bound thread (or where it was created), and ticket commands act on the local daemon, or
+  on `--machine <m>`. `SESH_TICKET_OWNER`, if set, instead routes every ticket command to one
+  owner machine — it is **unset** on Lukas's fleet. To find a ticket whose machine you don't
+  know, use `ticket find`. CLI:
 
   ```bash
   sesh ticket create --name <name> [--prompt <text>]      # starts in triage
@@ -906,7 +909,8 @@ cwd+time rollout guess that could land on a same-cwd sibling's conversation).
 **Flags (`sesh thread flag`).** The flag is the "look at this thread" marker:
 the daemon auto-flags when a turn ends or the agent stalls on a question /
 approval prompt (claude's AskUserQuestion flags with the question as the
-reason) while the session is unattended; nothing ever auto-clears a flag.
+reason) — attended or not (no attended gate since 2026-07-25); nothing ever
+auto-clears a flag.
 `thread flag --off` clears; `--disable` suppresses auto-flagging for a thread
 (parent-monitored children; also clears any current flag); `--enable`
 re-allows it; `--on` flags manually AND re-enables a disabled thread (one
@@ -1062,7 +1066,7 @@ asked), and `SESH_STATE_AUTHORITY` (`reported`/`heuristic` — which mechanism
 decided busy; absent when unknown). The event vocabulary includes
 `flag_changed` (from/to `flagged`/`unflagged`) — to=flagged is THE toast
 edge: the daemon flags exactly when a turn ends or the agent stalls on a
-question/approval while nobody watches (and on manual flags). The activity/flip ages exist because a HEURISTIC busy→idle edge alone
+question/approval (attended or not), and on manual flags. The activity/flip ages exist because a HEURISTIC busy→idle edge alone
 can't tell a finished turn from the user pausing: typing into a pane or
 navigating onto it latches the content-diff busy probe like agent output
 would, while raw attachment over-suppresses (cockpit clients park on

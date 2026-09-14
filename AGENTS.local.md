@@ -37,8 +37,8 @@ sidebar-like env AND a display-stripped env both put the popup's uuid into the r
 saved and restored (its rich HTML flavour was not). termux: the TUI reported "UUID copied" (tool exit
 0), but **read-back is NOT observed** — `termux-clipboard-get` over ssh returns empty because Android
 blocks clipboard reads from a background app, adb has no `cmd clipboard`, and the phone was awake in
-Obsidian so I did not steal focus. Lukas to confirm by pasting on the phone. That smoke OVERWROTE the
-phone's clipboard (unreadable, so unsaveable).
+Obsidian so I did not steal focus. **Lukas then CONFIRMED it works on both termux and pocket4 in real use
+(2026-09-14).** That smoke OVERWROTE the phone's clipboard (unreadable, so unsaveable).
 **MY MISTAKE, recorded so it isn't repeated:** after an anti-gaming run I ran `pkill -f "^sleep 30$"`
 — the H101 trap. The test's cleanup had already killed its own child, so anything it matched belonged
 to someone else's polling loop. Kill test children by recorded pid only (the tests now do).

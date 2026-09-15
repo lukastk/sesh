@@ -228,14 +228,24 @@ mymain stores (zero mismatches). Full matrix on the branch: 248/253, the 5 reds 
 pre-existing (4 codex cells failing identically on the base commit under codex 0.151.0
 — its headed-TUI sessions no longer resume, ticketed; 1 load flake passing serially).
 
-## 8. Memory context (2026-09-15)
+## 8. Memory context (2026-09-15, corrected the same day)
 
-The foldable-phone-research thread measured the phone's memory (AGENTS.local.md H108): the
-whole Termux uid — daemon, cockpit, sshd and shells — is **193 MB** (112 MB resident + 81 MB
-in zRAM) against ~10.2 GiB of anonymous memory held by other apps on an 11.3 GiB device with
-zRAM 99 % full. The daemon's 15.9 MB RSS (27 MB PSS by `dumpsys meminfo` the same afternoon,
-against 93 cached app processes holding 4.8 GB) is ~2 % of the pressure, so the view's O(total) RAM
-noted under C2 is not a phone problem at any realistic archive size: the RAM-O(live)
-follow-up (BACKLOG #6) stays triggered by TUI poll cost and mesh size, never by phone memory.
-The recurring Termux deaths seen around the deploys are lmkd victims of that external
-pressure, not a sesh cost, and nothing inside the Termux uid can self-heal a uid kill (H108).
+First reading (AGENTS.local.md H108): every Termux-side measurement put the whole Termux uid
+at 193 MB against ~10 GiB held by other apps, and this section said the daemon was ~2 % of
+the pressure. **That was wrong.** Through adb, the Termux uid was holding **~2,000 leaked
+`ssh-agent` processes — ~1.9 GB of real RAM at oom_score_adj 0** — invisible from inside
+Termux because OpenSSH marks the agent non-dumpable and Android's `/proc` then hides it even
+from its own uid (H108 follow-up 3). The chain runs through this design's territory: termux's
+zshenv launches the daemon before its ssh-agent block; the daemon creates the work tmux
+server (H85, by design), so the server's global env has no `SSH_AUTH_SOCK`; and myrig's
+work-server status row `#(zsh -lc 'sesh-current-status …')` — measured at ~1 spawn/s per
+attached client on both the phone and mymain, not once per `status-interval` — started a
+fresh agent on every run and never stopped it. The permanent fix is myrig's (one agent per
+phone, started before the daemon; Lukas deciding). The sesh-side lever is to stop forking a
+login shell per status redraw at all — BACKLOG #7.
+
+What survives the correction: the daemon itself IS small (27 MB PSS), the CPU results in §7
+stand, and the view's O(total) RAM under C2 is still not a phone problem at any realistic
+archive size — BACKLOG #6 stays triggered by TUI poll cost and mesh size. What does not:
+"victim, not cause" — Termux was a ~1.9 GB cause, and the uid-wide Termux deaths were partly
+its own pressure. Nothing inside the uid can self-heal a uid kill either way (H108).

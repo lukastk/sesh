@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H108 — PHONE MEMORY, MEASURED BY THE foldable-phone-research THREAD: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (2026-09-15; NO code change — record only; termux sshd DOWN at the time of writing)
+## H108 — PHONE MEMORY (2026-09-15; record only, NO code change). **THE HEADLINE BELOW WAS WRONG — READ FOLLOW-UP 3 FIRST:** the "193 MB, ~2 %, victim not cause" reading missed ~2,000 leaked ssh-agents (~1.9 GB) that are invisible from inside Termux. Original title: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (termux sshd DOWN at the time of writing)
 Cross-thread finding, relayed at Lukas's request ("read it and factor it into the termux work"). Source:
 `~/dev/20260829_p58ayx__foldable-phone-research/phone-memory-findings-2026-09-15.md`, measured over ssh
 on the phone that afternoon. Summing VmRSS+VmSwap over every Termux-uid process (37: the daemon, the
@@ -117,6 +117,71 @@ Same findings file, new "Update" section. What it settles and corrects here:
   process does, and the app's oom bucket — foreground while open, perceptible via the wake-lock
   foreground service when backgrounded — is the only knob. It is a phone knob, not a sesh one, and
   under this morning's pressure lmkd reaches the perceptible tier anyway.
+
+### H108 follow-up 3 — CORRECTION: Termux WAS a cause — ~2,000 leaked ssh-agents (~1.9 GB at oom_score_adj 0), invisible from inside Termux; root cause = the work server's status-line login shell meeting termux.sh's per-shell agent start (2026-09-15 evening; relayed by Lukas; NO code change — termux.sh deliberately NOT edited, Lukas is deciding the permanent fix)
+The foldable thread's "Update 2"/"Update 3" in the same file. Everything in H108 that rested on
+Termux-side process counts was blind to this, and so were H83/H84/H99's counts. Re-verified here where
+I could without touching the phone's state; the rest is cited.
+- **What was found (adb `dumpsys meminfo`, Native bucket grouped by name):** 1,591 → 1,973
+  `ssh-agent` processes over a few minutes (+52/min), all uid 10440 (Termux), PPid 1,
+  `oom_score_adj 0`, cpuset `/foreground`. Killing 2,097 at once freed **MemAvailable +1,875 MB,
+  SwapFree +2,393 MB, PageTables −382 MB** — ~0.9 MB of real RAM per agent, much of it kernel. At
+  adj 0 and unmanaged by AMS they were among the LAST things lmkd would touch: it evicted every
+  cached app, then services, then visible apps — Obsidian included — before them.
+- **Why every Termux-side measurement missed them:** OpenSSH marks `ssh-agent` non-dumpable to
+  protect keys, and Android's `/proc` (hidepid) then hides a non-dumpable process from other
+  processes EVEN OF THE SAME UID: `pgrep -x ssh-agent` → 0, `/proc/<pid>` "No such file", adb shell
+  gets EPERM on their environ. So the 193 MB, the "37 processes", the +11 min "36 processes", and
+  plausibly H83's 12/39/45 and H84's censuses all excluded them. Digested as a trap below.
+- **Root cause chain — the other thread verified it, and I re-read both myrig files: it is exactly
+  as stated.** (1) `home/.myrig/zshenv/^termux^termux.sh:79-82` runs `eval "$(ssh-agent -s)"` in
+  EVERY zsh lacking `SSH_AUTH_SOCK`, non-interactive included, and the agent outlives the shell.
+  (2) The same file launches the sesh daemon at lines 70-77, BEFORE that block, so the daemon has no
+  `SSH_AUTH_SOCK`; the daemon is the sole work-server creator (H85, by design), so the work tmux
+  server's GLOBAL env has none either (`show-environment -g SSH_AUTH_SOCK` → unknown variable), and
+  tmux runs `#()` status jobs with the global env. (3) myrig's `tmux.work.conf:29` status row is
+  `#(zsh -lc 'sesh-current-status #{pane_id} #{socket_path}')` — a login zsh that sources termux.sh,
+  sees no agent, starts one, exits. (4) Every non-interactive `ssh-target termux '…'` leaks one too:
+  my SIX ssh probes today each did (`~/.ssh/agent/` socket files 246 → 248 across the last two,
+  exactly as predicted). History per the other thread: the status job since 146bb6e (2026-06-11), the
+  daemon-in-zshenv since a94af90 (same day), the agent block older — the leak has run whenever the
+  cockpit was attached, since June. That spans H83/H84/H99: **part of the "swap pinned at 96–100 %"
+  those entries blamed on other apps was this.** Causation proven by the other thread's stopgap: a
+  fixed agent set as the work server's global `SSH_AUTH_SOCK` stopped the growth (socket count +2 in
+  60 s, both from its own measuring ssh calls).
+- **THE CADENCE IS REAL, FLEET-WIDE, AND CORRECTS H98 follow-up**, which recorded the status row as
+  "re-run only on the 15 s status-interval beat". Measured today, 0.1 s sampling of `zsh -lc …
+  sesh-current-status` children, `status-interval` at its default 15 on both servers: **phone (tmux
+  3.7c, 1 client): 22 distinct spawns in 20 s; mymain (tmux 3.6b, 4 clients): 12 in 20 s** (a 0.5 s
+  sampler on mymain saw only 2 — the shells live ~200 ms there; sample fast). About one login zsh per
+  second per attached client, each sourcing all of myrig's shell.sh (~0.9 s wall on the phone — H99's
+  1.8 % CPU figure assumed a 15 s cadence and is an underestimate). WHY tmux re-runs a `#()` far below
+  `status-interval` I did not establish; it is measured, not explained.
+- **Fleet check for the same class (read-only):** myrig starts an agent in exactly two places —
+  termux.sh:81 (this leak) and `scripts/post/all.sh:20` at install time, guarded by `ssh-add -l`
+  rc 2 (no reachable agent) but never stopped afterwards. Live counts: mymain 1 (`ssh-agent -D`, the
+  40-day systemd one), macstudio 1 (launchd, 23 d), macbook 1 (launchd), pocket4 ≤ 1, **ideapad ~9,
+  oldest 16 d, all `ssh-agent -s`** — the install-time one accumulating about once per unattended
+  reinstall (its CI runner reinstalls), ~1 MB each: a myrig footnote, not a problem. The per-shell
+  class is termux-only.
+- **Phone state at my last probe (~18:40 UTC):** stopgap live (`SSH_AUTH_SOCK=~/.ssh/agent-fixed.sock`
+  in the work server's global env; daemon pid 12114, restarted again ~76 min earlier by the other
+  thread's `am kill-all`, stopgap re-applied after it); ~240 pre-stopgap agents still alive (listing
+  them needs adb, killing them needs the Termux uid); `ssh-target termux` still leaks one per call.
+  **NOT done here, deliberately: no edit to termux.sh, no agents killed, stopgap untouched** — Lukas is
+  choosing between the file's proposed fix (one agent per phone at a fixed socket, fork-free liveness
+  check, placed BEFORE the daemon launch) and dropping the agent on the phone entirely (the key has no
+  passphrase; costs `ForwardAgent`).
+- **What in H108 survives, what falls.** Survives: the daemon itself is small (27 MB PSS / 15.9 MB
+  RSS), the H99/H102 CPU results, "nothing inside the uid can self-heal a uid kill", the
+  phantom-killer closure, the boot-time arithmetic, and BACKLOG #6's memory-is-not-a-trigger (the
+  leak is not the view's RAM). Falls: "193 MB / ~2 % / victim, not cause" — Termux held ~1.9 GB,
+  self-inflicted, and the uid-wide deaths were partly its own pressure. Title amended above;
+  MESH_SCALE.md §8 rewritten; H99's "NOT sesh's fault" sentence carries a pointer.
+- **The sesh-side item this leaves:** the leak's fix is myrig's, but a login shell forked per status
+  redraw is a mechanism cost sesh can remove for good — a daemon-maintained pane option
+  (`#{@sesh_status}`, zero forks) or at least `#(sesh tmux status …)` (one exec, no shell). Designed
+  as BACKLOG #7, not built. Nothing else to do here until Lukas decides the termux.sh side.
 
 ## H107 — the uuid popup's COPY (`y`, then `c`) worked on macOS only: termux is GOOS=android, wl-copy's forked child held the exec PIPE (TUI freeze), popups have no display env (2026-09-14, sesh 060ee4c; NO schema/API change; BINARY-ONLY, DEPLOYED ALL SIX)
 Ticket b7da691e. (Lukas corrected my first read: the key is `y` for the popup, `c` inside it copies.)
@@ -719,9 +784,12 @@ tick = 14.7 % of a core, 7.3 MB/s of garbage.** mymain's snapshot alone is 1.38 
 1,763 archived**. With the TUI open the daemon doubled to 32 % and wrote **88 KB/s to flash**: at
 active cadence every delta round re-marshaled the whole working set and rewrote the 1.4 MB blob.
 Everything else was small: the maintainer's zero-thread early-out works; `sesh-current-status`
-(a `zsh -lc`, ~0.9 s wall every 15 s) ~1.8 %; tmux servers ~1 %; the cockpit's 5 ssh links ~0.
+(a `zsh -lc`, ~0.9 s wall every 15 s) ~1.8 % [CORRECTED 2026-09-15, H108 follow-up 3: it runs about
+once per SECOND per attached client, not per 15 s, and on termux every run leaked an ssh-agent]; tmux servers ~1 %; the cockpit's 5 ssh links ~0.
 Fleet-wide, not phone-specific: macbook (hooks-pinned, full 1 s cadence) 6.6 % on battery, ideapad
-3.1 %. NOT sesh's fault: the phone is memory-starved (swap 96–98 % used) — that is system_server +
+3.1 %. NOT sesh's fault: the phone is memory-starved (swap 96–98 % used) [CORRECTED 2026-09-15, H108
+follow-up 3: ~1.9 GB of that was ~2,000 leaked ssh-agents under the Termux uid, invisible from inside
+Termux, fed by the cockpit's own status line] — that is system_server +
 kswapd, the load average of 4–8. **Also confirmed en route: H84's phantom-killer setting SURVIVED
 A REBOOT** (`max_phantom_processes=2147483647` at 17h46m uptime) — that open item is closed.
 
@@ -4682,6 +4750,12 @@ still resolve.
   ~/.local/bin/sesh daemon run` with SESH_HOME=~/.sesh SESH_MACHINE=termux sockets
   sesh/sesh-master. /tmp is unwritable (log to $HOME); termux is an inbound-less leaf (no
   SESH_API_ADDR / token).
+- **Android hides non-dumpable processes from their own uid** (H108 follow-up 3) — OpenSSH marks
+  `ssh-agent` non-dumpable and Android's `/proc` (hidepid) then hides it from every Termux-side
+  `ps`/`pgrep`/`/proc` walk; only adb (`dumpsys meminfo`) sees them. Every Termux-side process
+  count or RSS sum (H83, H84, H99, H108's "193 MB") is blind to that class. Also: until the myrig
+  fix lands, every non-interactive `ssh-target termux '…'` runs termux's zshenv and leaks one
+  ssh-agent (~0.9 MB) — count your probes.
 - **THE WHICH-CLIENT LAW** — tmux cannot map a popup/pane/subprocess pty back to the
   client that triggered it; `display-message -p '#{client_name}'` there is an AMBIENT
   guess. Resolve the client via a BINDING's own `#{client_name}` carrier (baked into

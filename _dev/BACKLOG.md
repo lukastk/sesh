@@ -198,8 +198,41 @@ O(total) is the LAST hop and the in-memory copies:
 Trigger for building it: the TUI on the phone measurably paying for the full-set poll
 (the A/B left the daemon at 3.2 % of a core with a TUI-shaped poll; the CLIENT's own
 decode is now the larger half), or the mesh passing ~10k threads. Phone MEMORY is not a
-trigger: measured 2026-09-15, the whole Termux uid is ~2 % of the phone's pressure
-(H108, MESH_SCALE.md §8). Matrix: a
+trigger for THIS item: the phone's Termux-side memory problem turned out to be leaked
+ssh-agents from the status line (item 7 below), not the daemon's RAM, which is ~27 MB PSS
+(H108 follow-up 3, MESH_SCALE.md §8). Matrix: a
 `mesh.client-delta` cell over the counting proxy (the `mesh.delta-sync.http` pattern)
 + a scale-guard cell seeding thousands of archived virtual records and asserting the
 work counters (`sweptThreads`, `rowsWritten`) stay O(live/Δ).
+
+## 7. Work-server status line without a login shell per redraw (designed 2026-09-15 from the termux ssh-agent leak, NOT built)
+
+Today the work server's top status row is `#(zsh -lc 'sesh-current-status #{pane_id}
+#{socket_path}')` (myrig `tmux.work.conf`). Measured 2026-09-15 with 0.1 s sampling and
+`status-interval` at its default 15: tmux spawns that job **about once per second per
+attached client** (phone, 1 client: 22 in 20 s; mymain, 4 clients: 12 in 20 s), not once
+per interval — each spawn a login zsh sourcing all of myrig's shell.sh (~0.9 s wall on the
+phone, H99). On termux that fork is what leaked ~2,000 ssh-agents (H108 follow-up 3);
+everywhere it is constant CPU, page-table and battery churn for a line that changes on
+human timescales. Why tmux re-runs the job that often is not established — measured only.
+
+Two shapes, both sesh mechanism with myrig keeping the rendering policy:
+
+- **Daemon-maintained pane option (preferred).** The maintainer already resolves every
+  marked pane's thread and state per tick (`refreshThread`); on change it sets user
+  options on the pane — the raw fields (`@sesh_thread_name`, `@sesh_flagged`, …) for
+  myrig to format, or one rendered `@sesh_status` — and the conf reads `#{@sesh_status}`:
+  a format lookup, zero forks. Unmarked panes carry nothing (the row goes blank, as it
+  does today for a non-thread pane). Cost: one `set-option -p` per state change per marked
+  pane, sent on the batched command list the maintainer already issues (H102's
+  `CapturePanes`). A stale option after a daemon restart is a real edge: clear or rewrite
+  every marked pane's options on the first full sweep.
+- **A Go subcommand instead of a shell (fallback).** `#(sesh tmux status #{pane_id}
+  #{socket_path})`: one exec of the binary, no shell startup, no zshenv side effects — the
+  smaller change, still ~1 fork/s per client.
+
+Either way the myrig status conf changes in the same deploy. Matrix: a `tmux.status-line`
+claim asserting the rendered row for a real marked pane over a real work server (local and
+via the real ssh hop), plus a counter proving zero status-job spawns across N forced
+redraws. Trigger: as soon as the termux agent fix has landed — the leak is the urgent half,
+this is the durable half.

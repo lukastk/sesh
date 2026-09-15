@@ -1,5 +1,56 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H108 — PHONE MEMORY, MEASURED BY THE foldable-phone-research THREAD: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (2026-09-15; NO code change — record only; termux sshd DOWN at the time of writing)
+Cross-thread finding, relayed at Lukas's request ("read it and factor it into the termux work"). Source:
+`~/dev/20260829_p58ayx__foldable-phone-research/phone-memory-findings-2026-09-15.md`, measured over ssh
+on the phone that afternoon. Summing VmRSS+VmSwap over every Termux-uid process (37: the daemon, the
+full cockpit, sshd sessions, shells): **112 MB resident + 81 MB swapped = 193 MB**. Largest single
+process `sesh daemon run` at **15.9 MB RSS** (H102 read 45 MB two weeks earlier — the difference is what
+zRAM has since swapped out, not a regression); each `sesh master window` ~3.4 MB. System-wide: 11.3 GiB
+total, MemAvailable 681 MiB, SwapTotal = exactly MemTotal/2 (the zRAM fingerprint — `/proc/swaps` is
+permission-denied from Termux, the ratio is the evidence) at **99 % full**: ~10.2 GiB of anonymous
+memory held by OTHER apps (4.63 GiB resident + 5.58 GiB compressed), 845 MiB of page tables = a very
+large cached-process population. Termux is ~2 % of that.
+
+**WHAT IT SETTLES FOR THIS BOX.** H99 drew the boundary "NOT sesh's fault: the phone is memory-starved"
+from swap at 96–98 %; this quantifies it. (1) The CPU side is done (0.7 % idle, H99/H102) and there is
+no memory lever left in sesh worth pulling FOR THE PHONE: even Stage D's serve-from-rows (BACKLOG #6)
+trims at most a 15.9 MB RSS on a device short by gigabytes. Phone memory is therefore NOT a trigger for
+Stage D — its triggers stay the TUI poll cost and mesh size (noted in BACKLOG #6 and MESH_SCALE.md §8).
+(2) The intermittent Termux deaths recorded across this work — the H99 A/B daemon death, the
+post-deploy sshd+daemon death in H102, termux unreachable for H106's deploy on 09-14, and again TODAY
+(`android-main` answers a tailscale ping in 70 ms, direct path, but 8022 and 7878 both REFUSE — the uid
+died sometime after the other thread's ssh measurements the same afternoon) — are consistent with lmkd
+killing the Termux app under pressure created elsewhere, Android reaping its tracked children with it.
+TWO DEATH SIGNATURES are now on record and they discriminate: H83's phantom-cap cull took the COCKPIT
+cohort and SPARED the setsid-detached daemon/sshd/crond; the H102 and today's deaths took sshd too, i.e.
+the whole uid — the lmkd shape, which H84's cap bump cannot prevent and a wake lock does not touch.
+(3) NOTHING INSIDE THE UID CAN SELF-HEAL A UID KILL. The relaunch paths are the login guard
+(`myrig home/.myrig/zshenv/^termux^termux.sh`: starts sshd, crond and the daemon on every zsh startup)
+and Termux:Boot (`home/^termux^.termux/boot/start-sshd`: wake lock, termux-api-start, sshd — it does
+NOT start the daemon); after a uid kill only opening a Termux session or a reboot reaches either, since
+sshd is among the dead. So the guard stays the right mechanism. A cron guard (cronie is provisioned and
+crond started by that zshenv) would cover only a DAEMON-ONLY death — one is on record, the H99 A/B, when
+the OLD binary sat at 15 % of a core (a plausible background-CPU phantom kill; at 0.7 % it is not) —
+unverified either way, NOT built, Lukas's call. (4) Because sshd is down I could NOT read today's daemon
+etime, `oom_score_adj` or `~/.myrig/logs/sesh-daemon.log`; every number above is the other thread's,
+cited, not re-measured.
+
+**CORRECTIONS THAT FLOW BACK TO THE OTHER THREAD.** (a) Its "the phantom cap's effective state is still
+unconfirmed": H84 raised `max_phantom_processes` to 2^31-1 via adb `device_config` (the allowlist-blocked
+`settings_enable_monitor_phantom_procs` toggle is NOT what the fix relies on), and H99 re-read that value
+after a reboot on 2026-08-29 at 17h46m uptime — settled on the Android 16 build. What IS open: the file
+reports the phone on **Android 17** now, and an OTA can reset device_config overrides. Behaviourally the
+cap is not biting (37 processes alive today, 66 on 08-29, both above 32 with no cull), but the honest
+check is `adb shell dumpsys activity settings | grep phantom` once wireless debugging is on, and H84's
+three adb lines are the re-apply. (b) Its own correction is right and worth keeping here: deviceidle
+whitelist and `SYSTEM_EXEMPT_FROM_POWER_RESTRICTIONS` exempt from POWER management only and do not move
+`oom_score_adj` — no protection from lmkd. Termux read adj 0/50 in H83/H84 (foreground/perceptible
+class), as good as a non-foreground app gets; at 99 % zRAM lmkd reaches that class. (c) What would
+actually help the phone is per-app attribution (`dumpsys meminfo` by process / by OOM adjustment) —
+blocked on wireless debugging being OFF (`service.adb.tls.port` empty) and Shizuku not started. That is
+the other thread's track; sesh has no part in it.
+
 ## H107 — the uuid popup's COPY (`y`, then `c`) worked on macOS only: termux is GOOS=android, wl-copy's forked child held the exec PIPE (TUI freeze), popups have no display env (2026-09-14, sesh 060ee4c; NO schema/API change; BINARY-ONLY, DEPLOYED ALL SIX)
 Ticket b7da691e. (Lukas corrected my first read: the key is `y` for the popup, `c` inside it copies.)
 THREE INDEPENDENT DEFECTS, each reproduced on the real box before touching code:

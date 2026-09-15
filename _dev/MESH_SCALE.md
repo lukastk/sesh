@@ -227,3 +227,14 @@ comparison. Migration rehearsed row-for-row against copies of the real termux an
 mymain stores (zero mismatches). Full matrix on the branch: 248/253, the 5 reds all
 pre-existing (4 codex cells failing identically on the base commit under codex 0.151.0
 — its headed-TUI sessions no longer resume, ticketed; 1 load flake passing serially).
+
+## 8. Memory context (2026-09-15)
+
+The foldable-phone-research thread measured the phone's memory (AGENTS.local.md H108): the
+whole Termux uid — daemon, cockpit, sshd and shells — is **193 MB** (112 MB resident + 81 MB
+in zRAM) against ~10.2 GiB of anonymous memory held by other apps on an 11.3 GiB device with
+zRAM 99 % full. The daemon's 15.9 MB RSS is ~2 % of the pressure, so the view's O(total) RAM
+noted under C2 is not a phone problem at any realistic archive size: the RAM-O(live)
+follow-up (BACKLOG #6) stays triggered by TUI poll cost and mesh size, never by phone memory.
+The recurring Termux deaths seen around the deploys are lmkd victims of that external
+pressure, not a sesh cost, and nothing inside the Termux uid can self-heal a uid kill (H108).

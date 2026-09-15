@@ -197,7 +197,9 @@ O(total) is the LAST hop and the in-memory copies:
 
 Trigger for building it: the TUI on the phone measurably paying for the full-set poll
 (the A/B left the daemon at 3.2 % of a core with a TUI-shaped poll; the CLIENT's own
-decode is now the larger half), or the mesh passing ~10k threads. Matrix: a
+decode is now the larger half), or the mesh passing ~10k threads. Phone MEMORY is not a
+trigger: measured 2026-09-15, the whole Termux uid is ~2 % of the phone's pressure
+(H108, MESH_SCALE.md §8). Matrix: a
 `mesh.client-delta` cell over the counting proxy (the `mesh.delta-sync.http` pattern)
 + a scale-guard cell seeding thousands of archived virtual records and asserting the
 work counters (`sweptThreads`, `rowsWritten`) stay O(live/Δ).

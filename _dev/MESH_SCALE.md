@@ -233,7 +233,8 @@ pre-existing (4 codex cells failing identically on the base commit under codex 0
 The foldable-phone-research thread measured the phone's memory (AGENTS.local.md H108): the
 whole Termux uid — daemon, cockpit, sshd and shells — is **193 MB** (112 MB resident + 81 MB
 in zRAM) against ~10.2 GiB of anonymous memory held by other apps on an 11.3 GiB device with
-zRAM 99 % full. The daemon's 15.9 MB RSS is ~2 % of the pressure, so the view's O(total) RAM
+zRAM 99 % full. The daemon's 15.9 MB RSS (27 MB PSS by `dumpsys meminfo` the same afternoon,
+against 93 cached app processes holding 4.8 GB) is ~2 % of the pressure, so the view's O(total) RAM
 noted under C2 is not a phone problem at any realistic archive size: the RAM-O(live)
 follow-up (BACKLOG #6) stays triggered by TUI poll cost and mesh size, never by phone memory.
 The recurring Termux deaths seen around the deploys are lmkd victims of that external

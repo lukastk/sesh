@@ -67,8 +67,9 @@ Lukas: "sshd is now up." Read-only probe over ssh (a script piped to `zsh -s`; n
   server and every master window — the foreground class H83 saw; expect 50+ once Termux leaves the
   foreground.
 - **Android 17 confirmed:** `google/tokay/tokay:17/CP2A.260805.005`, sdk 37, security patch 2026-08-05.
-  Wireless debugging still OFF (`service.adb.tls.port` empty), so the device_config value is still
-  unreadable. **Behaviourally the phantom cap is NOT biting on Android 17:** 33 processes under the uid
+  `service.adb.tls.port` read empty — which on Android 17 means UNREADABLE from the Termux uid, not
+  "off" (corrected in follow-up 2), so the device_config value was still out of reach here.
+  **Behaviourally the phantom cap is NOT biting on Android 17:** 33 processes under the uid
   at +1 min, **36 at +11 min with the master server, daemon and sshd all still alive and 6 master windows
   up** — H84's method (pre-fix the same cockpit died by ~7 min; the trim is lazy and arms on crossing
   32). One ssh probe per sample, so minimal warming (H84's caveat). Strong evidence, not proof; the
@@ -84,6 +85,38 @@ Lukas: "sshd is now up." Read-only probe over ssh (a script piped to `zsh -s`; n
   is truncated per relaunch (590 bytes now: the expected no-API leaf warning). If death frequency ever
   matters, the myrig one-liner is `>>` plus a dated launch line — not done, Lukas's call.
 - `sqlite3` is not installed on termux; store counts there go through `sesh` itself.
+
+### H108 follow-up 2 — the other thread got adb and ran `dumpsys meminfo` (2026-09-15 ~16:15 UTC; relayed by Lukas; no code change)
+Same findings file, new "Update" section. What it settles and corrects here:
+- **PHANTOM KILLER: CLOSED.** `settings get global settings_enable_monitor_phantom_procs` → **`false`**,
+  and Settings.Global overrides the `true` sysprop. That `false` is H84's own belt-and-braces
+  `settings put`, so at least that H84 write SURVIVED the Android 17 OTA (the `max_phantom_processes`
+  device_config value was not re-read; with the monitor off it is moot, and the +11 min survival above
+  agrees). H83's "NOT DETERMINED" and my "open after the OTA" are both closed.
+- **Uptime 108,078 s (30.0 h)** at their read ≈ 16:15 UTC — cross-checks the starttime arithmetic
+  above (26.2 h at 12:23 UTC ⇒ boot ≈ 2026-09-14 10:13 UTC) exactly. Swap had refilled to 99 % within
+  30 h of boot, matching the ~2.4 MB/s refill measured above.
+- **No single hog:** 93 CACHED app processes hold 4.8 GB (YouTube 687 MB, Maps 547, Gmail 200, …),
+  which Android counts as "free" because lmkd reclaims from that pool; the non-reclaimable
+  Visible/Perceptible tiers hold ~2 GB (GMS 353, launcher 266, Gboard 218, …). Obsidian had already
+  been evicted. Termux by PSS: `com.termux` 104 MB (in the FOREGROUND bucket — Lukas had it open), the
+  sesh daemon **27 MB**, each master window ~4 MB, Termux:API 12 MB.
+- **zRAM correction:** 1.34 GB physical holds 5.50 GB swapped = **4.1× compression**, not the 2.3× the
+  morning section estimated; the rest of the gap is GPU private memory (543 MB) and "Lost RAM"
+  (907 MB). No number in H108 above depended on the 2.3×.
+- **`service.adb.tls.port` is NOT READABLE from the Termux uid on Android 17** (empty ≠ off), and
+  wireless debugging only runs on Wi-Fi (the phone had been on mobile data). The other thread found
+  the port by scanning localhost from inside Termux.
+- **WHY sshd, crond and the daemon die WITH the app, now that the monitor is confirmed off:** with
+  phantom tracking disabled, AMS does not even know the children exist, so the uid-wide death is not
+  a phantom kill. The mechanism that fits all three observations (H83's cull SPARED the setsid-detached
+  trio while the app lived; H102's and today's deaths took them while the app died; the monitor is
+  off) is ordinary app-death cleanup: when lmkd kills `com.termux`'s main process, AMS kills the app's
+  PROCESS GROUP (its cgroup), and `setsid` does not leave the cgroup. Not verified on-device (no
+  logcat), stated as the fit. Consequence: the sesh leaf lives exactly as long as the Termux app
+  process does, and the app's oom bucket — foreground while open, perceptible via the wake-lock
+  foreground service when backgrounded — is the only knob. It is a phone knob, not a sesh one, and
+  under this morning's pressure lmkd reaches the perceptible tier anyway.
 
 ## H107 — the uuid popup's COPY (`y`, then `c`) worked on macOS only: termux is GOOS=android, wl-copy's forked child held the exec PIPE (TUI freeze), popups have no display env (2026-09-14, sesh 060ee4c; NO schema/API change; BINARY-ONLY, DEPLOYED ALL SIX)
 Ticket b7da691e. (Lukas corrected my first read: the key is `y` for the popup, `c` inside it copies.)

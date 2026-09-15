@@ -51,6 +51,40 @@ actually help the phone is per-app attribution (`dumpsys meminfo` by process / b
 blocked on wireless debugging being OFF (`service.adb.tls.port` empty) and Shizuku not started. That is
 the other thread's track; sesh has no part in it.
 
+### H108 follow-up — re-measured once Termux came back (2026-09-15, 12:23–12:35 UTC; still no code change)
+Lukas: "sshd is now up." Read-only probe over ssh (a script piped to `zsh -s`; nothing written).
+- **Recovery was exactly the documented path.** A Termux:Widget `zsh -ilc mmt-start` at 12:23:31 UTC
+  ran the zshenv guard, which relaunched sshd (pid 23428), crond and the daemon (23451) within the same
+  second; the widget then built the full six-machine cockpit. NOT a reboot: `/proc/<pid>/stat`
+  starttime puts the daemon and sshd at 94,240 s ≈ 26.2 h after boot (boot ≈ 2026-09-14 10:13 UTC).
+  NB a tmux server's comm is `tmux: server` — the space shifts every `stat` field by one, so read
+  starttime from a process whose comm has no space.
+- **Daemon healthy:** exe → `~/.local/bin/sesh` (not `(deleted)`), `vcs.revision=24e7e86` /
+  `vcs.modified=false` (code-current with main — the two later commits are docs only), the four SESH_*
+  vars, schema 25 / api 48, cadence idle, all five peers synced 13 s ago, 0 local threads. RSS 34.8 MB
+  at 70 s (VmSwap 0) and **20.9 MB at 11 min** — already being swapped out; RSS on this phone measures
+  pressure, not footprint. `oom_score_adj` 0 / `oom_score` 668 for the daemon, sshd, crond, the master
+  server and every master window — the foreground class H83 saw; expect 50+ once Termux leaves the
+  foreground.
+- **Android 17 confirmed:** `google/tokay/tokay:17/CP2A.260805.005`, sdk 37, security patch 2026-08-05.
+  Wireless debugging still OFF (`service.adb.tls.port` empty), so the device_config value is still
+  unreadable. **Behaviourally the phantom cap is NOT biting on Android 17:** 33 processes under the uid
+  at +1 min, **36 at +11 min with the master server, daemon and sshd all still alive and 6 master windows
+  up** — H84's method (pre-fix the same cockpit died by ~7 min; the trim is lazy and arms on crossing
+  32). One ssh probe per sample, so minimal warming (H84's caveat). Strong evidence, not proof; the
+  `dumpsys activity settings | grep phantom` line remains the check once adb is back.
+- **The pressure had been relieved WITHOUT a reboot** — MemAvailable 5.2 GiB (681 MiB this morning),
+  swap 48 % used (99 %), PageTables 210 MiB (845), AnonPages 1.78 GiB (4.63) — a large kill sweep
+  (lmkd's, or apps swiped away) freed ~4.5 GiB and Termux went with it. **And it refills fast: between
+  the +1 and +11 min samples SwapFree fell 3.05 GB → 1.45 GB and MemAvailable 5.2 → 4.16 GiB** — ~2.4
+  MB/s into zRAM, so this morning's 99 % state is a steady state the phone returns to within roughly an
+  hour of a purge. That refill rate is the number the foldable thread's per-app attribution should
+  explain.
+- **Death history is not recoverable:** the guard launches with `>`, so `~/.myrig/logs/sesh-daemon.log`
+  is truncated per relaunch (590 bytes now: the expected no-API leaf warning). If death frequency ever
+  matters, the myrig one-liner is `>>` plus a dated launch line — not done, Lukas's call.
+- `sqlite3` is not installed on termux; store counts there go through `sesh` itself.
+
 ## H107 — the uuid popup's COPY (`y`, then `c`) worked on macOS only: termux is GOOS=android, wl-copy's forked child held the exec PIPE (TUI freeze), popups have no display env (2026-09-14, sesh 060ee4c; NO schema/API change; BINARY-ONLY, DEPLOYED ALL SIX)
 Ticket b7da691e. (Lukas corrected my first read: the key is `y` for the popup, `c` inside it copies.)
 THREE INDEPENDENT DEFECTS, each reproduced on the real box before touching code:

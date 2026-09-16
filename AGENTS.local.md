@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh <this commit>; NO schema/API/CLI change; DAEMON rebuild + RESTART; ticket 4b069b88)
+## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh 138be35; NO schema/API/CLI change; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX**; ticket 4b069b88 done)
 Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …
 often I want to … spawn a handful of threads and then send a message directly to them. This
 prompt kind of messes that up."
@@ -79,7 +79,20 @@ The full matrix was NOT run.
 
 DEPLOY: daemon-side (the seeding runs in the owner's spawn path) ⇒ rebuild AND supervised
 restart; no schema/API/wire change, so a mixed fleet is safe. Nothing retroactive is needed:
-a pre-fix thread in a box gets seeded on its next revive (the cell's second half). (2026-09-15; record only, NO code change). **THE HEADLINE BELOW WAS WRONG — READ FOLLOW-UP 3 FIRST:** the "193 MB, ~2 %, victim not cause" reading missed ~2,000 leaked ssh-agents (~1.9 GB) that are invisible from inside Termux. Original title: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (termux sshd DOWN at the time of writing)
+a pre-fix thread in a box gets seeded on its next revive (the cell's second half).
+**DEPLOY RESULT (2026-09-16): ALL SIX at 138be35, every binary `vcs.modified=false`** —
+mymain (local), ideapad/pocket4/macbook/macstudio (one piped `zsh -ls` script each: clean
+checkout verified BEFORE pulling — H49/H63 — then build → `.new`+`mv` → `supervisorctl
+restart sesh-daemon`), termux (plain `go build`, old daemon killed by EXPLICIT pid 12793,
+the zshenv guard relaunched pid 31238, `/proc/<pid>/exe` re-read to confirm the new inode).
+NB termux's `ssh-target` no longer leaks an ssh-agent — Lukas landed the one-agent-per-
+device fix in termux.sh (H108 follow-up 3's open item is closed). API 48 everywhere, mesh
+all reachable. LIVE-SMOKED on the supervised mymain daemon against the REAL `~/.claude.json`:
+a fresh `git init` dir under `~/.cache`, `thread new --agent claude` → the entry landed
+(`projects` 701→702, nothing else of sesh's), NO dialog in the pane, and a `thread send
+--wait` fired immediately after was answered ("SMOKE-42"). Thread stopped+deleted, dir
+removed, the entry removed again (701 projects, 82 top-level keys, verified). Concurrent
+session landed H109 (the status-options daemon) mid-flight — rebased, renumbered to H110. (2026-09-15; record only, NO code change). **THE HEADLINE BELOW WAS WRONG — READ FOLLOW-UP 3 FIRST:** the "193 MB, ~2 %, victim not cause" reading missed ~2,000 leaked ssh-agents (~1.9 GB) that are invisible from inside Termux. Original title: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (termux sshd DOWN at the time of writing)
 
 ## H109 — THE STATUS ROW WITHOUT A SHELL PER REDRAW: the daemon stamps `@sesh-name` & co. as PANE user options and the work conf renders a pure format; measured 0 status-shell spawns per 20 s on mymain (was 12) (2026-09-16, sesh cfc4fa1 + myrig 149483a; NO API/wire/schema/CLI change; DAEMON rebuild + supervised RESTART + work-conf re-source; **DEPLOYED ALL SIX** — termux ~1 h after the others, once the phone was back on the tailnet)
 The foldable thread's second open item after the ssh-agent fix (myrig 332a403): "tmux.work.conf's

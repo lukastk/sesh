@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lukastk/sesh/internal/agents"
+	"github.com/lukastk/sesh/internal/agents/claude"
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/store"
 )
@@ -14,13 +15,34 @@ func (d *Daemon) routesResume(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/resume", d.handleThreadResume)
 }
 
-// prepCodexEnv pre-trusts the cwd (so codex's directory-trust prompt does not eat
-// input) and injects CODEX_HOME, for any codex spawn (new or resume). No-op for
-// other agents.
-func (d *Daemon) prepCodexEnv(kind agents.Kind, env map[string]string, cwd string) error {
-	if kind != agents.Codex {
-		return nil
+// prepAgentEnv runs the per-agent groundwork every HEADED launch needs (new,
+// into-pane, resume) so the agent comes up at a clean input prompt:
+//   - claude: pre-trust the cwd in claude's global config (its workspace-trust
+//     dialog otherwise eats the first keystrokes — ticket 4b069b88; see
+//     claude.EnsureTrust for why --dangerously-skip-permissions is not enough);
+//   - codex: pre-trust the cwd (same prompt class), wire the turn-end notify
+//     reporter, and inject CODEX_HOME.
+//
+// Headless turns (`--print`/`exec`) are non-interactive and never show either
+// dialog, so they do not come through here. pi has no trust prompt.
+func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd string) error {
+	switch kind {
+	case agents.Claude:
+		cfgPath, err := claude.GlobalConfigPath()
+		if err != nil {
+			return err
+		}
+		return claude.EnsureTrust(cfgPath, cwd)
+	case agents.Codex:
+		return d.prepCodexEnv(env, cwd)
 	}
+	return nil
+}
+
+// prepCodexEnv pre-trusts the cwd (so codex's directory-trust prompt does not eat
+// input), wires the notify reporter, and injects CODEX_HOME, for any codex spawn
+// (new or resume).
+func (d *Daemon) prepCodexEnv(env map[string]string, cwd string) error {
 	codexHome, err := agents.CodexHome(d.cfg.CodexHome)
 	if err != nil {
 		return err
@@ -208,7 +230,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 	}
 
 	env := d.spawnEnv(id)
-	if err := d.prepCodexEnv(kind, env, thread.Cwd); err != nil {
+	if err := d.prepAgentEnv(kind, env, thread.Cwd); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

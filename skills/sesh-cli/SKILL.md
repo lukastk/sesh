@@ -169,6 +169,19 @@ conversation), `master down` (tears mycockpit down), `peer remove`, `import`.
   still resumable.
 - **Agents**: `claude`, `codex`, `pi`. Spawn policy (yolo/default/sandbox) comes from
   `[spawn]` config or `--yolo`/`--sandbox`.
+  - **Workspace-trust prompts are pre-answered.** Every headed claude/codex launch
+    (new, revive, `--into-pane`) first marks the thread's cwd trusted in that agent's own
+    config — claude: `projects[<cwd>].hasTrustDialogAccepted` in `~/.claude.json` (or
+    `$CLAUDE_CONFIG_DIR/.claude.json`); codex: `[projects."<cwd>"] trust_level` in
+    `config.toml` — so the agent comes up at its input prompt and a `thread send` fired
+    right after spawn lands in the agent, not in a "Quick safety check … trust this
+    folder?" dialog (which would otherwise eat it: Enter there picks "No, exit").
+    Claude's dialog fires for every fresh git-repo box even under
+    `--dangerously-skip-permissions`, since its trust lookup stops at the repo root.
+    sesh writes exactly that one key (atomically, never a corrupt or truncated file
+    — an unparseable config is refused loudly instead) and nothing when the cwd is
+    already trusted. It does NOT pre-approve CLAUDE.md external imports; that dialog
+    is separate and only appears for a project CLAUDE.md that imports outside the tree.
 - **Parent/child** threads form a tree (a supervisor thread and its sub-agents); the TUI
   renders it collapsibly. **`thread new` defaults to childing the new thread to the current
   one** (see the ⚠️ note under *Creating* — pass `--no-parent` for a standalone/root thread).

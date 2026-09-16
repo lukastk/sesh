@@ -536,6 +536,12 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "thread.claude-trust",
+		Description: "ticket 4b069b88: a headed claude spawn/revive pre-trusts its cwd in claude's global config (projects[cwd].hasTrustDialogAccepted), so a fresh git-repo box comes up at the input prompt instead of the workspace-trust dialog and a `thread send` issued right after readiness is answered; proven against an isolated CLAUDE_CONFIG_DIR that trusts nothing; remote = routed, the owner seeds",
+		Agents:      []Agent{Claude},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.backup",
 		Description: "backup/restore/copy: sha256-idempotent transcript backups into portable SQLite; restore --to-dir (all agents) / --native (claude; others reported Unsupported); copy composes them; remote = routed",
 		Agents:      agentic,

@@ -211,7 +211,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	id := uuid.NewString()
 
 	env := d.spawnEnv(id)
-	if err := d.prepCodexEnv(kind, env, req.Cwd); err != nil {
+	if err := d.prepAgentEnv(kind, env, req.Cwd); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -376,7 +376,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 	}
 	id := uuid.NewString()
 	env := d.spawnEnv(id)
-	if err := d.prepCodexEnv(kind, env, cwd); err != nil {
+	if err := d.prepAgentEnv(kind, env, cwd); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -1,5 +1,86 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh <this commit>; NO schema/API/CLI change; DAEMON rebuild + RESTART; ticket 4b069b88)
+Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …
+often I want to … spawn a handful of threads and then send a message directly to them. This
+prompt kind of messes that up."
+
+**ROOT CAUSE IS UPSTREAM, AND IT IS A ONE-LINE DIFF IN CLAUDE'S OWN LOGIC.** Read from the
+bundled JS of both installed versions (`strings` on `~/.local/share/claude/versions/*`):
+2.1.228's trust check walked the cwd's ancestors all the way to `/`, so `/home/lukastk`
+being trusted (it is — `projects["/home/lukastk"].hasTrustDialogAccepted: true`) covered
+every directory under it. 2.1.273's walk is BOUNDED BY THE ENCLOSING GIT ROOT (`_0` →
+`RI(r)` = git root, `m0` stops there), so a fresh box — its own repo — inherits nothing and
+prompts. `--dangerously-skip-permissions` does not touch it (the check is `wpe()`:
+`CLAUDE_CODE_SANDBOXED` env, in-session accept, non-interactive, exact project entry, then
+the bounded walk — nothing else). No env var or settings key exists for it; claude's own
+error text names the remedy: `set projects[<dir>].hasTrustDialogAccepted: true in
+~/.claude.json`. PROVEN in isolation before touching code (own `CLAUDE_CONFIG_DIR` with the
+real config's `projects` map emptied + credentials symlinked, exact sesh argv): a non-git
+dir under the trusted home → NO dialog; a `git init`'d sibling → the dialog. Then the fix,
+against the REAL config: a pre-seeded fresh repo came up at the input prompt while the
+unseeded control got the dialog. Every probe was torn down and the two probe entries
+removed from `~/.claude.json` (701 projects, 82 top-level keys, verified after).
+`hasTrustDialogAccepted` is true on only 56 of the 701 recorded projects — the other 645 ran
+fine on inherited trust for months, which is why this looked new.
+
+**TWO DIALOGS THAT ARE NOT THIS ONE, so nobody chases them:** (a) "Allow external CLAUDE.md
+file imports?" — it showed up in the isolated probe because the probe's config dir had no
+per-project approval; with the REAL config it does not fire for a new box (the user-level
+`~/.claude/CLAUDE.md` `@~/.pi/agent/AGENTS.md` import is not what triggers it — only 3 of
+701 projects ever saw it, all with a PROJECT CLAUDE.md importing outside the tree). Not
+pre-approved by sesh, deliberately: that is a security choice, not a workflow nuisance.
+(b) the "Bypass Permissions mode" disclaimer — global, already accepted on the fleet
+(`skipDangerousModePermissionPrompt: true` in myrig's settings.json).
+
+FIX. `internal/agents/claude/trust.go`: `GlobalConfigPath()` (`$CLAUDE_CONFIG_DIR/.claude.json`,
+else `$HOME/.claude.json` — a SIBLING of `~/.claude`, not inside it) + `EnsureTrust(path, cwd)`.
+`prepCodexEnv` became `prepAgentEnv` (claude → EnsureTrust; codex → the old body), still at
+the same three call sites: `thread new`, `--into-pane`, and revive (`headful`/`resume`).
+Headless turns never see the dialog (non-interactive is trusted by claude's own rule). The
+file is claude's LIVE STATE — 1.4 MB, rewritten by every running session — so the edit is
+minimal by construction: top level and `projects` are decoded as `json.RawMessage` maps and
+only the target entry is opened (no float64 round-trip of ids/timestamps, no reordering of
+untouched records); an unparseable document is REFUSED loudly, never overwritten (a torn or
+corrupt file must not become an empty one); the write is temp-file + rename at 0600, the
+same atomic shape claude uses (its own crash leftovers `.claude.json.tmp.<pid>.<hex>` are
+still in the home dir from Aug 6); already-trusted is a pure read. The cwd's realpath is
+seeded too when it differs: claude keys a repo by its CANONICAL root and compares the
+as-given cwd against it, so both spellings are the same directory to it. A missing cwd is a
+loud error at prep (the spawn would fail later anyway).
+Residual, stated: read-modify-write races with a concurrent claude session are a lost-update
+class claude's own multi-process design already has (every session RMWs this file); sesh
+adds one RMW per NEW directory and none afterwards.
+
+TESTS. Units: config-path truth table; keys (clean, symlink → both, relative/missing refused);
+create-with-mode; EVERYTHING-ELSE-PRESERVED (big ints, nested unknowns, other projects'
+records byte-identical via `json.Compact` — NOT a decode, which would itself mangle the ints
+the test guards); already-trusted leaves bytes AND mtime untouched; false→true, missing/null
+`projects`; five corrupt shapes refused with the bytes unchanged and no temp file leaked.
+New matrix row **`thread.claude-trust`** (claude × local + remote, real ssh hop): a real
+claude in a real `git init` box against an ISOLATED `CLAUDE_CONFIG_DIR` that trusts NOTHING
+(`setupClaudeConfigDir`: credentials symlinked — the setupCodexHome precedent — the real
+config minus `projects`, and the bypass disclaimer pre-accepted so the only dialog left is
+the one under test). Asserts the entry on disk, the pane NOT showing the dialog, and a
+`thread send` fired straight after readiness being ANSWERED (a computed sentinel, since the
+prompt itself is echoed in the pane); then stop → delete the entry behind claude's back
+(a pre-fix record) → `headful` → all three again. **`waitThreadReady` CANNOT catch this
+bug**: the dialog is a rendered, byte-stable pane, i.e. exactly "TUI up, idle" — which is
+why every existing claude cell stayed green (their `/tmp` cwds are non-git and inherit
+`/tmp`'s trust). ANTI-GAMING (reverse-edited, md5-verified restore — H44): neutering the
+seeding reddens the cell at the on-disk check; neutering that check too reddens it at the
+pane with the report VERBATIM ("parked on its workspace-trust dialog ("Quick safety
+check")"). GREEN: `go vet ./...`; every non-conformance package plain, the touched ones
+`-race`; cells thread.claude-trust ×2, thread.new.headed ×4 (claude ×2, codex, pi),
+thread.resume claude ×2 + codex, thread.codex-session-capture, thread.spawn-mode/claude.
+`thread.resume/codex/local` failed ONCE at 111 s then passed 3/3 at ~22 s — the real-codex
+turn-timeout flake class (H62/H93), not this change (the codex prep body is untouched).
+The full matrix was NOT run.
+
+DEPLOY: daemon-side (the seeding runs in the owner's spawn path) ⇒ rebuild AND supervised
+restart; no schema/API/wire change, so a mixed fleet is safe. Nothing retroactive is needed:
+a pre-fix thread in a box gets seeded on its next revive (the cell's second half). (2026-09-15; record only, NO code change). **THE HEADLINE BELOW WAS WRONG — READ FOLLOW-UP 3 FIRST:** the "193 MB, ~2 %, victim not cause" reading missed ~2,000 leaked ssh-agents (~1.9 GB) that are invisible from inside Termux. Original title: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (termux sshd DOWN at the time of writing)
+
 ## H109 — THE STATUS ROW WITHOUT A SHELL PER REDRAW: the daemon stamps `@sesh-name` & co. as PANE user options and the work conf renders a pure format; measured 0 status-shell spawns per 20 s on mymain (was 12) (2026-09-16, sesh cfc4fa1 + myrig 149483a; NO API/wire/schema/CLI change; DAEMON rebuild + supervised RESTART + work-conf re-source; **DEPLOYED ALL SIX** — termux ~1 h after the others, once the phone was back on the tailnet)
 The foldable thread's second open item after the ssh-agent fix (myrig 332a403): "tmux.work.conf's
 status line still forks a login zsh about once a second while the cockpit is attached … pushing the

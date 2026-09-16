@@ -1,5 +1,70 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H111 — SCOPED, NOT BUILT: scheduled work (`sesh schedule` — timed messages into a thread + timed spawns), and the `respect-typing` guard it surfaced for EVERY pane send (2026-09-16, sesh 60b28f2/3a88285/fa6d366 on branch `feat/scheduling`, docs only; ticket 28f6e77b done)
+Lukas's ticket: cron-style messages to a thread with rules (revive-if-unattached, only-if-not-
+running = a heartbeat), cron-style thread spawns with rules (kill+archive on turn end, attached vs
+not), "might be one or two features, I'm not sure — scope it thoroughly." Design record:
+`_dev/SCHEDULING.md`; BACKLOG #8; a row in AGENTS.md's `_dev/` table.
+
+**THE VERDICT.** ONE mechanism, two actions (`message`, `spawn`) sharing the clock, catch-up,
+bounds, outcome history, CLI family and — load-bearingly — the guard vocabulary over the existing
+state axes. `message` is the half only sesh can do (state guards evaluated at fire time on the
+OWNER, atomically with the send; `sesh thread status && sesh thread send` from cron has a real
+TOCTOU window and the failure is interrupting a running turn). `spawn` is mostly convenience —
+`0 9 * * 1-5 sesh delegate …` in a crontab covers ~80 % today — so it lands second.
+**VOCABULARY CORRECTION that shaped every flag name:** the ticket's "attached/unattached" means
+the HEAD axis (headful/headless — the daemon can revive a pane, it cannot make a human look), not
+sesh's attachment axis; the same correction H89 made for shell threads. The real attachment axis
+IS used, for a different guard (below).
+
+**MECHANISM, in one line each:** a schedule is a row in the EXECUTING machine's own `sesh.db`
+(target thread's owner / the spawn machine; owner-local like tickets/subscriptions, NOT in the
+mesh snapshot, fan-out for `list --all-machines`, cascade-deleted with the thread — NB
+`DeleteThread` does not cascade `subscriptions` today, a wart not to copy); a fourth
+`{start,stopAndWait,run,tick}` loop polling at 1 s against `next_fire` (not the maintainer's tick
+— that loop is the hottest and a revive takes seconds); a pure hand-rolled 5-field cron
+`Next(spec, tz, after)` with the tz RECORDED at creation (a routed create means the OWNER's
+zone); catch-up `skip` (roll forward + loud miss count) or `once`, never "fire all missed";
+guards `--when-headless {turn|revive|skip}`, `--when-busy {skip|send}`, `--if <closed list>`,
+`--idle-for` (60 s implied by `--if idle` — the H58/H64 stale-busy classes make a bare idle read
+unsafe), hold and archived skipped by default; spawn: `--if-previous skip` keyed on RUNTIME only
+(headful or busy — with `keep` as the default a finished run is an un-archived headless·idle
+record, so "record exists" would suppress every later run), `--on-turn-end` via the eventer's
+busy→idle edge + a persisted `schedule_runs` row (a headless run's turn is a daemon goroutine and
+DIES with the daemon — seed-time reconciliation marks it failed; a headed run's pane outlives
+it), `--parent <virtual thread>` to group runs, `flag_disabled` on headed runs (H60 flags every
+unattended turn end — a nightly job would flag itself nightly; headless turn ends never flag,
+H52). `--msg`/`sendWhenReady`'s 90 s readiness timeout is a LOG LINE only — a scheduled headed
+spawn must own that wait and record `failed`. No arbitrary shell, ever (the API is already
+RCE-equivalent behind one token, H73). ~24 matrix cells across six rows; `message`/`spawn` carry
+the agent axis per H93's lesson.
+
+**THE LIVE FINDING (phase 0, ships FIRST, no schema):** `SendText` pastes then sends Enter, so a
+delivery into a pane where a human is mid-line submits the CONCATENATION. Lukas confirmed it bites
+him today — child threads reporting into a supervisor he is typing in. H48's
+`attached_activity_unix` (newest tmux `client_activity` = last client INPUT) is the signal. Fix
+belongs on the delivery primitive, not the scheduler: one daemon helper above `SendText` for the
+THREE thread-level paste sites (`handleThreadSend`, `handleTicketSendPrompt`, `sendIntoThread`;
+not `sendWhenReady`, not the raw `tmux send-text`), semantics WAIT-not-drop until 60 s of quiet
+(live `list-clients`, ~2 s poll), bounded 10 min, at the bound fail LOUDLY + auto-flag the target
+with the reason (never paste anyway — that is the collision again, silently). Built-in 60 s
+default, `[send] respect_typing`, per-call `--respect-typing <dur>` (`0` = off); the CLI loops
+like `waitLoop` because of the 15 s client timeout. Known edge stated, not hidden: PgUp counts as
+input.
+
+**DECISIONS (all nine settled with Lukas the same day, AskUserQuestion + follow-up):** both
+actions, message first; `--idle-for` 60 s implied; respect-typing ON and generalised; hand-roll
+the cron parser; spawn defaults headless + `--on-turn-end keep` (his call, reversing my
+`stop+archive`); closed guard list; the two TUI snapshot fields in phase 3; spawn-mode disclosure
+only; no broadcast. Nothing open. Build order §14: 0 respect-typing → 1 engine+message → 2 spawn
+→ 3 TUI/doctor/hook events.
+
+**METHOD NOTE:** two Explore agents mapped the spawn/send/revive paths and the daemon's
+time-driven machinery in parallel while I read the design corpus; the map is what let the doc
+name real seams (`sendIntoThread`, `nextHoldFlip`, `reviveThread`'s in-flight reservation, the
+five `SendText` call sites) instead of inventing them. Nothing was deployed; the branch is
+unpushed.
+
 ## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh 138be35; NO schema/API/CLI change; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX**; ticket 4b069b88 done)
 Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …
 often I want to … spawn a handful of threads and then send a message directly to them. This

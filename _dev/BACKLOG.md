@@ -255,5 +255,6 @@ order: phase 0 = the `respect-typing` wait-not-drop guard on EVERY pane delivery
 + `message` (the half only sesh can do), `spawn` second (cron + `delegate` already covers ~80 %),
 TUI/doctor/hook-events third. ~24 matrix cells across six new rows. Decided 2026-09-16: both
 actions, message first; `--idle-for 60s` implied by `--if idle`; `respect-typing` on by default;
-hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`. Still open (snapshot
-fields for the TUI, guard grammar, spawn-mode disclosure, broadcast): `SCHEDULING.md` §15.
+hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`; closed guard keyword
+list; the two TUI snapshot fields in phase 3; spawn-mode disclosure only; no broadcast. **Fully
+decided — ready to build** in the `SCHEDULING.md` §14 order.

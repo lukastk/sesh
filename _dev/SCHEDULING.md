@@ -3,7 +3,7 @@
 *Status: **SCOPE / DESIGN. Nothing here is built.** Ticket 28f6e77b ("Scheduled messages and
 agents feature"), 2026-09-16. This doc answers the ticket's own question — "it might be one or
 two different [features], I'm not sure" — and then specifies the thing well enough to build.
-Decisions are marked ⚑ and collected in §15 — five decided with Lukas the same day, four still open.*
+Every ⚑ decision was settled with Lukas the same day; §15 records them all. Ready to build in the §14 order.*
 
 ---
 
@@ -193,10 +193,10 @@ cross-machine by `--machine` routing for writes and a **fan-out** for mesh-wide 
 NOT added to `api.ThreadSnapshot`, because every field there is re-transferred on every changed
 row of every sync round (MESH_SCALE) and schedules change on human timescales.
 
-⚑ **Exception worth considering (§15.7):** two small omitempty fields on the snapshot —
-`schedules int` and `next_fire_unix int64` — would let the TUI render a "this thread has a
+**One decided exception (§15.7):** two small omitempty fields on the snapshot —
+`schedules int` and `next_fire_unix int64` — let the TUI render a "this thread has a
 heartbeat" marker without a fan-out. Cheap (two ints, only on rows that have schedules) and it is
-the only way the sidebar can show it. Recommendation: **yes, in phase 3**, not before.
+the only way the sidebar can show it. **Decided: yes, in phase 3**, not before.
 
 ### 3.3 The firing pipeline — five phases, in this order
 
@@ -397,8 +397,9 @@ hold; unknown condition = loud error at creation, not at fire time):
 `archived`, `not-archived`, `blocked`, `not-blocked`.
 
 Not a DSL. SPEC §6 wants explicit, machine-readable contracts; a mini-language here is a
-maintenance sink and an un-testable surface. (The TUI's `[[tui.views]]` predicate language exists
-and could be reused if a richer grammar is ever wanted — ⚑ §15.6.)
+maintenance sink and an un-testable surface. **Decided (§15.6): the closed list.** (The TUI's
+`[[tui.views]]` predicate language exists and could be adopted later if a richer grammar is ever
+wanted.)
 
 ### 6.4 `--idle-for <dur>` — the guard that makes a heartbeat safe
 
@@ -514,7 +515,7 @@ per minute per edge): a per-schedule cap that trips loudly rather than looping.
 
 Everything `thread new` already takes, recorded on the schedule: `--agent`, `--cwd`, `--prompt`
 (or `--prompt-file`, or a `@blob()` token — expansion is already automatic on delivery),
-`--model`, `--headless` (the ticket's "attached or unattached" — ⚑ default below), placement
+`--model`, `--headless` (the ticket's "attached or unattached" — default decided below), placement
 (`--into-session`), `--parent`, and the spawn mode (`--yolo`/`--sandbox`, as `delegate` has).
 
 Two additions that only matter because the spawn is recurring:
@@ -716,7 +717,8 @@ Schedules run **only sesh actions** — no arbitrary shell (§10). But "spawn an
 prompt, unattended, under `[spawn] mode = yolo`, every night" is a materially different risk
 posture from doing it by hand, and the fleet's default is yolo. Mitigation is disclosure, not
 restriction: record the effective spawn mode on the schedule, print it at creation
-(`mode: yolo (from [spawn])`), and show it in `schedule show`. ⚑ §15.8.
+(`mode: yolo (from [spawn])`), and show it in `schedule show`. **Decided (§15.8): disclosure
+only, no mandatory `--yolo`.**
 
 ---
 
@@ -728,8 +730,8 @@ restriction: record the effective spawn mode on the schedule, print it at creati
   carries RCE-equivalent power behind one bearer token (H73); adding a remote-managed
   arbitrary-command cron to it is a different product with a different threat model.
 - **Not a job queue.** No retries with backoff, no dependencies between schedules, no fan-out to
-  many threads from one schedule (⚑ §15.9 — a tag-targeted broadcast is a plausible future, and
-  a dangerous one).
+  many threads from one schedule (**decided, §15.9: no** — a tag-targeted broadcast is a
+  plausible future and a dangerous one; it would be a third target shape, not a record change).
 - **Not a replacement for subscriptions or hooks.** Those are edge-triggered; this is
   clock-triggered. They compose (a spawn schedule can subscribe its worker to a supervisor).
 - **Not "agent keep-alive intelligence".** A heartbeat is a dumb timer with guards. If the real
@@ -863,14 +865,15 @@ mixed-mesh safe; the TUI half is binary-only.
 5. ~~Spawn defaults~~ → **headless, and `--on-turn-end keep`** (do not archive when done);
    the overlap guard keys on runtime only (headful or busy), never on the record. (§7.1–7.3)
 
-**Still open:**
+6. ~~Guard vocabulary~~ → **the closed keyword list**, ANDed, unknown word loud at creation;
+   the `[[tui.views]]` predicate grammar stays available as a later upgrade if the list ever
+   feels cramped. (§6.3)
+7. ~~Snapshot fields~~ → **yes, in phase 3**: `schedules int` + `next_fire_unix int64`,
+   omitempty, on `ThreadSnapshot` so the TUI/sidebar can show a schedule marker without a
+   fan-out. (§3.2)
+8. ~~Spawn mode disclosure~~ → **disclosure only**: record the effective `[spawn]` mode on the
+   schedule and print it at creation and in `schedule show`; no mandatory `--yolo`. (§9.5)
+9. ~~Broadcast~~ → **no**. One schedule targets one thread (or one spawn); a tag-targeted form
+   can be added later as a third target shape without changing the record. (§10)
 
-6. **Guard vocabulary:** the closed keyword list (recommended), or reuse the `[[tui.views]]`
-   predicate language for richer expressions? (§6.3)
-7. **Snapshot fields** `schedules`/`next_fire_unix` in phase 3 — accept the (small) replication
-   cost so the TUI/sidebar can show a schedule marker? (§3.2)
-8. **Spawn mode disclosure** — record + print the effective `[spawn]` mode per schedule
-   (recommended), or additionally require `--yolo` to be typed explicitly on a scheduled spawn?
-   (§9.5)
-9. **Broadcast** — should a schedule ever target *many* threads (by tag)? Not designed here;
-   powerful and easy to regret. (§10)
+**Nothing is open.** The design is fully decided; what remains is building it in the §14 order.

@@ -1,5 +1,96 @@
 # AGENTS.local.md — sesh v2 working notes
 
+## H109 — THE STATUS ROW WITHOUT A SHELL PER REDRAW: the daemon stamps `@sesh-name` & co. as PANE user options and the work conf renders a pure format; measured 0 status-shell spawns per 20 s on mymain (was 12) (2026-09-16, sesh cfc4fa1 + myrig 149483a; NO API/wire/schema/CLI change; DAEMON rebuild + supervised RESTART + work-conf re-source; DEPLOYED 5/6 — termux PENDING, the phone was off the tailnet)
+The foldable thread's second open item after the ssh-agent fix (myrig 332a403): "tmux.work.conf's
+status line still forks a login zsh about once a second while the cockpit is attached … pushing the
+status into a tmux user option from sesh would remove the spawns entirely. That second one is
+squarely your territory." BACKLOG #7, now built. Design record: `_dev/STATUS_OPTIONS.md`.
+
+**DESIGN.** The row shows RECORD fields only (name, agent, tags, archived, flagged, flag-disabled),
+so the owning daemon's maintainer stamps them on every `@sesh-thread-id`-marked pane as six PANE
+user options (`@sesh-name`, `@sesh-agent`, `@sesh-tags`, `@sesh-archived`, `@sesh-flagged`,
+`@sesh-flag-disabled`; booleans `1`/empty) and the conf renders `#{?@sesh-name,sesh: #{@sesh-name}
+[#{=8:@sesh-thread-id}] · #{@sesh-agent}…,}` — lookups only, the id from the existing marker. PANE
+scope and nothing coarser: tmux inherits user options during format expansion (the H89 trap), so a
+session-scoped option would render a neighbour's thread on an unmarked pane. Mechanism
+(`internal/daemon/statusoptions.go`, one call per tick after the sweep): desired = f(record index,
+pane index) — both already in hand; diff against `paneStatus` (last written); ONLY changed panes go
+to tmux, in ONE invocation (`tmux.ApplyPaneOptions`, argv cut under 8 KiB — the whole list is one
+16 KiB imsg, H90), followed by `refresh-client -S -t <client>` for every attached client so a
+rename/flag repaints at once (names from the SAME `list-clients` call that feeds the attachment
+axis — `AttachedClients`, no extra enumeration); a still-live pane that lost its marker is cleared,
+a gone pane forgotten (the set of live pane ids now falls out of `RuntimeIndex`'s walk); a
+zero-thread machine pays nothing (one clearing walk while something is cached, then never). Per
+tick when nothing changed: a map walk and a struct compare per marked pane, no tmux call.
+Rendering policy stays in myrig — sesh publishes data. The fallback shape (`#(sesh tmux status …)`,
+one exec per redraw) was not built.
+
+**MEASURED tmux FACTS the design leans on (3.6b here, 3.7c on the phone):** `#{?@opt,…}` reads an
+empty option as false (so an unmarked pane renders nothing); the `=8:` length modifier works on user
+options; a comma inside a VALUE is safe (the conditional splits before substitution); a literal comma
+inside a branch is `#,`; a `#[…]` in a name styles the line exactly as it did through the shell job
+(not escaped); `set-option -p -u` on an absent option is rc=0; a lone `;` value must travel as `\;`.
+TWO ABORT SEMANTICS of a command list, both handled: a vanished pane stops the list AT its
+sub-command with **`no such pane: %N`** — NOT capture-pane's `can't find pane` wording — so the
+panes before it landed, it is dropped and the rest retried (the CapturePanes pattern); a detached
+client fails only the trailing `refresh-client` (`can't find client`) — every write precedes the
+refreshes, so they all count as applied and the next beat repaints the rest.
+
+**TESTS.** Units: `internal/tmux` (real server — write, empty value, `;`, a vanished pane in the
+MIDDLE of a batch with the panes after it still landing, a detached client in the refresh list,
+chunking under the budget, `AttachedClients` naming a real nested client); `internal/daemon` (real
+maintainer + store + pane — stamped after one tick, `statusWrites` unchanged across unchanged ticks,
+rename-to-`;`/tags/flag/archive/flag-disable each within a tick, cleared on unstamp, restored on
+re-stamp, cleared by the zero-thread early-out after the last delete and never touched again).
+Matrix row **`tmux.status-options`** (agent-agnostic × local/remote): a REAL pi thread; options
+appear; the contract format (pinned as `statusRowFormat`, asserted to contain no `#(`) renders the
+exact row via `display-message -p -F`; rename/tag/flag/archive through the real verbs (real ssh hop
+remote) change the rendered row within a tick; unstamping empties it. ANTI-GAMING: sync neutered →
+local cell RED "the daemon never stamped @sesh-name on the thread's pane"; restored BYTE-IDENTICAL
+(md5 de4e38a0…) → 2/2 green. GREEN: vet, gofmt (touched files), tmux/daemon/matrix plain + `-race`
+(sequential), every non-conformance package plain, blast radius = every `tmux.*` cell (24),
+thread.runtime-state/pi ×2, thread.flagged/pi ×2, shell.lifecycle ×2, daemon.doctor, daemon.hooks
+×2, thread.state-authority/pi ×2 — all pass. **The full 257-cell matrix was NOT run** — do not read
+this as all-green.
+
+**myrig 149483a.** `tmux.work.conf` status-format[0]'s thread row is now the format (nested inside
+the termux dictation-banner conditional; verified on a blank isolated server for unmarked / marked /
+flag-disabled / banner-on: identical text, glyphs, colours to the shell version); a comment forbids
+a `#()` job ever coming back. `_mt_refresh_status_on` (H98's keypress repaint, incl. its background
+ssh hop per prefix+f) DELETED — the daemon repaints on change. `sesh-current-status` STAYS: the
+personal server's `~/.tmux.base.conf` still calls it (its panes are not daemon-managed; it still
+forks per redraw — CPU only, no per-shell agent start outside termux; out of scope, noted in the
+function's header). termux.sh's leak comment reworded to the past tense.
+
+**DEPLOY (2026-09-16).** Order per machine: new binary → `supervisorctl restart sesh-daemon` →
+myrig pull + render → `tmux -L sesh source-file ~/.sesh/myrig/tmux.work.conf` (an OLD daemon stamps
+nothing, so re-sourcing first would blank the row). **LIVE ON 5/6 at cfc4fa1** (`vcs.modified=false`
+everywhere): mymain (native; own checkout was clean), ideapad + pocket4 (native, python3 render),
+macstudio + macbook (`/opt/homebrew/bin/go`, `uv run --with jinja2` render); every checkout clean
+before pulling; mesh all five reachable after the restarts. Verified on each machine with a marked
+pane that `@sesh-name` is set and `#{E:status-format[0]}` renders the row — mymain
+`sesh: adi-requests [c194478c] · claude ⚑ FLAGGED`, pocket4 `myarch-tablet-mode … ⚑`, macstudio
+`pendrive-llm`, macbook `chanu-wedding … ⚑` (ideapad had no marked pane). **THE NUMBER: mymain's
+work server, 4 attached clients, 0.1 s sampling for 20 s — 0 `zsh -lc … sesh-current-status`
+spawns, where the identical sample counted 12 before the deploy.** `%1620`'s row rendered within
+a tick of the restart. **termux PENDING:** at deploy time the phone was OFF the tailnet
+(`tailscale status`: offline, last seen 1m ago; ssh timed out, not refused) — nothing to do with
+Termux. A background retry was armed (poll ping+ssh up to 12 min, then run the recipe). Recipe:
+`cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f … sesh`
+(plain build, CGO=1/android — H22), kill the daemon by ITS OWN reported pid (`sesh daemon status`,
+never pgrep), `cd ~/mysetup/myrig && git pull && python3 scripts/install-home.py "$MYRIG_TARGETS"`
+(log to $HOME — /tmp unwritable, H38), then a FRESH login (the zshenv guard relaunches — make sure
+that login's command line does not contain the guard's `pgrep -f` pattern text), verify pid/exe/
+SESH_* vars, and `tmux -L sesh source-file ~/.sesh/myrig/tmux.work.conf`. Termux has zero local
+threads, so its row is empty either way; the benefit there is purely the missing fork.
+
+**SMALL TRAPS:** zsh globs an unquoted `status-format[0]` (`no matches found` — quote the option
+name in `tmux set`); `display-message -p '#{E:status-format[0]}'` renders a status FORMAT for
+verification (capture-pane never captures status lines); a shell redirect into a non-existent log
+DIRECTORY fails BEFORE the command runs (rc=1 from the shell, `install-home` never executed —
+verify the rendered artifact, not the rc alone); `grep -c '#('` on the conf counts your own
+"never put `#()` back" comment.
+
 ## H108 — PHONE MEMORY (2026-09-15; record only, NO code change). **THE HEADLINE BELOW WAS WRONG — READ FOLLOW-UP 3 FIRST:** the "193 MB, ~2 %, victim not cause" reading missed ~2,000 leaked ssh-agents (~1.9 GB) that are invisible from inside Termux. Original title: the whole Termux uid is 193 MB, ~2 % of the ~10 GiB other apps hold in zRAM — so the recurring whole-Termux deaths are lmkd victims, not a sesh cost, and nothing inside the uid can self-heal them (termux sshd DOWN at the time of writing)
 Cross-thread finding, relayed at Lukas's request ("read it and factor it into the termux work"). Source:
 `~/dev/20260829_p58ayx__foldable-phone-research/phone-memory-findings-2026-09-15.md`, measured over ssh

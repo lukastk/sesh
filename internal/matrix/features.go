@@ -576,6 +576,44 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.send-respect-typing",
+		Description: "the typing guard on every delivery into a live pane (thread send, ticket send-prompt, subscription delivery): a paste is appended to whatever a viewer has half-typed and submitted with it, so the owning daemon HOLDS a delivery while the session sees viewer input (tmux client_activity), pastes it once the pane has been quiet for [send] respect_typing (default 60s; --respect-typing overrides, 0 = now), and a delivery still held at the deadline FAILS loudly and auto-flags the thread with the undelivered message; --on-typing skip refuses instead of queueing, wait blocks the caller",
+		Localities:  bothLoc,
+	})
+	// ---- scheduled work (_dev/SCHEDULING.md) ----
+	Register(Feature{
+		ID:          "schedule.crud",
+		Description: "sesh schedule message/list/show/edit/pause/resume/remove over the real CLI (routed for remote): the record lives on the executing machine with its zone recorded, next_fire is recomputed on a clock edit and on resume, an unknown guard word / a spec that never fires / a duplicate name are loud at creation",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "schedule.message",
+		Description: "a message schedule fires a real interval into a real agent thread: the text lands in the live pane and starts a turn; a stopped (headless) target gets a real headless turn under --when-headless turn, and is REVIVED into a pane first under --when-headless revive (conversation continuity through the daemon's own resume); every run is recorded",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "schedule.guards",
+		Description: "the message guards against a REAL busy thread: --when-busy skip records 'skipped: busy' and delivers nothing, --if idle implies a dwell that holds off a just-idle target, a held thread is skipped (--ignore-hold overrides), an archived one is skipped (--allow-archived overrides), run-now --force bypasses them all",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "schedule.spawn",
+		Description: "a spawn schedule creates a real thread per run (headless by default, --headed into a real pane) and delivers the prompt; the run row records the thread; auto-flag is disabled on run threads; --on-turn-end stop+archive really archives after the first turn ends, keep (the default) leaves the finished run readable; --if-previous skip suppresses a run while the previous one is still going",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "schedule.catchup",
+		Description: "occurrences missed while the daemon was down: after a real stop/start across two due instants, catchup=skip rolls next_fire forward, counts the misses and replays nothing; catchup=once fires exactly one catch-up run",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "schedule.lifecycle",
+		Description: "deleting the target thread removes its message schedules in the same transaction (the delete reports the count); max_fires disables after the last delivered run; a one-shot --at disables itself after firing; the failure breaker ([schedules] disable_after_failures) disables a schedule whose runs keep failing, naming the reason",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "thread.hold",
 		Description: "park a thread until a future instant (thread hold --until/--until-unix), RELEASE it and its subtree from an ancestor's hold (--release), or clear both (--clear); the owning daemon derives `on_hold` against its clock from max(own, ancestors' own) — a live release, or being ARCHIVED, detaches the thread from that max and stops the walk there — so holds AND releases auto-expire; a --clear that leaves the thread parked by an ancestor fails loudly naming it; the TUI's default view hides on-hold threads, the `on hold` view shows them",
 		Localities:  bothLoc,

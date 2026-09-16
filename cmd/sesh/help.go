@@ -219,9 +219,9 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh thread status --id 1a2b3c4d --json"},
 	},
 	"thread send": {
-		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise)",
-		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--machine <m>]",
-		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m"},
+		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise). The TYPING GUARD holds the paste while a viewer is at the keyboard: a paste is appended to whatever is half-typed and submitted with it, so the daemon waits until the pane has seen no viewer input for [send] respect_typing (60s), delivering it then (`deferred`), or — still in use at the deadline (10m) — failing loudly and FLAGGING the thread with the undelivered message. --wait blocks here for the quiet pane instead.",
+		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
+		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m", "sesh thread send --id 1a2b3c4d --text 'now' --respect-typing 0"},
 	},
 	"thread wait": {
 		summary:  "block until a thread reaches a state (server-owned wait; one routed hop for --machine)",
@@ -343,6 +343,67 @@ does not wrap can be driven straight against the tmux server.`,
 		usage:    "sesh ticket <create|list|get|find|set|delete|set-status|import|unbind|move|needs-input|send-prompt>",
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
+	"schedule": {
+		summary: "scheduled work (message | spawn | list | show | runs | pause | resume | remove | edit | run-now): a cron/interval/one-shot clock that delivers a message into an existing thread or spawns a new thread, with state-aware rules. A schedule lives on the machine that EXECUTES it (a message on its target's owner — `message` auto-routes there; a spawn where its cwd is) and is never replicated.",
+		usage:   "sesh schedule <message|spawn|list|show|runs|pause|resume|remove|edit|run-now>",
+		long:    "WHEN is one of --cron '<5 fields>' | --every <dur> | --at <instant>, in --tz (default: the owning machine's zone, recorded on the schedule and printed back). Occurrences missed while the daemon was down are never replayed: --catchup skip (default) rolls forward and counts them, --catchup once fires one catch-up run. --not-before/--not-after/--max-fires bound a schedule's life. Every run ends in a recorded outcome — fired, skipped: <why>, or failed: <err> (`schedule runs`) — and a schedule failing [schedules] disable_after_failures (10) times running is disabled loudly. A message run reads the target's live state first: on hold or archived ⇒ skipped (--ignore-hold/--allow-archived override), --if <words> must all hold, --if idle implies a 60s quiet dwell (--idle-for), a busy target is skipped unless --when-busy send, a headless target gets a headless turn (or --when-headless revive|skip), and a pane paste goes through the typing guard — a typing viewer SKIPS the run. A spawn run creates a thread (headless by default; --headed for a pane), gives it the prompt, and applies --on-turn-end (keep by default) at its first turn end; --if-previous skip (default) never overlaps a run that is still going; run threads have auto-flagging disabled unless --flag-on-end. `run-now` fires a schedule immediately (--force bypasses the guards) — the way to test one. [schedules] enabled = false in config.toml stops a machine firing anything.",
+		examples: []string{
+			"sesh schedule message --id 1a2b3c4d --every 20m --text 'Continue with the plan' --if idle --idle-for 10m --when-headless skip --max-fires 30",
+			"sesh schedule spawn --agent pi --cwd ~/dev/proj --cron '0 9 * * 1-5' --prompt 'Review the CI failures since yesterday' --parent 7f1dfe3a",
+			"sesh schedule list --all-machines",
+			"sesh schedule run-now --id nightly --force",
+		},
+	},
+	"schedule message": {
+		summary:  "schedule a message into an EXISTING thread (created on the thread's owner — auto-routed); rules decide what happens when the target is headless, busy, on hold, archived, or being typed into",
+		usage:    "sesh schedule message --id <thread> --text <s> (--cron <expr> | --every <dur> | --at <instant>) [--name <n>] [--tz <zone>] [--catchup <skip|once>] [--not-before <t>] [--not-after <t>] [--max-fires <n>] [--when-headless <turn|revive|skip>] [--when-busy <skip|send>] [--if <words>] [--idle-for <dur>] [--ignore-hold] [--allow-archived] [--respect-typing <dur>] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule message --id 1a2b3c4d --every 20m --text 'Continue with the plan. If blocked, say so and stop.' --if idle --idle-for 10m --when-headless skip --max-fires 30 --not-after '2026-09-20 18:00'", "sesh schedule message --id 1a2b3c4d --cron '0 9 * * 1-5' --text 'Morning status?' --when-headless revive"},
+	},
+	"schedule spawn": {
+		summary:  "schedule a NEW thread in a directory with a prompt, on this machine (or --machine); headless by default, --on-turn-end keep by default, never overlapping a run that is still going",
+		usage:    "sesh schedule spawn --agent <a> --cwd <dir> (--prompt <s> | --prompt-file <f>) (--cron <expr> | --every <dur> | --at <instant>) [--name <n>] [--tz <zone>] [--catchup <skip|once>] [--not-before <t>] [--not-after <t>] [--max-fires <n>] [--headed] [--into-session <s>] [--parent <id>] [--model <m>] [--yolo | --sandbox] [--name-template <t>] [--if-previous <skip|spawn-anyway|stop-previous>] [--on-turn-end <keep|stop|archive|stop+archive|delete>] [--max-runtime <dur>] [--flag-on-end] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule spawn --agent pi --cwd ~/dev/proj --cron '0 9 * * 1-5' --prompt 'Review the CI failures since yesterday and summarise' --parent 7f1dfe3a", "sesh schedule spawn --agent claude --cwd ~/dev/proj --every 6h --prompt-file ~/prompts/audit.md --on-turn-end stop+archive --max-runtime 30m"},
+	},
+	"schedule list": {
+		summary:  "list schedules (this machine; --all-machines fans out to every reachable peer)",
+		usage:    "sesh schedule list [--all-machines] [--thread <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule list", "sesh schedule list --all-machines --json"},
+	},
+	"schedule show": {
+		summary:  "print one schedule in full: definition, rules, next/last fire, counters",
+		usage:    "sesh schedule show --id <id|prefix|name> [--json] [--machine <m>]",
+		examples: []string{"sesh schedule show --id nightly"},
+	},
+	"schedule runs": {
+		summary:  "the run history of a schedule, newest first (outcome, detail, the thread a spawn made)",
+		usage:    "sesh schedule runs --id <id|prefix|name> [--limit <n>] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule runs --id nightly --limit 5"},
+	},
+	"schedule pause": {
+		summary:  "stop a schedule firing until resumed (its backlog is never replayed)",
+		usage:    "sesh schedule pause --id <id|prefix|name> [--machine <m>]",
+		examples: []string{"sesh schedule pause --id nightly"},
+	},
+	"schedule resume": {
+		summary:  "resume a paused (or breaker-disabled) schedule; next fire is recomputed from now",
+		usage:    "sesh schedule resume --id <id|prefix|name> [--machine <m>]",
+		examples: []string{"sesh schedule resume --id nightly"},
+	},
+	"schedule remove": {
+		summary:  "delete a schedule and its run history",
+		usage:    "sesh schedule remove --id <id|prefix|name> [--machine <m>]",
+		examples: []string{"sesh schedule remove --id nightly"},
+	},
+	"schedule edit": {
+		summary:  "change a schedule's clock, bounds, name, text or prompt (a changed clock recomputes the next fire)",
+		usage:    "sesh schedule edit --id <id|prefix|name> [--cron <expr> | --every <dur> | --at <instant>] [--name <n>] [--tz <zone>] [--catchup <skip|once>] [--not-after <t>] [--max-fires <n>] [--text <s>] [--prompt <s>] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule edit --id nightly --cron '30 8 * * 1-5'", "sesh schedule edit --id heartbeat --text 'Carry on.'"},
+	},
+	"schedule run-now": {
+		summary:  "fire a schedule immediately and print the run's outcome (the way to test one); --force bypasses its guards",
+		usage:    "sesh schedule run-now --id <id|prefix|name> [--force] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule run-now --id nightly", "sesh schedule run-now --id heartbeat --force"},
+	},
 	"blob": {
 		summary:  "content-addressed file store (add | ls | get | rm | path | expand). Files are referenced from prompts by an @blob(<hex>) token (from `blob add`) and expanded to absolute paths on send/copy. Routes per --machine like tickets",
 		usage:    "sesh blob <add|ls|get|rm|path|expand>",
@@ -459,8 +520,8 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh ticket needs-input --id t1 --json"},
 	},
 	"ticket send-prompt": {
-		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call)",
-		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--machine <m>]",
+		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call). Goes through the same typing guard as `thread send` (held while a viewer types; deferred, then flagged at the deadline).",
+		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh ticket send-prompt --id t1", "sesh ticket send-prompt --id t1 --no-prepend"},
 	},
 
@@ -708,7 +769,7 @@ Before doing anything DESTRUCTIVE to "yourself" — compacting, sending, stoppin
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "blob", "fs", "plugins", "tui", "info",
+	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
 	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

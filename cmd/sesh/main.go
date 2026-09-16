@@ -113,6 +113,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh ticket:", err)
 			os.Exit(1)
 		}
+	case "schedule":
+		if err := runSchedule(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh schedule:", err)
+			os.Exit(1)
+		}
 	case "blob":
 		if err := runBlob(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh blob:", err)

@@ -51,6 +51,7 @@ var declaredTUIClaims = []string{
 	"id-toggle",                 // i toggles a real-tid8 ID column (the TUI's only id surface)
 	"cursor-preselect",          // --cursor: the pane carrier resolves the REAL pane's thread and the first fetch lands the cursor on it
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
+	"sched-column",              // the opt-in sched column renders a real schedule's next fire from the owner-stamped digest; blank once removed
 	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME grows to content (untruncated within the cap; see column-max-width)
 	"cwd-label-column",          // the CWD column renders a real thread's real cwd through the [[cwd_label]] rules; unconfigured = ~-relative
 	"cwd-launch-scope",          // --cwd admits only an exact CWD; --cwd-tree adds descendants path-safely; both start in all while retaining configured views

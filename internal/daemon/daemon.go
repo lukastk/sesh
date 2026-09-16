@@ -81,9 +81,27 @@ type Daemon struct {
 	flags config.FlagsConfig
 	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
 	subTracker *subscribe.Tracker
+	// send: the [send] typing-guard policy; pasteQueues holds deliveries the
+	// guard deferred, one FIFO per thread (paste.go). In-memory: a restart drops
+	// held deliveries, loudly (pasteStop wakes them to say so).
+	send           config.SendConfig
+	pasteMu        sync.Mutex
+	pasteQueues    map[string]*pasteQueue
+	pasteStop      chan struct{}
+	pasteStopOnce  sync.Once
+	pasteHeld      atomic.Int64
+	pasteDelivered atomic.Int64
+	pasteFlagged   atomic.Int64
 	// mmaint converges the cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
+	// sched is the clock-driven loop behind `sesh schedule` (scheduler.go);
+	// schedules its [schedules] policy; runWatch the spawn runs the reaper is
+	// watching, keyed by thread id (scheduler_spawn.go).
+	sched     *scheduler
+	schedules config.SchedulesConfig
+	runsMu    sync.Mutex
+	runWatch  map[string]*runWatch
 
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
@@ -170,6 +188,18 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err // a broken [flags] refuses the daemon loudly
 	}
 	d.flags = flagsCfg
+	sendCfg, err := config.LoadSend(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [send] refuses the daemon loudly
+	}
+	d.send = sendCfg
+	d.pasteStop = make(chan struct{})
+	schedCfg, err := config.LoadSchedules(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [schedules] refuses the daemon loudly
+	}
+	d.schedules = schedCfg
+	d.sched = newScheduler(d)
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly
@@ -233,6 +263,7 @@ func (d *Daemon) Serve() error {
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the cockpit to one window per connected machine
 	}
+	d.sched.start() // the clock behind `sesh schedule`
 
 	// Optional network API (remote clients / mobile). Only a MISCONFIGURATION (API
 	// addr set without a token) is fatal here; a transient bind failure (e.g. the
@@ -272,7 +303,11 @@ func (d *Daemon) Serve() error {
 // once. On-disk markers (pid/socket) are removed by Serve's deferred cleanup, in
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	d.stopPastes()
 	d.stopAPI(ctx)
+	if d.sched != nil {
+		d.sched.stopAndWait()
+	}
 	if d.mmaint != nil {
 		d.mmaint.stopAndWait()
 	}

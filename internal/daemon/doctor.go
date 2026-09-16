@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -110,6 +111,40 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 			add("peer:"+pm.Machine, "ok", "synced "+time.Unix(pm.SyncedAtUnix, 0).Format("15:04:05"))
 		} else {
 			add("peer:"+pm.Machine, "warn", "unreachable (last sync "+time.Unix(pm.SyncedAtUnix, 0).Format("15:04:05")+")")
+		}
+	}
+
+	// Schedules: a subsystem that goes quiet must say so (the H75 lesson). The
+	// kill switch, breaker-disabled schedules (a schedule that keeps failing is
+	// invisible once disabled unless surfaced), and an enabled schedule whose
+	// next_fire is well past due while this daemon is up — which means the loop
+	// is wedged, not that the machine was asleep.
+	if !d.schedules.Enabled {
+		add("schedules", "warn", "[schedules] enabled = false — this daemon fires no schedules")
+	} else if all, err := d.store.ListSchedules(); err != nil {
+		add("schedules", "fail", "cannot list: "+err.Error())
+	} else {
+		now := time.Now().Unix()
+		enabled, breaker, overdue := 0, 0, 0
+		for _, sc := range all {
+			if !sc.Enabled {
+				if sc.DisabledReason != "" && sc.DisabledReason != "paused" && sc.DisabledReason != "one-shot fired" {
+					breaker++
+					add("schedule:"+sc.Name, "warn", "DISABLED: "+sc.DisabledReason)
+				}
+				continue
+			}
+			enabled++
+			if sc.NextFireUnix > 0 && now-sc.NextFireUnix > 2*int64(scheduleMissGrace/time.Second) && time.Since(d.started) > 2*scheduleMissGrace {
+				overdue++
+				add("schedule:"+sc.Name, "fail", fmt.Sprintf("due %s ago and not fired — the scheduler loop is not running", time.Duration(now-sc.NextFireUnix)*time.Second))
+			}
+		}
+		if breaker == 0 && overdue == 0 {
+			add("schedules", "ok", fmt.Sprintf("%d enabled", enabled))
+		}
+		if held, delivered, flagged := d.pasteQueueStats(); held > 0 {
+			add("typing guard", "ok", fmt.Sprintf("%d held, %d delivered, %d flagged since start", held, delivered, flagged))
 		}
 	}
 

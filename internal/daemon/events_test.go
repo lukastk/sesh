@@ -38,18 +38,22 @@ func TestEventEnv(t *testing.T) {
 	}
 	ev.Snap.Flagged = true
 	ev.Snap.FlagReason = "Do you prefer red or blue?"
+	ev.ScheduleID, ev.ScheduleName, ev.ScheduleOutcome = "sid-1", "heartbeat", "fired: pane"
 	env := ev.Env()
 	want := map[string]string{
-		"SESH_EVENT":       "busy_changed",
-		"SESH_EVENT_FROM":  "busy",
-		"SESH_EVENT_TO":    "idle",
-		"SESH_THREAD_ID":   "tid-1",
-		"SESH_THREAD_NAME": "worker",
-		"SESH_AGENT":       "pi",
-		"SESH_MACHINE":     "mbox",
-		"SESH_CWD":         "/w",
-		"SESH_SESSION":     "sesh_worker",
-		"SESH_TAGS":        "a,b",
+		"SESH_SCHEDULE_ID":            "sid-1",
+		"SESH_SCHEDULE_NAME":          "heartbeat",
+		"SESH_SCHEDULE_OUTCOME":       "fired: pane",
+		"SESH_EVENT":                  "busy_changed",
+		"SESH_EVENT_FROM":             "busy",
+		"SESH_EVENT_TO":               "idle",
+		"SESH_THREAD_ID":              "tid-1",
+		"SESH_THREAD_NAME":            "worker",
+		"SESH_AGENT":                  "pi",
+		"SESH_MACHINE":                "mbox",
+		"SESH_CWD":                    "/w",
+		"SESH_SESSION":                "sesh_worker",
+		"SESH_TAGS":                   "a,b",
 		"SESH_HEAD":                   string(api.Headful),
 		"SESH_BUSY":                   string(api.BusyIdle),
 		"SESH_ATTACHMENT":             "attached",
@@ -77,7 +81,11 @@ func TestEventEnv(t *testing.T) {
 	ev.Snap.Flagged = false
 	ev.Snap.FlagReason = ""
 	ev.Snap.StateAuthority = ""
+	ev.ScheduleID = ""
 	env = ev.Env()
+	if _, present := env["SESH_SCHEDULE_ID"]; present {
+		t.Error("SESH_SCHEDULE_* must be absent on a non-schedule event")
+	}
 	if env["SESH_ATTACHMENT"] != "detached" {
 		t.Errorf("SESH_ATTACHMENT = %q, want detached", env["SESH_ATTACHMENT"])
 	}

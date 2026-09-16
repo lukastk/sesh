@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
@@ -442,6 +443,7 @@ func ticketSendPrompt(cfg config.Config, args []string) error {
 	id := fs.String("id", "", "ticket id (required)")
 	fs.Bool("prepend", false, "prepend the ticket's name + id to the delivered prompt")
 	fs.Bool("no-prepend", false, "do NOT prepend the ticket's name + id (overrides the [ticket] config default)")
+	tf := addTypingFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -461,9 +463,39 @@ func ticketSendPrompt(cfg config.Config, args []string) error {
 			prepend = &v
 		}
 	})
+	req := api.SendPromptRequest{ID: *id, Prepend: prepend}
+	if err := tf.apply(&req.RespectTypingMs, &req.TypingDeadlineMs, &req.OnTyping, false); err != nil {
+		return fmt.Errorf("ticket send-prompt: %w", err)
+	}
 	c := daemonClient(cfg)
-	if err := c.TicketSendPrompt(context.Background(), *id, prepend); err != nil {
-		return err
+	if req.OnTyping == api.OnTypingWait {
+		// Wait mode from a keybinding is a blocking loop; bound it like a send.
+		deadline := time.Now().Add(10 * time.Minute)
+		for {
+			req.TypingWaitMs = int(min(time.Until(deadline), 8*time.Second) / time.Millisecond)
+			if req.TypingWaitMs <= 0 {
+				return errors.New("ticket send-prompt: the pane stayed in use for 10m; not sent")
+			}
+			resp, err := c.TicketSendPromptWith(context.Background(), req)
+			if err != nil {
+				return err
+			}
+			if reportTyping("ticket send-prompt", resp) {
+				break
+			}
+		}
+	} else {
+		resp, err := c.TicketSendPromptWith(context.Background(), req)
+		if err != nil {
+			return err
+		}
+		if !reportTyping("ticket send-prompt", resp) {
+			if resp.Deferred {
+				fmt.Println("deferred prompt for", *id)
+				return nil
+			}
+			return fmt.Errorf("ticket send-prompt: not sent (%+v)", resp)
+		}
 	}
 	fmt.Println("sent prompt for", *id)
 	return nil

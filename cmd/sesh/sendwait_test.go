@@ -38,7 +38,9 @@ func scriptedDaemon(t *testing.T, wait func(until string) api.ThreadWaitResponse
 	})
 	mux.HandleFunc("POST /v1/threads/send", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&sends, 1)
-		json.NewEncoder(w).Encode(map[string]any{"schema": api.SchemaVersion}) //nolint:errcheck
+		// The real daemon's shape: `sent` carries the id when the text landed
+		// (the typing guard's other outcomes are exercised against a real tmux).
+		json.NewEncoder(w).Encode(map[string]any{"schema": api.SchemaVersion, "sent": swTID}) //nolint:errcheck
 	})
 	mux.HandleFunc("GET /v1/threads/wait", func(w http.ResponseWriter, r *http.Request) {
 		resp := wait(r.URL.Query().Get("until"))

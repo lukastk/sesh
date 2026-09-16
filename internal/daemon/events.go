@@ -23,6 +23,11 @@ type Event struct {
 	// attachment axis flip (either direction) — the "user just navigated onto
 	// it" signal. -1 = no flip observed since daemon start.
 	AttachmentChangedAgo int64
+	// ScheduleID/ScheduleName/ScheduleOutcome are set on schedule_fired /
+	// schedule_failed (schema 49).
+	ScheduleID      string
+	ScheduleName    string
+	ScheduleOutcome string
 }
 
 // Env is the environment a hook command receives.
@@ -72,6 +77,11 @@ func (e Event) Env() map[string]string {
 	// (headless, a pre-43 owner) — a hook must not read absence as either value.
 	if e.Snap.StateAuthority != "" {
 		m["SESH_STATE_AUTHORITY"] = string(e.Snap.StateAuthority)
+	}
+	if e.ScheduleID != "" {
+		m["SESH_SCHEDULE_ID"] = e.ScheduleID
+		m["SESH_SCHEDULE_NAME"] = e.ScheduleName
+		m["SESH_SCHEDULE_OUTCOME"] = e.ScheduleOutcome
 	}
 	return m
 }

@@ -236,3 +236,25 @@ claim asserting the rendered row for a real marked pane over a real work server 
 via the real ssh hop), plus a counter proving zero status-job spawns across N forced
 redraws. Trigger: as soon as the termux agent fix has landed — the leak is the urgent half,
 this is the durable half.
+
+## 8. Scheduled work — timed messages into a thread + timed spawns (`sesh schedule`; designed 2026-09-16 in `_dev/SCHEDULING.md`, NOT built; ticket 28f6e77b)
+
+sesh has no clock-driven input: every existing mechanism fires on a user action or an observed
+state edge. The design is ONE record with two actions — `message` (deliver text into an existing
+thread, on a cron/interval/one-shot) and `spawn` (create a thread in a cwd with a prompt) — sharing
+the clock, catch-up policy, bounds, outcome history, CLI family and, load-bearingly, the guard
+vocabulary over the existing state axes: `--when-headless {turn|revive|skip}`, `--when-busy
+{skip|send}` (the heartbeat rule), `--if idle,detached,…`, `--idle-for`, hold/archived skipped by
+default, a typing-collision guard on pane pastes (H48's `attached_activity_unix`). Spawn adds the
+overlap guard (`--if-previous skip`), `--on-turn-end stop+archive` via the eventer's busy→idle
+edge with a persisted `schedule_runs` row, auto-flag disabled on scheduled runs, and `--parent` onto
+a virtual thread to group runs. Owned by the machine that executes it (the target thread's owner /
+the spawn machine), owner-local table like tickets/subscriptions, NOT in the mesh snapshot. Build
+order: phase 0 = the `respect-typing` wait-not-drop guard on EVERY pane delivery (`thread send`,
+`ticket send-prompt`, subscriptions — a live collision today, no schema, ships first), then engine
++ `message` (the half only sesh can do), `spawn` second (cron + `delegate` already covers ~80 %),
+TUI/doctor/hook-events third. ~24 matrix cells across six new rows. Decided 2026-09-16: both
+actions, message first; `--idle-for 60s` implied by `--if idle`; `respect-typing` on by default;
+hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`; closed guard keyword
+list; the two TUI snapshot fields in phase 3; spawn-mode disclosure only; no broadcast. **Fully
+decided — ready to build** in the `SCHEDULING.md` §14 order.

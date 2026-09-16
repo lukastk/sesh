@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -236,11 +237,15 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := d.store.DeleteThread(req.ID); err != nil {
+	cascaded, err := d.store.DeleteThreadCascade(req.ID)
+	if err != nil {
 		d.threadOpErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "deleted": req.ID})
+	if cascaded > 0 {
+		log.Printf("delete: thread %s took %d message schedule(s) with it", req.ID, cascaded)
+	}
+	writeJSON(w, http.StatusOK, api.DeleteThreadResponse{Schema: api.SchemaVersion, Deleted: req.ID, SchedulesRemoved: int(cascaded)})
 }
 
 func (d *Daemon) respondThread(w http.ResponseWriter, id string) {

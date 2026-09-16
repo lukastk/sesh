@@ -292,7 +292,24 @@ package api
 // and mixed-mesh safe: the derivation is owner-side, so a pre-48 VIEWER reads
 // the correct on_hold either way; a pre-48 OWNER ignores the unknown column
 // and keeps the pre-48 behavior (no release).
-const SchemaVersion = 48
+//
+// 49: THE TYPING GUARD on every delivery into a live pane, and SCHEDULED WORK
+// (_dev/SCHEDULING.md). (a) ThreadSendRequest / SendPromptRequest gain
+// respect_typing_ms, typing_deadline_ms, on_typing and typing_wait_ms, and both
+// endpoints answer with ThreadSendResponse — `sent` is still the id when the
+// text landed (the pre-49 shape), and `deferred`/`typing`/`input_ago_sec`/
+// `deadline_unix` say when it did not: a paste is appended to whatever a viewer
+// has half-typed and submitted with it, so the owning daemon now holds a
+// delivery until the session has been free of client input for [send]
+// respect_typing (default 60 s), and a delivery still held at the deadline
+// fails loudly and auto-flags the thread instead of pasting anyway. Mixed-mesh:
+// a pre-49 daemon ignores the unknown fields and pastes at once (the pre-49
+// behavior); a pre-49 CLIENT talking to a 49 daemon over the http transport
+// reads a deferred 200 as "sent" for the duration of a rollout — the ssh
+// transport re-execs the peer's own binary, so CLI and daemon match there.
+// (b) The /v1/schedules endpoint family (additive; a pre-49 daemon 404s it
+// loudly) — see the Schedule types.
+const SchemaVersion = 49
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

@@ -91,6 +91,7 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 	if snap, ok := d.maint.stateOf(th.ID); ok {
 		return api.ThreadRow{Thread: th, Head: snap.Head, Busy: snap.Busy, Attachment: snap.Attachment,
 			TicketsOpen: dg.Count, TicketName: dg.NewestName,
+			Schedules: snap.Schedules, ScheduleNextUnix: snap.ScheduleNextUnix,
 			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
 			CwdRel:           snap.CwdRel, OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil,
 			StateAuthority:   snap.StateAuthority}

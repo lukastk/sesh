@@ -40,6 +40,7 @@ func init() {
 	registerTUIClaim("cursor-preselect", claimCursorPreselect)
 	registerTUIClaim("uuid-popup-copy", claimUUIDPopupCopy)
 	registerTUIClaim("columns-config", claimColumnsConfig)
+	registerTUIClaim("sched-column", claimSchedColumn)
 	registerTUIClaim("cwd-label-column", claimCwdLabelColumn)
 	registerTUIClaim("columns-reorder", claimColumnsReorder)
 	registerTUIClaim("notify-toggle", claimNotifyToggle)
@@ -1588,4 +1589,51 @@ func firstHeaderLine(view string) string {
 		}
 	}
 	return ""
+}
+
+// claimSchedColumn: the opt-in `sched` column and the details row render a
+// thread's schedule digest — stamped by the OWNING daemon's maintainer from
+// the real schedules table, so the row carries it with no fan-out. A real
+// message schedule 30 minutes out shows "in 29m"/"in 30m"; removing it blanks
+// the cell on the next fetch.
+func claimSchedColumn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sb := newSandbox(t, matrix.Local)
+	sb.startDaemon(t)
+	th := sb.newHeadlessThread(t, "pi", "with-a-heartbeat")
+	other := sb.newHeadlessThread(t, "pi", "without-one")
+	sc := sb.scheduleJSON(t, "message", "--id", th.ID, "--every", "30m", "--name", "beat", "--when-headless", "skip", "--text", "x")
+	cols, err := tui.ResolveColumns([]string{"name", "sched"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols)
+	var view string
+	if !waitUntil(15*time.Second, func() bool {
+		m, view = renderUntilRowView(t, m, "with-a-heartbeat")
+		return strings.Contains(view, "in 29m") || strings.Contains(view, "in 30m")
+	}) {
+		t.Fatalf("SCHED column never showed the next fire:\n%s", view)
+	}
+	if !strings.Contains(view, "SCHED") {
+		t.Fatalf("SCHED header missing:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "without-one") && strings.Contains(line, "in ") {
+			t.Fatalf("a thread with no schedule shows a next fire:\n%s", view)
+		}
+	}
+	_ = other
+	if _, stderr, err := sb.Runner.Run(t, "schedule", "remove", "--id", sc.ID); err != nil {
+		t.Fatalf("remove: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool {
+		m2 := tui.New(sb.Home+"/daemon.sock", false).WithColumns(cols)
+		_, v := renderUntilRowView(t, m2, "with-a-heartbeat")
+		return !strings.Contains(v, "in 29m") && !strings.Contains(v, "in 30m")
+	}) {
+		t.Fatalf("SCHED cell did not blank after the schedule was removed")
+	}
 }

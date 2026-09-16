@@ -104,3 +104,10 @@ func (c *Client) TicketNeedsInput(ctx context.Context, id string) (api.TicketNee
 func (c *Client) TicketSendPrompt(ctx context.Context, id string, prepend *bool) error {
 	return c.postJSON(ctx, "http://unix/v1/tickets/send-prompt", api.SendPromptRequest{ID: id, Prepend: prepend}, nil)
 }
+
+// TicketSendPromptWith is TicketSendPrompt with the full request (typing-guard
+// fields) and the daemon's decision in the response.
+func (c *Client) TicketSendPromptWith(ctx context.Context, req api.SendPromptRequest) (api.ThreadSendResponse, error) {
+	var out api.ThreadSendResponse
+	return out, c.postJSON(ctx, "http://unix/v1/tickets/send-prompt", req, &out)
+}

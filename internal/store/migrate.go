@@ -230,6 +230,70 @@ var migrations = []string{
 	// statement, so the exclusivity is structural rather than a convention.
 	// Dated like a hold, so it auto-expires. APPENDED last.
 	`ALTER TABLE threads ADD COLUMN hold_release_until INTEGER NOT NULL DEFAULT 0;`,
+	// 26: SCHEDULED WORK (_dev/SCHEDULING.md, api 49). schedules is one record
+	// per `sesh schedule` — WHEN (spec + recorded tz + catch-up policy + bounds),
+	// WHAT (a message into thread_id, or a spawn of agent/cwd/prompt), RULES (one
+	// JSON column so the guard vocabulary can grow without a migration per
+	// flag), and its own STATE (next/last fire, outcome, counters). Owner-local:
+	// a schedule lives on the machine that executes it and is never replicated.
+	// schedule_runs is the per-fire history AND the spawn reaper's durable
+	// source of truth (a run row outlives a daemon restart mid-run). Its own
+	// revs row + triggers gate the scheduler's in-memory cache the way threads'
+	// gate the maintainer; a second trigger set bumps the 'threads' rev too (as
+	// tickets do) so the maintainer's full sweep restamps each thread's schedule
+	// digest (the snapshot's schedules/schedule_next_unix). APPENDED last.
+	`CREATE TABLE schedules (
+		id              TEXT PRIMARY KEY,
+		name            TEXT NOT NULL,
+		action          TEXT NOT NULL,
+		enabled         INTEGER NOT NULL DEFAULT 1,
+		disabled_reason TEXT NOT NULL DEFAULT '',
+		spec            TEXT NOT NULL,
+		tz              TEXT NOT NULL,
+		catchup         TEXT NOT NULL,
+		not_before      INTEGER NOT NULL DEFAULT 0,
+		not_after       INTEGER NOT NULL DEFAULT 0,
+		max_fires       INTEGER NOT NULL DEFAULT 0,
+		thread_id       TEXT NOT NULL DEFAULT '',
+		text            TEXT NOT NULL DEFAULT '',
+		agent           TEXT NOT NULL DEFAULT '',
+		cwd             TEXT NOT NULL DEFAULT '',
+		prompt          TEXT NOT NULL DEFAULT '',
+		model           TEXT NOT NULL DEFAULT '',
+		spawn_mode      TEXT NOT NULL DEFAULT '',
+		headless        INTEGER NOT NULL DEFAULT 1,
+		into_session    TEXT NOT NULL DEFAULT '',
+		parent_id       TEXT NOT NULL DEFAULT '',
+		name_template   TEXT NOT NULL DEFAULT '',
+		rules           TEXT NOT NULL DEFAULT '{}',
+		next_fire       INTEGER NOT NULL DEFAULT 0,
+		last_fire       INTEGER NOT NULL DEFAULT 0,
+		last_outcome    TEXT NOT NULL DEFAULT '',
+		fire_count      INTEGER NOT NULL DEFAULT 0,
+		skip_count      INTEGER NOT NULL DEFAULT 0,
+		fail_streak     INTEGER NOT NULL DEFAULT 0,
+		missed          INTEGER NOT NULL DEFAULT 0,
+		last_run_thread TEXT NOT NULL DEFAULT '',
+		created_at      INTEGER NOT NULL
+	);
+	CREATE INDEX schedules_thread ON schedules (thread_id);
+	CREATE TABLE schedule_runs (
+		schedule_id TEXT NOT NULL,
+		fired_at    INTEGER NOT NULL,
+		thread_id   TEXT NOT NULL DEFAULT '',
+		outcome     TEXT NOT NULL,
+		detail      TEXT NOT NULL DEFAULT '',
+		ended_at    INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (schedule_id, fired_at)
+	) WITHOUT ROWID;
+	CREATE INDEX schedule_runs_thread ON schedule_runs (thread_id);
+	INSERT INTO revs (name, rev) VALUES ('schedules', 0);
+	CREATE TRIGGER schedules_rev_ins AFTER INSERT ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'schedules'; END;
+	CREATE TRIGGER schedules_rev_upd AFTER UPDATE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'schedules'; END;
+	CREATE TRIGGER schedules_rev_del AFTER DELETE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'schedules'; END;
+	CREATE TRIGGER schedules_trev_ins AFTER INSERT ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER schedules_trev_upd AFTER UPDATE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
+	CREATE TRIGGER schedules_trev_del AFTER DELETE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

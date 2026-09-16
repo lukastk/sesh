@@ -210,10 +210,14 @@ func threadDelete(cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.ThreadDelete(context.Background(), rid, *force); err != nil {
+	report, err := c.ThreadDeleteReport(context.Background(), rid, *force)
+	if err != nil {
 		return err
 	}
 	fmt.Println("deleted", rid)
+	if report.SchedulesRemoved > 0 {
+		fmt.Printf("also removed %d message schedule(s) that targeted it\n", report.SchedulesRemoved)
+	}
 	return nil
 }
 
@@ -447,6 +451,7 @@ func threadSend(cfg config.Config, args []string) error {
 	timeout := fs.Duration("timeout", 0, "overall deadline for --wait (required with --wait)")
 	pane := fs.String("pane", "", "SHELL threads: send to this tmux pane id (default: the session's active pane)")
 	window := fs.Int("window", -1, "SHELL threads: send to this window's active pane (default: the session's active pane)")
+	tf := addTypingFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -465,6 +470,17 @@ func threadSend(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
+	var win *int
+	if *window >= 0 {
+		win = window
+	}
+	req := api.ThreadSendRequest{ID: *id, Text: *text, Pane: *pane, Window: win}
+	if err := tf.apply(&req.RespectTypingMs, &req.TypingDeadlineMs, &req.OnTyping, *wait); err != nil {
+		return fmt.Errorf("thread send: %w", err)
+	}
+	if *wait && req.OnTyping == api.OnTypingDefer {
+		return errors.New("thread send: --wait cannot combine with --on-typing defer (a deferred delivery has no turn to wait for); use wait or skip")
+	}
 	// For --wait's stall guard: the pre-send activity marker. Read BEFORE the
 	// send so a delivered keystroke's pane change is observable as progress.
 	var preActive int64
@@ -476,16 +492,35 @@ func threadSend(cfg config.Config, args []string) error {
 		}
 		preActive, preBusy = pre.LastActiveUnix, pre.Reached
 	}
-	var win *int
-	if *window >= 0 {
-		win = window
-	}
-	if err := c.ThreadSendTo(context.Background(), *id, *text, *pane, win); err != nil {
-		return err
-	}
 	if !*wait {
-		fmt.Println("sent", *id)
-		return nil
+		resp, err := c.ThreadSendWith(context.Background(), req)
+		if err != nil {
+			return err
+		}
+		if reportTyping("thread send", resp) {
+			fmt.Println("sent", *id)
+			return nil
+		}
+		if resp.Deferred {
+			fmt.Println("deferred", *id)
+			return nil
+		}
+		return fmt.Errorf("thread send: not sent (%+v)", resp)
+	}
+	// --wait: the delivery itself blocks for a quiet pane (wait mode), bounded
+	// by the same --timeout, before the turn is waited for.
+	if req.OnTyping == api.OnTypingWait {
+		if _, err := sendUntilQuiet(c, req, *timeout); err != nil {
+			return err
+		}
+	} else {
+		resp, err := c.ThreadSendWith(context.Background(), req)
+		if err != nil {
+			return err
+		}
+		if !reportTyping("thread send", resp) {
+			return fmt.Errorf("thread send: not sent (%+v)", resp)
+		}
 	}
 	// STALL GUARD (herdr's agent_prompt_stalled): a send from a non-busy state
 	// must produce SOME observed change within 5s — a busy latch, or at least

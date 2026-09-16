@@ -353,6 +353,56 @@ type ThreadSendRequest struct {
 	// Both are refused on an agent thread, whose target is its marker.
 	Pane   string `json:"pane,omitempty"`
 	Window *int   `json:"window,omitempty"`
+	// The typing guard (schema 49, _dev/SCHEDULING.md §6.5.1). A pane paste is
+	// appended to whatever a viewer has half-typed and SUBMITTED with it, so a
+	// delivery into a pane whose session saw client input within RespectTypingMs
+	// is held until the pane has been quiet that long. nil = the owning daemon's
+	// [send] respect_typing; 0 = paste now regardless. TypingDeadlineMs bounds a
+	// held delivery (nil = [send] respect_typing_deadline); when it lapses the
+	// daemon FAILS the delivery loudly and auto-flags the thread rather than
+	// pasting anyway. OnTyping picks what a held delivery does: "defer" (the
+	// default — the daemon queues it, pastes when quiet, and the response says
+	// so), "wait" (the daemon blocks up to TypingWaitMs, server-capped, and a
+	// still-typing pane returns typing=true WITHOUT queueing, so a caller that
+	// wants to block loops), or "skip" (a typing pane is a loud refusal, nothing
+	// queued — for periodic senders with a next occurrence).
+	RespectTypingMs  *int   `json:"respect_typing_ms,omitempty"`
+	TypingDeadlineMs *int   `json:"typing_deadline_ms,omitempty"`
+	OnTyping         string `json:"on_typing,omitempty"`
+	TypingWaitMs     int    `json:"typing_wait_ms,omitempty"`
+}
+
+// OnTyping values for ThreadSendRequest.OnTyping.
+const (
+	OnTypingDefer = "defer"
+	OnTypingWait  = "wait"
+	OnTypingSkip  = "skip"
+)
+
+// ThreadSendResponse is the body of POST /v1/threads/send (and
+// /v1/tickets/send-prompt). Sent carries the thread id when the text landed in
+// the pane — the pre-49 shape, kept — and is empty otherwise: Deferred means the
+// daemon holds the delivery for a quiet pane (until DeadlineUnix, then it flags);
+// Typing means a "wait"-mode caller's budget ran out with the viewer still at the
+// keyboard and nothing was queued (loop, or give up). InputAgoSec is how long
+// ago the session last saw viewer input when the decision was made.
+type ThreadSendResponse struct {
+	Schema       int    `json:"schema"`
+	ID           string `json:"id"`
+	Sent         string `json:"sent,omitempty"`
+	Deferred     bool   `json:"deferred,omitempty"`
+	Typing       bool   `json:"typing,omitempty"`
+	InputAgoSec  int64  `json:"input_ago_sec,omitempty"`
+	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
+}
+
+// DeleteThreadResponse is the body of POST /v1/threads/delete. SchedulesRemoved
+// counts the message schedules that targeted the thread and went with it (schema
+// 49) — a schedule whose thread is gone would fire into nothing forever.
+type DeleteThreadResponse struct {
+	Schema           int    `json:"schema"`
+	Deleted          string `json:"deleted"`
+	SchedulesRemoved int    `json:"schedules_removed,omitempty"`
 }
 
 // RenameThreadRequest is the body of POST /v1/threads/rename.
@@ -459,6 +509,9 @@ type ThreadRow struct {
 	// TicketsOpen is the number of bound, still-open tickets (not done/dropped)
 	// — the TUI's `ticketed` predicate and TICKETS column read it.
 	TicketsOpen int `json:"tickets_open"`
+	// Schedules / ScheduleNextUnix mirror ThreadSnapshot's (schema 49).
+	Schedules        int   `json:"schedules,omitempty"`
+	ScheduleNextUnix int64 `json:"schedule_next_unix,omitempty"`
 	// TicketName is the newest open ticket's name (the TKT-NAME column); '' if none.
 	TicketName string `json:"ticket_name,omitempty"`
 	// TicketNeedsInput is true when ANY bound open ticket of this thread needs input
@@ -514,12 +567,18 @@ type ThreadSnapshot struct {
 	// session; 0 = detached or unknown (e.g. a pre-42 peer). Lets a notify hook
 	// tell "the user is driving this session" from "a cockpit client is merely
 	// parked on it" — raw attachment cannot (schema 42).
-	AttachedActivityUnix int64  `json:"attached_activity_unix,omitempty"`
-	TicketsOpen          int    `json:"tickets_open"`
-	TicketName           string `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
-	TicketNeedsInput     bool   `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
-	AgentRunning         bool   `json:"agent_running"`
-	LastActiveUnix       int64  `json:"last_active_unix"` // last pane change / turn completion
+	AttachedActivityUnix int64 `json:"attached_activity_unix,omitempty"`
+	TicketsOpen          int   `json:"tickets_open"`
+	// Schedules / ScheduleNextUnix: how many ENABLED message schedules target
+	// this thread and the earliest next fire (schema 49) — owner-stamped, so a
+	// TUI on any machine can show "this thread has a heartbeat" without a
+	// fan-out. Zero/absent when none.
+	Schedules        int    `json:"schedules,omitempty"`
+	ScheduleNextUnix int64  `json:"schedule_next_unix,omitempty"`
+	TicketName       string `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
+	TicketNeedsInput bool   `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
+	AgentRunning     bool   `json:"agent_running"`
+	LastActiveUnix   int64  `json:"last_active_unix"` // last pane change / turn completion
 	// CwdRel is Cwd rendered ~-relative to the OWNING machine's home, stamped by
 	// that machine's maintainer (the home is owner data the viewer cannot know). A
 	// viewer applies its own [[cwd_label]] rules to this, so the CWD column labels

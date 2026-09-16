@@ -80,28 +80,44 @@ func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
 // id silently renders children as roots and can never be cleaned up later, since
 // the grandparent is unknowable once the row is gone).
 func (s *Store) DeleteThread(id string) error {
+	_, err := s.DeleteThreadCascade(id)
+	return err
+}
+
+// DeleteThreadCascade is DeleteThread reporting how many message schedules
+// targeting the thread went with it — in the SAME transaction, run history
+// included: a schedule whose thread is gone would fire into nothing forever.
+func (s *Store) DeleteThreadCascade(id string) (schedules int64, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("store: delete thread: begin: %w", err)
+		return 0, fmt.Errorf("store: delete thread: begin: %w", err)
 	}
 	defer tx.Rollback()
 	var parent string
 	if err := tx.QueryRow(`SELECT parent FROM threads WHERE id = ?`, id).Scan(&parent); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrThreadNotFound
+			return 0, ErrThreadNotFound
 		}
-		return fmt.Errorf("store: delete thread: read parent: %w", err)
+		return 0, fmt.Errorf("store: delete thread: read parent: %w", err)
 	}
 	if _, err := tx.Exec(`UPDATE threads SET parent = ? WHERE parent = ?`, parent, id); err != nil {
-		return fmt.Errorf("store: delete thread: promote children: %w", err)
+		return 0, fmt.Errorf("store: delete thread: promote children: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM threads WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("store: delete thread: %w", err)
+		return 0, fmt.Errorf("store: delete thread: %w", err)
 	}
+	if _, err := tx.Exec(`DELETE FROM schedule_runs WHERE schedule_id IN (SELECT id FROM schedules WHERE thread_id = ?)`, id); err != nil {
+		return 0, fmt.Errorf("store: delete thread: cascade schedule runs: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM schedules WHERE thread_id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete thread: cascade schedules: %w", err)
+	}
+	schedules, _ = res.RowsAffected()
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: delete thread: commit: %w", err)
+		return 0, fmt.Errorf("store: delete thread: commit: %w", err)
 	}
-	return nil
+	return schedules, nil
 }
 
 // RealizeThread converts a VIRTUAL thread into a real one in place: agent kind,

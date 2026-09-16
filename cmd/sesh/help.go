@@ -219,9 +219,9 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh thread status --id 1a2b3c4d --json"},
 	},
 	"thread send": {
-		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise)",
-		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--machine <m>]",
-		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m"},
+		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise). The TYPING GUARD holds the paste while a viewer is at the keyboard: a paste is appended to whatever is half-typed and submitted with it, so the daemon waits until the pane has seen no viewer input for [send] respect_typing (60s), delivering it then (`deferred`), or — still in use at the deadline (10m) — failing loudly and FLAGGING the thread with the undelivered message. --wait blocks here for the quiet pane instead.",
+		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
+		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m", "sesh thread send --id 1a2b3c4d --text 'now' --respect-typing 0"},
 	},
 	"thread wait": {
 		summary:  "block until a thread reaches a state (server-owned wait; one routed hop for --machine)",
@@ -459,8 +459,8 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh ticket needs-input --id t1 --json"},
 	},
 	"ticket send-prompt": {
-		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call)",
-		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--machine <m>]",
+		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call). Goes through the same typing guard as `thread send` (held while a viewer types; deferred, then flagged at the deadline).",
+		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh ticket send-prompt --id t1", "sesh ticket send-prompt --id t1 --no-prepend"},
 	},
 

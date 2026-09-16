@@ -257,6 +257,14 @@ func (c *Client) ThreadSendTo(ctx context.Context, id, text, pane string, window
 		api.ThreadSendRequest{ID: id, Text: text, Pane: pane, Window: window}, nil)
 }
 
+// ThreadSendWith posts POST /v1/threads/send with the full request (the typing
+// guard fields) and returns the daemon's decision: sent, deferred (held by the
+// daemon), or typing (wait mode's budget spent, nothing queued).
+func (c *Client) ThreadSendWith(ctx context.Context, req api.ThreadSendRequest) (api.ThreadSendResponse, error) {
+	var out api.ThreadSendResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/send", req, &out)
+}
+
 // ThreadSendHeadless posts POST /v1/threads/send-headless (deliver a turn to a
 // headless thread; runs in the background).
 func (c *Client) ThreadSendHeadless(ctx context.Context, id, text string) error {

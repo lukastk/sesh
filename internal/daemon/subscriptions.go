@@ -97,7 +97,7 @@ func (d *Daemon) deliverTo(subscriberID, subscribeeID, text string) {
 		// Local subscriber: pane send if live, else headless turn.
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if derr := d.sendIntoThread(ctx, th, text); derr != nil {
+		if derr := d.sendIntoThread(ctx, th, "subscription "+subscribeeID[:min(8, len(subscribeeID))], text); derr != nil {
 			log.Printf("subscriptions: delivery %s→%s: %v", subscribeeID, subscriberID, derr)
 		}
 		return
@@ -128,19 +128,39 @@ func (d *Daemon) peerMachineOf(id string) string {
 	return d.view.ownerOf(id)
 }
 
-// sendIntoThread delivers text to a local thread by its runtime state.
-func (d *Daemon) sendIntoThread(ctx context.Context, th api.Thread, text string) error {
+// sendIntoThread delivers text to a local thread by its runtime state. sender
+// names the origin for the typing guard's logs and flag reason.
+func (d *Daemon) sendIntoThread(ctx context.Context, th api.Thread, sender, text string) error {
 	head, busy, err := d.resolveState(th)
 	if err != nil {
 		return err
 	}
 	switch {
 	case head == api.Headful:
-		loc, found, ferr := d.tmux.FindPaneByThreadID(th.ID)
-		if ferr != nil || !found {
-			return fmt.Errorf("subscriber pane vanished: %v", ferr)
+		// Through the typing guard (paste.go), defer policy: a report must never
+		// be pasted into a line the user is mid-way through typing, and must
+		// never be lost — a held delivery lands when the pane is quiet, or flags.
+		preq := pasteRequest{
+			thread: th,
+			text:   text,
+			guard:  d.pasteGuardFor(nil, nil),
+			sender: sender,
+			resolve: func() (string, string, bool, error) {
+				loc, found, ferr := d.tmux.FindPaneByThreadID(th.ID)
+				if ferr != nil || !found {
+					return "", "", false, ferr
+				}
+				return loc.Pane, loc.Session, true, nil
+			},
 		}
-		return d.tmux.SendText(loc.Pane, text, true)
+		out, err := d.pasteDefer(preq)
+		if err != nil {
+			return err
+		}
+		if out.Deferred {
+			log.Printf("subscriptions: %s → %s held (pane in use); delivering when quiet", sender, th.ID)
+		}
+		return nil
 	case busy == api.BusyIdle:
 		// A headless turn through our OWN send-headless endpoint — the exact
 		// same gates (live-pane 409, overlap 409, codex discovery) apply.

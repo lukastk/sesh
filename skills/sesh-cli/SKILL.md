@@ -880,7 +880,29 @@ sesh await <id> --timeout 5m                               # block until a turn 
 sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → archive
 sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # leave the worker active instead of archiving
 sesh subscribe <subscribee> --from <subscriber>            # pipe one thread's turns into another
+sesh thread send --id <id> --text 'now' --respect-typing 0 # bypass the typing guard for this one paste
 ```
+
+**The typing guard (every paste into a live pane).** A pane paste is
+`paste-buffer` then Enter, so text delivered while a human is mid-line in that
+pane is appended to their half-typed prompt and SUBMITTED with it — the live
+case was child threads reporting into a supervisor its user was typing in. So
+the owning daemon holds every thread-level delivery (`thread send`, `ticket
+send-prompt`, subscription deliveries, scheduled messages) while the thread's
+session has seen viewer INPUT within `[send] respect_typing` (default 60s —
+tmux's `client_activity`, bumped by keystrokes through an attached client, not
+by agent output), and pastes it once the pane has been quiet that long. What a
+held delivery does is `--on-typing`: **`defer`** (the default — the daemon queues
+it per thread, FIFO, prints `deferred <id>` and delivers later; a delivery still
+held at `[send] respect_typing_deadline` (10m) FAILS loudly and auto-flags the
+thread with `undelivered message from …` as the reason, never pasting anyway),
+**`wait`** (block the command until the pane is quiet, bounded by `--timeout`;
+the default under `--wait`), or **`skip`** (refuse with a non-zero exit, queue
+nothing — for periodic senders). `--respect-typing <dur>` overrides the window
+per call (`0` = paste now regardless), `--typing-deadline <dur>` the bound. A
+detached session (nobody viewing) is quiet by definition. Held deliveries live
+in daemon memory: a daemon restart drops them, loudly in its log. NB tmux counts
+ANY key as input — PgUp while reading holds the guard like typing does.
 
 **State authority.** A headful thread's busy/idle normally comes from a pane
 content-diff heuristic, but pi and claude threads carry an in-agent reporter
@@ -1057,6 +1079,10 @@ idle_interval = "60s"            # peer-sync pace while nothing reads the mesh v
 
 [spawn]                          # default launch policy (yolo bypasses permission prompts)
 mode = "yolo"
+
+[send]                           # the typing guard on every paste into a live pane
+respect_typing = "60s"           # hold a delivery until the pane has seen no viewer input this long ("0s" = off)
+respect_typing_deadline = "10m"  # a delivery still held this long fails loudly + flags the thread
 
 [[hooks]]                        # event hooks: fire a command on an observed state edge
 name = "notify-idle"

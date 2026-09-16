@@ -362,6 +362,9 @@ var flagDocs = map[string][]flagDoc{
 		{"--text", "message text to send into the pane (required)"},
 		{"--wait", "block until the turn settles (idle or blocked); fails fast if the input produces no state change within 5s"},
 		{"--timeout", "overall deadline for --wait, e.g. 5m (required with --wait)"},
+		{"--respect-typing", "hold the paste until the thread's session has seen no viewer INPUT for this long (a paste lands in whatever is half-typed and submits it). 0 = paste now regardless; default: the daemon's [send] respect_typing (60s)"},
+		{"--typing-deadline", "how long a held delivery waits for that quiet window before it FAILS loudly and auto-flags the thread with the undelivered message (default: [send] respect_typing_deadline, 10m)"},
+		{"--on-typing", "what happens while the pane is in use: defer (the daemon queues the delivery and pastes it when quiet — the default), wait (block this command until quiet; the default under --wait), skip (refuse loudly, queue nothing)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread wait": {
@@ -491,6 +494,9 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "ticket id whose prompt to send to its bound thread (required)"},
 		{"--prepend", "prepend the ticket's name + id to the delivered prompt (overrides the config default)"},
 		{"--no-prepend", "do NOT prepend the ticket's name + id (overrides the [ticket] send_prepend config default)"},
+		{"--respect-typing", "hold the paste until the thread's session has seen no viewer INPUT for this long (a paste lands in whatever is half-typed and submits it). 0 = paste now regardless; default: the daemon's [send] respect_typing (60s)"},
+		{"--typing-deadline", "how long a held delivery waits for that quiet window before it FAILS loudly and auto-flags the thread with the undelivered message (default: [send] respect_typing_deadline, 10m)"},
+		{"--on-typing", "what happens while the pane is in use: defer (the daemon queues the delivery and pastes it when quiet — the default), wait (block this command until quiet; the default under --wait), skip (refuse loudly, queue nothing)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"ticket set": {

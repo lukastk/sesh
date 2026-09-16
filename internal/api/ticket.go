@@ -144,6 +144,14 @@ type MoveTicketRequest struct {
 type SendPromptRequest struct {
 	ID      string `json:"id"`
 	Prepend *bool  `json:"prepend,omitempty"`
+	// The typing guard, exactly as on ThreadSendRequest (schema 49): a prompt
+	// pasted into a pane a human is typing in would be submitted with their
+	// half-typed line. nil/0/"defer" semantics identical; the response is a
+	// ThreadSendResponse (Sent = the ticket id when it landed).
+	RespectTypingMs  *int   `json:"respect_typing_ms,omitempty"`
+	TypingDeadlineMs *int   `json:"typing_deadline_ms,omitempty"`
+	OnTyping         string `json:"on_typing,omitempty"`
+	TypingWaitMs     int    `json:"typing_wait_ms,omitempty"`
 }
 
 // UnbindTicketRequest is the body of POST /v1/tickets/unbind — it detaches a
@@ -186,12 +194,12 @@ type TicketFindResponse struct {
 // status == active AND the bound thread's activity == waiting, REGARDLESS of
 // attachment. A dead bound thread is "needs-restart", not needs-input.
 type TicketNeedsInput struct {
-	Schema         int    `json:"schema"`
-	ID             string `json:"id"`
-	NeedsInput     bool   `json:"needs_input"`
-	NeedsRestart   bool   `json:"needs_restart"`
-	Status         string `json:"status"`
-	ThreadID       string `json:"thread_id,omitempty"`
-	ThreadHead     string `json:"thread_head,omitempty"`
-	ThreadBusy     string `json:"thread_busy,omitempty"`
+	Schema       int    `json:"schema"`
+	ID           string `json:"id"`
+	NeedsInput   bool   `json:"needs_input"`
+	NeedsRestart bool   `json:"needs_restart"`
+	Status       string `json:"status"`
+	ThreadID     string `json:"thread_id,omitempty"`
+	ThreadHead   string `json:"thread_head,omitempty"`
+	ThreadBusy   string `json:"thread_busy,omitempty"`
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/lukastk/sesh/internal/config"
@@ -56,21 +57,27 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resolve the TARGET pane. An agent thread has exactly one — its marked pane.
 	// A shell thread's runtime is a whole session, so it has many, and the caller
-	// may address one explicitly.
-	var target string
+	// may address one explicitly. The resolver is re-run at delivery time by a
+	// held delivery (paste.go), so it is a closure, and its first run here is
+	// what turns "no live pane" into the loud 409 below.
+	var resolve func() (string, string, bool, error)
 	if thread.AgentKind == api.ShellAgentKind {
-		sess, live, serr := d.tmux.FindSessionByShellID(req.ID)
-		if serr != nil {
-			writeError(w, http.StatusInternalServerError, serr.Error())
-			return
+		resolve = func() (string, string, bool, error) {
+			sess, live, serr := d.tmux.FindSessionByShellID(req.ID)
+			if serr != nil || !live {
+				return "", "", false, serr
+			}
+			target, terr := shellSendTarget(sess, req.Pane, req.Window)
+			if terr != nil {
+				return "", "", false, terr
+			}
+			return target, sess.Name, true, nil
 		}
-		if !live {
+		if _, _, live, serr := resolve(); serr != nil {
+			writeError(w, http.StatusBadRequest, serr.Error())
+			return
+		} else if !live {
 			writeError(w, http.StatusConflict, "shell thread has no live session; revive it first (sesh thread resume --id "+req.ID+")")
-			return
-		}
-		target, err = shellSendTarget(sess, req.Pane, req.Window)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	} else {
@@ -78,16 +85,20 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "thread send: --pane/--window address a SHELL thread's session; an agent thread's target is its own marked pane")
 			return
 		}
-		loc, found, ferr := d.tmux.FindPaneByThreadID(req.ID)
-		if ferr != nil {
+		resolve = func() (string, string, bool, error) {
+			loc, found, ferr := d.tmux.FindPaneByThreadID(req.ID)
+			if ferr != nil || !found {
+				return "", "", false, ferr
+			}
+			return loc.Pane, loc.Session, true, nil
+		}
+		if _, _, found, ferr := resolve(); ferr != nil {
 			writeError(w, http.StatusInternalServerError, ferr.Error())
 			return
-		}
-		if !found {
+		} else if !found {
 			writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
 			return
 		}
-		target = loc.Pane
 	}
 	// Expand @blob(…) references to absolute paths; an unknown blob is a loud 400.
 	text, err := d.expandPrompt(req.Text)
@@ -95,11 +106,49 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := d.tmux.SendText(target, text, true); err != nil {
+	preq := pasteRequest{
+		thread:  thread,
+		text:    text,
+		guard:   d.pasteGuardFor(req.RespectTypingMs, req.TypingDeadlineMs),
+		sender:  "thread send",
+		resolve: resolve,
+	}
+	out, err := d.pasteByPolicy(r.Context(), preq, req.OnTyping, req.TypingWaitMs)
+	if err != nil {
+		var typing errTyping
+		if errors.As(err, &typing) {
+			writeError(w, http.StatusConflict, "thread send: "+err.Error()+" — not sent (on_typing=skip)")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "sent": req.ID})
+	writeJSON(w, http.StatusOK, out.response(req.ID))
+}
+
+// pasteByPolicy dispatches one delivery on the request's on_typing value
+// ("" = defer). An unknown value is a loud error, never a silent default.
+func (d *Daemon) pasteByPolicy(ctx context.Context, preq pasteRequest, onTyping string, waitMs int) (pasteOutcome, error) {
+	switch onTyping {
+	case "", api.OnTypingDefer:
+		return d.pasteDefer(preq)
+	case api.OnTypingWait:
+		return d.pasteWait(ctx, preq, time.Duration(waitMs)*time.Millisecond)
+	case api.OnTypingSkip:
+		return d.pasteNow(preq)
+	default:
+		return pasteOutcome{}, fmt.Errorf("send: unknown on_typing %q (want defer, wait or skip)", onTyping)
+	}
+}
+
+// response renders a paste outcome as the wire shape.
+func (o pasteOutcome) response(id string) api.ThreadSendResponse {
+	resp := api.ThreadSendResponse{Schema: api.SchemaVersion, ID: id, Deferred: o.Deferred, Typing: o.Typing,
+		InputAgoSec: int64(o.InputAgo / time.Second), DeadlineUnix: o.DeadlineUnix}
+	if o.Sent {
+		resp.Sent = id
+	}
+	return resp
 }
 
 // handleThreadNew spawns a headed thread: a real agent in a real tmux session,

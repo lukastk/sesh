@@ -81,6 +81,17 @@ type Daemon struct {
 	flags config.FlagsConfig
 	// subTracker: the per-edge subscription delivery decision (dedup + breaker).
 	subTracker *subscribe.Tracker
+	// send: the [send] typing-guard policy; pasteQueues holds deliveries the
+	// guard deferred, one FIFO per thread (paste.go). In-memory: a restart drops
+	// held deliveries, loudly (pasteStop wakes them to say so).
+	send           config.SendConfig
+	pasteMu        sync.Mutex
+	pasteQueues    map[string]*pasteQueue
+	pasteStop      chan struct{}
+	pasteStopOnce  sync.Once
+	pasteHeld      atomic.Int64
+	pasteDelivered atomic.Int64
+	pasteFlagged   atomic.Int64
 	// mmaint converges the cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -170,6 +181,12 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err // a broken [flags] refuses the daemon loudly
 	}
 	d.flags = flagsCfg
+	sendCfg, err := config.LoadSend(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [send] refuses the daemon loudly
+	}
+	d.send = sendCfg
+	d.pasteStop = make(chan struct{})
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly
@@ -272,6 +289,7 @@ func (d *Daemon) Serve() error {
 // once. On-disk markers (pid/socket) are removed by Serve's deferred cleanup, in
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	d.stopPastes()
 	d.stopAPI(ctx)
 	if d.mmaint != nil {
 		d.mmaint.stopAndWait()

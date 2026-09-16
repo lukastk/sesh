@@ -150,12 +150,22 @@ func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "ticket has no prompt to send")
 		return
 	}
-	loc, found, err := d.tmux.FindPaneByThreadID(ticket.ThreadID)
+	thread, err := d.store.GetThread(ticket.ThreadID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusConflict, "ticket's bound thread "+ticket.ThreadID+" is not on this machine: "+err.Error())
 		return
 	}
-	if !found {
+	resolve := func() (string, string, bool, error) {
+		loc, found, ferr := d.tmux.FindPaneByThreadID(ticket.ThreadID)
+		if ferr != nil || !found {
+			return "", "", false, ferr
+		}
+		return loc.Pane, loc.Session, true, nil
+	}
+	if _, _, found, ferr := resolve(); ferr != nil {
+		writeError(w, http.StatusInternalServerError, ferr.Error())
+		return
+	} else if !found {
 		writeError(w, http.StatusConflict, "bound thread has no live pane (dead); cannot send prompt")
 		return
 	}
@@ -181,11 +191,24 @@ func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) 
 	if prepend {
 		prompt = fmt.Sprintf("Ticket %q (%s)\n\n%s", ticket.Name, ticket.ID, prompt)
 	}
-	if err := d.tmux.SendText(loc.Pane, prompt, true); err != nil {
+	preq := pasteRequest{
+		thread:  thread,
+		text:    prompt,
+		guard:   d.pasteGuardFor(req.RespectTypingMs, req.TypingDeadlineMs),
+		sender:  "ticket " + ticket.ID[:min(8, len(ticket.ID))],
+		resolve: resolve,
+	}
+	out, err := d.pasteByPolicy(r.Context(), preq, req.OnTyping, req.TypingWaitMs)
+	if err != nil {
+		var typing errTyping
+		if errors.As(err, &typing) {
+			writeError(w, http.StatusConflict, "ticket send-prompt: "+err.Error()+" — not sent (on_typing=skip)")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "sent": req.ID})
+	writeJSON(w, http.StatusOK, out.response(req.ID))
 }
 
 func (d *Daemon) handleTicketCreate(w http.ResponseWriter, r *http.Request) {

@@ -127,6 +127,24 @@ neutered → guards cell red "busy target: fired: pane"; the reaper neutered →
 "missed=0". Migration 26 REHEARSED against a `VACUUM INTO` copy of mymain's live store: 25→26,
 2,057/407/80 byte-identical, tables + triggers present.
 
+**DEPLOY RESULT (2026-09-16, merge 7100afc): LIVE ON ALL SIX.** Merged `--no-ff` to main and
+pushed, then per machine: `VACUUM INTO` pre backup with counts → clean checkout pulled to
+7100afc (every one was clean) → native build (`/opt/homebrew/bin/go` on the Macs) → `.new` +
+`mv` → `supervisorctl restart sesh-daemon` → `daemon status` api 49 / store 26 → post backup.
+Pre→post counts BYTE-IDENTICAL everywhere: **mymain 2,057/407/80; macbook 125/44/0; macstudio
+26/1/0; pocket4 39/5/0; ideapad 7/2/0; termux 0/0/0** (`~/.sesh/backups/sesh-{pre,post}-v26-
+h111-20260916.db`; termux has no sqlite3 → plain file copies, its store is empty, and its old
+daemon 31238 was killed by its own reported pid after the build, the zshenv guard relaunching
+31831 on the next login with the new inode). Every binary `vcs.modified=false`. Mesh after: all
+five API peers reachable, synced ≤1 s; doctor exit 0 (`✓ schedules 0 enabled`). LIVE-SMOKED on
+the supervised mymain daemon: a disposable headless pi thread + `schedule message --every 10s
+--when-headless turn --max-fires 1` fired on its real clock (`fired: headless turn`), the real
+turn replied `SMOKEBEAT`, max_fires disabled it, `schedule list --machine ideapad` routed, and
+`thread delete` reported `also removed 1 message schedule(s)`. NB mymain's recorded zone is
+`Etc/UTC` (the box runs UTC) — a schedule typed there in wall-clock terms is UTC unless `--tz`.
+myrig needs NOTHING: `[send]` and `[schedules]` have built-in defaults (60 s / 10 m; enabled,
+breaker 10); document them in `config.toml.jinja` only if you want them visible.
+
 ## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh 138be35; NO schema/API/CLI change; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX**; ticket 4b069b88 done)
 Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …
 often I want to … spawn a handful of threads and then send a message directly to them. This

@@ -48,8 +48,9 @@ func TestHelpFlagsCoverUsageExactly(t *testing.T) {
 // subcommandSets mirrors each parent command's dispatch switch. The meta-test asserts
 // every declared subcommand has a help entry — the "no silent gap" guard for help.
 var subcommandSets = map[string][]string{
-	"daemon": {"run", "start", "stop", "restart", "status"},
-	"tmux":   {"current", "info", "create-session", "kill-session", "create-pane", "send-text", "stage-file", "nav", "master-current"},
+	"schedule": {"message", "spawn", "list", "show", "runs", "pause", "resume", "remove", "edit", "run-now"},
+	"daemon":   {"run", "start", "stop", "restart", "status"},
+	"tmux":     {"current", "info", "create-session", "kill-session", "create-pane", "send-text", "stage-file", "nav", "master-current"},
 	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "send-headless",
 		"headless-reply", "rename", "info", "adopt", "transcript", "notify", "report-state", "wait", "flag", "hold", "pin",
 		"unpin", "reparent", "tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},

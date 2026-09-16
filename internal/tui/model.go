@@ -1072,7 +1072,8 @@ func (m Model) fetch() tea.Cmd {
 // so a second hand-written conversion that dropped a field would make goto pick a
 // different view than the one the grid actually renders the thread in.
 func meshRow(t api.ThreadSnapshot) api.ThreadRow {
-	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority}
+	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority,
+		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix}
 }
 
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
@@ -3634,6 +3635,18 @@ func (m Model) MaxColWidth() bool { return m.maxColWidth }
 // DetailsOpen reports whether the thread-details takeover is open (for tests).
 func (m Model) DetailsOpen() bool { return m.detailsPopup }
 
+// detailSchedules renders the enabled message schedules targeting a thread:
+// the count and the earliest next fire (absolute + relative), or "-".
+func detailSchedules(r api.ThreadRow) string {
+	if r.Schedules == 0 {
+		return "-"
+	}
+	if r.ScheduleNextUnix == 0 {
+		return fmt.Sprintf("%d (no next fire)", r.Schedules)
+	}
+	return fmt.Sprintf("%d, next %s (%s)", r.Schedules, time.Unix(r.ScheduleNextUnix, 0).Format("2006-01-02 15:04"), schedNextLabel(r.ScheduleNextUnix))
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -4402,6 +4415,7 @@ func (m Model) detailsView() string {
 		{"released", detailRelease(r)},
 		{"notify", yesNo(r.Notify)},
 		{"tickets open", strconv.Itoa(r.TicketsOpen)},
+		{"schedules", detailSchedules(r)},
 		{"ticket name", detailTicket(r)},
 		{"agent session", orDash(r.AgentSessionID)},
 		{"started", yesNo(r.HeadlessStarted)},

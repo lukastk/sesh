@@ -95,6 +95,13 @@ type Daemon struct {
 	// mmaint converges the cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
+	// sched is the clock-driven loop behind `sesh schedule` (scheduler.go);
+	// schedules its [schedules] policy; runWatch the spawn runs the reaper is
+	// watching, keyed by thread id (scheduler_spawn.go).
+	sched     *scheduler
+	schedules config.SchedulesConfig
+	runsMu    sync.Mutex
+	runWatch  map[string]*runWatch
 
 	// apiSrv is the optional TCP API server (the network surface for remote clients /
 	// mobile) — the SAME full router behind a bearer token. nil unless SESH_API_ADDR
@@ -187,6 +194,12 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.send = sendCfg
 	d.pasteStop = make(chan struct{})
+	schedCfg, err := config.LoadSchedules(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [schedules] refuses the daemon loudly
+	}
+	d.schedules = schedCfg
+	d.sched = newScheduler(d)
 	hooks, err := config.LoadHooks(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [[hooks]] refuses the daemon loudly
@@ -250,6 +263,7 @@ func (d *Daemon) Serve() error {
 	if d.mmaint != nil {
 		d.mmaint.start() // converge the cockpit to one window per connected machine
 	}
+	d.sched.start() // the clock behind `sesh schedule`
 
 	// Optional network API (remote clients / mobile). Only a MISCONFIGURATION (API
 	// addr set without a token) is fatal here; a transient bind failure (e.g. the
@@ -291,6 +305,9 @@ func (d *Daemon) Serve() error {
 func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopPastes()
 	d.stopAPI(ctx)
+	if d.sched != nil {
+		d.sched.stopAndWait()
+	}
 	if d.mmaint != nil {
 		d.mmaint.stopAndWait()
 	}

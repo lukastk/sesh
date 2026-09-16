@@ -39,6 +39,7 @@ const (
 	ColCreated     = "created"
 	ColHold        = "hold"
 	ColArchived    = "archived"
+	ColSched       = "sched"
 )
 
 // Built-in default max widths for the full-width columns (the cap the `w` toggle
@@ -120,6 +121,20 @@ var colOrder = []colSpec{
 		}},
 	{name: ColTags, header: "TAGS", fixedW: 16,
 		cell: func(_ *Model, r api.ThreadRow) string { return strings.Join(r.Tags, ",") }},
+	{name: ColSched, header: "SCHED", fixedW: 9,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			// The earliest next fire of the enabled message schedules targeting the
+			// thread, relative ("in 12m"); a count prefix when there are several;
+			// blank when none. Owner-stamped, so it needs no fan-out.
+			if r.Schedules == 0 {
+				return ""
+			}
+			s := schedNextLabel(r.ScheduleNextUnix)
+			if r.Schedules > 1 {
+				s = fmt.Sprintf("%d %s", r.Schedules, s)
+			}
+			return s
+		}},
 	{name: ColCreated, header: "CREATED", fixedW: 10,
 		cell: func(_ *Model, r api.ThreadRow) string { return createdLabel(r.CreatedAtUnix) }},
 	{name: ColHold, header: "HOLD", fixedW: 11,
@@ -552,4 +567,24 @@ func tildeRelative(path, home string) string {
 		}
 	}
 	return path
+}
+
+// schedNextLabel renders a next-fire instant relative to now, compactly.
+func schedNextLabel(unix int64) string {
+	if unix == 0 {
+		return "⏱"
+	}
+	d := time.Until(time.Unix(unix, 0))
+	switch {
+	case d < 0:
+		return "due"
+	case d < time.Minute:
+		return "in <1m"
+	case d < time.Hour:
+		return fmt.Sprintf("in %dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("in %dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("in %dd", int(d.Hours()/24))
+	}
 }

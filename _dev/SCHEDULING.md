@@ -1,9 +1,10 @@
 # sesh v2 — scheduled work: timed messages and timed spawns (design)
 
-*Status: **SCOPE / DESIGN. Nothing here is built.** Ticket 28f6e77b ("Scheduled messages and
-agents feature"), 2026-09-16. This doc answers the ticket's own question — "it might be one or
-two different [features], I'm not sure" — and then specifies the thing well enough to build.
-Every ⚑ decision was settled with Lukas the same day; §15 records them all. Ready to build in the §14 order.*
+*Status: designed 2026-09-16 (ticket 28f6e77b), **BUILT the same day** — phases 0–3 all
+landed on `feat/scheduling`; see §16 for what the build changed against this design and
+AGENTS.local.md H111 for the test/deploy record. This doc answers the ticket's own question —
+"it might be one or two different [features], I'm not sure" — and then specifies the thing.
+Every ⚑ decision was settled with Lukas the same day; §15 records them all.*
 
 ---
 
@@ -877,3 +878,49 @@ mixed-mesh safe; the TUI half is binary-only.
    can be added later as a third target shape without changing the record. (§10)
 
 **Nothing is open.** The design is fully decided; what remains is building it in the §14 order.
+
+---
+
+## 16. As built (2026-09-16) — where the code departs from the design above
+
+Everything in §3–§9 exists as written, with these refinements found while building; each is
+the honest record, not a plan.
+
+- **`respect-typing` on `thread send` is daemon-owned, not a CLI loop (§6.5.1).** A plain
+  `thread send` into a pane in use returns at once with `deferred <id>`: the daemon queues
+  the delivery (per-thread FIFO, one drainer goroutine, a 2 s poll of live `list-clients`)
+  and pastes when quiet, or fails + auto-flags at the deadline. The reason: a child agent's
+  `sesh thread send` runs inside a Bash tool with its own timeout (Claude Code's default is
+  2 min), so a CLI that blocked for up to 10 minutes would be killed mid-wait and the
+  message lost with nothing recorded. `--wait` callers (who want to block anyway) get the
+  loop: `on_typing=wait`, the daemon holds ≤8 s per call, the CLI re-calls until sent or
+  `--timeout`. `--on-typing skip` refuses loudly and queues nothing (what the scheduler
+  uses). Held deliveries are in-memory; shutdown logs each loss.
+- **Missed occurrences are detected by lateness, not by a restart flag.** A due schedule
+  whose `next_fire` is more than `scheduleMissGrace` (90 s) in the past is treated as
+  MISSED (the catch-up policy applies); anything less is merely late and fires. This is
+  what makes the loop correct after suspend/resume without any notion of "was I asleep".
+- **The message action reads HEAD live, and a headless target's BUSY from the turn
+  registry, at fire time.** The maintainer's published row (what §3.3 said the guards read)
+  is up to a tick old — a thread stopped a moment ago still reads headful there, and a
+  headless turn that just completed still reads busy — and a paste into a vanished pane is a
+  loud failure. Record fields (archived, flagged) come from the record just read; `on_hold`
+  stays the maintainer's derivation (it walks the whole record set).
+- **`run-now --force` on a `--when-headless skip` schedule delivers a headless turn.** Force
+  means "do it now": a skip-only rule yields to a turn rather than refusing.
+- **The effective spawn mode is recorded as `default` when the agent's own.** Never blank
+  (the disclosure §9.5 asked for must always print something).
+- **A schedule write bumps the `threads` rev too** (second trigger set), so the maintainer's
+  full sweep restamps each thread's schedule digest (`schedules`, `schedule_next_unix` on
+  the snapshot/row) — the phase-3 fields, owner-stamped, read by the TUI's opt-in `sched`
+  column and the `I` details row.
+- **Spawn runs write their run row BEFORE the turn** (outcome `running`, then stamped), so a
+  restart mid-run can reap; `record()` updates that row instead of inserting a second.
+- **The reaper accepts a busy→idle edge as a turn end only after a REAL turn**: reported
+  authority, or ≥3 s of busy — a heuristic pane flickers busy→idle between the paste and the
+  agent's first render, which would otherwise reap a run before it started.
+- **The typing guard's fixture pane runs `cat` under the argv0 `pi`** (a symlink): the
+  scheduler's state read, like the maintainer's, requires an agent process of the right kind
+  under the marked pane, not merely a pane.
+- **`sesh mesh --json` is pretty-printed** — a substring match on `"on_hold":true` never
+  matches; decode it. (Re-learned; H55 had recorded it.)

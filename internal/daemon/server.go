@@ -40,6 +40,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesRPC(mux)
 	d.routesTerminal(mux)
 	d.routesMaster(mux)
+	d.routesSchedules(mux)
 	d.routesTickets(mux)
 	d.routesBlobs(mux)
 	d.routesFs(mux)

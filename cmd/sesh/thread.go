@@ -210,10 +210,14 @@ func threadDelete(cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.ThreadDelete(context.Background(), rid, *force); err != nil {
+	report, err := c.ThreadDeleteReport(context.Background(), rid, *force)
+	if err != nil {
 		return err
 	}
 	fmt.Println("deleted", rid)
+	if report.SchedulesRemoved > 0 {
+		fmt.Printf("also removed %d message schedule(s) that targeted it\n", report.SchedulesRemoved)
+	}
 	return nil
 }
 

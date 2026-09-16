@@ -117,7 +117,15 @@ func (c *Client) ThreadStopForce(ctx context.Context, id string, force bool) err
 // ThreadDelete posts POST /v1/threads/delete (drop the record). force drops a
 // live thread's record anyway (orphaning its agent).
 func (c *Client) ThreadDelete(ctx context.Context, id string, force bool) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id, Force: force}, nil)
+	_, err := c.ThreadDeleteReport(ctx, id, force)
+	return err
+}
+
+// ThreadDeleteReport is ThreadDelete returning the daemon's report (incl. the
+// message schedules removed with the thread).
+func (c *Client) ThreadDeleteReport(ctx context.Context, id string, force bool) (api.DeleteThreadResponse, error) {
+	var out api.DeleteThreadResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/delete", api.DeleteThreadRequest{ID: id, Force: force}, &out)
 }
 
 // Snapshot fetches GET /v1/snapshot — this machine's threads with their live state,
@@ -319,4 +327,51 @@ func (c *Client) ThreadMeta(ctx context.Context, id, key, value string) (api.Thr
 // ThreadImport posts POST /v1/threads/import (raw record insert; v1 migration).
 func (c *Client) ThreadImport(ctx context.Context, th api.Thread) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/import", th, nil)
+}
+
+// --- schedules (schema 49) ---
+
+// ScheduleCreate posts POST /v1/schedules.
+func (c *Client) ScheduleCreate(ctx context.Context, req api.CreateScheduleRequest) (api.ScheduleResponse, error) {
+	var out api.ScheduleResponse
+	return out, c.postJSON(ctx, "http://unix/v1/schedules", req, &out)
+}
+
+// SchedulesList fetches GET /v1/schedules (thread filters to one target; allMachines fans out).
+func (c *Client) SchedulesList(ctx context.Context, thread string, allMachines bool) (api.SchedulesResponse, error) {
+	u := "http://unix/v1/schedules?thread=" + url.QueryEscape(thread)
+	if allMachines {
+		u += "&all-machines=1"
+	}
+	var out api.SchedulesResponse
+	return out, c.getJSON(ctx, u, &out)
+}
+
+// ScheduleGet fetches GET /v1/schedules/get?id= (full id, unique prefix, or name).
+func (c *Client) ScheduleGet(ctx context.Context, ref string) (api.ScheduleResponse, error) {
+	var out api.ScheduleResponse
+	return out, c.getJSON(ctx, "http://unix/v1/schedules/get?id="+url.QueryEscape(ref), &out)
+}
+
+// ScheduleUpdate posts POST /v1/schedules/update.
+func (c *Client) ScheduleUpdate(ctx context.Context, req api.UpdateScheduleRequest) (api.ScheduleResponse, error) {
+	var out api.ScheduleResponse
+	return out, c.postJSON(ctx, "http://unix/v1/schedules/update", req, &out)
+}
+
+// ScheduleRemove posts POST /v1/schedules/remove.
+func (c *Client) ScheduleRemove(ctx context.Context, ref string) error {
+	return c.postJSON(ctx, "http://unix/v1/schedules/remove", api.ScheduleIDRequest{ID: ref}, nil)
+}
+
+// ScheduleRunNow posts POST /v1/schedules/run-now and returns the run's outcome.
+func (c *Client) ScheduleRunNow(ctx context.Context, ref string, force bool) (api.ScheduleRunNowResponse, error) {
+	var out api.ScheduleRunNowResponse
+	return out, c.postJSON(ctx, "http://unix/v1/schedules/run-now", api.ScheduleIDRequest{ID: ref, Force: force}, &out)
+}
+
+// ScheduleRuns fetches GET /v1/schedules/runs?id=&limit=.
+func (c *Client) ScheduleRuns(ctx context.Context, ref string, limit int) (api.ScheduleRunsResponse, error) {
+	var out api.ScheduleRunsResponse
+	return out, c.getJSON(ctx, "http://unix/v1/schedules/runs?id="+url.QueryEscape(ref)+"&limit="+strconv.Itoa(limit), &out)
 }

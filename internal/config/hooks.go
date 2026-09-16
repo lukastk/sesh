@@ -48,6 +48,11 @@ var ValidHookEvents = []string{
 	"flag_changed",
 	"thread_created", "thread_deleted",
 	"thread_archived", "thread_unarchived", "thread_renamed",
+	// schedule_fired / schedule_failed (schema 49): a `sesh schedule` run
+	// ended — SESH_SCHEDULE_ID/NAME/OUTCOME carry which and how; the thread
+	// fields describe the target (message) or the spawned thread (spawn).
+	// Skips are not events (a skipped heartbeat is the system working).
+	"schedule_fired", "schedule_failed",
 }
 
 type hooksFile struct {

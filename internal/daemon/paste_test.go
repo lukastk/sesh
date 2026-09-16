@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,21 @@ func newPasteFixture(t *testing.T) *pasteFixture {
 	t.Cleanup(func() { st.Close() })
 	sock := "seshpaste-" + strings.ReplaceAll(t.Name(), "/", "_")
 	f := &pasteFixture{t: t, sock: sock, st: st}
-	if _, err := f.raw("-f", "/dev/null", "new-session", "-d", "-s", "watched", "-x", "80", "-y", "24", "cat"); err != nil {
+	// The pane runs `cat` under the argv0 "pi" (a symlink — a shebang script
+	// would read as "sh"), so the runtime resolver sees a live pi of the right
+	// kind: the scheduler's state read, like the maintainer's, requires an
+	// agent process under the marked pane, not just the pane.
+	catBin, err := exec.LookPath("cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakePi := filepath.Join(t.TempDir(), "pi")
+	if err := os.Symlink(catBin, fakePi); err != nil {
+		t.Fatal(err)
+	}
+	// stdout to /dev/null: the tty echo alone shows what arrived, once (cat's
+	// own output would print every line a second time).
+	if _, err := f.raw("-f", "/dev/null", "new-session", "-d", "-s", "watched", "-x", "80", "-y", "24", fakePi+" >/dev/null"); err != nil {
 		t.Fatalf("new-session watched: %v", err)
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", sock, "kill-server").Run() }) //nolint:errcheck

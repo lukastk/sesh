@@ -75,6 +75,10 @@ func (e *eventer) observePair(was, now api.ThreadSnapshot) {
 			// The turn-delivery engine (C3): owner-side, guarded per edge.
 			go e.d.deliverSubscriptions(now)
 		}
+		// The scheduler's spawn reaper (owner-side; a no-op for peer threads).
+		if e.d.sched != nil {
+			go e.d.sched.onBusyEdge(now)
+		}
 	}
 	if was.Head != now.Head && was.Head != "" && now.Head != "" {
 		e.runner.handle(e.decorate(Event{Type: "head_changed", Snap: now, From: string(was.Head), To: string(now.Head)}))

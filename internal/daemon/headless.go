@@ -204,6 +204,10 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 					d.deliverSubscriptions(api.ThreadSnapshot{Thread: th, Head: api.Headless, Busy: api.BusyIdle})
 				}
 			}
+			// A scheduled spawn's headless run ends here, deterministically.
+			if d.sched != nil {
+				d.sched.onHeadlessDone(req.ID)
+			}
 		}
 	}()
 

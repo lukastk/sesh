@@ -396,6 +396,15 @@ type ThreadSendResponse struct {
 	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
 }
 
+// DeleteThreadResponse is the body of POST /v1/threads/delete. SchedulesRemoved
+// counts the message schedules that targeted the thread and went with it (schema
+// 49) — a schedule whose thread is gone would fire into nothing forever.
+type DeleteThreadResponse struct {
+	Schema           int    `json:"schema"`
+	Deleted          string `json:"deleted"`
+	SchedulesRemoved int    `json:"schedules_removed,omitempty"`
+}
+
 // RenameThreadRequest is the body of POST /v1/threads/rename.
 type RenameThreadRequest struct {
 	ID   string `json:"id"`
@@ -500,6 +509,9 @@ type ThreadRow struct {
 	// TicketsOpen is the number of bound, still-open tickets (not done/dropped)
 	// — the TUI's `ticketed` predicate and TICKETS column read it.
 	TicketsOpen int `json:"tickets_open"`
+	// Schedules / ScheduleNextUnix mirror ThreadSnapshot's (schema 49).
+	Schedules        int   `json:"schedules,omitempty"`
+	ScheduleNextUnix int64 `json:"schedule_next_unix,omitempty"`
 	// TicketName is the newest open ticket's name (the TKT-NAME column); '' if none.
 	TicketName string `json:"ticket_name,omitempty"`
 	// TicketNeedsInput is true when ANY bound open ticket of this thread needs input
@@ -555,12 +567,18 @@ type ThreadSnapshot struct {
 	// session; 0 = detached or unknown (e.g. a pre-42 peer). Lets a notify hook
 	// tell "the user is driving this session" from "a cockpit client is merely
 	// parked on it" — raw attachment cannot (schema 42).
-	AttachedActivityUnix int64  `json:"attached_activity_unix,omitempty"`
-	TicketsOpen          int    `json:"tickets_open"`
-	TicketName           string `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
-	TicketNeedsInput     bool   `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
-	AgentRunning         bool   `json:"agent_running"`
-	LastActiveUnix       int64  `json:"last_active_unix"` // last pane change / turn completion
+	AttachedActivityUnix int64 `json:"attached_activity_unix,omitempty"`
+	TicketsOpen          int   `json:"tickets_open"`
+	// Schedules / ScheduleNextUnix: how many ENABLED message schedules target
+	// this thread and the earliest next fire (schema 49) — owner-stamped, so a
+	// TUI on any machine can show "this thread has a heartbeat" without a
+	// fan-out. Zero/absent when none.
+	Schedules        int    `json:"schedules,omitempty"`
+	ScheduleNextUnix int64  `json:"schedule_next_unix,omitempty"`
+	TicketName       string `json:"ticket_name,omitempty"`        // newest open ticket's name (TKT-NAME column)
+	TicketNeedsInput bool   `json:"ticket_needs_input,omitempty"` // any active ticket on a headful·idle thread
+	AgentRunning     bool   `json:"agent_running"`
+	LastActiveUnix   int64  `json:"last_active_unix"` // last pane change / turn completion
 	// CwdRel is Cwd rendered ~-relative to the OWNING machine's home, stamped by
 	// that machine's maintainer (the home is owner data the viewer cannot know). A
 	// viewer applies its own [[cwd_label]] rules to this, so the CWD column labels

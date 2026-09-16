@@ -50,3 +50,17 @@ func TestLoadSendLoud(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSchedules(t *testing.T) {
+	got, err := LoadSchedules(t.TempDir())
+	if err != nil || !got.Enabled || got.DisableAfterFailures != DefaultScheduleFailureBreaker {
+		t.Fatalf("defaults: %+v %v", got, err)
+	}
+	got, err = LoadSchedules(writeSendConfig(t, "[schedules]\nenabled = false\ndisable_after_failures = 0\n"))
+	if err != nil || got.Enabled || got.DisableAfterFailures != 0 {
+		t.Fatalf("values: %+v %v", got, err)
+	}
+	if _, err := LoadSchedules(writeSendConfig(t, "[schedules]\ndisable_after_failures = -1\n")); err == nil {
+		t.Fatal("negative breaker must be refused")
+	}
+}

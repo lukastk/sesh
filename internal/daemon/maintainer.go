@@ -90,12 +90,17 @@ type maintainer struct {
 	// threads — those with live runtime, which can change without a record
 	// write — are re-derived. Any record write bumps the rev (schema triggers,
 	// so no write path can dodge it) and forces one FULL sweep.
-	lastRev        int64
-	haveRev        bool
-	cachedThreads  []api.Thread
-	cachedTickets  map[string]store.TicketDigest
-	cachedHolds    map[string]int64
-	nextHoldExpiry int64 // earliest future hold-flip instant (0 = none) — an effective hold lapsing, or a RELEASE lapsing (an ancestor's hold snapping back on). Either flips OnHold with NO record write, so it forces a full sweep. See nextHoldFlip.
+	lastRev       int64
+	haveRev       bool
+	cachedThreads []api.Thread
+	cachedTickets map[string]store.TicketDigest
+	// cachedSchedules is the per-thread digest of enabled message schedules
+	// (count + earliest next fire), refreshed with the record list — a
+	// schedule write bumps the threads rev too (its triggers), so it is never
+	// staler than a full sweep.
+	cachedSchedules map[string]store.ScheduleDigest
+	cachedHolds     map[string]int64
+	nextHoldExpiry  int64 // earliest future hold-flip instant (0 = none) — an effective hold lapsing, or a RELEASE lapsing (an ancestor's hold snapping back on). Either flips OnHold with NO record write, so it forces a full sweep. See nextHoldFlip.
 	// emitting gates change-pair emission to the eventer: false during the
 	// FIRST sweep after daemon start (the baseline — existing state must not
 	// re-announce), true after. Guarded by m.mu.
@@ -242,7 +247,11 @@ func (m *maintainer) tick() {
 		if err != nil {
 			tickets = map[string]store.TicketDigest{} // transient store error: refresh next full sweep
 		}
-		m.cachedThreads, m.cachedTickets = threads, tickets
+		scheds, err := m.d.store.ScheduleDigests()
+		if err != nil {
+			scheds = map[string]store.ScheduleDigest{}
+		}
+		m.cachedThreads, m.cachedTickets, m.cachedSchedules = threads, tickets, scheds
 		m.cachedByID = make(map[string]api.Thread, len(threads))
 		for _, th := range threads {
 			m.cachedByID[th.ID] = th
@@ -479,7 +488,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 
 	dg := tickets[th.ID]
 	st.hasActiveTicket = dg.HasActive // publish() turns this into TicketNeedsInput once head/busy are known
+	sd := m.cachedSchedules[th.ID]
 	snap := api.ThreadSnapshot{Thread: th, Attachment: api.Detached, TicketsOpen: dg.Count, TicketName: dg.NewestName,
+		Schedules: sd.Count, ScheduleNextUnix: sd.NextFireUnix,
 		// Stamp the owner-relative cwd so cross-machine viewers (with a different home)
 		// can apply their cwd_label rules — they cannot know this machine's home.
 		CwdRel: config.TildeRelative(th.Cwd, m.home),

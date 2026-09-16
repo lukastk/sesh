@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H111 — SCOPED, NOT BUILT: scheduled work (`sesh schedule` — timed messages into a thread + timed spawns), and the `respect-typing` guard it surfaced for EVERY pane send (2026-09-16, sesh 60b28f2/3a88285/fa6d366 on branch `feat/scheduling`, docs only; ticket 28f6e77b done)
+## H111 — SCHEDULED WORK BUILT: `sesh schedule` (cron/interval/one-shot messages into a thread + thread spawns, state-aware guards, catch-up, a reaper) AND the `respect-typing` guard on EVERY paste into a live pane (2026-09-16, sesh feat/scheduling → merged; store migration 25→26, api 48→49; DAEMON rebuild + RESTART ALL SIX; ticket 28f6e77b done)
 Lukas's ticket: cron-style messages to a thread with rules (revive-if-unattached, only-if-not-
 running = a heartbeat), cron-style thread spawns with rules (kill+archive on turn end, attached vs
 not), "might be one or two features, I'm not sure — scope it thoroughly." Design record:
@@ -62,8 +62,70 @@ only; no broadcast. Nothing open. Build order §14: 0 respect-typing → 1 engin
 **METHOD NOTE:** two Explore agents mapped the spawn/send/revive paths and the daemon's
 time-driven machinery in parallel while I read the design corpus; the map is what let the doc
 name real seams (`sendIntoThread`, `nextHoldFlip`, `reviveThread`'s in-flight reservation, the
-five `SendText` call sites) instead of inventing them. Nothing was deployed; the branch is
-unpushed.
+five `SendText` call sites) instead of inventing them.
+
+### H111 — the build, the same day (Lukas: "proceed with the building. Build the whole thing.")
+Two commits on top of the scope: the typing guard (phase 0) and the scheduler (phases 1–3).
+`_dev/SCHEDULING.md` §16 lists every place the build departed from the design; the durable
+ones:
+- **`thread send`'s typing guard is DAEMON-OWNED, not a CLI loop.** A child agent's `sesh thread
+  send` runs inside a Bash tool with its own timeout (Claude Code: 2 min), so a CLI blocking
+  up to 10 min would be killed mid-wait with the message lost and nothing recorded. So the
+  daemon queues a held delivery (per-thread FIFO, one drainer, 2 s polls of live
+  `list-clients`), returns `deferred <id>` at once, pastes when quiet, and at the deadline
+  FAILS + auto-flags the target with `undelivered message from <sender>: …` — never pastes
+  anyway. `--wait` callers get the loop (`on_typing=wait`, ≤8 s per call under the 15 s client
+  timeout); `--on-typing skip` refuses (what the scheduler uses). Held deliveries are
+  in-memory; shutdown logs each loss. Three thread-level paste sites go through it
+  (`handleThreadSend`, `handleTicketSendPrompt`, `sendIntoThread`); `sendWhenReady` and the raw
+  `tmux send-text` do not.
+- **The scheduler reads HEAD live and a headless target's BUSY from the turn registry**, not
+  the maintainer's row — a thread stopped a moment ago still reads headful there and a just-
+  completed headless turn still reads busy (300 ms), and both produced wrong deliveries in the
+  first cell runs. Record fields (archived/flagged) come from the record; `on_hold` stays the
+  maintainer's (it walks the whole record set — the guards cell waits on the SNAPSHOT for it,
+  via a decoded `sesh mesh --json`, which is PRETTY-PRINTED so a `"on_hold":true` substring
+  never matches — H55 had recorded this and I re-hit it).
+- **Missed = due more than 90 s ago** (`scheduleMissGrace`), not "the daemon restarted": correct
+  after suspend/resume with no notion of having slept. catchup skip counts and rolls forward
+  (13 = the due one + 12 slept through in the unit test); once fires exactly one run.
+- **The reaper accepts a busy→idle edge as a turn end only after a REAL turn** (reported
+  authority, or ≥3 s busy): a heuristic pane flickers busy→idle between the paste and the
+  agent's first render. Spawn runs write their run row BEFORE the turn (restart-safe);
+  `record()` stamps it rather than inserting a second. `run-now --force` on a `--when-headless
+  skip` schedule delivers a headless turn (force means deliver). The effective spawn mode is
+  recorded as `default` when the agent's own. A schedule write bumps the `threads` rev too so
+  the maintainer restamps the digest (`schedules`/`schedule_next_unix`) the TUI's `sched`
+  column reads — and `meshRow` had to copy them (the sched-column claim caught the gap, H91's
+  one-conversion lesson again).
+- **Test fixture traps:** the paste fixture's pane runs `cat` under argv0 `pi` (a symlink) so
+  the runtime resolver sees an agent, with stdout to /dev/null so a paste echoes ONCE (cat's
+  own output doubled every line and looked like a double paste); `send-keys -t =viewer_x`
+  fails where `-t viewer_x:` works; the viewer's own keystroke echoes latch the busy heuristic,
+  so a "still idle while held" assertion is impossible — the pane's text is the only honest
+  signal. The lifecycle cell's deterministic failure is codex's revive-before-first-turn N/A
+  (a fresh codex headless thread CAN take a first headless turn, so that path is not a
+  failure).
+- **The AGENTS.local.md numbering collided again** (H80/H87 class): a concurrent session landed
+  H110 (claude trust pre-seeding, 138be35) and deployed it to all six while this ran; rebased
+  onto it (one conflict, this file), renumbered mine to H111.
+
+**GREEN:** every non-conformance package plain + `-race`, `go vet`; the FULL TUI claims suite
+(236 s, incl. the new `sched-column`); 20 new cells serially (`thread.send-respect-typing` ×2,
+`schedule.crud/guards` ×2 each, `schedule.message/spawn` ×6 each, `schedule.catchup/lifecycle`
+×1 each); phase-0 blast radius (send.headful ×6, ticket.send-prompt ×6, subscribe ×2, send-wait
+×6, spawn-mode ×3, delegate ×6 — the two claude delegate cells failed once in the batch on a
+transient claude refusal and pass alone); post-rebase: schedule.message/claude, spawn/claude,
+respect-typing, thread.claude-trust ×2. **FULL 277-CELL MATRIX (62 min): 276 pass, 1 fail, 0
+skip, 0 missing, 0 not-run, 2 n/a — the one red, `thread.model/claude/local` ("override model
+leaked before it was requested"), reproduces BYTE-IDENTICALLY on a clean origin/main worktree:
+pre-existing (claude's transcript now names the override alias unprompted, the H79 fixture
+class), not this branch's, not fixed here.** ANTI-GAMING, each reversed byte-identically (md5):
+paneQuiet forced true → respect-typing cell red "was not deferred: sent"; the busy guard
+neutered → guards cell red "busy target: fired: pane"; the reaper neutered → spawn cell red
+"run never ended with the keep policy"; missed detection neutered → catch-up unit red
+"missed=0". Migration 26 REHEARSED against a `VACUUM INTO` copy of mymain's live store: 25→26,
+2,057/407/80 byte-identical, tables + triggers present.
 
 ## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh 138be35; NO schema/API/CLI change; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX**; ticket 4b069b88 done)
 Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …

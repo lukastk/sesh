@@ -3,7 +3,7 @@
 *Status: **SCOPE / DESIGN. Nothing here is built.** Ticket 28f6e77b ("Scheduled messages and
 agents feature"), 2026-09-16. This doc answers the ticket's own question — "it might be one or
 two different [features], I'm not sure" — and then specifies the thing well enough to build.
-Open decisions Lukas owns are marked ⚑ and collected in §15.*
+Decisions are marked ⚑ and collected in §15 — five decided with Lukas the same day, four still open.*
 
 ---
 
@@ -159,6 +159,15 @@ Points 1, 2 and 5 are the ones that actually require sesh.
 
 This follows SPEC §1's one consistent rule, and it is the most consequential decision here.
 
+**Where, concretely:** in that machine's own sesh store — the same `<SESH_HOME>/sesh.db` SQLite
+file that holds its thread records, in a new `schedules` table (§4, migration 26). One machine,
+one file, one writer; no central schedule server, no config file to render. It survives daemon
+restarts and reboots exactly as thread records do, is covered by the deploy-time `VACUUM INTO`
+backups (which copy the whole file — NB `sesh backup` is a *transcript* backup and does not
+include it), and is edited only through that machine's daemon (`--machine` routes the write, and
+the offline fast-fail applies: you cannot edit a schedule on a machine that is down, you can
+only see its last-known listing).
+
 - A `message` schedule is owned by **the target thread's owning machine** — because every
   delivery path is owner-side: the pane lives in that machine's tmux, the headless turn reads
   that machine's transcripts, and the state it guards on is that machine's maintained snapshot.
@@ -184,7 +193,7 @@ cross-machine by `--machine` routing for writes and a **fan-out** for mesh-wide 
 NOT added to `api.ThreadSnapshot`, because every field there is re-transferred on every changed
 row of every sync round (MESH_SCALE) and schedules change on human timescales.
 
-⚑ **Exception worth considering (§15.6):** two small omitempty fields on the snapshot —
+⚑ **Exception worth considering (§15.7):** two small omitempty fields on the snapshot —
 `schedules int` and `next_fire_unix int64` — would let the TUI render a "this thread has a
 heartbeat" marker without a fan-out. Cheap (two ints, only on rows that have schedules) and it is
 the only way the sidebar can show it. Recommendation: **yes, in phase 3**, not before.
@@ -279,8 +288,9 @@ Three, all explicit, one field:
 Parsing: a **cron parser must be written or vendored**. The repo has 8 direct dependencies and a
 strong preference for small ones; `robfig/cron/v3` is the obvious vendor (MIT, ~1k lines, widely
 used) but a 5-field parser with a `Next(time.Time) time.Time` is ~150 lines and unit-tests
-exhaustively. ⚑ §15.4. Either way the parser must be a **pure function** `Next(spec, tz, after)
-→ time.Time` so it unit-tests like `TestEffectiveHolds` does, with literal constants.
+exhaustively. **DECIDED: hand-roll** (§15.4). The parser must be a **pure function**
+`Next(spec, tz, after) → time.Time` so it unit-tests like `TestEffectiveHolds` does, with
+literal constants.
 
 ### 5.2 Timezone — recorded, never inferred at fire time
 
@@ -388,7 +398,7 @@ hold; unknown condition = loud error at creation, not at fire time):
 
 Not a DSL. SPEC §6 wants explicit, machine-readable contracts; a mini-language here is a
 maintenance sink and an un-testable surface. (The TUI's `[[tui.views]]` predicate language exists
-and could be reused if a richer grammar is ever wanted — ⚑ §15.5.)
+and could be reused if a richer grammar is ever wanted — ⚑ §15.6.)
 
 ### 6.4 `--idle-for <dur>` — the guard that makes a heartbeat safe
 
@@ -402,8 +412,8 @@ and could be reused if a richer grammar is ever wanted — ⚑ §15.5.)
 
 `--idle-for 5m` requires the thread to have been idle for a dwell time, computed from the
 snapshot's existing `last_active_unix`. It costs nothing and it is the difference between a
-heartbeat that nudges a stuck agent and one that talks over a working agent. **Recommend making
-it the default for `--if idle` (60 s) rather than an opt-in.** ⚑ §15.2.
+heartbeat that nudges a stuck agent and one that talks over a working agent. **DECIDED: 60 s is
+implied whenever `--if idle` is used** (§15.2); `--idle-for 0` opts out per schedule.
 
 Optional companion: `--require-authority` (only fire when `state_authority == reported`), for the
 paranoid case. Off by default — it would make every codex thread unschedulable.
@@ -431,8 +441,51 @@ newest tmux `client_activity` = last *input* from a client on that session). So:
 > **`--respect-typing <dur>` (default 60 s, ON) for pane deliveries:** if the thread is attached
 > and someone typed within the window, skip this run (recorded as `skipped: viewer typing`).
 
-⚑ §15.3 — defaulting it ON is a behaviour choice, but silently corrupting a half-typed prompt is
-the worse failure.
+**DECIDED 2026-09-16: ON by default — and promoted out of the scheduler into the delivery
+primitive itself (§6.5.1).** Lukas: the collision is live today — a supervisor's child threads
+report into the supervisor's pane while he is typing in it — so the guard belongs on every pane
+delivery, not only scheduled ones.
+
+#### 6.5.1 `respect-typing` as a property of every pane delivery (a separate, earlier change)
+
+Every text that reaches an agent's pane goes through one tmux seam, `tmux.Server.SendText`, from
+exactly three daemon call sites that deliver *into a thread*: `handleThreadSend` (`thread send`),
+`handleTicketSendPrompt` (`ticket send-prompt`), and `sendIntoThread` (subscriptions — the
+child-reports-to-supervisor path). (`sendWhenReady` pastes the first prompt into a pane that was
+created milliseconds ago and has no viewer; the raw `tmux send-text` primitive is pane-level, not
+thread-level. Neither gets the guard.) So the guard is one daemon helper above `SendText`, used
+by those three sites, and the scheduler's message action simply calls it too.
+
+Semantics — **wait, do not drop.** A direct send or a subscription delivery is a message that
+must arrive; skipping it would lose a child's report silently, which is worse than the collision.
+So when the target session is attached and its newest `client_activity` is within the window,
+the delivery **waits** until the pane has been quiet for the window, bounded by a deadline
+(default 10 min — nobody composes a prompt for ten minutes without a sixty-second pause). At the
+deadline it does NOT paste anyway (that reinstates the exact collision, silently): it fails
+loudly, and **auto-flags the target thread** with the reason (`undelivered: <sender> — pane was
+in use for 10m`), so the loss is visible in the gutter and the reply is one `sesh transcript`
+away. That is the existing flag mechanism doing its job — "this thread needs the user".
+
+Mechanics: the wait is a poll of the live `list-clients` activity for that session (one tmux
+call per poll, every ~2 s — not the maintainer snapshot, which is ≤300 ms stale and this guard
+is about the last few seconds); a daemon-internal caller (subscriptions) waits in its own
+goroutine; the CLI cannot block on one HTTP call (the client's hard 15 s timeout, the same reason
+`thread wait` is server-capped at 10 s and the CLI loops), so `thread send` gets the same
+loop-until-deadline shape as `waitLoop`, and a routed send (`--machine`) runs that loop on the
+owner where it already re-execs.
+
+Policy and override: **built-in default 60 s** (Lukas's call — a fresh machine should have the
+guard, and a wait is benign), machine-wide `[send] respect_typing = "60s"` / `"0s"` in
+`config.toml`, per-call `--respect-typing <dur>` with `0` disabling it for that send, and
+`--respect-typing-deadline <dur>` for the bound. Recorded on the schedule for scheduled sends.
+
+Known edge, stated rather than hidden: `client_activity` counts **any** key input, so someone
+reviewing a long output and pressing PgUp every thirty seconds holds the guard exactly as typing
+does. That is arguably correct (they are *using* the pane), and the deadline + flag bound it.
+
+**This is its own deliverable — phase 0 in §14 — and should ship before the scheduler**: it
+fixes a collision that is happening now, it touches no schema, and the scheduler then inherits
+it for free.
 
 ### 6.6 What a heartbeat actually looks like
 
@@ -472,9 +525,10 @@ Two additions that only matter because the spawn is recurring:
   schedule under one collapsible node in the TUI. This is the composition that makes recurring
   spawns tolerable in a 2,000-thread mesh, and it costs nothing: virtual parents already exist.
 
-⚑ **Default head for a scheduled spawn: `--headless`.** Cheap, no pane churn, matches `delegate`,
-and a headed unattended spawn creates panes on a machine nobody is looking at. Headed remains
-available and is the right choice when the run is meant to be *found* later in the cockpit.
+**DECIDED 2026-09-16 — default head for a scheduled spawn: `--headless`** (Lukas). Cheap, no
+pane churn, matches `delegate`, and a headed unattended spawn creates panes on a machine nobody
+is looking at. `--headed` remains available and is the right choice when the run is meant to be
+*found* later in the cockpit.
 
 **The two heads take two different, existing prompt paths — and one of them fails silently
 today.** A headless run is `thread new --headless` + `send-headless` (the `delegate` shape; the
@@ -489,9 +543,12 @@ than inherit the fire-and-forget path.
 ### 7.2 The overlap guard — the spawn analogue of "don't send if busy"
 
 `--if-previous {skip|spawn-anyway|stop-previous}` (default **`skip`**): if the previous run's
-thread is still alive (record present, not archived, and headful-or-busy), the new run is
+thread is **still going** — a live pane (`headful`) or a turn in flight (`busy`) — the new run is
 skipped and recorded. Without this, a 5-minute cron over a 10-minute job grows threads without
-bound — the single most likely way this feature hurts someone.
+bound — the single most likely way this feature hurts someone. The predicate is deliberately
+runtime-only: with `--on-turn-end keep` as the default (§7.3), a finished run is a
+headless·idle record that stays un-archived, and "record exists" would suppress every later
+run forever.
 
 `--max-runtime <dur>` bounds the other side: a run still going after the limit is stopped and
 recorded as `failed: exceeded max-runtime`, so a wedged agent does not hold the singleton slot
@@ -499,9 +556,14 @@ forever.
 
 ### 7.3 The lifecycle rule — "killed and archived when it finishes its turn"
 
-`--on-turn-end {keep|stop|archive|stop+archive|delete}`, default **`stop+archive`** (exactly
-`delegate`'s ephemeral contract: the record and transcript are retained and auditable, the thread
-leaves the active view).
+`--on-turn-end {keep|stop|archive|stop+archive|delete}`, **default `keep` — DECIDED
+2026-09-16** (Lukas: spawn headlessly and do *not* archive when done). A headless run that
+finishes its turn is simply a headless·idle thread holding its reply: it stays in the active
+view where it can be read (`sesh transcript`/`tail`), continued, or archived by hand, and
+`--parent <virtual group>` (§7.1) keeps a schedule's runs in one collapsible node so they do
+not litter the grid. `stop+archive` is `delegate`'s ephemeral contract (record and transcript
+retained, hidden from the default view) for jobs whose output is consumed elsewhere — a
+subscription, a hook — and never read in place; it is an explicit opt-in here.
 
 Mechanism: the run is recorded in `schedule_runs` at spawn; the **eventer's busy→idle edge**
 (`observePair`, where `deliverSubscriptions` already hooks in) fires the reaper for the run's
@@ -521,9 +583,11 @@ failure has nothing to inspect afterwards.
 **The trap that must be handled with it: auto-flagging.** Since H60 the daemon flags a thread on
 *every* turn end, attended or not. A nightly scheduled spawn would therefore flag itself every
 night and pollute the flagged set and the cockpit's `,`/`.` ring — the very ring H98 built to
-hold "the threads I am juggling". So a spawn schedule **sets `flag_disabled` on the threads it
-creates by default** (the existing `⌁` auto-flag-off state), with `--flag-on-end` to opt back in
-for jobs whose whole point is to get your attention.
+hold "the threads I am juggling". So a **headed** spawn schedule **sets `flag_disabled` on the
+threads it creates by default** (the existing `⌁` auto-flag-off state), with `--flag-on-end` to
+opt back in for jobs whose whole point is to get your attention. For the default headless run
+this is moot: a headless turn end never auto-flags (H52 — delegate/await/subscriptions own that
+delivery), so a headless scheduled run is quiet unless something subscribes to it.
 
 ### 7.4 Relationship to `sesh delegate`
 
@@ -652,7 +716,7 @@ Schedules run **only sesh actions** — no arbitrary shell (§10). But "spawn an
 prompt, unattended, under `[spawn] mode = yolo`, every night" is a materially different risk
 posture from doing it by hand, and the fleet's default is yolo. Mitigation is disclosure, not
 restriction: record the effective spawn mode on the schedule, print it at creation
-(`mode: yolo (from [spawn])`), and show it in `schedule show`. ⚑ §15.7.
+(`mode: yolo (from [spawn])`), and show it in `schedule show`. ⚑ §15.8.
 
 ---
 
@@ -664,7 +728,7 @@ restriction: record the effective spawn mode on the schedule, print it at creati
   carries RCE-equivalent power behind one bearer token (H73); adding a remote-managed
   arbitrary-command cron to it is a different product with a different threat model.
 - **Not a job queue.** No retries with backoff, no dependencies between schedules, no fan-out to
-  many threads from one schedule (⚑ §15.8 — a tag-targeted broadcast is a plausible future, and
+  many threads from one schedule (⚑ §15.9 — a tag-targeted broadcast is a plausible future, and
   a dangerous one).
 - **Not a replacement for subscriptions or hooks.** Those are edge-triggered; this is
   clock-triggered. They compose (a spawn schedule can subscribe its worker to a supervisor).
@@ -772,6 +836,7 @@ per agent, and that is exactly where an agent-agnostic registration hid a real d
 
 | phase | scope | effort |
 |---|---|---|
+| **0. `respect-typing` on every pane delivery** (§6.5.1) | the wait-not-drop guard above `SendText` for `thread send`, `ticket send-prompt` and subscription delivery; `[send] respect_typing` config + per-call flags; the deadline auto-flag; units + a real-tmux cell (a nested client typing, the delivery held, then landing after the quiet window) | **small** — no schema; binary + daemon restart; fixes a live collision today |
 | **1. Engine + `message`** | migration 26, api 49 + endpoints + client, the scheduler loop, the cron parser, guards (§6), CLI `message/list/show/pause/resume/remove/run-now`, help + flagdocs + SKILL, `schedule.crud` + `schedule.message` + `schedule.guards` + `schedule.catchup` cells | **medium-large** — comparable to H103 (hold release) or the subscriptions engine; one focused session plus a deploy |
 | **2. `spawn`** | `schedule_runs`, the eventer reaper, overlap + max-runtime + name templates + flag-disable, CLI `spawn`, `schedule.spawn` + `schedule.lifecycle` cells | **medium** — reuses everything |
 | **3. Visibility** | the two snapshot fields, the `sched` column, the details popup, `doctor` checks, `schedule_fired`/`schedule_failed` hook events | **small-medium** |
@@ -782,23 +847,30 @@ mixed-mesh safe; the TUI half is binary-only.
 
 ---
 
-## 15. Open decisions for Lukas ⚑
+## 15. Decisions ⚑
 
-1. **Scope now:** build both actions, or phase 1 (`message`) only and revisit `spawn` after
-   living with it? (§0 — my read is that `message` is the one that must exist; `spawn` is cheap
-   but genuinely substitutable by cron + `delegate` today.)
-2. **`--idle-for` default.** Default 60 s whenever `--if idle` is used (recommended), or opt-in
-   only? (§6.4)
-3. **`--respect-typing` default ON at 60 s** for pane deliveries? (§6.5 — prevents submitting a
-   half-typed line, at the cost of occasionally skipping a run while you are at the keyboard.)
-4. **Cron parser:** vendor `robfig/cron/v3` (a 9th direct dependency) or hand-roll ~150 lines?
-   (§5.1)
-5. **Guard vocabulary:** the closed keyword list (recommended), or reuse the `[[tui.views]]`
+**Decided with Lukas, 2026-09-16:**
+
+1. ~~Scope~~ → **both actions, `message` first** (phases 0–3 as in §14; `spawn` stays designed
+   and lands second).
+2. ~~`--idle-for` default~~ → **60 s implied whenever `--if idle` is used**; per-schedule
+   override. (§6.4)
+3. ~~`--respect-typing`~~ → **ON at 60 s by default, and generalised to every pane delivery**
+   (`thread send`, `ticket send-prompt`, subscriptions) as its own earlier change — §6.5.1,
+   phase 0.
+4. ~~Cron parser~~ → **hand-roll** the 5-field parser as a pure `Next(spec, tz, after)` with
+   exhaustive tests; no new dependency. (§5.1)
+5. ~~Spawn defaults~~ → **headless, and `--on-turn-end keep`** (do not archive when done);
+   the overlap guard keys on runtime only (headful or busy), never on the record. (§7.1–7.3)
+
+**Still open:**
+
+6. **Guard vocabulary:** the closed keyword list (recommended), or reuse the `[[tui.views]]`
    predicate language for richer expressions? (§6.3)
-6. **Snapshot fields** `schedules`/`next_fire_unix` in phase 3 — accept the (small) replication
+7. **Snapshot fields** `schedules`/`next_fire_unix` in phase 3 — accept the (small) replication
    cost so the TUI/sidebar can show a schedule marker? (§3.2)
-7. **Spawn mode disclosure** — record + print the effective `[spawn]` mode per schedule
+8. **Spawn mode disclosure** — record + print the effective `[spawn]` mode per schedule
    (recommended), or additionally require `--yolo` to be typed explicitly on a scheduled spawn?
    (§9.5)
-8. **Broadcast** — should a schedule ever target *many* threads (by tag)? Not designed here;
+9. **Broadcast** — should a schedule ever target *many* threads (by tag)? Not designed here;
    powerful and easy to regret. (§10)

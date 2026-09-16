@@ -250,8 +250,10 @@ overlap guard (`--if-previous skip`), `--on-turn-end stop+archive` via the event
 edge with a persisted `schedule_runs` row, auto-flag disabled on scheduled runs, and `--parent` onto
 a virtual thread to group runs. Owned by the machine that executes it (the target thread's owner /
 the spawn machine), owner-local table like tickets/subscriptions, NOT in the mesh snapshot. Build
-order: engine + `message` first (the half only sesh can do), `spawn` second (cron + `delegate`
-already covers ~80 %), TUI/doctor/hook-events third. ~24 matrix cells across six new rows. The
-decisions Lukas owns (scope now vs message-only, `--idle-for`/`--respect-typing` defaults, vendor
-`robfig/cron` vs hand-roll, snapshot fields for the TUI, spawn-mode disclosure, broadcast) are
-collected in `SCHEDULING.md` §15.
+order: phase 0 = the `respect-typing` wait-not-drop guard on EVERY pane delivery (`thread send`,
+`ticket send-prompt`, subscriptions — a live collision today, no schema, ships first), then engine
++ `message` (the half only sesh can do), `spawn` second (cron + `delegate` already covers ~80 %),
+TUI/doctor/hook-events third. ~24 matrix cells across six new rows. Decided 2026-09-16: both
+actions, message first; `--idle-for 60s` implied by `--if idle`; `respect-typing` on by default;
+hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`. Still open (snapshot
+fields for the TUI, guard grammar, spawn-mode disclosure, broadcast): `SCHEDULING.md` §15.

@@ -32,6 +32,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "tmux.status-options",
+		Description: "the owning daemon stamps every @sesh-thread-id-marked pane with its record fields as tmux PANE user options (@sesh-name/-agent/-tags/-archived/-flagged/-flag-disabled), current within a maintainer tick after rename/tag/flag/archive and cleared when the pane is unstamped — so a status-line format renders the thread row with lookups alone, no `#()` shell per redraw (the termux ssh-agent leak, H108)",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "tmux.kill-session",
 		Description: "kill one session by name on the work server (routed); non-existent session is loud — the mechanism behind myrig's kill-empty-sessions cleanup",
 		Localities:  bothLoc,

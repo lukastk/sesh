@@ -18,6 +18,7 @@ var skipReasons = map[string]string{
 	"tmux.current":               "resolve calling terminal locator + owning thread",
 	"tmux.info":                  "cross-machine session/window/pane walk",
 	"tmux.create-session":        "create a tmux session",
+	"tmux.status-options":        "the owning daemon stamps a marked pane's record fields as tmux pane user options (@sesh-name …) so the work server's status row renders with format lookups alone — no shell per redraw; current within a tick after rename/tag/flag/archive; cleared when the pane is unstamped",
 	"tmux.create-pane":           "create a pane",
 	"tmux.nav":                   "outer switch + inner switch-client + detached-pane kick",
 	"tmux.stage-file":            "copy local file to machine, return staged path",

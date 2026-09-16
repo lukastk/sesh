@@ -156,19 +156,26 @@ func (s *Server) PaneIndexByThreadID() (map[string]api.PaneLocator, error) {
 // session marker (@sesh-shell-id). The maintainer needs both on every tick and
 // they come out of the same enumeration, so walking twice would double the
 // per-tick tmux cost for nothing.
-func (s *Server) RuntimeIndex() (map[string]api.PaneLocator, map[string]api.TmuxSession, error) {
+//
+// The third result is the set of EVERY live pane id, marked or not — the
+// status-option sync (statusoptions.go) needs it to tell "this pane lost its
+// marker, clear its options" from "this pane is gone, nothing to clear", and
+// it falls out of the same walk for free.
+func (s *Server) RuntimeIndex() (map[string]api.PaneLocator, map[string]api.TmuxSession, map[string]bool, error) {
 	sessions, err := s.Info("")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	panes := make(map[string]api.PaneLocator)
 	shells := make(map[string]api.TmuxSession)
+	existing := make(map[string]bool)
 	for _, sess := range sessions {
 		if sess.ShellID != "" {
 			shells[sess.ShellID] = sess
 		}
 		for _, win := range sess.Windows {
 			for _, pane := range win.Panes {
+				existing[pane.Pane] = true
 				if pane.ThreadID != "" {
 					panes[pane.ThreadID] = api.PaneLocator{
 						Session: sess.Name,
@@ -180,7 +187,7 @@ func (s *Server) RuntimeIndex() (map[string]api.PaneLocator, map[string]api.Tmux
 			}
 		}
 	}
-	return panes, shells, nil
+	return panes, shells, existing, nil
 }
 
 // SessionFirstPane returns the pane id of a session's first pane (a freshly
@@ -339,34 +346,16 @@ func (s *Server) ClientCount(session string) (int, error) {
 // (the state maintainer's per-tick attachment probe, instead of one ClientCount
 // per thread). Presence in the map == attached.
 func (s *Server) AttachedSessions() (map[string]int64, error) {
-	// Activity first: it is a bare integer, so the session name (which may
-	// contain spaces, but never the TAB tmux passes through verbatim) is
-	// everything after the first TAB.
-	out, err := s.run("list-clients", "-F", "#{client_activity}\t#{client_session}")
+	sessions, _, err := s.AttachedClients()
+	return sessions, err
+}
+
+func parseActivity(act string) (int64, error) {
+	n, err := strconv.ParseInt(act, 10, 64)
 	if err != nil {
-		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "error connecting") {
-			return map[string]int64{}, nil
-		}
-		return nil, err
+		return 0, fmt.Errorf("tmux: list-clients activity %q: %w", act, err)
 	}
-	set := map[string]int64{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		act, sess, ok := strings.Cut(line, "\t")
-		if !ok {
-			return nil, fmt.Errorf("tmux: list-clients line %q has no field separator", line)
-		}
-		n, err := strconv.ParseInt(act, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("tmux: list-clients activity %q: %w", act, err)
-		}
-		if n > set[sess] {
-			set[sess] = n
-		}
-	}
-	return set, nil
+	return n, nil
 }
 
 // SessionAttached reports whether a client is attached to the session. It uses

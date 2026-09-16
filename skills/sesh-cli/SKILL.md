@@ -950,6 +950,17 @@ Keychain even when a local cockpit later attaches to it. A daemon-born work serv
 Aqua service context. Raw interactive SSH is still Keychain-isolated and may require Claude
 `/login`; the cockpit works because its panes run inside the Aqua daemon-born work server.
 
+**Status options (for tmux status lines and scripts).** The owning daemon stamps every pane
+that carries a `@sesh-thread-id` marker with its thread's record fields as tmux PANE user
+options, kept current within a tick: `@sesh-name`, `@sesh-agent`, `@sesh-tags` (comma-joined,
+empty when none), `@sesh-archived`, `@sesh-flagged`, `@sesh-flag-disabled` (each `1` or empty).
+A status line renders the thread row with format lookups alone — no `#()` job, no shell per
+redraw — e.g. `#{?@sesh-name,sesh: #{@sesh-name} [#{=8:@sesh-thread-id}] · #{@sesh-agent},}`;
+an unmarked pane renders nothing. Read them with `tmux -L sesh show-options -p -t <pane> -v
+@sesh-name`. They are pane-scoped only (tmux inherits user options during format expansion, so
+never read them at window/session scope), and they are data published by the daemon, not
+something to set by hand. Design: `_dev/STATUS_OPTIONS.md`.
+
 **"A machine's threads vanished from my TUI."** Almost always that machine is
 *unreachable*, not thread-less: offline machines' threads are hidden by default
 (the TUI's toggle-offline command reveals them, and the footer names the machine). Check `sesh mesh`

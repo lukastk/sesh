@@ -205,7 +205,7 @@ ssh-agents from the status line (item 7 below), not the daemon's RAM, which is ~
 + a scale-guard cell seeding thousands of archived virtual records and asserting the
 work counters (`sweptThreads`, `rowsWritten`) stay O(live/Δ).
 
-## 7. Work-server status line without a login shell per redraw (designed 2026-09-15 from the termux ssh-agent leak, NOT built)
+## 7. ✅ DONE — Work-server status line without a login shell per redraw (designed 2026-09-15 from the termux ssh-agent leak; BUILT 2026-09-16 as the daemon-maintained pane options — `_dev/STATUS_OPTIONS.md`, matrix row `tmux.status-options`)
 
 Today the work server's top status row is `#(zsh -lc 'sesh-current-status #{pane_id}
 #{socket_path}')` (myrig `tmux.work.conf`). Measured 2026-09-15 with 0.1 s sampling and

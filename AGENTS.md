@@ -32,6 +32,7 @@ thing; do not write "the master cockpit", which is redundant.
 | `SHELL.md` | **Shell threads** — a tracked tmux session as a first-class thread, and the `S` shells viewer over live/ghost sessions. Carries the tmux marker-inheritance trap digest. |
 | `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
 | `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
+| `STATUS_OPTIONS.md` | The work server's status row without a shell per redraw: the daemon stamps `@sesh-name` etc. as pane user options, the conf renders them with a pure format. Built. |
 | `CLI_TUI_FEATURES.md` | The 2026-06-11 CLI/TUI feature batch and its contract. |
 | `PARITY_ROADMAP.md` | The v1-parity contract: every v1 feature, ticked off. |
 | `V1_FEATURE_AUDIT.md` | The v1→v2 audit that produced that roadmap. Historical, but it is the record of what was deliberately *not* ported. |

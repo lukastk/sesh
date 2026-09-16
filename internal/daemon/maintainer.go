@@ -113,6 +113,14 @@ type maintainer struct {
 	// is invisible otherwise. Touched only by the maintainer goroutine.
 	probedPanes int
 	probedProcs int
+	// paneStatus is, per marked pane id, the status-option tuple last written
+	// to it (statusoptions.go); statusWrites counts panes whose options were
+	// written or cleared — the test observable for "tmux is not invoked when
+	// nothing changed". cachedByID indexes cachedThreads by id, rebuilt on every
+	// full sweep. Maintainer goroutine only.
+	paneStatus   map[string]statusFields
+	statusWrites int
+	cachedByID   map[string]api.Thread
 	// home is THIS daemon's user home dir, used to stamp each thread's CwdRel
 	// (~-relative cwd) so cross-machine viewers can label it. "" if undeterminable.
 	home string
@@ -175,6 +183,7 @@ func newMaintainer(d *Daemon) *maintainer {
 		epoch:      strconv.FormatInt(time.Now().UnixNano(), 36),
 		tombstones: map[string]int64{},
 		staleBound: authorityStaleBound,
+		paneStatus: map[string]statusFields{},
 	}
 }
 
@@ -234,6 +243,10 @@ func (m *maintainer) tick() {
 			tickets = map[string]store.TicketDigest{} // transient store error: refresh next full sweep
 		}
 		m.cachedThreads, m.cachedTickets = threads, tickets
+		m.cachedByID = make(map[string]api.Thread, len(threads))
+		for _, th := range threads {
+			m.cachedByID[th.ID] = th
+		}
 		// Effective hold deadlines (own + inherited from same-machine ancestors),
 		// computed on record changes so a held parent parks its whole subtree —
 		// and the EARLIEST future deadline, whose passing must force the next
@@ -265,11 +278,21 @@ func (m *maintainer) tick() {
 		m.emitting = true
 		m.mu.Unlock()
 		m.emit(deleted)
+		// The last record may have left status options on a still-live pane
+		// (a force-deleted thread's unstamped pane). Clear them — ONE tmux walk,
+		// only while something is cached, so a zero-thread machine still pays
+		// nothing per tick once the cache is empty.
+		if len(m.paneStatus) > 0 {
+			if _, _, existing, err := m.d.tmux.RuntimeIndex(); err == nil {
+				_, clients, _ := m.d.tmux.AttachedClients() // a repaint is a hint; the beat covers a failed listing
+				m.syncStatusOptions(nil, nil, existing, clients)
+			}
+		}
 		return
 	}
-	attached, err := m.d.tmux.AttachedSessions()
+	attached, clients, err := m.d.tmux.AttachedClients()
 	if err != nil {
-		attached = map[string]int64{} // tmux unreachable => nothing attached
+		attached, clients = map[string]int64{}, nil // tmux unreachable => nothing attached
 	}
 	// Resolve EVERY thread's pane and the agent process table ONCE per tick — both
 	// are tick-global. Doing them per-thread (FindPaneByThreadID re-enumerates all
@@ -282,7 +305,7 @@ func (m *maintainer) tick() {
 	// the rev gate: a pane can gain/lose a thread marker with no record write
 	// (that is exactly what makes a thread unsettled), so runtime discovery must
 	// never be gated on record changes.
-	panes, shellSessions, err := m.d.tmux.RuntimeIndex()
+	panes, shellSessions, existing, err := m.d.tmux.RuntimeIndex()
 	if err != nil {
 		return
 	}
@@ -352,6 +375,12 @@ func (m *maintainer) tick() {
 		}(th)
 	}
 	wg.Wait()
+
+	// Status options (statusoptions.go): every marked pane carries its
+	// thread's record fields as tmux user options, so the work server's status
+	// row renders with format lookups instead of a shell per redraw. A pure
+	// diff against what was last written — tmux is invoked only on change.
+	m.syncStatusOptions(m.cachedByID, panes, existing, clients)
 
 	if needFull {
 		// Drop state for threads that no longer exist (tombstoned for delta sync,

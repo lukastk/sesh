@@ -1,6 +1,6 @@
 # AGENTS.local.md — sesh v2 working notes
 
-## H109 — THE STATUS ROW WITHOUT A SHELL PER REDRAW: the daemon stamps `@sesh-name` & co. as PANE user options and the work conf renders a pure format; measured 0 status-shell spawns per 20 s on mymain (was 12) (2026-09-16, sesh cfc4fa1 + myrig 149483a; NO API/wire/schema/CLI change; DAEMON rebuild + supervised RESTART + work-conf re-source; DEPLOYED 5/6 — termux PENDING, the phone was off the tailnet)
+## H109 — THE STATUS ROW WITHOUT A SHELL PER REDRAW: the daemon stamps `@sesh-name` & co. as PANE user options and the work conf renders a pure format; measured 0 status-shell spawns per 20 s on mymain (was 12) (2026-09-16, sesh cfc4fa1 + myrig 149483a; NO API/wire/schema/CLI change; DAEMON rebuild + supervised RESTART + work-conf re-source; **DEPLOYED ALL SIX** — termux ~1 h after the others, once the phone was back on the tailnet)
 The foldable thread's second open item after the ssh-agent fix (myrig 332a403): "tmux.work.conf's
 status line still forks a login zsh about once a second while the cockpit is attached … pushing the
 status into a tmux user option from sesh would remove the spawns entirely. That second one is
@@ -73,16 +73,24 @@ pane that `@sesh-name` is set and `#{E:status-format[0]}` renders the row — my
 `pendrive-llm`, macbook `chanu-wedding … ⚑` (ideapad had no marked pane). **THE NUMBER: mymain's
 work server, 4 attached clients, 0.1 s sampling for 20 s — 0 `zsh -lc … sesh-current-status`
 spawns, where the identical sample counted 12 before the deploy.** `%1620`'s row rendered within
-a tick of the restart. **termux PENDING:** at deploy time the phone was OFF the tailnet
-(`tailscale status`: offline, last seen 1m ago; ssh timed out, not refused) — nothing to do with
-Termux. A background retry was armed (poll ping+ssh up to 12 min, then run the recipe). Recipe:
-`cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f … sesh`
-(plain build, CGO=1/android — H22), kill the daemon by ITS OWN reported pid (`sesh daemon status`,
-never pgrep), `cd ~/mysetup/myrig && git pull && python3 scripts/install-home.py "$MYRIG_TARGETS"`
-(log to $HOME — /tmp unwritable, H38), then a FRESH login (the zshenv guard relaunches — make sure
-that login's command line does not contain the guard's `pgrep -f` pattern text), verify pid/exe/
-SESH_* vars, and `tmux -L sesh source-file ~/.sesh/myrig/tmux.work.conf`. Termux has zero local
-threads, so its row is empty either way; the benefit there is purely the missing fork.
+a tick of the restart. **termux, ~1 h later:** at the first pass the phone was OFF the tailnet
+(`tailscale status`: offline; ssh timed out, not refused — nothing to do with Termux), so a
+once-a-minute watch waited for ping+ssh and the recipe ran at 08:44 UTC: `cd ~/mysetup/sesh && git
+pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f … sesh` (plain build, CGO=1/android —
+H22; built at a61063c = cfc4fa1 plus docs commits, `vcs.modified=false`), the old daemon (pid 7270,
+its exe already reading `(deleted)` after the mv) killed by ITS OWN reported pid, `cd ~/mysetup/myrig
+&& git pull && python3 scripts/install-home.py "$MYRIG_TARGETS"` (log to $HOME — /tmp unwritable,
+H38), then a FRESH login relaunched it via the zshenv guard (that login's command line must not
+contain the guard's `pgrep -f` pattern text): pid 12793, exe the new binary, the four SESH_* vars,
+schema 25, cadence idle, `tmux -L sesh source-file ~/.sesh/myrig/tmux.work.conf` done, the scratch
+pane's row renders EMPTY (correct: termux owns no threads — the benefit there is purely the missing
+fork), `~/.ssh/agent/` holds 0 socket files (the agent fix holding), all five peers synced.
+
+**SWEPT en route (H75 leak class, NOT mine, no suite running):** a 17-day-old conformance tmux
+server `sesh-test-local-1788012287139033872` still hosting a sandbox pi (7 MB) from some earlier
+killed suite run — killed by socket name — plus five dead `sesh-test-local-*` socket files. NB the
+harness killed my hour-long termux-retry loop citing "low memory" while `free` showed 17 GB
+available on mymain: that is the harness's own heuristic, not box pressure — keep waits short.
 
 **SMALL TRAPS:** zsh globs an unquoted `status-format[0]` (`no matches found` — quote the option
 name in `tmux set`); `display-message -p '#{E:status-format[0]}'` renders a status FORMAT for

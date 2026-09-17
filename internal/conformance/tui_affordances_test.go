@@ -151,6 +151,39 @@ func claimThreadDetails(t *testing.T) {
 		t.Errorf("details view should show the full real uuid %s", th.ID)
 	}
 
+	// On a pane too SHORT for the field list the popup SCROLLS rather than
+	// overflowing: the frame fits (an over-tall frame makes bubbletea drop the
+	// top lines, losing the title and the uuid), and ↓ reaches a field that was
+	// below the fold while the title stays put.
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	m = mm.(tui.Model)
+	short := m.View()
+	if lines := strings.Count(short, "\n") + 1; lines > 12 {
+		t.Fatalf("details frame is %d lines in a 12-row pane:\n%s", lines, short)
+	}
+	if !strings.Contains(short, "thread details") || !strings.Contains(short, th.ID) {
+		t.Fatalf("a short pane lost the title or the uuid:\n%s", short)
+	}
+	if !strings.Contains(short, "▼") {
+		t.Fatalf("no ▼ indicator although the fields cannot fit 12 rows:\n%s", short)
+	}
+	scrolledTo := ""
+	for i := 0; i < 20 && scrolledTo == ""; i++ {
+		m = runSpecial(t, m, tea.KeyDown)
+		if v := m.View(); strings.Contains(v, "started") {
+			scrolledTo = v
+		}
+	}
+	if scrolledTo == "" {
+		t.Fatalf("scrolling never reached the last fields:\n%s", m.View())
+	}
+	if !strings.Contains(scrolledTo, "thread details") || !strings.Contains(scrolledTo, "▲") {
+		t.Fatalf("scrolled view lost the title or the ▲ indicator:\n%s", scrolledTo)
+	}
+	if lines := strings.Count(scrolledTo, "\n") + 1; lines > 12 {
+		t.Fatalf("scrolled details frame is %d lines in a 12-row pane:\n%s", lines, scrolledTo)
+	}
+
 	// esc closes it — back to the grid (the row is visible again).
 	m = runSpecial(t, m, tea.KeyEsc)
 	if m.DetailsOpen() {

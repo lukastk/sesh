@@ -476,7 +476,10 @@ type Model struct {
 	// thread's fields (the record + live axes); detailsRow is captured when it opens.
 	// Any of esc/q/enter closes it. It's read-only — nothing routes or shells out.
 	detailsPopup bool
-	detailsRow   api.ThreadRow
+	// detailsOffset scrolls the details popup's field list (↑/↓, j/k, ^j/^k),
+	// reset whenever the popup opens or closes.
+	detailsOffset int
+	detailsRow    api.ThreadRow
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -1193,6 +1196,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseButtonWheelDown:
 				if m.helpOffset < m.helpMaxOffset() {
 					m.helpOffset++
+				}
+			}
+			return m, nil
+		}
+		// Same for the `I` details popup — a scrollable list must answer the wheel,
+		// or the only way to reach a field below the fold is the keyboard.
+		if m.detailsPopup {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if m.detailsOffset > 0 {
+					m.detailsOffset--
+				}
+			case tea.MouseButtonWheelDown:
+				if m.detailsOffset < m.detailsMaxOffset() {
+					m.detailsOffset++
 				}
 			}
 			return m, nil
@@ -2469,7 +2487,7 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		// Thread details: a read-only full-screen takeover of every field of the
 		// selected thread (the record + live axes). Local data — nothing routes.
 		if row, ok := m.Selected(); ok {
-			m.detailsPopup, m.detailsRow = true, row
+			m.detailsPopup, m.detailsRow, m.detailsOffset = true, row, 0
 		}
 	case "refresh":
 		return m, m.fetch()
@@ -2624,7 +2642,19 @@ func (m Model) handleUUIDKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDetailsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "ctrl+c", "enter", "I":
-		m.detailsPopup = false
+		m.detailsPopup, m.detailsOffset = false, 0
+	case "up", "k":
+		if m.detailsOffset > 0 {
+			m.detailsOffset--
+		}
+	case "ctrl+k":
+		m.detailsOffset = max(0, m.detailsOffset-m.detailsVisibleRows()/2)
+	case "down", "j":
+		if m.detailsOffset < m.detailsMaxOffset() {
+			m.detailsOffset++
+		}
+	case "ctrl+j":
+		m.detailsOffset = min(m.detailsMaxOffset(), m.detailsOffset+m.detailsVisibleRows()/2)
 	}
 	return m, nil
 }
@@ -4393,9 +4423,19 @@ func (m Model) viewFrame() string {
 // detailsView renders the full-screen thread-details takeover (`I`): every field of
 // the selected thread — the record plus its live runtime axes — as an aligned
 // label/value list. Read-only; esc/q/enter return to the grid.
-func (m Model) detailsView() string {
+// detailsChrome is the details popup's fixed non-field line count: title, the
+// blank line under it, the two more-indicators, the blank line above the footer,
+// and the footer.
+const detailsChrome = 6
+
+// detailField is one label/value row of the `I` popup.
+type detailField struct{ k, v string }
+
+// detailsFields is the popup's field list — ONE source for the renderer and the
+// scroll budget (a second hand-written count is the H41 drift class).
+func (m Model) detailsFields() []detailField {
 	r := m.detailsRow
-	type kv struct{ k, v string }
+	type kv = detailField
 	fields := []kv{
 		{"id", r.ID},
 		{"name", r.Name},
@@ -4431,6 +4471,36 @@ func (m Model) detailsView() string {
 			fields = append(fields, kv{"meta." + k, r.Meta[k]})
 		}
 	}
+	return fields
+}
+
+// detailsVisibleRows is how many field lines fit the pane.
+func (m Model) detailsVisibleRows() int {
+	return listVisibleRows(len(m.detailsFields()), m.height, detailsChrome)
+}
+
+// detailsMaxOffset is the largest useful scroll offset.
+func (m Model) detailsMaxOffset() int {
+	return len(m.detailsFields()) - m.detailsVisibleRows()
+}
+
+// detailsView is the `I` popup: every field of one thread, SCROLLABLE when the
+// list overflows the pane (a thread with tickets, holds and meta pairs easily
+// exceeds a short pane, and an overflowing frame makes bubbletea drop the TOP
+// lines — the title and the id field first, which is exactly the information
+// you opened it for). The two indicator lines are always present so the layout
+// does not jump while scrolling.
+func (m Model) detailsView() string {
+	r := m.detailsRow
+	fields := m.detailsFields()
+	avail := m.detailsVisibleRows()
+	off := m.detailsOffset
+	if max := m.detailsMaxOffset(); off > max {
+		off = max
+	}
+	if off < 0 {
+		off = 0
+	}
 	labelW := 0
 	for _, f := range fields {
 		if n := len([]rune(f.k)); n > labelW {
@@ -4442,11 +4512,31 @@ func (m Model) detailsView() string {
 	if title == "" {
 		title = tid8(r.ID)
 	}
-	b.WriteString(styleHeader.Render("thread details · "+title) + "\n\n")
-	for _, f := range fields {
-		b.WriteString("  " + styleDim.Render(pad(f.k, labelW)) + "  " + f.v + "\n")
+	b.WriteString(styleHeader.Render("thread details · "+title) + "\n")
+	if off > 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▲ %d more", off)) + "\n")
+	} else {
+		b.WriteString("\n")
 	}
-	b.WriteString("\n" + styleDim.Render("  esc/q to close") + "\n")
+	// The VALUE is clipped to the remaining width (labels are fixed-width and
+	// values carry no styling, so this is exact rune arithmetic — a wrapped
+	// value would push the frame past the pane height and drop the title).
+	valueBudget := m.width - (labelW + 4)
+	for _, f := range fields[off : off+avail] {
+		v := f.v
+		if m.width > 1 && valueBudget > 1 {
+			if r := []rune(v); len(r) > valueBudget {
+				v = string(r[:valueBudget-1]) + "…"
+			}
+		}
+		b.WriteString("  " + styleDim.Render(pad(f.k, labelW)) + "  " + v + "\n")
+	}
+	if rest := len(fields) - off - avail; rest > 0 {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  ▼ %d more", rest)) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n" + styleDim.Render("  ↑/↓ scroll · esc/q to close"))
 	return b.String()
 }
 

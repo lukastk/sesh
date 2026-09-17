@@ -90,7 +90,7 @@ var declaredTUIClaims = []string{
 	"action-reorder",            // m enters move mode; ↑ repositions the pinned row above another on the daemon
 	"action-new-divider",        // D opens a label prompt and creates a real pinned divider on the daemon
 	"column-max-width",          // full-width columns are capped by default (a long NAME truncates); `w` toggles the cap off to show full text; a [[tui.column_width]] override raises the cap (config→render)
-	"thread-details",            // I opens a read-only takeover showing a thread's REAL fields (full uuid, machine, agent, cwd, live axis); esc closes back to the grid
+	"thread-details",            // I opens a read-only takeover showing a thread's REAL fields (full uuid, machine, agent, cwd, live axis); it SCROLLS on a pane too short for the list (title and uuid kept, frame fits); esc closes back to the grid
 	"mouse-click",               // a left CLICK selects the row under the pointer; a click on the ▸/▾ fold marker collapses/expands that thread's subtree — over a REAL parent/child tree + render
 	"command-palette",           // `p` opens the COMMAND PALETTE; a fuzzy query reaches a command with no key at all and Enter runs it for real (the daemon's record changes); esc cancels without running it
 	"keymap-config",             // a [[tui.key]] rebinding really moves a command's key against a live daemon: the NEW key performs the routed action and the key it moved off does nothing

@@ -6,11 +6,18 @@ package conformance
 // agent ACTUALLY ran, not just that argv carried --model:
 //
 //   - pi / claude: spawn headless pinned to a DISTINCTIVE model, run a turn, and
-//     assert that model appears in the agent's own transcript (pi records modelId
-//     on its model_change + assistant lines; claude records model on each
-//     assistant message). The per-turn override is proved by a second model that
-//     can ONLY appear in the transcript if the override was honored (the thread's
-//     stored model is the first one).
+//     assert the model on the agent's own ASSISTANT MESSAGES — the field the agent
+//     stamps with what actually served the turn (claude: `message.model` on its
+//     `assistant` lines; pi: `message.model` on its assistant `message` lines).
+//     The per-turn override is proved by the NEXT assistant message naming the
+//     second model (the thread's stored model is the first one).
+//
+//     NB the assertion reads that FIELD, never the transcript text: a claude
+//     transcript embeds the Agent tool's schema (`enum:["sonnet","opus",…]`) and
+//     whatever model ids the user's own CLAUDE.md mentions, so a substring like
+//     "sonnet" appears in a haiku turn's transcript and proves nothing. That is
+//     what the old text-substring form asserted, and it went red the moment the
+//     ambient context grew a model list.
 //   - codex (on a ChatGPT account) exposes no active-model id in its json/rollout
 //     and supports only the default model, so a positive "ran model X" is not
 //     observable. The honest observable is that the EXACT model string reaches
@@ -64,19 +71,29 @@ func testThreadModel(t *testing.T, agent string) {
 			t.Errorf("record model = %q, want %q", th.Model, stored)
 		}
 
-		// Turn 1 uses the thread's pinned model.
+		// Turn 1 uses the thread's pinned model: the assistant message the turn
+		// produced must be stamped with it, and NOTHING may be stamped with the
+		// override yet (the disjointness check, over model ids only).
 		sb.headlessTurn(t, th.ID, "Reply with exactly: ok")
 		requireSuccessfulModelReply(t, sb, th.ID, agent, stored)
-		tr := sb.transcriptText(t, th.ID)
-		if !strings.Contains(tr, storedMark) {
-			t.Fatalf("[%s] pinned model %q did not run: transcript lacks %q", agent, stored, storedMark)
+		models := sb.transcriptModels(t, th.ID, agent)
+		if len(models) == 0 {
+			t.Fatalf("[%s] no assistant message carries a model id — the transcript shape changed; fix the reader, do not weaken the assertion", agent)
 		}
-		if strings.Contains(tr, overrideMark) {
-			t.Fatalf("[%s] override model leaked before it was requested (test models not disjoint)", agent)
+		last := models[len(models)-1]
+		if !strings.Contains(last, storedMark) {
+			t.Fatalf("[%s] pinned model %q did not run: the turn's assistant message names %q (all: %v)", agent, stored, last, models)
 		}
+		for _, m := range models {
+			if strings.Contains(m, overrideMark) {
+				t.Fatalf("[%s] override model %q served a turn before it was requested (test models not disjoint): %v", agent, override, models)
+			}
+		}
+		beforeOverride := len(models)
 
-		// Turn 2 overrides the model for THIS turn only. The override mark can only
-		// appear if --model on send-headless was honored (the stored model differs).
+		// Turn 2 overrides the model for THIS turn only. The override can only
+		// stamp a message if --model on send-headless was honored (the stored
+		// model differs).
 		if _, stderr, err := sb.Runner.Run(t, "thread", "send-headless", "--id", th.ID,
 			"--text", "Reply with exactly: ok", "--model", override); err != nil {
 			t.Fatalf("send-headless --model: %v\n%s", err, stderr)
@@ -85,9 +102,12 @@ func testThreadModel(t *testing.T, agent string) {
 			t.Fatalf("[%s] override turn never completed", agent)
 		}
 		requireSuccessfulModelReply(t, sb, th.ID, agent, override)
-		tr = sb.transcriptText(t, th.ID)
-		if !strings.Contains(tr, overrideMark) {
-			t.Fatalf("[%s] per-turn --model override %q was not honored: transcript lacks %q", agent, override, overrideMark)
+		models = sb.transcriptModels(t, th.ID, agent)
+		if len(models) <= beforeOverride {
+			t.Fatalf("[%s] the override turn produced no new assistant message (%d before, %d after)", agent, beforeOverride, len(models))
+		}
+		if last := models[len(models)-1]; !strings.Contains(last, overrideMark) {
+			t.Fatalf("[%s] per-turn --model override %q was not honored: the turn's assistant message names %q (all: %v)", agent, override, last, models)
 		}
 		// The thread's stored model is unchanged by a per-turn override.
 		if got := sb.getThread(t, th.ID); got.Model != stored {
@@ -165,8 +185,41 @@ func (sb *Sandbox) getThread(t *testing.T, id string) api.Thread {
 	return api.Thread{}
 }
 
-// transcriptText returns the agent's transcript lines joined — the observable the
-// model assertion reads (the agent records the model it actually ran).
+// transcriptModels returns, in order, the model id stamped on each ASSISTANT
+// message of the agent's own transcript — what actually served each turn.
+// claude writes `{"type":"assistant","message":{"model":…}}`; pi writes
+// `{"type":"message","message":{"role":"assistant","model":…}}`. Reading the
+// FIELD (rather than grepping the transcript) is what keeps the assertion
+// honest: both transcripts embed tool schemas and ambient context that mention
+// other model names.
+func (sb *Sandbox) transcriptModels(t *testing.T, id, agent string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(sb.transcriptText(t, id), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role  string `json:"role"`
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue // a transcript line that is not JSON is not a message
+		}
+		assistant := rec.Message.Role == "assistant" || (agent == "claude" && rec.Type == "assistant")
+		if assistant && rec.Message.Model != "" {
+			out = append(out, rec.Message.Model)
+		}
+	}
+	return out
+}
+
+// transcriptText returns the agent's transcript lines joined — the raw JSONL the
+// model reader above parses.
 func (sb *Sandbox) transcriptText(t *testing.T, id string) string {
 	t.Helper()
 	out, stderr, err := sb.Runner.Run(t, "thread", "transcript", "--id", id, "--json")

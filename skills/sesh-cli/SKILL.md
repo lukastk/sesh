@@ -506,7 +506,9 @@ m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it w
              block, enter/esc commit-and-exit (an unpinned top-level row is pinned first)
 I            thread details: a read-only popup of ALL of the selected thread's
              fields (id, agent, model, state axes, cwd, parent, tags, hold,
-             tickets, session id, meta…); esc/q closes
+             tickets, schedules, session id, meta…); scrolls when the list is
+             taller than the pane (↑/↓, j/k, ^j/^k half-page, or the wheel);
+             esc/q closes
 y            show full UUID (c copies)         R   force refresh
 K            tickets view (the selected thread's tickets — see below)
 S            SHELLS view — every live tmux session on every reachable machine,

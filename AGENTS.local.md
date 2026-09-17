@@ -151,6 +151,78 @@ turn replied `SMOKEBEAT`, max_fires disabled it, `schedule list --machine ideapa
 myrig needs NOTHING: `[send]` and `[schedules]` have built-in defaults (60 s / 10 m; enabled,
 breaker 10); document them in `config.toml.jinja` only if you want them visible.
 
+### H111 follow-up — the two loose ends fixed (2026-09-17, sesh a1c2a66; NO schema/API/daemon change; BINARY-ONLY, no restart; NOT YET DEPLOYED)
+Both were recorded as known-bad in H111's summary rather than quietly dropped, so they were the
+next thing asked for.
+
+**1. `thread.model/claude/local` was a WRONG TEST, not a flake — and it was red on main before
+the scheduling branch.** It asserted "the transcript contains `haiku` and NOT `sonnet`". But a
+claude transcript embeds the **Agent tool's own schema** (`"enum":["sonnet","opus","haiku",
+"fable"]`) and the model-id line from Lukas's global CLAUDE.md, so "sonnet" appears in a HAIKU
+turn's transcript. PROBED before touching anything: a real `claude --print --model haiku` turn
+wrote 2 lines matching `sonnet` while every assistant message carried
+`"model":"claude-haiku-4-5-20251001"`. The substring never proved anything; it went red the day
+the ambient context grew a model list. FIX: `Sandbox.transcriptModels(id, agent)` reads the
+model id off ASSISTANT messages only — claude `{"type":"assistant","message":{"model":…}}`, pi
+`{"type":"message","message":{"role":"assistant","model":…}}` (both shapes verified against real
+on-disk transcripts) — and the cell asserts the LAST assistant message per turn: turn 1 names the
+pinned model and NO message names the override yet (the disjointness check, now over model IDS),
+turn 2 names the override and adds a message. Strictly STRONGER than the text match: it names the
+model that actually served the turn. ANTI-GAMING: dropping `modelArgs` from the claude headless
+branch turns it red naming the real model (`pinned model "haiku" did not run: the turn's
+assistant message names "claude-opus-5"`) — a message the old form could not have produced;
+reversed byte-identically (md5). All three model cells green.
+
+**2. The `I` details popup now SCROLLS** (H88 recorded the defect and excluded it from
+`TestPopupFramesFitPaneHeight`). It rendered its whole field list unconditionally, so on a short
+pane the frame outgrew the height and bubbletea dropped the TOP lines — the title and the id, the
+very fields you open it for. FIX = helpView's treatment: `Model.detailsFields()` is now ONE source
+for the renderer and the scroll budget (a second hand-written count is the H41 drift class),
+plus `detailsChrome`/`detailsVisibleRows`/`detailsMaxOffset`, a `detailsOffset` reset on open AND
+close, always-present ▲/▼ indicators, a clamped offset, the VALUE clipped to the remaining width
+by exact rune arithmetic (values carry no ANSI, so no stripping is needed), ↑/↓ + j/k + ^j/^k
+half-page, and the WHEEL (a scrollable list that ignores the wheel is half-built). The guard's
+exclusion comment is GONE, replaced by three details cases (plain, meta + a long cwd, and a
+past-the-end offset that must clamp). ANTI-GAMING: rendering the full list again reproduces the
+original defect verbatim (`details at height 8 rendered a 26-line frame`); making ↓ inert turns
+the claim red (`scrolling never reached the last fields`); both reversed byte-identically.
+LIVE-PROVEN read-only in an isolated 12-row tmux against the REAL mymain daemon: `thread details ·
+mysetup`, the id on screen, `▼ 15 more`, and ten ↓ presses walking to `notify` with the title held.
+
+**TEST STATE, honestly.** Green: every non-conformance package plain AND `-race`, `go vet`, the
+FULL TUI claims suite (240 s), `thread.model` ×3, and **183 matrix cells reconfirmed in groups** —
+tmux+master (31), schedule+shell+ticket (…), daemon/api/mesh/route/blob/fs/plugins, and thread
+group 1 (78) — **0 failures**. NOT reconfirmed end-to-end: the remaining real-agent `thread.*`
+groups (send/state/resume/fork/subscribe/await/delegate…), which these changes do not touch. The
+last FULL 277-cell run on this branch was 276/277 with the single red being exactly the model cell
+fixed here. **Do not read this as a fresh all-green grid.**
+
+**TWO PROCESS MISTAKES WORTH NOT REPEATING.**
+- **My own cleanup killed my own tests.** I started a background sweep of ~2,700 stale
+  `/tmp/tmux-1000/sesh-test-*` socket files, then launched a matrix chunk BEFORE the sweep's
+  completion notification arrived — the sweep was still deleting sockets the running cells had
+  just created, and 27 tmux/master cells failed in 0.01 s each. They pass on a quiet box. The
+  H101 lesson in a new costume: a sweep matching a generic pattern must FINISH before anything
+  that creates matching names starts. (The sockets themselves were stale FILES, no live servers —
+  `pgrep -x tmux` found 5 processes, none a test server — so nothing was leaking memory, but the
+  file count had grown across many sessions' runs.)
+- **`rm -f $D/chunk*.log` with no matching file ABORTS the whole zsh line** (NOMATCH), so an
+  `&& for …` chain silently ran nothing and only the trailing `echo` fired — the log said
+  "ALLDONE" with zero tests run. The H30/H49 family again. Quote the glob or use `setopt
+  NULL_GLOB`; and never gate a long run on a bare glob.
+
+**CONCURRENT WORK ON THE BOX (not mine, and it explains the kills).** The harness killed three
+heavy real-agent runs citing "low memory". Twice `free` showed ~12 GB available (H109's "the
+harness's own heuristic"), but the third coincided with genuine pressure: another session was
+running **`cd ~/mysetup/myrig && ./install.sh mymain` over ssh from macbook**, which restarted
+supervisord and EVERY supervised program — sesh-daemon among them (pid 3491022 → 2861940,
+uptime 1 d → seconds). That is what restarted the daemon mid-session, not my tests; the daemon
+came back healthy (api 49, store 26, all five peers reachable) on `657ae69`, which contains H111's
+merge. Each kill left 1–3 sandbox daemons, all killed by EXPLICIT pid after verifying their
+`SESH_HOME` was under `/tmp/sesh-sb-*` (never `pkill -f` — H22/H74), with the live daemon verified
+untouched each time. LESSON: check for a running `install.sh`/deploy on the box before launching
+a real-agent matrix batch; two of them on one machine is what made the box thrash.
+
 ## H110 — EVERY NEW CLAUDE BOX OPENED ON THE "Quick safety check" TRUST DIALOG: Claude Code 2.1.27x stopped inheriting trust across a GIT ROOT; fix = pre-seed `projects[cwd].hasTrustDialogAccepted` in `~/.claude.json` at every headed launch, the claude twin of EnsureCodexTrust (2026-09-16, sesh 138be35; NO schema/API/CLI change; DAEMON rebuild + RESTART; **DEPLOYED ALL SIX**; ticket 4b069b88 done)
 Lukas: "it seems to happen every time I open up a new Claude Code session in a new folder …
 often I want to … spawn a handful of threads and then send a message directly to them. This

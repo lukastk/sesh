@@ -98,6 +98,28 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
   store at the default paths destroys his working state, and you are probably running
   *inside* one of those threads while you do it.
 
+- **Teardown cannot depend on the test process surviving — `TestMain` reaps the LAST
+  run's leaks.** Each sandbox kills its own tmux server in `t.Cleanup`, which covers the
+  ordinary path, but `t.Cleanup` never runs when the test BINARY dies: Ctrl-C on `go
+  test`, a `-timeout` abort, a SIGKILL. tmux cannot recover on its own either —
+  `exit-empty` would close an idle server, but a leaked sandbox session still holds a
+  live `claude`/`pi`, so the server stays up **forever** with a real agent in it.
+
+  Measured on mymain 2026-09-23: three leaked servers aged **5-6 days**, each still
+  running an agent, plus **349** dead socket files. They were invisible to `sesh thread
+  list` (their stores went with the temp dirs), so nothing surfaced them — one was found
+  only because its agent still held an ssh channel to macstudio and was starving
+  `ssh-target`'s ControlMaster.
+
+  So `reapStaleTestServers` (harness_test.go) runs from `TestMain` before `m.Run()` and
+  kills any `sesh-test-*` server whose embedded `-<UnixNano>` stamp is older than
+  `staleTestServerAge` (2h), unlinking dead sockets as it goes. The age bound is the only
+  reason it is safe: it must never kill a **concurrent** run's servers. It reports each
+  kill on stderr rather than sweeping silently, so a leak that keeps recurring stays
+  visible. `reap_test.go` covers the age split, that it touches nothing it does not own
+  (`sesh`, `sesh-master`, unparseable or lookalike names), and — end to end — that a real
+  server holding a real process is actually killed.
+
 - **Real cross-host test (`TestRealCrossHost`)** validates genuine multi-machine spawn
   over a real network ssh hop (the one thing the `ssh localhost` matrix cells cannot
   stand in for). Pairing: `mymain ↔ macbook` (from `$MYRIG_MACHINES`). It self-gates and

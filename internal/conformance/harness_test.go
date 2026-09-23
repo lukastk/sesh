@@ -67,6 +67,83 @@ func cleanupHarness() {
 	}
 }
 
+// staleTestServerAge is how old a leftover conformance tmux server must be before
+// a NEW run is willing to reap it. It exists only to protect a CONCURRENT run —
+// two `go test` invocations, or a developer's run beside CI — since those servers
+// are legitimately alive and young. Anything older than this belongs to a run that
+// is long over.
+const staleTestServerAge = 2 * time.Hour
+
+// tmuxSocketDir is where tmux keeps its sockets: $TMUX_TMPDIR (else /tmp) plus a
+// per-uid directory.
+func tmuxSocketDir() string {
+	base := os.Getenv("TMUX_TMPDIR")
+	if base == "" {
+		base = "/tmp"
+	}
+	return filepath.Join(base, fmt.Sprintf("tmux-%d", os.Getuid()))
+}
+
+// reapStaleTestServers kills tmux servers left behind by PREVIOUS conformance runs
+// and unlinks their dead sockets.
+//
+// Every sandbox already kills its own server in `t.Cleanup`, and that covers the
+// ordinary path — but `t.Cleanup` does not run when the test BINARY dies: Ctrl-C on
+// `go test`, a `-timeout` abort, a SIGKILL, a crash in a child. tmux cannot recover
+// on its own either: `exit-empty` would close an idle server, but a leaked sandbox
+// session still has a live `claude`/`pi` in it, so the server stays up forever
+// holding a real agent process.
+//
+// That is not hypothetical. Measured on mymain 2026-09-23: three leaked servers
+// aged 5-6 DAYS, each still running an agent, plus 349 dead socket files — and one
+// of those agents was holding an ssh channel to macstudio, which is how it was
+// noticed at all. They were invisible to `sesh thread list` because their stores
+// had been deleted with the temp dirs.
+//
+// So teardown cannot depend on this process surviving: each run cleans up after the
+// last one, which is robust to every way a run can die.
+func reapStaleTestServers() {
+	reapTestServersIn(tmuxSocketDir(), time.Now().Add(-staleTestServerAge))
+}
+
+// reapTestServersIn is the testable core: reap `sesh-test-*` sockets in `dir` whose
+// embedded timestamp is at or before `cutoff`. Returns how many live servers it
+// killed.
+func reapTestServersIn(dir string, cutoff time.Time) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0 // no socket dir yet — nothing to reap
+	}
+	killed := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "sesh-test-") {
+			continue
+		}
+		// Every socket this harness creates ends in `-<UnixNano>`. A name that does
+		// not is not ours to touch, however much it looks like it.
+		idx := strings.LastIndex(name, "-")
+		if idx < 0 {
+			continue
+		}
+		nanos, err := strconv.ParseInt(name[idx+1:], 10, 64)
+		if err != nil {
+			continue
+		}
+		if time.Unix(0, nanos).After(cutoff) {
+			continue // young enough to belong to a run happening right now
+		}
+		// Reported, not silent: a leak that keeps recurring should be visible in the
+		// test output rather than quietly swept up every run.
+		if err := exec.Command("tmux", "-L", name, "kill-server").Run(); err == nil {
+			fmt.Fprintf(os.Stderr, "conformance: reaped leaked tmux server %s (from an interrupted run)\n", name)
+			killed++
+		}
+		os.Remove(filepath.Join(dir, name)) //nolint:errcheck — best-effort
+	}
+	return killed
+}
+
 // Runner runs sesh commands for one locality against one isolated SESH_HOME.
 type Runner interface {
 	// Run executes `sesh <args...>` and returns combined stdout, stderr, error.

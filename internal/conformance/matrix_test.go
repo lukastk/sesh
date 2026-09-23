@@ -19,6 +19,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Reap tmux servers a PREVIOUS run leaked. Per-test `t.Cleanup` handles the
+	// ordinary path but cannot run when the test binary is interrupted or times
+	// out, and a leaked sandbox session keeps a real agent alive indefinitely —
+	// see reapStaleTestServers.
+	reapStaleTestServers()
+
 	// Bind a Skip to every cell no real test claimed (order-independent: runs
 	// after all init()s, before any test).
 	registerRemainingSkips()

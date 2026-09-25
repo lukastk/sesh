@@ -6,7 +6,7 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
-## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh 98c622a + mysystem 113da0e; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; **DEPLOYED 5/6** — pocket4 offline, pending)
+## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh 98c622a + mysystem 113da0e + myagent 704ae92; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; **DEPLOYED 5/6** — pocket4 offline, pending)
 Bug report relayed by Lukas from a claude BACKGROUND JOB in `mosaic-v3/courses/finnish` — an agent
 that is deliberately **not** a sesh thread. Its inherited `$SESH_THREAD_ID=c194478c` resolved to
 `adi-requests`, a live headful claude thread in `~/dev/20260622_oo996d__ADI-website`; its process
@@ -117,6 +117,27 @@ sesh's verbatim refusal naming `adi-requests`.
 **A running SIDEBAR/TUI keeps the binary it launched with (H70)** — irrelevant here (no TUI change),
 but a long-running agent's shell resolves `sesh` from PATH per call, so agents pick `whoami` up at
 once.
+
+**THE DEPLOY TRAP I NEARLY SHIPPED PAST, and it applies to EVERY skill change in this repo:
+`~/.agents/skills/{sesh-cli,do-tickets,myvault,convo-review,…}` are REAL DIRECTORIES, not symlinks.**
+myagent's own skills are symlinked to its checkout (so a pull is their whole deploy), but the skills
+that live in OTHER mysetup repos are listed in `myagent/external_skills.txt` as
+`lukastk/<repo>@<skill>` and installed by `npx skills add` **from GitHub, as COPIES**. So editing
+`sesh/skills/sesh-cli/SKILL.md`, committing it and deploying the BINARY leaves every agent still
+reading the OLD skill — the change is invisible to its actual audience. `diff -q` against the
+`~/.agents/skills/` copy is the check; myagent's AGENTS.md documents this and I still had to be
+caught by it. Refresh is `npx -y skills add lukastk/<repo>@<skill> -g -y -a codex -a claude-code -a pi`
+(the repeated `-a` is required — a comma-joined value parses as one invalid name), after PUSHING.
+Done for all three changed skills (`sesh@sesh-cli`, `mysystem@myvault`, `mysystem@convo-review`) on
+mymain, ideapad, macbook, macstudio and termux, each verified by grepping the installed copy.
+**ALSO FIXED, third repo, asked for separately: `myagent` 704ae92** — `skills/self-compact/SKILL.md`,
+the skill whose failure caused the 2026-08-25 incident, still carried the jq ritual
+(`select(.source == "pane")`). It now reads `TID=$(sesh whoami) || exit 1` and fetches the record
+separately with `sesh info --id "$TID" --json` for the `headful` check (whoami does not report
+`head`). Verified BOTH ways live from this pane: the real form resolves + reports
+`mysetup - sesh … headful`, and the detached-job shape stops at step 1 with nothing compacted. On a
+machine whose sesh predates `whoami` the step FAILS CLOSED (`unknown command "whoami"`, exit 2) —
+stated in the skill so nobody reaches back for the old filter.
 
 ## H111 — SCHEDULED WORK BUILT: `sesh schedule` (cron/interval/one-shot messages into a thread + thread spawns, state-aware guards, catch-up, a reaper) AND the `respect-typing` guard on EVERY paste into a live pane (2026-09-16, sesh feat/scheduling → merged; store migration 25→26, api 48→49; DAEMON rebuild + RESTART ALL SIX; ticket 28f6e77b done)
 Lukas's ticket: cron-style messages to a thread with rules (revive-if-unattached, only-if-not-

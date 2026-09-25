@@ -90,6 +90,17 @@ func init() {
 		Description: "sesh info [id|prefix]: describe one thread; with no arg the CURRENT thread is inferred (explicit > the calling pane's @sesh-thread-id marker > $SESH_THREAD_ID > loud) and the answer reports its PROVENANCE (source pane|env|explicit + verified). An env-derived id has no pane to confirm it, so it is announced as unverified and REFUSED when the named thread's cwd is unrelated to the caller's (--allow-unverified overrides)",
 		Localities:  bothLoc,
 	})
+	// LOCAL-only by design (the thread.placement precedent): whoami reports who
+	// the CALLING process is, so the question has no remote form. Routing it
+	// would make a peer read its OWN pane and environment and answer
+	// confidently about another machine — the exact failure mode the verb
+	// exists to prevent — so `--machine` is a loud refusal, and the cell
+	// asserts that refusal rather than leaving the axis untested.
+	Register(Feature{
+		ID:          "thread.whoami",
+		Description: "sesh whoami: the default-safe twin of `sesh info` — prints the current thread's uuid ONLY when the identity is VERIFIED (the calling pane's @sesh-thread-id marker) and exits NON-ZERO otherwise, so `TID=$(sesh whoami) || exit 1` is safe by construction. Three distinct refusals: an inherited $SESH_THREAD_ID contradicted by the calling directory, an UNCONTRADICTED but still unverified one (absence of contradiction is not evidence — this is the residual `info` exits 0 on), and no identity at all. --allow-unverified downgrades the gate; not routable",
+		Localities:  []Locality{Local},
+	})
 	Register(Feature{
 		ID:          "thread.stop",
 		Description: "end a thread's runtime (agent + session) but KEEP the record (idle, revivable)",

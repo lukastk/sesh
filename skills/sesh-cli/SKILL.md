@@ -64,13 +64,39 @@ Inference has two sources and they are **not** equally trustworthy:
   froze whichever pane started it) carries a perfectly *valid* id belonging to an
   *unrelated* thread.
 
-`sesh info` reports which it used — a `source:` line, or `"source"` / `"verified"` in
-`--json`. An env-derived answer is announced on stderr, and it is **corroborated against
-the calling directory**: if the named thread's cwd is unrelated to where you are standing,
-sesh **refuses** instead of guessing. Pass `--id`, or `--allow-unverified` to proceed
-anyway (a pseudo-global — every verb that infers accepts it). The refusal names the flag
-**that command** takes, which is not always `--id`: `subscribe`/`unsubscribe` take
-`--from`, `ticket list --current` and `hooks test` take `--thread`.
+**`sesh whoami` is the command to reach for.** It runs the same resolution with the safe
+default: it prints the full uuid **only** when the identity is *verified*, and exits
+non-zero otherwise. So this is safe by construction —
+
+```bash
+TID=$(sesh whoami) || exit 1        # or: || { echo "I am not a sesh thread"; exit 1; }
+```
+
+— and it has no `--id`, because naming a thread would make the answer trivially
+"explicit". It is not routable either: a peer would read its **own** pane and environment
+and answer confidently about a different machine, which is the failure mode, not a
+limitation. `--json` adds `source`/`verified`/name/cwd; `--allow-unverified` downgrades it
+to `info`'s tolerance. Three refusals, each distinct:
+
+| what happened | what it means |
+|---|---|
+| the env id is **contradicted** by your cwd | very likely another thread's id — do not sign or attach as it |
+| the env id is **uncontradicted but unverified** | your cwd neither confirms nor denies it; absence of contradiction is not evidence |
+| **no identity at all** | an answer, not a failure — say what you actually are (see below) |
+
+`sesh info` is the **diagnostic** twin and deliberately keeps the opposite default: it
+reports which source it used — a `source:` line, or `"source"` / `"verified"` in `--json`
+— announces an env-derived answer on stderr, and still **exits 0** for it, because
+refusing to describe a thread is the wrong move when you are diagnosing. It does refuse
+one case: an env-derived id whose thread cwd is **unrelated** to where you are standing.
+Pass `--id`, or `--allow-unverified` to proceed anyway (a pseudo-global — every verb that
+infers accepts it). The refusal names the flag **that command** takes, which is not always
+`--id`: `subscribe`/`unsubscribe` take `--from`, `ticket list --current` and `hooks test`
+take `--thread`.
+
+**Do not read an id out of `sesh info` to act as yourself.** That is what `whoami` is for;
+`info` will hand you an unverified id and a zero exit, and the warning is on stderr where
+a `2>/dev/null` swallows it.
 
 > **Agents: a claude Bash call often has NO pane.** A tool call hosted by claude's
 > machine-global daemon (any session showing background agents) runs with no `$TMUX_PANE`
@@ -86,17 +112,27 @@ anyway (a pseudo-global — every verb that infers accepts it). The refusal name
 > its self-compact runner compacted that thread and injected a foreign handover prompt
 > into it.
 >
+>
 > ```bash
-> TID=$(sesh info --json | jq -r 'select(.source == "pane") | .thread.id')
-> [ -n "$TID" ] || { echo "not pane-verified — refusing to act on myself"; exit 1; }
+> TID=$(sesh whoami) || { echo "not verified — refusing to act on myself"; exit 1; }
 > ```
 
+**If you have no sesh identity, say so — never borrow one.** An agent that is not a thread
+(a claude background job, a cron task, anything detached) has no valid sesh identity at
+all, and the honest signature is what it actually is: the tool or job and its working
+directory, e.g. `Claude Code job ef96bf74, cwd ~/dev/…__mosaic-v3/courses/finnish`. Signing
+with an inherited `$SESH_THREAD_ID` instead produces a *resolvable* id pointing at live,
+unrelated work — a reply addressed to a thread that never asked, and bookkeeping attached
+to the wrong project. That was reported from exactly such a job on 2026-09-25, whose
+inherited id named `adi-requests` in a different box.
+
 Corroboration is evidence, not proof: an inherited id that happens to name a thread in the
-*same* directory tree still resolves. Outside a pane, `--id` is the only certainty.
+*same* directory tree still resolves, which is precisely why `whoami` refuses it and `info`
+does not. Outside a pane, an explicit `--id` is the only certainty.
 
 ## Before running commands
 
-**Read-only** (safe to run freely): `list`, `grid`, `info`, `status`, `pane`, `capture`,
+**Read-only** (safe to run freely): `list`, `grid`, `info`, `whoami`, `status`, `pane`, `capture`,
 `mesh`, `tail`, `transcript`, `subscriptions`, `peer list`, `daemon status`, `master
 watchers`, `matrix`, `doctor`, `tmux current|info`, `cwd-label`, `meta get|list`, `hooks list`.
 

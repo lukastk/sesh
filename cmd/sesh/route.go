@@ -70,9 +70,16 @@ func stageFileRemote(cfg config.Config, machine, name string, content []byte) er
 
 // routableSubcommand reports whether `--machine` routing applies to this
 // subcommand. Local-only meta commands are excluded.
+//
+// `whoami` is excluded for a different reason than the others: routing it would
+// not merely be useless, it would be ANSWERING THE WRONG QUESTION — the peer
+// would read its own pane and environment and report confidently about a
+// different machine, which is the exact failure mode whoami exists to prevent.
+// Excluded here, the flag survives into whoami's own flagset, which refuses it
+// with that explanation instead of flag's bare "not defined".
 func routableSubcommand(sub string) bool {
 	switch sub {
-	case "peer", "matrix", "master", "help", "help-tree", "-h", "--help":
+	case "peer", "matrix", "master", "whoami", "help", "help-tree", "-h", "--help":
 		return false
 	default:
 		return true

@@ -69,6 +69,8 @@ func runThread(args []string) error {
 		return threadRename(cfg, rest)
 	case "info":
 		return runInfo(cfg, rest)
+	case "whoami":
+		return runWhoami(cfg, rest)
 	case "adopt":
 		return threadAdopt(cfg, rest)
 	case "transcript":

@@ -28,6 +28,7 @@ var skipReasons = map[string]string{
 	"thread.new.headless":        "spawn a thread with no pane: no tmux session, unified idle state (stateless-per-turn)",
 	"thread.parent":              "parent/child records: new --parent (+inference/--no-parent) + reparent (cycle guard loud)",
 	"thread.info":                "describe one thread; no-arg = current-thread inference (explicit/prefix > pane stamp > env > loud) with provenance + the unverified-env refusal",
+	"thread.whoami":              "the identity GATE: the uuid on stdout only when VERIFIED (pane marker), non-zero otherwise — contradicted env id, uncontradicted-but-unverified env id, or no identity at all",
 	"thread.stop":                "end a thread's runtime but keep the record (idle, revivable)",
 	"thread.send.headful":        "send into live pane (codex: directory-trust prompt at spawn eats input; needs per-dir trust handling)",
 	"thread.send.headless":       "run a turn on any IDLE thread (headless- or headed-born, conversation continuity); a live pane refuses loudly",

@@ -248,6 +248,24 @@ type unverifiedError struct {
 	Flag string
 }
 
+// noIdentityError is the refusal raised when NOTHING identifies the current
+// thread: no explicit id, no thread-marked pane, no valid $SESH_THREAD_ID. It
+// is a distinct type for the same reason unverifiedError is — a caller with no
+// thread-selector flag of its own (`sesh whoami`) must be able to phrase its
+// own remedy rather than tell the caller to pass a flag that command does not
+// have (the H95 class). Its own text is unchanged from the fmt.Errorf it
+// replaced, so every verb that simply surfaces it reads exactly as before.
+type noIdentityError struct {
+	// Flag is the flag THIS command accepts for naming a thread explicitly;
+	// empty means the usual --id. See unverifiedError.Flag.
+	Flag string
+}
+
+func (e *noIdentityError) Error() string {
+	return fmt.Sprintf("not inside a sesh thread: no %s, no valid $%s, and no thread-marked tmux pane — pass %s",
+		idFlagOr(e.Flag), agents.EnvThreadID, idFlagOr(e.Flag))
+}
+
 // idFlagOr returns the flag name to suggest, defaulting to --id.
 func idFlagOr(flag string) string {
 	if flag == "" {
@@ -312,8 +330,7 @@ func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, 
 			return in.env, srcEnv, notes, nil
 		}
 	}
-	return "", "", notes, fmt.Errorf("not inside a sesh thread: no %s, no valid $%s, and no thread-marked tmux pane — pass %s",
-		idFlagOr(in.idFlag), agents.EnvThreadID, idFlagOr(in.idFlag))
+	return "", "", notes, &noIdentityError{Flag: in.idFlag}
 }
 
 // cwdContradicts reports whether the calling directory POSITIVELY contradicts a

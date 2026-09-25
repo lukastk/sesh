@@ -119,6 +119,14 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
+	"whoami": {
+		{"--json", "emit machine-readable JSON (id, short, name, machine, cwd, agent, source, verified) instead of the bare uuid. Only on success — a refusal is still stderr + a non-zero exit"},
+		{"--allow-unverified", "accept an identity resolved from $SESH_THREAD_ID alone, downgrading the gate to `sesh info`'s tolerance. Pseudo-global: accepted by every verb that infers the current thread"},
+	},
+	"thread whoami": {
+		{"--json", "emit machine-readable JSON instead of the bare uuid (see `sesh help whoami`)"},
+		{"--allow-unverified", "accept an identity resolved from $SESH_THREAD_ID alone (see `sesh help whoami`)"},
+	},
 	"master ensure": {
 		{"--machines", "comma-separated machines to ensure windows for (default: self + all peers; 'self' allowed)"},
 		{"--tmux-conf", "tmux config file, used only when the master server must be CREATED"},

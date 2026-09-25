@@ -143,6 +143,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh info:", err)
 			os.Exit(1)
 		}
+	case "whoami":
+		if err := runWhoami(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh whoami:", err)
+			os.Exit(1)
+		}
 	case "delegate":
 		if err := runDelegate(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh delegate:", err)

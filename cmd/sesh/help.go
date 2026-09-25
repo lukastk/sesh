@@ -248,6 +248,11 @@ does not wrap can be driven straight against the tmux server.`,
 		usage:    "sesh thread info [--id <id>] [--machine <m>] [--json]",
 		examples: []string{"sesh thread info --id 1a2b3c4d"},
 	},
+	"thread whoami": {
+		summary:  "print the current thread's uuid only when the identity is VERIFIED, else exit non-zero (alias of `sesh whoami`)",
+		usage:    "sesh thread whoami [--json] [--allow-unverified]",
+		examples: []string{"sesh thread whoami", "TID=$(sesh thread whoami) || exit 1"},
+	},
 	"thread adopt": {
 		summary:  "bring an agent under sesh management. PANE adopt (default): a live work-server pane; --session-id supplies the conversation id when it can't be auto-detected (e.g. a claude launched with a bare -r). HEADLESS adopt (--agent): register an EXISTING, not-running conversation (--session-id) as a durable headless thread — no pane is used.",
 		usage:    "sesh thread adopt --name <name> [--pane <pane>] [--session-id <uuid>] [--agent <claude|codex|pi>] [--cwd <dir>] [--machine <m>] [--json]",
@@ -554,9 +559,46 @@ mean, or --allow-unverified to use $SESH_THREAD_ID anyway. (--allow-unverified
 is a pseudo-global: every verb that infers the current thread accepts it.)
 
 Before doing anything DESTRUCTIVE to "yourself" — compacting, sending, stopping
-— require verified provenance:
+— do not read this verb's id at all. Use ` + "`sesh whoami`" + `, which is the same
+resolution with the safe default: it prints the uuid only when the identity is
+VERIFIED and exits non-zero otherwise.
 
-  sesh info --json | jq -e '.source == "pane"' >/dev/null || exit 1`,
+  TID=$(sesh whoami) || exit 1`,
+	},
+	"whoami": {
+		summary:  "print the CURRENT thread's uuid, but only when the identity is VERIFIED — exit non-zero when it rests on an inherited $SESH_THREAD_ID (the safe-by-default twin of `sesh info`)",
+		usage:    "sesh whoami [--json] [--allow-unverified]",
+		examples: []string{"sesh whoami", "TID=$(sesh whoami) || exit 1", "sesh whoami --json"},
+		long: `Answer "may I act as this thread?" — and answer it with the EXIT CODE.
+
+  exit 0   stdout is the full uuid. The identity is VERIFIED: it was read from
+           the @sesh-thread-id marker on the tmux pane this process actually
+           runs in, which a process living somewhere else cannot inherit.
+  exit 1   stdout is EMPTY and stderr says why the identity cannot be trusted.
+
+This is the same resolution ` + "`sesh info`" + ` does, with the opposite default.
+` + "`info`" + ` is a DIAGNOSTIC: when the only evidence is $SESH_THREAD_ID it says so
+(source: env, verified: false) and still exits 0, because refusing to describe a
+thread is the wrong move when you are diagnosing. That makes the safe reading of
+it optional, and an optional ritual is one nobody performs.
+
+$SESH_THREAD_ID is frozen into the process environment at launch and INHERITED
+by every descendant, including detached and background processes that are not
+that thread at all — a claude background job hosted by the machine-global
+` + "`claude daemon run`" + ` carries whichever pane's env started that daemon. So the
+variable can name a perfectly valid thread belonging to unrelated work, and
+signing, attaching or acting as it misattributes silently.
+
+Three distinct refusals, each with its own text: the inherited id is
+CONTRADICTED by the calling directory; it is uncontradicted but still
+unverified (absence of contradiction is not evidence); or nothing identifies
+this process at all — which is an answer, not a failure. An agent with no sesh
+identity should say what it actually is, not borrow an id.
+
+whoami takes no thread argument: naming a thread would make the answer
+"explicit", i.e. trivially verified. To describe another thread use
+` + "`sesh info --id <thread>`" + `. It is not routable either — a peer would read its
+OWN pane and environment and answer confidently about a different machine.`,
 	},
 	"mesh": {
 		summary:  "print the merged cross-machine view from the local daemon's cache (every machine's threads with live state + freshness)",
@@ -770,7 +812,7 @@ Before doing anything DESTRUCTIVE to "yourself" — compacting, sending, stoppin
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
-	"delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
+	"whoami", "delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }

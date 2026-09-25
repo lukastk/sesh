@@ -6,6 +6,99 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh <this commit> + mysystem <this commit>; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; mysystem needs a rebuild)
+Bug report relayed by Lukas from a claude BACKGROUND JOB in `mosaic-v3/courses/finnish` — an agent
+that is deliberately **not** a sesh thread. Its inherited `$SESH_THREAD_ID=c194478c` resolved to
+`adi-requests`, a live headful claude thread in `~/dev/20260622_oo996d__ADI-website`; its process
+ancestry reaches `systemd` directly (detached + reparented, carrying the launching pane's env). Its
+point, which is the right one: **the resolvable-but-wrong case is worse than the unresolvable one.**
+It had signed a message with its Claude Code JOB id, which failed loudly and was caught within the
+hour; had it followed the standard advice and signed with `$SESH_THREAD_ID`, the message would have
+read as coming from `adi-requests` and nothing would have questioned it.
+
+**FIRST FINDING: H92 ALREADY REFUSES THIS EXACT CASE — verified live before touching code**, with
+the reporter's real ids against the real mymain daemon: `sesh info` exits **1** naming both cwds
+(`~/dev/20260622_oo996d__ADI-website` vs `~/dev/20260917_4cr9iq__mosaic-v3/courses/finnish`). The
+cwd corroboration works. So the report's ask #3 (document it) was already done in
+`skills/sesh-cli/SKILL.md`, and ask #2 (unset rather than leak) is **not sesh's to do** — sesh
+injects the var into the pane; claude's machine-global `claude daemon run` froze it and spawns the
+job. Say that plainly rather than build a half-fix.
+
+**THE REAL RESIDUAL, and it is where the risk now lives.** env set + cwd **compatible** + no pane:
+`source=env`, `verified=false`, **exit 0**, and the warning on **stderr only**. Measured live:
+`sesh info --json | jq -r .thread.id` happily returns an unverified id. The documented guard —
+`select(.source == "pane")` — is a ritual, and **the evidence is that rituals do not stick**: the
+self-compact skill had to be patched for exactly this in H92, H95 is an agent discarding stderr in a
+loop (`>/dev/null 2>&1`), and three mysystem skills still got it wrong today. An optional safe
+reading is one nobody performs.
+
+**THE FIX IS A SECOND VERB, NOT A TIGHTENED FIRST ONE** (conferred; Lukas took both recommendations).
+`info` is a DIAGNOSTIC and `whoami` is a GATE, and they want **opposite defaults** — refusing to
+describe a thread is exactly wrong when you are diagnosing, which is why `info` must keep exiting 0.
+So `sesh whoami` runs the same resolution and answers with the **EXIT CODE**: stdout is the bare
+uuid iff the identity is VERIFIED (the pane marker — the one source a process elsewhere cannot
+inherit), else stdout is EMPTY and stderr says why. `TID=$(sesh whoami) || exit 1` is therefore safe
+**by construction**, which the jq form never was. Three distinct refusals, each with its own text:
+contradicted env id / uncontradicted-but-unverified env id (**absence of contradiction is not
+evidence**) / no identity at all — the last being *an answer, not a failure*, and the one the
+reporter is in: it tells the caller to say what it actually is and never borrow an id.
+DESIGN POINTS: **no thread selector** (naming one makes the answer trivially "explicit"); **not
+routable** — excluded from `routableSubcommand` so the flag survives into whoami's own flagset,
+which refuses it with the REASON (a peer would read its OWN pane and env and answer confidently
+about another machine — the failure mode itself, not a limitation); `--allow-unverified` (the
+existing pseudo-global) downgrades it to info's tolerance. `noIdentityError` extracted beside
+`unverifiedError` with **byte-identical text** (pinned by a test) so ~20 verbs that merely surface
+it are unaffected — whoami needs the type because it has no `--id` and **a remedy the caller cannot
+type is only half a loud error** (H95), asserted by a test that no whoami refusal may contain `--id`.
+
+**MYSYSTEM WAS THE HALF ACTUALLY MISATTRIBUTING TODAY**, exactly as the reporter predicted.
+`mysystem/src/commands/_thread-ref.ts` read `$SESH_THREAD_ID` raw and checked only the uuid SHAPE —
+which cannot distinguish the real agent from a job carrying a stranger's id, both being well-formed
+uuids naming real threads. So `ms attach-thread` on a note would have recorded `adi-requests` and
+reported success. Now routed through `sesh whoami` (argv array via `execFileSync`, never a shell
+string — the path rule), preferring `$SESH_BIN` over PATH, surfacing sesh's stderr **verbatim**
+(it already names the thread you nearly became), and **deliberately NO fallback** to the raw var:
+a fallback would restore the exact silent misattribution on the machines where verification is
+hardest. The `whoami` seam is injectable so the contract is testable without a daemon.
+**THE TESTS THAT EXISTED ASSERTED THE DEFECT** ("falls back to $SESH_THREAD_ID when no thread is
+given" → `expect(success).toBe(true)`); rewritten to assert the refusal, for attach AND detach —
+detaching the wrong thread is quieter than attaching one and therefore easier to miss.
+**TEST TRAP worth keeping: vitest runs INSIDE my sesh pane**, so `sesh whoami` in a test resolves the
+RUNNER's own live thread and the suite would have "passed" by attaching my real id. The harness now
+strips `SESH_THREAD_ID`, `TMUX` **and** `TMUX_PANE` per test and restores them after.
+Docs: `skills/myvault`, `skills/convo-review` (both the attach paragraph and the checklist line) and
+`AGENTS.md`'s command list all said "uses `$SESH_THREAD_ID`" with no warning — corrected.
+
+**GREEN.** sesh: `go vet ./...`; gofmt clean on every touched file (the 6 pre-existing
+`internal/conformance/*_test.go` drift files are untouched — H48); every non-conformance package
+plain, `cmd/sesh` + `internal/matrix` also `-race`; new cell `thread.whoami/-/local`; the inference
+BLAST RADIUS — `thread.info` local+remote, `thread.parent`, `ticket.list-current`,
+`thread.subscribe`, `daemon.hooks` — and, per H92's lesson that `-run TestMatrix/…` **excludes every
+non-matrix test in the package**, `TestEmptyIDFlagIsLoud` / `TestTailCLIForms` / `TestEmptyThreadName`
+explicitly. mysystem: the FULL suite, 249 tests / 22 files.
+**THE FULL 280-CELL MATRIX WAS NOT RUN — do not read this as all-green.**
+ANTI-GAMING, each reversed and md5-verified byte-identical (H44): letting an uncontradicted env id
+pass the gate reddens the cell verbatim ("whoami accepted an identity resting on an inherited
+$SESH_THREAD_ID … absence of contradiction is not evidence"); dropping `whoami` from
+`routableSubcommand` reddens it at the routing refusal ("got: unknown machine \"somepeer\"");
+restoring mysystem's raw-env read reddens the seam test AND both attach/detach regressions.
+**THE CELL IS BUILT SO IT CANNOT PASS AGAINST A WHOAMI THAT IS A THIN ALIAS OF `info`**: each
+refusal is asserted alongside the corresponding `info` call SUCCEEDING on identical inputs, with the
+`info` leg a loud PRECONDITION failure if it ever stops — without that pairing the cell proves
+nothing. Registered LOCAL-only by design (the `thread.placement` precedent): whoami reports who the
+CALLING process is, so the question has no remote form; the `--machine` refusal is asserted rather
+than the axis quietly dropped.
+
+**LIVE-PROVEN read-only against the real mymain daemon**, all four cases: the reporter's exact
+scenario refused naming `adi-requests`; the RESIDUAL shown as the money shot — `info` exit **0**,
+`whoami` exit **1** on byte-identical inputs; no-identity refused; and from THIS agent's own real
+pane `sesh whoami` → `43b1b376-…` exit 0, `TID=$(…)` captured it, `--json` reporting
+`source=pane verified=true`.
+
+DEPLOY: **sesh is BINARY-ONLY — no schema/API/wire change and nothing daemon-side** (the resolver is
+CLI-side), so a mixed fleet is trivially safe: a machine on the old binary simply has no `whoami`.
+mysystem needs a `npm run build` wherever its CLI is installed.
+
 ## H111 — SCHEDULED WORK BUILT: `sesh schedule` (cron/interval/one-shot messages into a thread + thread spawns, state-aware guards, catch-up, a reaper) AND the `respect-typing` guard on EVERY paste into a live pane (2026-09-16, sesh feat/scheduling → merged; store migration 25→26, api 48→49; DAEMON rebuild + RESTART ALL SIX; ticket 28f6e77b done)
 Lukas's ticket: cron-style messages to a thread with rules (revive-if-unattached, only-if-not-
 running = a heartbeat), cron-style thread spawns with rules (kill+archive on turn end, attached vs

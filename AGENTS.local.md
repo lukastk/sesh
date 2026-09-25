@@ -6,7 +6,7 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
-## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh <this commit> + mysystem <this commit>; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; mysystem needs a rebuild)
+## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh 98c622a + mysystem 113da0e; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; **DEPLOYED 5/6** — pocket4 offline, pending)
 Bug report relayed by Lukas from a claude BACKGROUND JOB in `mosaic-v3/courses/finnish` — an agent
 that is deliberately **not** a sesh thread. Its inherited `$SESH_THREAD_ID=c194478c` resolved to
 `adi-requests`, a live headful claude thread in `~/dev/20260622_oo996d__ADI-website`; its process
@@ -97,7 +97,26 @@ pane `sesh whoami` → `43b1b376-…` exit 0, `TID=$(…)` captured it, `--json`
 
 DEPLOY: **sesh is BINARY-ONLY — no schema/API/wire change and nothing daemon-side** (the resolver is
 CLI-side), so a mixed fleet is trivially safe: a machine on the old binary simply has no `whoami`.
-mysystem needs a `npm run build` wherever its CLI is installed.
+mysystem is **npm-linked** to `~/mysetup/mysystem/mysystem` running `dist/cli.js`, and `dist/` is
+gitignored, so every machine needs its own `npm run build` — a pull alone changes nothing.
+**DEPLOY RESULT (2026-09-25): sesh LIVE ON 5/6 at 98c622a**, every installed binary
+`vcs.modified=false`, every checkout verified clean BEFORE pulling (the script refuses a dirty one —
+H49/H63): mymain (local), ideapad, macbook, macstudio (`/opt/homebrew/bin/go` auto-selected), termux
+(plain `go build`, CGO=1/android — H22). NO daemon was restarted anywhere and none needed to be.
+**mysystem rebuilt on 4** (mymain, ideapad, macbook, macstudio); **termux has the repo but no
+`node_modules`** — its mysystem CLI is not built there, so it was correctly skipped rather than
+forced. **pocket4 OFFLINE** (ssh :22 timed out, and the mesh already read it unreachable) → PENDING
+for both, harmless: it simply has no `whoami` and keeps the old attach behaviour until it catches
+up. When it returns:
+`cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh`
+then `cd ~/mysetup/mysystem && git pull && cd mysystem && npm run build`.
+VERIFIED ON THE DEPLOYED BINARIES, not just locally: macbook refuses a pane-less `whoami` (exit 1)
+and refuses `--machine mymain` with the routing reason; and on mymain the FULL CHAIN — node loading
+the built `dist/commands/_thread-ref.js`, with the reporter's inherited id and no pane, returns
+sesh's verbatim refusal naming `adi-requests`.
+**A running SIDEBAR/TUI keeps the binary it launched with (H70)** — irrelevant here (no TUI change),
+but a long-running agent's shell resolves `sesh` from PATH per call, so agents pick `whoami` up at
+once.
 
 ## H111 — SCHEDULED WORK BUILT: `sesh schedule` (cron/interval/one-shot messages into a thread + thread spawns, state-aware guards, catch-up, a reaper) AND the `respect-typing` guard on EVERY paste into a live pane (2026-09-16, sesh feat/scheduling → merged; store migration 25→26, api 48→49; DAEMON rebuild + RESTART ALL SIX; ticket 28f6e77b done)
 Lukas's ticket: cron-style messages to a thread with rules (revive-if-unattached, only-if-not-

@@ -33,7 +33,8 @@ well-formed uuid skips the prefix lookup entirely, so an unknown full uuid error
 verb itself via the daemon's 404 instead), and most
 verbs infer the **current** thread when you omit `--id` (from the calling pane's live
 `@sesh-thread-id` marker first, then — for a pane-less process — a headless **turn** the
-local daemon launched, then `$SESH_THREAD_ID`, or a loud error if nothing resolves). The pane marker wins because it is re-stamped on adopt/reparent while
+local daemon launched, then the agent **harness's own session id**, then `$SESH_THREAD_ID`,
+or a loud error if nothing resolves). The pane marker wins because it is re-stamped on adopt/reparent while
 `$SESH_THREAD_ID` is frozen at launch and can drift stale; on disagreement the pane is
 used and a drift note is printed to stderr. **See "Am I really this thread?" below —
 outside a pane the answer is UNVERIFIED and may be refused.** Inference happens **only when `--id` is
@@ -54,7 +55,7 @@ takes the graphical session env from the systemd user manager; a failed copy is 
 
 ## Am I really this thread? (provenance)
 
-Inference has three sources and they are **not** equally trustworthy:
+Inference has four sources and they are **not** equally trustworthy:
 
 - **pane** — read from the `@sesh-thread-id` marker on the tmux pane the command
   actually runs in. **Verified**: a process elsewhere cannot inherit it.
@@ -63,7 +64,13 @@ Inference has three sources and they are **not** equally trustworthy:
   started that turn, remembers its root process, and checks the live parent links — so a
   process outside the tree (anything detached, anything reparented) cannot claim it. This
   is how a `schedule spawn --headless` worker identifies itself.
-- **env** — `$SESH_THREAD_ID` alone, when there is neither. **Unverified**: that variable
+- **harness** — your agent harness's OWN session id (`$CLAUDE_CODE_SESSION_ID`), matched
+  against the `agent_session_id` the daemon recorded for exactly one thread. **Verified, but
+  conditionally**: this is a claim you present rather than a fact read from your container, so
+  it is accepted only when your cwd corroborates it AND that thread still has a live pane.
+  This is what identifies a **reparented** claude agent — one whose tool calls run detached,
+  so neither `$TMUX_PANE` nor process ancestry reaches its own pane.
+- **env** — `$SESH_THREAD_ID` alone, when there is none of the above. **Unverified**: that variable
   is frozen at launch and inherited by every descendant, so a detached or background
   process (a claude bg job/agent, hosted by a machine-global `claude daemon run` that
   froze whichever pane started it) carries a perfectly *valid* id belonging to an
@@ -87,7 +94,8 @@ to `info`'s tolerance. Three refusals, each distinct:
 |---|---|
 | the env id is **contradicted** by your cwd | very likely another thread's id — do not sign or attach as it |
 | the env id is **uncontradicted but unverified** | your cwd neither confirms nor denies it; absence of contradiction is not evidence |
-| **no identity at all** | an answer, not a failure — say what you actually are (see below) |
+| your **harness session** names a thread in an unrelated directory | either the harness is reporting other work's conversation, or you are not the agent you appear to be — refuse to act as it |
+| **nothing resolved** | UNRESOLVED, *not* "you are not a thread" — read the lead the refusal prints (see below) |
 
 `sesh info` is the **diagnostic** twin and deliberately keeps the opposite default: it
 reports which source it used — a `source:` line, or `"source"` / `"verified"` in `--json`
@@ -122,14 +130,26 @@ a `2>/dev/null` swallows it.
 > TID=$(sesh whoami) || { echo "not verified — refusing to act on myself"; exit 1; }
 > ```
 
-**If you have no sesh identity, say so — never borrow one.** An agent that is not a thread
-(a claude background job, a cron task, anything detached) has no valid sesh identity at
-all, and the honest signature is what it actually is: the tool or job and its working
-directory, e.g. `Claude Code job ef96bf74, cwd ~/dev/…__mosaic-v3/courses/finnish`. Signing
-with an inherited `$SESH_THREAD_ID` instead produces a *resolvable* id pointing at live,
-unrelated work — a reply addressed to a thread that never asked, and bookkeeping attached
-to the wrong project. That was reported from exactly such a job on 2026-09-25, whose
-inherited id named `adi-requests` in a different box.
+**"I could not resolve my identity" is NOT "I have no identity" — do not conclude the
+second from the first.** This distinction cost a real misattribution. On 2026-09-25 an agent
+reported that it was not a sesh thread and should sign as a Claude Code job; on 2026-09-27
+it corrected itself — it *was* thread `1a26989d`, with its pane, marker and cwd all
+registered, while its `$SESH_THREAD_ID` named `adi-requests` in a different project. It was
+reparented, so nothing in its environment could say so, and it found out only by capturing a
+pane and recognising its own prose. The answer was in the daemon the whole time.
+
+So when `whoami` refuses: **read the lead it prints.** A refusal now ends with what the
+daemon knows about your directory — the one live thread registered there, if there is
+exactly one. That is a lead, not an answer: confirm it with `sesh info <id>` and by capturing
+its pane to see whether the conversation on screen is the one you are having. If it is you,
+name that thread explicitly in what you were about to run.
+
+**If you genuinely are not a thread, say so — never borrow an id.** A cron task or a
+detached job with no live thread behind it should sign as what it actually is: the tool or
+job and its working directory, e.g. `Claude Code job ef96bf74, cwd ~/dev/…/courses/finnish`.
+Signing with an inherited `$SESH_THREAD_ID` instead produces a *resolvable* id pointing at
+live, unrelated work — a reply addressed to a thread that never asked, and bookkeeping
+attached to the wrong project.
 
 Corroboration is evidence, not proof: an inherited id that happens to name a thread in the
 *same* directory tree still resolves, which is precisely why `whoami` refuses it and `info`

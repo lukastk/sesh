@@ -583,3 +583,200 @@ func TestResolveCurrentThreadTurnSource(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveCurrentThreadHarnessSource covers the FOURTH source, and the case
+// that produced it (2026-09-27).
+//
+// An agent working in a mosaic-v3 course box WAS thread 1a26989d — pane, marker
+// and cwd all registered with the daemon — while its inherited $SESH_THREAD_ID
+// named `adi-requests` in a different project. Its process ancestry was
+// zsh <- claude <- claude <- systemd: reparented, so it reached neither the pane
+// nor the pane's recorded pid, and H113's turn ancestry cannot help it either. It
+// discovered who it was by capturing a pane and recognising its own prose.
+//
+// The harness's own session id closes that gap, because the daemon has recorded
+// the same id as exactly one thread's agent_session_id. But it is a CLAIM the
+// process presents rather than a fact read from its container, so the bar is
+// higher: the cwd must corroborate AND the thread must still be live.
+func TestResolveCurrentThreadHarnessSource(t *testing.T) {
+	const (
+		mine     = "1a26989d-7bb0-4d45-800e-3b48e390675b" // mosaic-finnish, the real one
+		mineSess = "07998bab-96b1-40f5-a9cb-78b263772cf7" // its claude --session-id
+		foreign  = "c194478c-e3be-4203-a09b-c58a63845de2" // adi-requests, what the env said
+		foreSess = "aaaa1111-2222-3333-4444-555566667777"
+	)
+	base := t.TempDir()
+	box := realDir(t, base, "dev", "mosaic-v3", "courses", "finnish")
+	adi := realDir(t, base, "dev", "ADI-website")
+	c := fakeMeshThreadClient{local: []api.Thread{
+		{ID: mine, Name: "mosaic-finnish", Cwd: box, AgentKind: "claude", AgentSessionID: mineSess},
+		{ID: foreign, Name: "adi-requests", Cwd: adi, AgentKind: "claude", AgentSessionID: foreSess},
+	}}
+	allLive := func(string) bool { return true }
+
+	t.Run("THE REPORTED CASE: the harness names the real thread and the env is called out", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: foreign, cwd: box, harnessSession: mineSess, paneLive: allLive,
+		})
+		if err != nil || id != mine || src != srcHarness {
+			t.Fatalf("got (%s, %s, %v), want (%s, harness, nil) — this is the whole point of the source", id, src, err, mine)
+		}
+		if !src.verified() {
+			t.Fatal("a corroborated harness session must be verified, or the agent still cannot act as itself")
+		}
+		// Silence here would leave the operator thinking the env var was fine.
+		joined := strings.Join(notes, "\n")
+		if !strings.Contains(joined, "WRONG") || !strings.Contains(joined, short8(foreign)) {
+			t.Errorf("a wrong $SESH_THREAD_ID must be named as wrong: %v", notes)
+		}
+	})
+
+	t.Run("a harness session whose thread is elsewhere is REFUSED, not accepted", func(t *testing.T) {
+		// The safety case: if a harness ever froze its session var the way
+		// $SESH_THREAD_ID gets frozen, the claim would look perfect. The cwd is
+		// what catches it, and it is why corroboration is mandatory here.
+		_, _, _, err := resolveCurrentThreadFrom(c, currentInputs{
+			cwd: box, harnessSession: foreSess, paneLive: allLive,
+		})
+		var hm *harnessMismatchError
+		if !errors.As(err, &hm) {
+			t.Fatalf("err = %v, want a harnessMismatchError", err)
+		}
+		if hm.ThreadID != foreign {
+			t.Errorf("the refusal must name the thread it declined to become: %+v", hm)
+		}
+	})
+
+	t.Run("a conversation that is not running does not certify anything", func(t *testing.T) {
+		dead := func(string) bool { return false }
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: mine, cwd: box, harnessSession: mineSess, paneLive: dead,
+		})
+		// Falls through to the env, i.e. unverified — never certified.
+		if err != nil || id != mine || src != srcEnv {
+			t.Fatalf("got (%s, %s, %v), want the unverified env answer", id, src, err)
+		}
+		if !strings.Contains(strings.Join(notes, "\n"), "no live pane") {
+			t.Errorf("the reason for not certifying must be said out loud: %v", notes)
+		}
+	})
+
+	t.Run("an unreachable liveness probe reads as NOT live", func(t *testing.T) {
+		// nil paneLive is "cannot check". It must never read as a pass: that would
+		// make the strictest half of the warrant vanish whenever the daemon hiccups.
+		_, src, _, _ := resolveCurrentThreadFrom(c, currentInputs{
+			env: mine, cwd: box, harnessSession: mineSess, paneLive: nil,
+		})
+		if src == srcHarness {
+			t.Fatal("certified a harness claim without being able to check liveness")
+		}
+	})
+
+	t.Run("an archived thread is not an identity", func(t *testing.T) {
+		arch := fakeMeshThreadClient{local: []api.Thread{
+			{ID: mine, Name: "mosaic-finnish", Cwd: box, AgentSessionID: mineSess, Archived: true},
+		}}
+		_, src, notes, _ := resolveCurrentThreadFrom(arch, currentInputs{
+			cwd: box, harnessSession: mineSess, paneLive: allLive,
+		})
+		if src == srcHarness {
+			t.Fatal("certified an archived thread as the caller's identity")
+		}
+		if !strings.Contains(strings.Join(notes, "\n"), "archived") {
+			t.Errorf("want an archived note, got %v", notes)
+		}
+	})
+
+	t.Run("two threads on one session id is refused loudly, not resolved", func(t *testing.T) {
+		dup := fakeMeshThreadClient{local: []api.Thread{
+			{ID: mine, Name: "a", Cwd: box, AgentSessionID: mineSess},
+			{ID: foreign, Name: "b", Cwd: box, AgentSessionID: mineSess},
+		}}
+		_, _, _, err := resolveCurrentThreadFrom(dup, currentInputs{
+			cwd: box, harnessSession: mineSess, paneLive: allLive,
+		})
+		if err == nil {
+			t.Fatal("want a loud refusal: the daemon claims a session per thread, so this means the assumption is wrong")
+		}
+		if !strings.Contains(err.Error(), "refusing to guess") {
+			t.Errorf("got %v", err)
+		}
+	})
+
+	t.Run("the pane still wins, and the harness is not consulted", func(t *testing.T) {
+		id, src, _, err := resolveCurrentThreadFrom(c, currentInputs{
+			paneID: foreign, cwd: adi, harnessSession: mineSess, paneLive: allLive,
+		})
+		if err != nil || id != foreign || src != srcPane {
+			t.Fatalf("got (%s, %s, %v), want the pane marker to outrank a harness claim", id, src, err)
+		}
+	})
+}
+
+// whoamiLead is what a refusal offers instead of a dead end. It must narrow, and
+// it must never look like an answer.
+func TestWhoamiLead(t *testing.T) {
+	base := t.TempDir()
+	here := realDir(t, base, "dev", "box")
+	other := realDir(t, base, "dev", "elsewhere")
+	live := func(string) bool { return true }
+	dead := func(string) bool { return false }
+
+	one := fakeMeshThreadClient{local: []api.Thread{
+		{ID: "1a26989d-1111-2222-3333-444444444444", Name: "mosaic-finnish", Cwd: here, AgentKind: "claude"},
+		{ID: "cccccccc-1111-2222-3333-444444444444", Name: "elsewhere", Cwd: other},
+	}}
+
+	t.Run("one live thread in this exact directory is offered as a LEAD", func(t *testing.T) {
+		got := whoamiLead(one, here, live)
+		if !strings.Contains(got, "1a26989d") || !strings.Contains(got, "mosaic-finnish") {
+			t.Fatalf("the lead must name the candidate: %q", got)
+		}
+		// The wording is the safety property: this must not read as an identity.
+		if !strings.Contains(got, "LEAD, NOT your identity") {
+			t.Errorf("a lead that reads like an answer is worse than no lead: %q", got)
+		}
+		if !strings.Contains(got, "sesh info 1a26989d") {
+			t.Errorf("it must hand over a command that confirms: %q", got)
+		}
+		// H95: whoami has no --id, so no refusal of its may send the reader to one.
+		if strings.Contains(got, "--id") {
+			t.Errorf("must use the positional form, not a flag whoami lacks: %q", got)
+		}
+	})
+
+	t.Run("several candidates is not a lead", func(t *testing.T) {
+		many := fakeMeshThreadClient{local: []api.Thread{
+			{ID: "aaaaaaaa-1111-2222-3333-444444444444", Name: "one", Cwd: here},
+			{ID: "bbbbbbbb-1111-2222-3333-444444444444", Name: "two", Cwd: here},
+		}}
+		got := whoamiLead(many, here, live)
+		if !strings.Contains(got, "do not pick one") {
+			t.Fatalf("with 2 candidates the honest move is to name none: %q", got)
+		}
+		if !strings.Contains(got, "aaaaaaaa") || !strings.Contains(got, "bbbbbbbb") {
+			t.Errorf("it should still list them so they can be checked: %q", got)
+		}
+	})
+
+	t.Run("dead threads are not leads, and neither is nothing", func(t *testing.T) {
+		if got := whoamiLead(one, here, dead); got != "" {
+			t.Errorf("a thread with no live pane cannot be the conversation this process is having: %q", got)
+		}
+		if got := whoamiLead(one, realDir(t, base, "dev", "empty"), live); got != "" {
+			t.Errorf("no candidates means no paragraph: %q", got)
+		}
+		if got := whoamiLead(one, "", live); got != "" {
+			t.Errorf("no cwd means no evidence: %q", got)
+		}
+	})
+
+	t.Run("archived threads are excluded", func(t *testing.T) {
+		arch := fakeMeshThreadClient{local: []api.Thread{
+			{ID: "dddddddd-1111-2222-3333-444444444444", Name: "old", Cwd: here, Archived: true},
+		}}
+		if got := whoamiLead(arch, here, live); got != "" {
+			t.Errorf("an archived thread is not a candidate identity: %q", got)
+		}
+	})
+}

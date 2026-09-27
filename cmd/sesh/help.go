@@ -570,8 +570,16 @@ says HOW it was inferred — the "source" line (JSON: "source" + "verified"):
             the local daemon created for that thread's HEADLESS TURN, confirmed
             by ancestry. This is how a scheduled/headless worker identifies
             itself; a process outside that tree cannot claim it.
-  env       UNVERIFIED — there is no tmux pane here and the daemon does not
-            recognise this process as one of its own turns, so the answer rests
+  harness   VERIFIED, conditionally — your agent harness's own session id
+            ($CLAUDE_CODE_SESSION_ID) is recorded against exactly one thread.
+            This is a claim you present rather than a fact read from your
+            container, so it is accepted only when the calling directory
+            corroborates it AND that thread has a live pane. It identifies a
+            REPARENTED agent, whose tool calls reach neither its pane nor its
+            pane's pid.
+  env       UNVERIFIED — there is no tmux pane here, the daemon does not
+            recognise this process as one of its own turns or agent sessions,
+            so the answer rests
             on $SESH_THREAD_ID alone. That variable is frozen at launch and
             INHERITED by every descendant, so a detached or background process
             can carry a perfectly valid id belonging to an unrelated thread.
@@ -595,11 +603,13 @@ VERIFIED and exits non-zero otherwise.
 		examples: []string{"sesh whoami", "TID=$(sesh whoami) || exit 1", "sesh whoami --json"},
 		long: `Answer "may I act as this thread?" — and answer it with the EXIT CODE.
 
-  exit 0   stdout is the full uuid. The identity is VERIFIED — one of the two
-           things a process living somewhere else cannot manufacture: the
+  exit 0   stdout is the full uuid and the identity is VERIFIED — the
            @sesh-thread-id marker on the tmux pane this process actually runs
-           in, or the local daemon confirming that this process sits inside the
-           process tree it created for that thread's headless turn.
+           in, the local daemon confirming this process sits inside the tree it
+           created for that thread's headless turn, or your agent harness's own
+           session id matched against the thread the daemon recorded it against
+           (that last one only when your directory corroborates it and the
+           thread is still running).
   exit 1   stdout is EMPTY and stderr says why the identity cannot be trusted.
 
 This is the same resolution ` + "`sesh info`" + ` does, with the opposite default.
@@ -631,6 +641,15 @@ INHERITED it — one the turn detached, or anything outside the turn's process
 tree — is refused exactly as before. $SESH_BIN in that environment is the
 daemon's own binary; use it rather than a bare ` + "`sesh`" + `, which from a login
 shell may be a wrapper function or an older install.
+
+IF YOU ARE A REPARENTED AGENT — tool calls that run detached, so neither
+$TMUX_PANE nor process ancestry reaches your own pane — your harness's session id
+is what identifies you, and a wrong $SESH_THREAD_ID is named as wrong rather than
+silently ignored. And when nothing resolves at all, the refusal ends with what the
+daemon DOES know about your directory: the one live thread registered there, if
+there is exactly one. That is a LEAD to confirm, never an answer. "Could not
+resolve" is not "you are not a thread" — an agent that concluded the second from
+the first signed as something it was not.
 
 whoami takes no thread argument: naming a thread would make the answer
 "explicit", i.e. trivially verified. To describe another thread use

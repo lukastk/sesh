@@ -47,8 +47,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/lukastk/sesh/internal/agents"
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
 )
 
@@ -88,6 +90,14 @@ func runWhoami(cfg config.Config, args []string) error {
 
 	id, src, err := resolveCurrentThread(cfg, "")
 	if gateErr := whoamiGate(id, src, err, allowUnverifiedCurrent, nameOf); gateErr != nil {
+		// A refusal that is only a refusal sent a real agent looking in the wrong
+		// place: the daemon knew which thread it was, and the message gave it
+		// nothing to ask. So say what the daemon DOES know about this caller —
+		// as a lead to confirm, never as an answer.
+		cwd, _ := os.Getwd()
+		if lead := whoamiLead(c, cwd, paneLiveness(cfg)); lead != "" {
+			return fmt.Errorf("%w\n\n%s", gateErr, lead)
+		}
 		return gateErr
 	}
 
@@ -135,12 +145,35 @@ func whoamiGate(id string, src idSource, err error, allowUnverified bool, nameOf
 				config.TildeRelative(unver.ThreadCwd, home), config.TildeRelative(unver.CallerCwd, home),
 				agents.EnvThreadID)
 		}
+		var hm *harnessMismatchError
+		if errors.As(err, &hm) {
+			home, _ := os.UserHomeDir()
+			return fmt.Errorf("NOT a verified identity: the agent session this process is serving is recorded "+
+				"against thread %s (%q), whose cwd (%s) is unrelated to this directory (%s). Either the "+
+				"harness is reporting a session that belongs to other work, or you are not the agent you "+
+				"appear to be — do not sign, attach or act as that thread. Name the thread explicitly in "+
+				"whatever you were about to run",
+				short8(hm.ThreadID), hm.ThreadName,
+				config.TildeRelative(hm.ThreadCwd, home), config.TildeRelative(hm.CallerCwd, home))
+		}
 		var none *noIdentityError
 		if errors.As(err, &none) {
-			return errors.New("this process has NO sesh thread identity: there is no thread-marked tmux " +
-				"pane here and no valid $" + agents.EnvThreadID + ". That is an answer, not a failure — " +
-				"identify yourself by what you actually are (the tool or job and its working directory), " +
-				"and never borrow a thread id to sign with")
+			// The wording here used to say flatly "you have NO sesh thread
+			// identity", and on 2026-09-27 an agent believed it: it was thread
+			// 1a26989d the whole time — pane, marker and cwd all registered — but
+			// reparented away from its pane and carrying another project's
+			// $SESH_THREAD_ID, so nothing in its environment could say so. It
+			// concluded it was not a thread at all. Not being ABLE TO RESOLVE an
+			// identity here is not the same as not HAVING one, and a refusal that
+			// conflates the two sends an agent off to sign as something it is not.
+			return errors.New("could not establish a verified identity for this process: no thread-marked " +
+				"tmux pane, no turn this machine's daemon launched, no recognised agent session, and no " +
+				"valid $" + agents.EnvThreadID + ". NOTE that this means UNRESOLVED, not 'you are not a " +
+				"thread' — a reparented agent whose environment carries another project's id looks exactly " +
+				"like this while the daemon knows perfectly well which thread it is. If a thread is named " +
+				"below, confirm it before using it; if none is, ask the daemon what it knows about this " +
+				"directory rather than assuming, and otherwise identify yourself by what you actually are " +
+				"(the tool or job and its working directory) and never borrow a thread id")
 		}
 		return err
 	}
@@ -163,4 +196,81 @@ func whoamiGate(id string, src idSource, err error, allowUnverified bool, nameOf
 		"not sign, attach or act as this thread on the strength of it; name the thread explicitly in "+
 		"whatever you were about to run, or pass --allow-unverified to accept $%s here anyway",
 		short8(id), nameOf(id), agents.EnvThreadID, agents.EnvThreadID)
+}
+
+// maxLeadProbes bounds how many liveness probes a refusal will spend. A lead is
+// worth one or two round trips on an error path; it is not worth walking a box
+// where 174 threads share a directory.
+const maxLeadProbes = 8
+
+// whoamiLead is the "what the daemon does know about you" paragraph appended to a
+// refusal. It answers the complaint that produced it — "nothing about my
+// situation was unknowable, I just could not get it from the environment and did
+// not think to ask the daemon" — without letting the gate pass a guess.
+//
+// THE EVIDENCE IT USES AND THE EVIDENCE IT REFUSES TO USE. Matching on cwd is a
+// LEAD, never an identity, and the fleet says why: measured 2026-09-27 across
+// 2,311 threads, 937 of them (41 %) sit on a cwd shared with another thread —
+// ~/mysetup/sesh has 38 and one box has 174. So a cwd match cannot certify
+// anything, and the bug report that asked for cwd+pid matching as the MECHANISM
+// was asking for a coin flip in the common case. What it can do is narrow: when
+// exactly ONE live thread sits in this exact directory, saying so turns a dead
+// end into something checkable. More than one, and the honest move is to say how
+// many and name none.
+//
+// Exact directory only, not containment: containment would drag a 174-thread box
+// in as "candidates", which is noise dressed as help.
+func whoamiLead(c threadListClient, cwd string, paneLive func(string) bool) string {
+	here := canonicalDir(cwd)
+	if here == "" || paneLive == nil {
+		return ""
+	}
+	threads, err := listAllThreads(c)
+	if err != nil {
+		return ""
+	}
+	var inHere []api.Thread
+	for _, th := range threads {
+		if th.Archived || th.Cwd == "" {
+			continue
+		}
+		if canonicalDir(th.Cwd) == here {
+			inHere = append(inHere, th)
+		}
+	}
+	if len(inHere) == 0 {
+		return ""
+	}
+	// Probe liveness, bounded. A dead thread is not a lead: nothing is running in
+	// it, so it cannot be the conversation this process is serving.
+	var live []api.Thread
+	for i, th := range inHere {
+		if i >= maxLeadProbes {
+			break
+		}
+		if paneLive(th.ID) {
+			live = append(live, th)
+		}
+	}
+	switch len(live) {
+	case 0:
+		return ""
+	case 1:
+		th := live[0]
+		return fmt.Sprintf("WHAT THE DAEMON DOES KNOW: exactly one live thread is registered in this exact "+
+			"directory — %s (%q), agent %s. That is a LEAD, NOT your identity, and you must not act as it "+
+			"on the strength of this line. Confirm it first: `sesh info %s` describes it, and capturing its "+
+			"pane shows whether the conversation on screen is the one you are having. If it is you, name "+
+			"that thread explicitly in whatever you were about to run.",
+			short8(th.ID), th.Name, th.AgentKind, th.ID)
+	default:
+		names := make([]string, 0, len(live))
+		for _, th := range live {
+			names = append(names, short8(th.ID)+" ("+th.Name+")")
+		}
+		return fmt.Sprintf("WHAT THE DAEMON DOES KNOW: %d live threads are registered in this exact directory "+
+			"— %s. Several candidates is not a lead: do not pick one. If one of them is you, confirm which "+
+			"by capturing their panes, then name it explicitly.",
+			len(live), strings.Join(names, ", "))
+	}
 }

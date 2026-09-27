@@ -69,13 +69,31 @@ func TestWhoamiGate(t *testing.T) {
 		}
 	})
 
-	t.Run("no identity at all is its own answer, not a failure to find one", func(t *testing.T) {
+	// THIS ASSERTION WAS REWRITTEN ON 2026-09-27, and the old one is the reason.
+	// It pinned the phrase "NO sesh thread identity", and an agent believed it: it
+	// WAS a thread (1a26989d — pane, marker and cwd all registered) but was
+	// reparented away from its pane and carried another project's
+	// $SESH_THREAD_ID, so nothing in its environment could say so. It read the
+	// refusal as a statement about what it was, concluded it was not a thread at
+	// all, and wrote a wrong id into three other threads' inboxes. Unresolvable
+	// and not-a-thread are different claims, and only one of them is ours to make.
+	t.Run("no identity resolved says UNRESOLVED, not 'you are not a thread'", func(t *testing.T) {
 		err := whoamiGate("", "", &noIdentityError{}, false, nameOfStub)
 		if err == nil {
 			t.Fatal("want refused")
 		}
-		if !strings.Contains(err.Error(), "NO sesh thread identity") {
-			t.Fatalf("got %q", err)
+		msg := err.Error()
+		if !strings.Contains(msg, "could not establish a verified identity") {
+			t.Fatalf("the refusal must be about RESOLUTION failing, not about what the caller is; got %q", msg)
+		}
+		// The load-bearing half: it must actively warn that a real thread can look
+		// exactly like this, or the reader draws the old wrong conclusion again.
+		if !strings.Contains(msg, "UNRESOLVED") || !strings.Contains(msg, "reparented") {
+			t.Errorf("the refusal must say plainly that unresolved is not the same as not-a-thread, and name "+
+				"the case where that bites; got %q", msg)
+		}
+		if strings.Contains(msg, "NO sesh thread identity") {
+			t.Errorf("the old wording asserted something about the caller that sesh cannot know; got %q", msg)
 		}
 		// Nothing to override: offering --allow-unverified here would invite a
 		// caller to "allow" an id that does not exist.

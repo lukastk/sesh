@@ -20,6 +20,7 @@ The hard part is not resolving an id. It is knowing whether the id you resolved 
 | 2026-08-25 | an agent asked `sesh info` who it was, was told it was an unrelated thread, and its self-compact runner **compacted that thread** and injected a foreign handover prompt |
 | 2026-08-27 | a supervisor's three `sesh subscribe` calls were refused; the loop discarded stderr and printed "subscribed"; nothing was delivered for an hour |
 | 2026-09-25 | a claude background job in a mosaic-v3 course box reported that its inherited id named `adi-requests`, a live thread in a different box — and that the standard advice ("sign with `$SESH_THREAD_ID`") produces that misattribution *silently* |
+| 2026-09-27 | **the same reporter, correcting itself:** it was not identity-less at all. It WAS thread `1a26989d` (pane `%1745`, marker and cwd both registered) while its `$SESH_THREAD_ID` named `adi-requests`. It found out by accident — a decision record assigned work to `1a26989d`, it captured that "other agent's" pane to avoid a collision, and read its own prose. §6 |
 
 Every one is `$SESH_THREAD_ID`. The variable is injected at launch, frozen into
 the process environment, and inherited by every descendant forever — including
@@ -52,7 +53,8 @@ Precedence, highest first (`cmd/sesh/current.go`):
 | `explicit` | yes | the caller passed an id or prefix. Nothing was guessed. |
 | `pane` | yes | the `@sesh-thread-id` marker on the tmux pane this process runs in, read live from tmux. Re-stamped on adopt/reparent, so it tracks live ownership. |
 | `turn` | yes | the local daemon confirming this process sits inside the tree it created for a thread's headless turn (schema 50, §5). |
-| `env` | **no** | `$SESH_THREAD_ID`, with neither of the above to check it against. |
+| `harness` | yes, conditionally | the agent harness's OWN session id (`$CLAUDE_CODE_SESSION_ID`) matched against the `agent_session_id` the daemon recorded for exactly one thread — accepted only with cwd corroboration AND a live pane (§6). |
+| `env` | **no** | `$SESH_THREAD_ID`, with none of the above to check it against. |
 
 `pane` is checked before `turn` for two reasons: a turn's environment has
 `$TMUX`/`$TMUX_PANE` stripped (§5), so the two can never both answer; and asking
@@ -183,7 +185,120 @@ Refused, correctly, for a process the worker DETACHED from its own turn, and for
 anything asking after the turn ended. Both want an explicit id captured while the
 turn was live.
 
-## 6. What is NOT claimed
+## 6. `harness` — the reparented agent (2026-09-27)
+
+### The correction that produced it
+
+The 2026-09-25 reporter came back and withdrew its own conclusion, and the
+withdrawal is more useful than the original report. It had written that an agent
+in its position "has no valid sesh identity at all". False: it was thread
+`1a26989d`, *mosaic-finnish*, headful on mymain, pane `%1745`, cwd
+`…/mosaic-v3/courses/finnish` — all verified here against the live daemon. Its
+`$SESH_THREAD_ID` said `c194478c` (*adi-requests*, a different project).
+
+So the variable is not merely absent-or-stale for a detached process: **it can be
+WRONG while a correct answer sits in the daemon the whole time.** Nothing about
+that situation was unknowable. The tooling just had no way to be asked.
+
+That also inverts the original report's suggestion (2), "unset the variable for
+detached jobs": doing so would have left it with nothing while the daemon knew.
+
+### Why the pane marker and turn ancestry both miss it
+
+Its process ancestry was `zsh <- claude <- claude <- systemd` — reparented. So:
+
+- the pane marker is unreachable: the marker is found via `$TMUX_PANE`, and this
+  process's environment is the frozen one from another pane;
+- §5's turn ancestry is unreachable *by construction*: the pane records pid
+  1838169 and this process does not descend from it. **A whoami that walks parents
+  cannot serve a reparented agent, and that is a real limit of §5, not a bug in
+  it** — §5 answers for a process the daemon started, and this one it did not.
+
+### Why NOT cwd matching, which is what the report asked for
+
+The report proposed matching cwd (plus pid) against the thread table. Measured on
+the real fleet, 2026-09-27, across 2,311 threads:
+
+| | |
+|---|---|
+| threads whose cwd is shared with ≥1 other thread | **937 (41 %)** |
+| distinct cwds / cwds shared by >1 thread | 1,480 / 113 |
+| worst directory | **174 threads** (`…__mosaic-v2`) |
+| `~/mysetup/sesh` | 38 threads |
+| the reporter's own directory | 3 (2 archived, 1 live) |
+
+So a cwd match is a coin flip in the common case and would have worked for the
+reporter only by luck of that particular directory. **It is a LEAD, never an
+identity** — see §7.
+
+### What is used instead
+
+`$CLAUDE_CODE_SESSION_ID`, which the running harness writes for the conversation
+it is actually serving, matched against the `agent_session_id` the daemon already
+recorded — sesh spawns claude with `--session-id`, so the mapping is the daemon's
+own (verified live: the reporter's pane runs `claude --session-id 07998bab…` and
+the thread record holds exactly that). No API change, no new endpoint: the id is
+already in the thread list.
+
+**The bar is higher than for a pane marker, and deliberately so.** The marker is
+read FROM the container the process is in; this is a CLAIM the process presents.
+If a harness ever froze its session var the way `$SESH_THREAD_ID` gets frozen, the
+claim would name a real thread belonging to unrelated work and look perfect. So it
+is accepted only when two independent things agree with it:
+
+1. **the calling directory does not contradict the thread's cwd** — mandatory
+   here, optional for `$SESH_THREAD_ID`, because here it is the entire warrant.
+   This is what makes the mechanism **fail closed** on the frozen case: a claim
+   from another project is refused with its own message (`harnessMismatchError`);
+2. **the thread still has a live pane** — a claim naming a conversation that is
+   no longer running certifies nothing. An unreachable liveness probe reads as
+   NOT live; it must never read as a pass.
+
+Two or more threads on one session id is impossible (the daemon claims a session
+per thread) and is therefore **refused naming both**, not resolved. An archived
+thread is not an identity.
+
+Claude only, and not dressed up as generic: no equivalent variable is known for
+codex or pi, and their tool calls are not detached from their panes the way a
+claude background job is, so `$TMUX_PANE` already answers for them. Adding a
+harness is one entry in `harnessSessionEnvVars`.
+
+**Not built, recorded as the available strengthening:** `$CLAUDE_PID` equals the
+pane's `pane_pid` for a pane agent (verified), so a claim could additionally be
+checked against the live pane table. It is not required because a reparented
+agent's `CLAUDE_PID` may be a child claude rather than the pane's, and requiring
+it would refuse the very case this exists for.
+
+## 7. Refusals carry a LEAD
+
+The 2026-09-27 reporter's real complaint was not that the gate refused it — the
+gate was right — but that the refusal was a dead end: *"nothing about my situation
+was unknowable, I just could not get it from the environment and did not think to
+ask the daemon."*
+
+So every whoami refusal now appends what the daemon DOES know about the caller:
+when exactly ONE live, non-archived thread is registered in the caller's **exact**
+directory, it is named, with `sesh info <id>` and "capture its pane" as the way to
+confirm. More than one and the count is given and **none** is named, because
+several candidates is not a lead. Exact directory only, never containment, or a
+174-thread box arrives as "candidates".
+
+The wording is load-bearing: `LEAD, NOT your identity`. A lead that reads like an
+answer is worse than no lead.
+
+Two related wordings were corrected at the same time, because they caused the
+wrong conclusion rather than merely failing to prevent it:
+
+- whoami's no-identity refusal said "this process has **NO sesh thread
+  identity**". It now says resolution FAILED — `could not establish a verified
+  identity` — and states explicitly that this means UNRESOLVED, not "you are not a
+  thread", naming the reparented case where a real thread looks exactly like this.
+  **sesh can know that it could not resolve an identity; it cannot know that the
+  caller has none, and it must not say so.**
+- the sesh-cli skill's "if you have no sesh identity, say so" paragraph now leads
+  with the same distinction.
+
+## 8. What is NOT claimed
 
 - **Not a security boundary.** The pid in the request is self-reported, and anyone
   who can reach the daemon socket can already do anything (the API is
@@ -192,8 +307,13 @@ turn was live.
 - **A process genuinely inside a live turn's tree can claim that thread.** That is
   correct rather than a residual: it *is* that thread's work.
 - **Corroboration is evidence, not proof.** An inherited id naming a thread rooted
-  in the same tree still resolves as `env`. Outside a pane and outside a turn, an
-  explicit `--id` remains the only certainty.
+  in the same tree still resolves as `env`. Outside a pane, a turn and a
+  corroborated harness session, an explicit `--id` remains the only certainty.
+- **`harness` is the weakest of the verified sources** and is the one to re-read
+  first if an incident ever comes from this area: it rests on a claim plus two
+  corroborations, not on a container the caller cannot leave. `--json` reports the
+  source, so a caller with a higher bar can require `pane`.
+- **A cwd match is never an identity**, at any count. §6 has the numbers.
 - **The registry's removal at turn end is not asserted end-to-end.** Every vantage
   point that survives the turn is outside the turn's tree, and such a process is
   refused before and after — so an assertion from there would pass without the
@@ -201,12 +321,12 @@ turn was live.
   (whose other half `thread.send.headless` proves via the busy→idle edge) and on
   the unit test that no live entry means refusal.
 
-## 7. Where the code is
+## 9. Where the code is
 
 | file | what |
 |---|---|
 | `cmd/sesh/current.go` | the precedence, the provenance model, corroboration, the injectable truth table |
-| `cmd/sesh/whoami.go` | the gate: `whoamiGate` (pure) + the three refusal texts |
+| `cmd/sesh/whoami.go` | the gate: `whoamiGate` (pure), the refusal texts, and `whoamiLead` |
 | `internal/procs` | `IsAncestor` — /proc on Linux, `ps` elsewhere |
 | `internal/daemon/headless.go` | the turn registry, `turnOwnerOf`, the endpoint |
 | `internal/agents/headless.go` | `TurnSpec`, `TurnEnv`, the pid hook |

@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lukastk/sesh/internal/matrix"
 )
@@ -128,18 +129,124 @@ func testWhoamiLocal(t *testing.T) {
 		}
 	}
 
-	// 4. NO IDENTITY AT ALL — the reporter's own position. That is an answer,
-	// not a lookup failure, and there is nothing to "allow", so the override
-	// must not be dangled.
+	// 4. NOTHING RESOLVED. The refusal must say UNRESOLVED and must NOT tell the
+	// caller what it is: on 2026-09-27 an agent that really was a thread (pane,
+	// marker and cwd all registered, but reparented and carrying another
+	// project's id) read the old "you have NO sesh thread identity" wording as a
+	// statement of fact and signed as something else. There is also nothing to
+	// "allow" here, so the override must not be dangled.
 	if out, stderr, err := runWithEnvDir(t, sb, unrelatedCwd, map[string]string{}, "whoami"); err == nil {
 		t.Errorf("whoami invented an identity with no pane and no env:\n%s", out)
 	} else {
-		if !strings.Contains(stderr, "NO sesh thread identity") {
-			t.Errorf("want the no-identity answer, got: %s", stderr)
+		if !strings.Contains(stderr, "could not establish a verified identity") {
+			t.Errorf("want a resolution failure, got: %s", stderr)
+		}
+		if !strings.Contains(stderr, "UNRESOLVED") {
+			t.Errorf("the refusal must distinguish unresolved from not-a-thread: %s", stderr)
 		}
 		if strings.Contains(stderr, "--allow-unverified") {
 			t.Errorf("there is no unverified id to allow here; offering the override is misleading: %s", stderr)
 		}
+	}
+
+	// 6. THE HARNESS SESSION (2026-09-27). A REPARENTED claude agent reaches
+	// neither its pane nor its pane's pid, so both the marker and H113's turn
+	// ancestry are unavailable to it — and its $SESH_THREAD_ID may name another
+	// project entirely. What it does have is its harness's own session id, which
+	// the daemon recorded as exactly one thread's agent_session_id when it spawned
+	// the agent with --session-id. A real claude thread here, with a real pane, so
+	// the session id and the liveness are both the daemon's own facts.
+	harnessDirA := filepath.Join(base, "dev", "20260917_4cr9iq__mosaic-v3", "courses", "finnish")
+	if err := os.MkdirAll(harnessDirA, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	agentTh := sb.newThread(t, "claude", "harness-subject", harnessDirA)
+	if !waitUntil(60*time.Second, func() bool { _, _, ok := sb.markedPane(t, agentTh.ID); return ok }) {
+		t.Fatalf("the claude thread never got a marked pane, so there is no live conversation to identify")
+	}
+	sess := ""
+	for _, th := range sb.listThreads(t) {
+		if th.ID == agentTh.ID {
+			sess = th.AgentSessionID
+		}
+	}
+	if sess == "" {
+		t.Fatalf("the daemon recorded no agent_session_id for the claude thread — the source has nothing to match")
+	}
+	// TMUX/TMUX_PANE blanked on purpose: the test process may itself sit in a real
+	// pane, and a cell whose outcome depends on that is not a measurement.
+	harnessEnv := map[string]string{
+		"CLAUDE_CODE_SESSION_ID": sess, "SESH_THREAD_ID": inherited.ID,
+		"TMUX": "", "TMUX_PANE": "",
+	}
+	out, stderr, err = runWithEnvDir(t, sb, harnessDirA, harnessEnv, "whoami")
+	if err != nil {
+		t.Fatalf("a reparented agent presenting its own harness session, standing in its own thread's "+
+			"directory, must be identified — that is the case this source exists for: %v\n%s", err, stderr)
+	}
+	if got := strings.TrimSpace(out); got != agentTh.ID {
+		t.Fatalf("whoami = %q, want the thread the harness session belongs to (%s)", got, agentTh.ID)
+	}
+	// And the WRONG $SESH_THREAD_ID it was carrying must be named as wrong, not
+	// silently ignored: that variable is what the operator would otherwise trust.
+	if !strings.Contains(stderr, "WRONG") || !strings.Contains(stderr, inherited.ID[:8]) {
+		t.Errorf("the refuted $SESH_THREAD_ID must be called out: %s", stderr)
+	}
+	out, _, err = runWithEnvDir(t, sb, harnessDirA, harnessEnv, "whoami", "--json")
+	if err == nil {
+		var hj struct {
+			ID       string `json:"id"`
+			Source   string `json:"source"`
+			Verified bool   `json:"verified"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(out)), &hj) == nil {
+			if hj.ID != agentTh.ID || hj.Source != "harness" || !hj.Verified {
+				t.Errorf("whoami --json = %+v, want the thread with source=harness verified=true", hj)
+			}
+		}
+	}
+
+	// 6b. THE SAFETY HALF. The same claim from an UNRELATED directory is refused:
+	// if a harness ever froze its session var the way $SESH_THREAD_ID gets frozen,
+	// the claim would name a real thread belonging to other work and look perfect.
+	// Corroboration is optional for $SESH_THREAD_ID and MANDATORY here, because
+	// here it is the entire warrant.
+	// insideCwd sits in the OTHER tree this cell already built (mysetup/sesh), so
+	// it is genuinely unrelated to the claude thread's box. NB harnessDirA and
+	// unrelatedCwd are the same directory by construction — the reported incident
+	// happened in it — so unrelatedCwd is emphatically NOT the unrelated one here.
+	if out, stderr, err := runWithEnvDir(t, sb, insideCwd, harnessEnv, "whoami"); err == nil {
+		t.Errorf("whoami certified a harness session whose thread sits in an unrelated directory:\n%s", out)
+	} else if !strings.Contains(stderr, agentTh.ID[:8]) {
+		t.Errorf("the refusal must name the thread it declined to become: %s", stderr)
+	}
+
+	// 6c. THE LEAD. With nothing at all to go on, the refusal must still hand over
+	// what the daemon knows — the one live thread registered in this exact
+	// directory — because the agent that reported this found itself only by
+	// capturing a pane, and nothing in the refusal had pointed there.
+	leadEnv := map[string]string{"CLAUDE_CODE_SESSION_ID": "", "SESH_THREAD_ID": "", "TMUX": "", "TMUX_PANE": ""}
+	if _, stderr, err := runWithEnvDir(t, sb, harnessDirA, leadEnv, "whoami"); err == nil {
+		t.Errorf("whoami claimed an identity with nothing to go on")
+	} else {
+		if !strings.Contains(stderr, "WHAT THE DAEMON DOES KNOW") || !strings.Contains(stderr, agentTh.ID[:8]) {
+			t.Errorf("the refusal must offer the live thread in this directory as a lead: %s", stderr)
+		}
+		if !strings.Contains(stderr, "LEAD, NOT your identity") {
+			t.Errorf("a lead that reads like an answer is worse than no lead: %s", stderr)
+		}
+	}
+
+	// 6d. A CONVERSATION THAT IS NOT RUNNING certifies nothing. Stop the agent and
+	// the same harness claim, from the same directory, stops being accepted.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", agentTh.ID); err != nil {
+		t.Fatalf("stop: %v\n%s", err, stderr)
+	}
+	if !waitUntil(20*time.Second, func() bool { _, _, ok := sb.markedPane(t, agentTh.ID); return !ok }) {
+		t.Fatalf("the pane never went away after stop")
+	}
+	if out, _, err := runWithEnvDir(t, sb, harnessDirA, harnessEnv, "whoami"); err == nil {
+		t.Errorf("whoami still certified a harness session whose conversation is no longer running:\n%s", out)
 	}
 
 	// 5. The deliberate override still works, and still prints a usable uuid.

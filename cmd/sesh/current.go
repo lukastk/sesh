@@ -19,7 +19,12 @@ package main
 //     scheduled/headless WORKER identifies itself, and before it existed the one
 //     process whose identity the daemon knew for certain was the one that could
 //     not prove it;
-//  4. $SESH_THREAD_ID — injected into every spawned pane and headless turn
+//  4. the HARNESS's own session id ($CLAUDE_CODE_SESSION_ID), matched against the
+//     agent_session_id the daemon recorded for exactly one thread. Unlike the
+//     pane marker this is a CLAIM, so it is accepted only when the calling
+//     directory corroborates it AND the thread still has a live pane — see the
+//     harness block below for why that combination is the honest bar;
+//  5. $SESH_THREAD_ID — injected into every spawned pane and headless turn
 //     process. This is FROZEN into the process env at launch and INHERITED by
 //     every descendant, so it can name a thread that is not this one at all
 //     (an adopted/reparented agent carries its old id; a detached background
@@ -181,6 +186,8 @@ func resolveCurrentThreadWith(cfg config.Config, explicit, idFlag string) (strin
 		allowUnverified: allowUnverifiedCurrent,
 		idFlag:          idFlag,
 		turnOf:          localTurnIdentity(cfg),
+		harnessSession:  harnessSessionID(),
+		paneLive:        paneLiveness(cfg),
 	})
 	for _, n := range notes {
 		fmt.Fprintln(os.Stderr, "sesh: "+n)
@@ -210,6 +217,20 @@ func localTurnIdentity(cfg config.Config) func() (string, error) {
 			return "", err
 		}
 		return resp.ID, nil
+	}
+}
+
+// paneLiveness builds the paneLive probe: does this thread have a live pane right
+// now? Asked of the thread's OWNER (daemonClient, unlike the turn probe, which is
+// a strictly local fact) and only from the harness branch, so the common paths
+// never pay for it. Any failure reads as NOT live — the harness claim then goes
+// uncertified, which is the safe direction.
+func paneLiveness(cfg config.Config) func(string) bool {
+	return func(id string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := daemonClient(cfg).ThreadPane(ctx, id)
+		return err == nil && resp.Found && resp.Pane.Pane != ""
 	}
 }
 
@@ -256,6 +277,7 @@ const (
 	srcExplicit idSource = "explicit" // the caller passed an id/prefix
 	srcPane     idSource = "pane"     // the calling pane's @sesh-thread-id marker
 	srcTurn     idSource = "turn"     // a headless turn the LOCAL daemon launched, confirmed by ancestry
+	srcHarness  idSource = "harness"  // the agent harness's own session id, matched + corroborated
 	srcEnv      idSource = "env"      // $SESH_THREAD_ID, with no pane to check it against
 )
 
@@ -269,7 +291,9 @@ const (
 // process that merely inherited something cannot manufacture a place in that
 // tree, and a detached one (ancestry reaching pid 1 — the reported failure
 // shape) is refused by construction.
-func (s idSource) verified() bool { return s == srcExplicit || s == srcPane || s == srcTurn }
+func (s idSource) verified() bool {
+	return s == srcExplicit || s == srcPane || s == srcTurn || s == srcHarness
+}
 
 // allowUnverifiedCurrent is the pseudo-global `--allow-unverified` escape hatch,
 // stripped from os.Args before dispatch (see extractAllowUnverifiedFlag). It is
@@ -294,6 +318,29 @@ type unverifiedError struct {
 	// a supervisor thread hit exactly this on 2026-08-27 and its subscriptions
 	// silently never existed for an hour.
 	Flag string
+}
+
+// harnessMismatchError is the refusal raised when the harness's own session id
+// names a thread whose cwd is unrelated to the caller's. It is its own type
+// because it is the one refusal that says "your harness is serving a
+// conversation that belongs somewhere else entirely" — a different and more
+// alarming thing than a stale $SESH_THREAD_ID, and the only signal that would
+// have stopped the reported case from certifying the wrong project.
+type harnessMismatchError struct {
+	ThreadID   string
+	ThreadName string
+	ThreadCwd  string
+	CallerCwd  string
+	Flag       string
+}
+
+func (e *harnessMismatchError) Error() string {
+	home, _ := os.UserHomeDir()
+	return fmt.Sprintf("the harness session this process is serving is recorded against thread %s (%q), "+
+		"whose cwd (%s) is unrelated to the calling directory (%s) — refusing to treat that as this "+
+		"process's identity. Pass %s <thread> to say which thread you mean",
+		short8(e.ThreadID), e.ThreadName,
+		config.TildeRelative(e.ThreadCwd, home), config.TildeRelative(e.CallerCwd, home), idFlagOr(e.Flag))
 }
 
 // noIdentityError is the refusal raised when NOTHING identifies the current
@@ -342,6 +389,15 @@ type currentInputs struct {
 	cwd             string // the calling process's working directory
 	allowUnverified bool
 	idFlag          string // the flag THIS command takes for an explicit thread ("" = --id)
+	// harnessSession is the coding-agent harness's OWN session id for the
+	// conversation this process is serving ($CLAUDE_CODE_SESSION_ID). It is not
+	// an identity by itself — see the harness branch in the resolver.
+	harnessSession string
+	// paneLive reports whether a thread has a live pane RIGHT NOW. Injected (like
+	// turnOf) so the truth table is testable with no daemon; nil means "cannot
+	// check", which the harness branch treats as not live — it must never read as
+	// a pass.
+	paneLive func(id string) bool
 	// turnOf asks the LOCAL daemon whether this process is running inside a
 	// headless turn it launched, returning that turn's thread id ("" = not a
 	// turn). Injected as a closure rather than reached through the client
@@ -396,6 +452,78 @@ func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, 
 					agents.EnvThreadID, short8(in.env), short8(turnID)))
 			}
 			return turnID, srcTurn, notes, nil
+		}
+	}
+	// THE HARNESS'S OWN SESSION. A claude agent's tool call carries
+	// $CLAUDE_CODE_SESSION_ID — written by the running harness for the
+	// conversation it is actually serving — and the daemon has recorded that same
+	// id as exactly one thread's agent_session_id (sesh passes `--session-id` when
+	// it spawns claude, and the notify reporter re-stamps it). So a pane-less,
+	// REPARENTED agent whose $SESH_THREAD_ID is wrong can still be identified.
+	//
+	// That case is not hypothetical: it is the 2026-09-27 correction. An agent
+	// working in a mosaic-v3 course box was thread 1a26989d (pane %1745, marker
+	// and cwd both registered), while its inherited $SESH_THREAD_ID named
+	// `adi-requests` in a different project. Its ancestry was zsh <- claude <-
+	// claude <- systemd — reparented, so it reached neither the pane nor the
+	// pane's recorded pid — and it found out who it was only by capturing a pane
+	// and recognising its own prose. The answer was in the daemon the whole time.
+	//
+	// WHY THE BAR IS HIGHER HERE THAN FOR A PANE MARKER. The marker is read FROM
+	// the container the process is in; this is a CLAIM the process presents. If a
+	// harness ever froze its session var the way $SESH_THREAD_ID gets frozen, the
+	// claim would name a real thread belonging to unrelated work and look perfect.
+	// So it is accepted only when two independent things agree with it: the
+	// calling directory does not contradict the thread's cwd, and the thread still
+	// has a LIVE pane. A frozen claim from another project fails the first (that
+	// is exactly what saves the reported case from certifying `adi-requests`), and
+	// a claim naming a conversation that is no longer running fails the second.
+	// Corroboration is optional for $SESH_THREAD_ID (info still exits 0 without
+	// it) and MANDATORY here, because here it is the whole warrant.
+	//
+	// Claude only, deliberately, and not dressed up as generic: no equivalent
+	// variable is known for codex or pi, and their tool calls are not detached
+	// from their panes the way a claude background job is, so $TMUX_PANE already
+	// answers for them. Adding another harness is one entry in
+	// harnessSessionEnvVars.
+	if in.harnessSession != "" {
+		hits := threadsByAgentSession(c, in.harnessSession)
+		switch {
+		case len(hits) > 1:
+			// Impossible by construction — the daemon claims a session for one
+			// thread — so if it happens the assumption is wrong and guessing would
+			// be the worst available move.
+			ids := make([]string, 0, len(hits))
+			for _, th := range hits {
+				ids = append(ids, short8(th.ID))
+			}
+			return "", "", notes, fmt.Errorf("the harness session id %s is recorded against %d threads (%s) — "+
+				"refusing to guess which one this process is; pass %s <thread>",
+				short8(in.harnessSession), len(hits), strings.Join(ids, ", "), idFlagOr(in.idFlag))
+		case len(hits) == 1:
+			th := hits[0]
+			switch {
+			case th.Archived:
+				notes = append(notes, fmt.Sprintf("the harness session id names archived thread %s (%q); not treating an archived thread as this process's identity",
+					short8(th.ID), th.Name))
+			case cwdContradicts(th.Cwd, in.cwd):
+				if !in.allowUnverified {
+					return "", "", notes, &harnessMismatchError{
+						ThreadID: th.ID, ThreadName: th.Name, ThreadCwd: th.Cwd, CallerCwd: in.cwd, Flag: in.idFlag,
+					}
+				}
+				notes = append(notes, fmt.Sprintf("--allow-unverified: not certifying the harness session id, whose thread %s (%q) sits in an unrelated directory",
+					short8(th.ID), th.Name))
+			case in.paneLive == nil || !in.paneLive(th.ID):
+				notes = append(notes, fmt.Sprintf("the harness session id names thread %s (%q), which has no live pane; not certifying a conversation that is not running",
+					short8(th.ID), th.Name))
+			default:
+				if in.env != "" && in.env != th.ID {
+					notes = append(notes, fmt.Sprintf("$%s=%s is WRONG for this process: the harness session it is actually serving belongs to thread %s (%q)",
+						agents.EnvThreadID, short8(in.env), short8(th.ID), th.Name))
+				}
+				return th.ID, srcHarness, notes, nil
+			}
 		}
 	}
 	// The env is all there is, and it is UNVERIFIED. A stale env (deleted thread,
@@ -517,6 +645,42 @@ func isFullUUID(s string) bool {
 		}
 	}
 	return true
+}
+
+// harnessSessionEnvVars are the env vars in which a coding-agent harness records
+// ITS OWN session id for the conversation the calling process is serving, most
+// specific first. Only claude has a known one; see the harness block above for
+// why that is targeted rather than a gap.
+var harnessSessionEnvVars = []string{"CLAUDE_CODE_SESSION_ID"}
+
+// harnessSessionID reads the calling process's harness session id, or "".
+func harnessSessionID() string {
+	for _, name := range harnessSessionEnvVars {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// threadsByAgentSession returns every thread the daemon has recorded against
+// this agent session id. More than one is a contradiction the caller must refuse
+// rather than resolve, so they are all returned instead of the first.
+func threadsByAgentSession(c threadListClient, session string) []api.Thread {
+	if session == "" {
+		return nil
+	}
+	threads, err := listAllThreads(c)
+	if err != nil {
+		return nil
+	}
+	var hits []api.Thread
+	for _, th := range threads {
+		if th.AgentSessionID == session {
+			hits = append(hits, th)
+		}
+	}
+	return hits
 }
 
 func lookupThread(c threadListClient, id string) (api.Thread, bool) {

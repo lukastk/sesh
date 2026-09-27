@@ -110,7 +110,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.whoami",
-		Description: "sesh whoami: the default-safe twin of `sesh info` — prints the current thread's uuid ONLY when the identity is VERIFIED (the calling pane's @sesh-thread-id marker) and exits NON-ZERO otherwise, so `TID=$(sesh whoami) || exit 1` is safe by construction. Three distinct refusals: an inherited $SESH_THREAD_ID contradicted by the calling directory, an UNCONTRADICTED but still unverified one (absence of contradiction is not evidence — this is the residual `info` exits 0 on), and no identity at all. --allow-unverified downgrades the gate; not routable",
+		Description: "sesh whoami: the default-safe twin of `sesh info` — prints the current thread's uuid ONLY when the identity is VERIFIED and exits NON-ZERO otherwise, so `TID=$(sesh whoami) || exit 1` is safe by construction. Verified means the calling pane's @sesh-thread-id marker, or (schema 50) the agent HARNESS's own session id matched against the thread the daemon recorded it against — accepted only with cwd corroboration AND a live pane, which is what identifies a REPARENTED agent whose tool calls reach neither its pane nor its pane's pid. Four distinct refusals: an inherited $SESH_THREAD_ID contradicted by the calling directory, an UNCONTRADICTED but still unverified one (absence of contradiction is not evidence — the residual `info` exits 0 on), a harness session naming a thread in an unrelated directory, and nothing resolved — which says UNRESOLVED rather than \"you are not a thread\" and ends with the one live thread registered in this exact directory as a LEAD to confirm, never an answer. --allow-unverified downgrades the gate; not routable",
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{

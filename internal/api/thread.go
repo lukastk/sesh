@@ -659,6 +659,40 @@ type HeadlessReplyResponse struct {
 	Reply     string `json:"reply,omitempty"`
 }
 
+// TurnIdentityResponse is returned by GET /v1/threads/turn-identity?pid=N
+// (schema 50): the daemon's answer to "is the process with this pid running
+// inside a headless turn YOU launched, and if so for which thread?".
+//
+// It is the identity a daemon-launched worker (a `schedule spawn --headless`
+// run, any `thread send-headless` turn) otherwise cannot obtain. Such a process
+// has no tmux pane, so before schema 50 the only thing naming its thread was the
+// inherited $SESH_THREAD_ID — which `sesh whoami` refuses, correctly, because a
+// detached background job carries a perfectly valid id belonging to unrelated
+// work. The daemon, however, started the turn and knows exactly which thread it
+// is for; the missing half was a way for the worker to PROVE it is that process.
+//
+// The proof is process ancestry (internal/procs): the daemon remembers the root
+// pid of every in-flight turn and walks up from the asking pid. Nothing here is
+// inheritable — the only input is a pid and the answer is recomputed from the
+// live process tree — so a reparented or detached process (ancestry reaching
+// pid 1) is refused exactly as before, and the record disappears when the turn
+// ends, so no answer outlives the work it describes.
+//
+// ID is empty when the process is not inside a live turn, with Reason saying
+// which of the possible "no"s it is (nothing in flight, not a descendant, the
+// tree could not be read, or — refused rather than guessed — several in-flight
+// turns claiming it). Always HTTP 200: "you are not a turn" is an answer, not an
+// error. A pre-50 daemon has no such route and 404s, which callers must read as
+// "cannot confirm" and refuse on.
+type TurnIdentityResponse struct {
+	Schema  int    `json:"schema"`
+	ID      string `json:"id"`
+	Machine string `json:"machine"`
+	// TurnPID is the root pid of the matched turn (diagnostic; 0 when none).
+	TurnPID int    `json:"turn_pid,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 // NotifyThreadRequest toggles a thread's notification gate.
 type NotifyThreadRequest struct {
 	ID string `json:"id"`

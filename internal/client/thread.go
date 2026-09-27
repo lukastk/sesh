@@ -191,6 +191,18 @@ func (c *Client) MeshNudge(ctx context.Context, machine string) error {
 	return c.postJSON(ctx, "http://unix/v1/mesh/nudge", api.MeshNudgeRequest{Machine: machine}, &out)
 }
 
+// TurnIdentity asks GET /v1/threads/turn-identity?pid=N (schema 50): is this
+// process running inside a headless turn the daemon launched, and if so for
+// which thread? See api.TurnIdentityResponse.
+//
+// Call it on the LOCAL daemon only. The turn registry is a local fact — a peer
+// asked about our pid would be answering about its own process table, which is
+// exactly the confident-but-wrong shape the identity model exists to prevent.
+func (c *Client) TurnIdentity(ctx context.Context, pid int) (api.TurnIdentityResponse, error) {
+	var out api.TurnIdentityResponse
+	return out, c.getJSON(ctx, "http://unix/v1/threads/turn-identity?pid="+strconv.Itoa(pid), &out)
+}
+
 // ThreadGrid fetches GET /v1/threads/grid — every thread with live status.
 func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bool) (api.ThreadGridResponse, error) {
 	var out api.ThreadGridResponse

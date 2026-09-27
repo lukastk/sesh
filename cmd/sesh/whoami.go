@@ -19,15 +19,20 @@ package main
 // So whoami answers a different question — "may I act as this thread?" — and
 // the answer is the EXIT CODE:
 //
-//	exit 0   stdout is the full uuid, and the identity is VERIFIED: it was read
-//	         from the @sesh-thread-id marker on the tmux pane this process
-//	         actually runs in, which a process living somewhere else cannot
-//	         inherit.
+//	exit 0   stdout is the full uuid, and the identity is VERIFIED — one of the
+//	         two things a process living somewhere else cannot manufacture:
+//	         the @sesh-thread-id marker on the tmux pane this process actually
+//	         runs in, or (schema 50) the local daemon confirming that this
+//	         process sits inside the process tree it created for that thread's
+//	         headless turn. The second is how a scheduled/headless WORKER
+//	         identifies itself: it has no pane, and before it existed the one
+//	         process on the machine whose identity the daemon knew for certain
+//	         was the only one that could not prove it.
 //	exit 1   stderr says why the identity cannot be trusted, and stdout is
 //	         EMPTY. Three distinct cases, each with its own text: the env id is
 //	         contradicted by the calling directory; the env id is uncontradicted
-//	         but still unverified (no pane); or nothing identifies this process
-//	         at all.
+//	         but still unverified (no pane, and no turn this daemon launched); or
+//	         nothing identifies this process at all.
 //
 // `TID=$(sesh whoami) || exit 1` is therefore safe by construction, which the
 // jq form never was. --allow-unverified (the pseudo-global) downgrades the gate
@@ -152,9 +157,10 @@ func whoamiGate(id string, src idSource, err error, allowUnverified bool, nameOf
 	// and `sesh info` exits 0. For a GATE that is not good enough: absence of
 	// contradiction is not evidence.
 	return fmt.Errorf("NOT a verified identity: the current thread %s (%q) rests on $%s alone — there "+
-		"is no tmux pane here to confirm it, and a detached or background process inherits that variable "+
-		"from whatever started it. The calling directory does not contradict it, but it does not confirm "+
-		"it either. Do not sign, attach or act as this thread on the strength of it; name the thread "+
-		"explicitly in whatever you were about to run, or pass --allow-unverified to accept $%s here anyway",
+		"is no tmux pane here to confirm it, the local daemon does not recognise this process as one of "+
+		"the turns it launched, and a detached or background process inherits that variable from whatever "+
+		"started it. The calling directory does not contradict it, but it does not confirm it either. Do "+
+		"not sign, attach or act as this thread on the strength of it; name the thread explicitly in "+
+		"whatever you were about to run, or pass --allow-unverified to accept $%s here anyway",
 		short8(id), nameOf(id), agents.EnvThreadID, agents.EnvThreadID)
 }

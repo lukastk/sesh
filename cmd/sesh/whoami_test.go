@@ -149,3 +149,17 @@ func TestNoIdentityErrorTextUnchanged(t *testing.T) {
 		t.Fatalf("the per-command flag must still travel with the refusal:\n got %q\nwant %q", got, want)
 	}
 }
+
+// A live turn passes the gate. This is the acceptance half of the feature: the
+// worker is told its own uuid and exits 0, so `TID=$(sesh whoami) || exit 1`
+// works inside a scheduled headless run for the first time.
+func TestWhoamiGateAcceptsALiveTurn(t *testing.T) {
+	nameOf := func(string) string { return "health-analyst" }
+	const id = "5a5a655f-e24c-4126-aa4e-46aa2c344635"
+	if err := whoamiGate(id, srcTurn, nil, false, nameOf); err != nil {
+		t.Fatalf("a turn-derived identity must pass the gate without --allow-unverified: %v", err)
+	}
+	if !srcTurn.verified() {
+		t.Error("srcTurn must report as verified — `sesh info --json` and the gate read the same flag")
+	}
+}

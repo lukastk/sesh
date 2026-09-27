@@ -309,7 +309,19 @@ package api
 // transport re-execs the peer's own binary, so CLI and daemon match there.
 // (b) The /v1/schedules endpoint family (additive; a pre-49 daemon 404s it
 // loudly) — see the Schedule types.
-const SchemaVersion = 49
+// 50: TURN IDENTITY — GET /v1/threads/turn-identity?pid=N (additive; see
+// TurnIdentityResponse). A daemon-launched headless worker had no verified
+// self-identity: no pane, so `sesh whoami` saw only the inherited
+// $SESH_THREAD_ID and refused it, which is right for a detached background job
+// and wrong for the one process on the machine whose identity the daemon knows
+// for certain. The daemon now remembers each in-flight turn's root pid and
+// answers whether a given pid is inside it, so inference gains a third VERIFIED
+// source (`source: turn`) alongside the pane marker. Mixed-mesh safe in both
+// directions: a pre-50 daemon 404s the route and the caller falls through to the
+// old refusal (fails CLOSED — a worker on an old daemon simply cannot verify
+// itself and is told so), and a pre-50 CLIENT never asks. No store migration —
+// the registry is in-memory, exactly as long-lived as the turn.
+const SchemaVersion = 50
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

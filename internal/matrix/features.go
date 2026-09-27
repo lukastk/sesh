@@ -96,6 +96,18 @@ func init() {
 	// confidently about another machine — the exact failure mode the verb
 	// exists to prevent — so `--machine` is a loud refusal, and the cell
 	// asserts that refusal rather than leaving the axis untested.
+	// LOCAL-only for the same reason as thread.whoami: "who is THIS process" has
+	// no remote form. PER-AGENT axes on purpose — the turn environment is built
+	// once for all three agents, but whether an agent runs a shell command as a
+	// DESCENDANT of its turn process (rather than handing it to a machine-global
+	// helper) is per-agent, and ancestry is the whole mechanism. That is the H93
+	// lesson: the delivery is agent-independent, the thing it depends on is not.
+	Register(Feature{
+		ID:          "thread.turn-identity",
+		Description: "a daemon-launched HEADLESS worker obtains its own verified identity: `sesh whoami` inside a `schedule spawn --headless` run (or any send-headless turn) prints that thread's uuid and exits 0, reported as source=turn/verified=true, because the daemon remembers the turn's root pid and confirms by process ancestry (GET /v1/threads/turn-identity, schema 50). Nothing is inheritable: at the same moment, with the same turn live, a process OUTSIDE the turn's process tree carrying the same $SESH_THREAD_ID is still refused, and a decoy thread in the same directory rules out a cwd/recency guess. $SESH_BIN is injected into the turn env so the worker asks the sesh that launched it",
+		Agents:      AllAgents,
+		Localities:  []Locality{Local},
+	})
 	Register(Feature{
 		ID:          "thread.whoami",
 		Description: "sesh whoami: the default-safe twin of `sesh info` — prints the current thread's uuid ONLY when the identity is VERIFIED (the calling pane's @sesh-thread-id marker) and exits NON-ZERO otherwise, so `TID=$(sesh whoami) || exit 1` is safe by construction. Three distinct refusals: an inherited $SESH_THREAD_ID contradicted by the calling directory, an UNCONTRADICTED but still unverified one (absence of contradiction is not evidence — this is the residual `info` exits 0 on), and no identity at all. --allow-unverified downgrades the gate; not routable",

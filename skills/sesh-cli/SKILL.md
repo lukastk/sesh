@@ -32,8 +32,8 @@ Threads are identified by a UUID. Every `--id` accepts an **unambiguous prefix**
 well-formed uuid skips the prefix lookup entirely, so an unknown full uuid errors at the
 verb itself via the daemon's 404 instead), and most
 verbs infer the **current** thread when you omit `--id` (from the calling pane's live
-`@sesh-thread-id` marker first, then `$SESH_THREAD_ID`, or a loud error if neither
-resolves). The pane marker wins because it is re-stamped on adopt/reparent while
+`@sesh-thread-id` marker first, then — for a pane-less process — a headless **turn** the
+local daemon launched, then `$SESH_THREAD_ID`, or a loud error if nothing resolves). The pane marker wins because it is re-stamped on adopt/reparent while
 `$SESH_THREAD_ID` is frozen at launch and can drift stale; on disagreement the pane is
 used and a drift note is printed to stderr. **See "Am I really this thread?" below —
 outside a pane the answer is UNVERIFIED and may be refused.** Inference happens **only when `--id` is
@@ -54,11 +54,16 @@ takes the graphical session env from the systemd user manager; a failed copy is 
 
 ## Am I really this thread? (provenance)
 
-Inference has two sources and they are **not** equally trustworthy:
+Inference has three sources and they are **not** equally trustworthy:
 
 - **pane** — read from the `@sesh-thread-id` marker on the tmux pane the command
   actually runs in. **Verified**: a process elsewhere cannot inherit it.
-- **env** — `$SESH_THREAD_ID` alone, when there is no pane. **Unverified**: that variable
+- **turn** — the local daemon confirming that this process sits inside the process tree it
+  created for a thread's **headless turn**. **Verified** for the same reason: the daemon
+  started that turn, remembers its root process, and checks the live parent links — so a
+  process outside the tree (anything detached, anything reparented) cannot claim it. This
+  is how a `schedule spawn --headless` worker identifies itself.
+- **env** — `$SESH_THREAD_ID` alone, when there is neither. **Unverified**: that variable
   is frozen at launch and inherited by every descendant, so a detached or background
   process (a claude bg job/agent, hosted by a machine-global `claude daemon run` that
   froze whichever pane started it) carries a perfectly *valid* id belonging to an
@@ -128,7 +133,30 @@ inherited id named `adi-requests` in a different box.
 
 Corroboration is evidence, not proof: an inherited id that happens to name a thread in the
 *same* directory tree still resolves, which is precisely why `whoami` refuses it and `info`
-does not. Outside a pane, an explicit `--id` is the only certainty.
+does not.
+
+### If you are a scheduled or headless worker
+
+A thread created by `sesh schedule spawn` does not exist when the schedule is written, so
+its prompt cannot name it. Ask instead — this works in a **headless** run (the daemon
+verifies you are inside the turn it launched) and in a `--headed` one (the pane marker):
+
+```bash
+TID=$("$SESH_BIN" whoami) || exit 1
+```
+
+`$SESH_BIN` is the launching daemon's own binary, injected into the turn's environment
+alongside `$SESH_THREAD_ID`. Prefer it to a bare `sesh`: from a login shell that may be a
+wrapper function or an older install on the PATH, i.e. a different sesh than the one that
+started you. And `$SESH_THREAD_ID` is still **not** the contract — it is inherited by
+anything you detach, so `whoami` refuses it alone.
+
+Two things that will still (correctly) refuse: a process the worker **detached** from its
+own turn, and anything asking **after** the turn has ended — the identity does not outlive
+the work it describes. Both cases want an explicit id, captured while the turn was live.
+
+Outside a pane and outside a daemon-launched turn, an explicit `--id` is the only
+certainty.
 
 ## Before running commands
 

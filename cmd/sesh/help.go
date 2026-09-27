@@ -368,6 +368,25 @@ does not wrap can be driven straight against the tmux server.`,
 		summary:  "schedule a NEW thread in a directory with a prompt, on this machine (or --machine); headless by default, --on-turn-end keep by default, never overlapping a run that is still going",
 		usage:    "sesh schedule spawn --agent <a> --cwd <dir> (--prompt <s> | --prompt-file <f>) (--cron <expr> | --every <dur> | --at <instant>) [--name <n>] [--tz <zone>] [--catchup <skip|once>] [--not-before <t>] [--not-after <t>] [--max-fires <n>] [--headed] [--into-session <s>] [--parent <id>] [--model <m>] [--yolo | --sandbox] [--name-template <t>] [--if-previous <skip|spawn-anyway|stop-previous>] [--on-turn-end <keep|stop|archive|stop+archive|delete>] [--max-runtime <dur>] [--flag-on-end] [--json] [--machine <m>]",
 		examples: []string{"sesh schedule spawn --agent pi --cwd ~/dev/proj --cron '0 9 * * 1-5' --prompt 'Review the CI failures since yesterday and summarise' --parent 7f1dfe3a", "sesh schedule spawn --agent claude --cwd ~/dev/proj --every 6h --prompt-file ~/prompts/audit.md --on-turn-end stop+archive --max-runtime 30m"},
+		long: `Each run creates a NEW thread and gives it the prompt: headless by default (no
+pane, a headless turn), or ` + "`--headed`" + ` for a real pane.
+
+WHAT THE RUN'S WORKER KNOWS ABOUT ITSELF. A run's thread is created at fire
+time, so its prompt cannot name it. The worker asks:
+
+  TID=$("$SESH_BIN" whoami) || exit 1
+
+and gets the uuid of the thread it is running as. In a HEADLESS run that answer
+is verified by the daemon that launched the turn (source: turn — it confirms the
+asking process is inside the turn's own process tree); in a ` + "`--headed`" + ` run it
+comes from the pane marker. Either way it is the id to pass to anything that
+records, publishes or attaches on the run's behalf.
+
+The $SESH_THREAD_ID in the same environment is NOT that contract: it is
+inherited by every descendant, including any process the worker detaches, so
+` + "`whoami`" + ` refuses it on its own. $SESH_BIN is the launching daemon's own
+binary — prefer it to a bare ` + "`sesh`" + `, which from a login shell may be a
+wrapper function or an older install.`,
 	},
 	"schedule list": {
 		summary:  "list schedules (this machine; --all-machines fans out to every reachable peer)",
@@ -547,8 +566,13 @@ says HOW it was inferred — the "source" line (JSON: "source" + "verified"):
   pane      VERIFIED — read from the @sesh-thread-id marker on the tmux pane this
             command actually runs in. It cannot be inherited by a process
             living somewhere else.
-  env       UNVERIFIED — there is no tmux pane here, so the answer rests on
-            $SESH_THREAD_ID alone. That variable is frozen at launch and
+  turn      VERIFIED — this process has no pane but sits inside the process tree
+            the local daemon created for that thread's HEADLESS TURN, confirmed
+            by ancestry. This is how a scheduled/headless worker identifies
+            itself; a process outside that tree cannot claim it.
+  env       UNVERIFIED — there is no tmux pane here and the daemon does not
+            recognise this process as one of its own turns, so the answer rests
+            on $SESH_THREAD_ID alone. That variable is frozen at launch and
             INHERITED by every descendant, so a detached or background process
             can carry a perfectly valid id belonging to an unrelated thread.
 
@@ -571,9 +595,11 @@ VERIFIED and exits non-zero otherwise.
 		examples: []string{"sesh whoami", "TID=$(sesh whoami) || exit 1", "sesh whoami --json"},
 		long: `Answer "may I act as this thread?" — and answer it with the EXIT CODE.
 
-  exit 0   stdout is the full uuid. The identity is VERIFIED: it was read from
-           the @sesh-thread-id marker on the tmux pane this process actually
-           runs in, which a process living somewhere else cannot inherit.
+  exit 0   stdout is the full uuid. The identity is VERIFIED — one of the two
+           things a process living somewhere else cannot manufacture: the
+           @sesh-thread-id marker on the tmux pane this process actually runs
+           in, or the local daemon confirming that this process sits inside the
+           process tree it created for that thread's headless turn.
   exit 1   stdout is EMPTY and stderr says why the identity cannot be trusted.
 
 This is the same resolution ` + "`sesh info`" + ` does, with the opposite default.
@@ -594,6 +620,17 @@ CONTRADICTED by the calling directory; it is uncontradicted but still
 unverified (absence of contradiction is not evidence); or nothing identifies
 this process at all — which is an answer, not a failure. An agent with no sesh
 identity should say what it actually is, not borrow an id.
+
+IN A DAEMON-LAUNCHED HEADLESS TURN — a ` + "`sesh schedule spawn --headless`" + ` run, or
+any ` + "`thread send-headless`" + ` turn — there is no pane, but the daemon that
+started the turn remembers its root process and confirms by ancestry, so whoami
+answers with that thread's uuid (source: turn). That is the supported way for a
+scheduled worker to identify itself, and it is the only one: the $SESH_THREAD_ID
+in the same environment is still just a hint, and a process that merely
+INHERITED it — one the turn detached, or anything outside the turn's process
+tree — is refused exactly as before. $SESH_BIN in that environment is the
+daemon's own binary; use it rather than a bare ` + "`sesh`" + `, which from a login
+shell may be a wrapper function or an older install.
 
 whoami takes no thread argument: naming a thread would make the answer
 "explicit", i.e. trivially verified. To describe another thread use

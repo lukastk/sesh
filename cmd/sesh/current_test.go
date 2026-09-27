@@ -282,8 +282,11 @@ func TestResolveCurrentThreadProvenance(t *testing.T) {
 	})
 
 	t.Run("env with no pane resolves but is flagged UNVERIFIED", func(t *testing.T) {
-		// The legitimate no-pane case: a headless turn, whose cwd is its
-		// thread's. It must still work — and must still say it is unverified.
+		// The legitimate no-pane case with nothing better available: a pane-less
+		// caller whose cwd agrees. Since schema 50 a daemon-launched turn has a
+		// VERIFIED source of its own (srcTurn, below), so what lands here is a
+		// caller the daemon does not recognise — or one on a pre-50 daemon. It
+		// must still resolve, and must still say it is unverified.
 		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{env: mine, cwd: box})
 		if err != nil || id != mine || src != srcEnv {
 			t.Fatalf("got (%s, %s, %v), want (%s, env, nil)", id, src, err, mine)
@@ -448,6 +451,135 @@ func TestRefusalNamesTheCommandsOwnFlag(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "--id") || !strings.Contains(err.Error(), "--from") {
 			t.Fatalf("not-in-a-thread refusal must name --from here, got:\n%s", err)
+		}
+	})
+}
+
+// TestResolveCurrentThreadTurnSource covers the THIRD source: a headless turn
+// the local daemon launched.
+//
+// The gap it closes: a daemon-launched worker (a `schedule spawn --headless` run,
+// any `send-headless` turn) has no tmux pane, so before schema 50 the only thing
+// naming its thread was the inherited $SESH_THREAD_ID — which the gate refuses,
+// correctly, because a detached background job carries a perfectly valid id
+// belonging to unrelated work. The daemon started the turn and knows which thread
+// it is for; turnOf is the worker proving it is that process.
+func TestResolveCurrentThreadTurnSource(t *testing.T) {
+	const (
+		worker  = "5a5a655f-e24c-4126-aa4e-46aa2c344635" // the thread whose turn is running
+		foreign = "093da760-ea1c-40a3-b5bb-29aa566eea7f" // a stranger's thread
+	)
+	base := t.TempDir()
+	workerCwd := realDir(t, base, "dev", "20260917_4cr9iq__mosaic-v3")
+	elsewhere := realDir(t, base, "mysetup", "sesh")
+	c := fakeMeshThreadClient{local: []api.Thread{
+		{ID: worker, Name: "health-analyst", Cwd: workerCwd},
+		{ID: foreign, Name: "adi-requests", Cwd: elsewhere},
+	}}
+	turn := func(id string) func() (string, error) {
+		return func() (string, error) { return id, nil }
+	}
+
+	t.Run("a live turn is a VERIFIED identity", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: worker, cwd: workerCwd, turnOf: turn(worker),
+		})
+		if err != nil || id != worker || src != srcTurn {
+			t.Fatalf("got (%s, %s, %v), want (%s, turn, nil)", id, src, err, worker)
+		}
+		if !src.verified() {
+			t.Fatal("a turn-derived id must be VERIFIED: it is the whole point — the worker can now sign, attach and publish as itself")
+		}
+		if len(notes) != 0 {
+			t.Errorf("a verified answer needs no caveat on stderr, got %v", notes)
+		}
+	})
+
+	t.Run("a verified turn is NOT corroborated against the cwd", func(t *testing.T) {
+		// A worker that has cd'd somewhere unrelated is still that worker. cwd
+		// corroboration exists to bound an UNVERIFIED guess; applying it to a
+		// verified source would refuse the one caller whose identity is certain.
+		id, src, _, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: worker, cwd: elsewhere, turnOf: turn(worker),
+		})
+		if err != nil || id != worker || src != srcTurn {
+			t.Fatalf("got (%s, %s, %v), want the turn accepted regardless of cwd", id, src, err)
+		}
+	})
+
+	t.Run("the turn outranks a DISAGREEING env, and says so", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: foreign, cwd: workerCwd, turnOf: turn(worker),
+		})
+		if err != nil || id != worker || src != srcTurn {
+			t.Fatalf("got (%s, %s, %v), want the TURN to win", id, src, err)
+		}
+		if len(notes) != 1 || !strings.Contains(notes[0], "disagrees") {
+			t.Errorf("a disagreement between the env and the real turn must be loud, got %v", notes)
+		}
+	})
+
+	t.Run("the pane is checked FIRST and the daemon is not asked at all", func(t *testing.T) {
+		// Not just a precedence claim: asking second is what keeps the cost off
+		// the pane agent, which is the overwhelmingly common caller.
+		asked := false
+		id, src, _, err := resolveCurrentThreadFrom(c, currentInputs{
+			paneID: foreign, cwd: elsewhere,
+			turnOf: func() (string, error) { asked = true; return worker, nil },
+		})
+		if err != nil || id != foreign || src != srcPane {
+			t.Fatalf("got (%s, %s, %v), want the pane marker", id, src, err)
+		}
+		if asked {
+			t.Error("a marked pane resolved the identity; the daemon should not have been asked")
+		}
+	})
+
+	t.Run("no turn falls through to the unverified env exactly as before", func(t *testing.T) {
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: worker, cwd: workerCwd, turnOf: turn(""),
+		})
+		if err != nil || id != worker || src != srcEnv {
+			t.Fatalf("got (%s, %s, %v), want (%s, env, nil)", id, src, err, worker)
+		}
+		if src.verified() {
+			t.Error("an env-derived id must still NOT be verified")
+		}
+		if len(notes) != 1 || !strings.Contains(notes[0], "unverified") {
+			t.Errorf("expected the unverified note, got %v", notes)
+		}
+	})
+
+	t.Run("an unanswerable daemon is a NOTE, not a silent downgrade", func(t *testing.T) {
+		// The mid-rollout case: a machine still on a pre-50 binary 404s the
+		// route. The worker is refused either way, but it must be told the
+		// difference between "your identity was checked and rejected" and "your
+		// identity could not be checked here".
+		id, src, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			env: worker, cwd: workerCwd,
+			turnOf: func() (string, error) { return "", errors.New("daemon: HTTP 404") },
+		})
+		if err != nil || id != worker || src != srcEnv {
+			t.Fatalf("got (%s, %s, %v), want the old env behaviour", id, src, err)
+		}
+		joined := strings.Join(notes, "\n")
+		if !strings.Contains(joined, "could not ask the local daemon") || !strings.Contains(joined, "404") {
+			t.Errorf("the failure and its reason must both surface: %v", notes)
+		}
+	})
+
+	t.Run("no env and no turn: no noise about a question nobody asked", func(t *testing.T) {
+		// A plain shell with no daemon running is not a mis-identification risk,
+		// so it gets the ordinary "not inside a sesh thread" and nothing else.
+		_, _, notes, err := resolveCurrentThreadFrom(c, currentInputs{
+			cwd: elsewhere, turnOf: func() (string, error) { return "", errors.New("connection refused") },
+		})
+		var none *noIdentityError
+		if !errors.As(err, &none) {
+			t.Fatalf("err = %v, want noIdentityError", err)
+		}
+		if len(notes) != 0 {
+			t.Errorf("no notes expected for a caller with no identity to check, got %v", notes)
 		}
 	})
 }

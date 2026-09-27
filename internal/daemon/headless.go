@@ -2,19 +2,25 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/procs"
 	"github.com/lukastk/sesh/internal/store"
 )
 
 func (d *Daemon) routesHeadless(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/send-headless", d.handleThreadSendHeadless)
 	mux.HandleFunc("GET /v1/threads/headless-reply", d.handleThreadHeadlessReply)
+	mux.HandleFunc("GET /v1/threads/turn-identity", d.handleTurnIdentity)
 }
 
 // newHeadlessThread creates a headless thread record (stateless-per-turn): a
@@ -176,11 +182,30 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 	}
 
 	go func() {
-		reply, newSessionID, runErr := agents.HeadlessTurn(
-			agents.Kind(thread.AgentKind), req.ID, sessionID, thread.Cwd, started, text, codexHome, turnMode, turnModel)
+		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
+			Kind: agents.Kind(thread.AgentKind), ThreadID: req.ID, SessionID: sessionID,
+			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
+			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(),
+			// The turn's root pid is this daemon's evidence that a process asking
+			// "who am I?" really is the worker it launched — the only verified
+			// identity a pane-less turn can have. Registered under the same lock as
+			// hlInFlight and dropped with it below, so it is live for exactly as
+			// long as the turn is.
+			OnStart: func(pid int) {
+				d.hlMu.Lock()
+				d.turnPID[req.ID] = pid
+				d.hlMu.Unlock()
+			},
+		})
 
 		d.hlMu.Lock()
+		// ONE critical section for both, deliberately: the in-flight flag and the
+		// turn's root pid are the same fact with the same lifetime, and an
+		// identity that outlived its turn would be the stale-id bug in a new
+		// costume. Keep these two lines adjacent — a separate cleanup elsewhere is
+		// exactly how they would drift apart.
 		delete(d.hlInFlight, req.ID)
+		delete(d.turnPID, req.ID)
 		if runErr == nil {
 			d.hlReply[req.ID] = reply
 		} else {
@@ -231,6 +256,79 @@ func (d *Daemon) handleThreadHeadlessReply(w http.ResponseWriter, r *http.Reques
 		HaveReply: have,
 		Reply:     reply,
 	})
+}
+
+// handleTurnIdentity answers GET /v1/threads/turn-identity?pid=N: is that
+// process running inside a headless turn THIS daemon launched, and if so for
+// which thread? See api.TurnIdentityResponse for why the question exists and
+// internal/procs for why the answer is an ancestry walk rather than a token.
+//
+// Always 200 on a well-formed pid: "you are not a turn" is an answer (the caller
+// is a plain shell, a pane agent, or a detached job), not a failure.
+func (d *Daemon) handleTurnIdentity(w http.ResponseWriter, r *http.Request) {
+	pid, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("pid")))
+	if err != nil || pid <= 0 {
+		writeError(w, http.StatusBadRequest, "turn-identity: pid must be a positive integer")
+		return
+	}
+	id, turnPID, reason := d.turnOwnerOf(pid)
+	writeJSON(w, http.StatusOK, api.TurnIdentityResponse{
+		Schema: api.SchemaVersion, ID: id, Machine: d.cfg.Machine, TurnPID: turnPID, Reason: reason,
+	})
+}
+
+// turnOwnerOf resolves the thread whose IN-FLIGHT turn owns the process tree
+// containing pid. It returns ("", 0, why) for every kind of no.
+//
+// THE RULES, each load-bearing:
+//   - only turns that are in flight RIGHT NOW are considered, because turnPID is
+//     dropped when the turn ends. An identity that outlived its turn would be the
+//     stale-$SESH_THREAD_ID bug with extra steps.
+//   - an unreadable process tree is a REFUSAL carrying the read error, never a
+//     quiet "not a descendant": the difference between "provably not yours" and
+//     "could not tell" is the whole point of the gate this feeds.
+//   - two in-flight turns both claiming the pid is impossible by construction (a
+//     turn's tree cannot contain another turn's root — the daemon starts each one
+//     itself, as a child of itself) and is therefore refused rather than guessed,
+//     loudly naming both, because if it ever happens the assumption is wrong.
+func (d *Daemon) turnOwnerOf(pid int) (threadID string, turnPID int, reason string) {
+	d.hlMu.Lock()
+	live := make(map[string]int, len(d.turnPID))
+	for id, p := range d.turnPID {
+		live[id] = p
+	}
+	d.hlMu.Unlock()
+
+	if len(live) == 0 {
+		return "", 0, "no headless turn is in flight on this machine"
+	}
+	var hits []string
+	var hitPID int
+	var walkErr error
+	for id, root := range live {
+		ok, err := procs.IsAncestor(root, pid)
+		if err != nil {
+			walkErr = err
+			continue
+		}
+		if ok {
+			hits = append(hits, id)
+			hitPID = root
+		}
+	}
+	switch len(hits) {
+	case 1:
+		return hits[0], hitPID, ""
+	case 0:
+		if walkErr != nil {
+			return "", 0, fmt.Sprintf("could not read the process tree above pid %d: %v", pid, walkErr)
+		}
+		return "", 0, fmt.Sprintf("pid %d is not inside any of the %d turn(s) in flight on this machine", pid, len(live))
+	default:
+		sort.Strings(hits)
+		return "", 0, fmt.Sprintf("pid %d resolves to %d in-flight turns (%s) — refusing to guess",
+			pid, len(hits), strings.Join(hits, ", "))
+	}
 }
 
 // headlessActivity reports a headless thread's activity from the in-flight

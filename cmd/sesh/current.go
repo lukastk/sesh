@@ -11,7 +11,15 @@ package main
 //     inherited by every process in the pane). The marker is the GROUND TRUTH
 //     for "which thread owns this pane right now": it is re-stamped on
 //     adopt/reparent, so it tracks the live ownership of the pane;
-//  3. $SESH_THREAD_ID — injected into every spawned pane and headless turn
+//  3. a TURN the local daemon launched — this process has no pane, but it may be
+//     running inside the process tree the daemon created for a headless turn, and
+//     the daemon knows which thread it started that turn for. Confirmed live by
+//     ancestry (GET /v1/threads/turn-identity, schema 50), so like the pane
+//     marker it cannot be inherited by a process living elsewhere: this is how a
+//     scheduled/headless WORKER identifies itself, and before it existed the one
+//     process whose identity the daemon knew for certain was the one that could
+//     not prove it;
+//  4. $SESH_THREAD_ID — injected into every spawned pane and headless turn
 //     process. This is FROZEN into the process env at launch and INHERITED by
 //     every descendant, so it can name a thread that is not this one at all
 //     (an adopted/reparented agent carries its old id; a detached background
@@ -43,6 +51,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/client"
 	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/tmux"
 )
@@ -171,11 +180,37 @@ func resolveCurrentThreadWith(cfg config.Config, explicit, idFlag string) (strin
 		cwd:             cwd,
 		allowUnverified: allowUnverifiedCurrent,
 		idFlag:          idFlag,
+		turnOf:          localTurnIdentity(cfg),
 	})
 	for _, n := range notes {
 		fmt.Fprintln(os.Stderr, "sesh: "+n)
 	}
 	return id, src, err
+}
+
+// localTurnIdentity builds the turnOf probe: "local daemon, is this process
+// running inside a headless turn you launched?".
+//
+// It dials the LOCAL unix socket explicitly instead of going through
+// daemonClient, and that is not an optimisation. daemonClient honours
+// SESH_REMOTE, which points this process at a PEER's API — and a peer asked
+// about our pid would answer from its own process table, i.e. confidently about
+// a different machine's processes. That is the precise failure mode this whole
+// area exists to prevent, so the one question that is meaningless remotely is
+// asked locally by construction rather than by convention.
+//
+// The timeout is short because this sits in front of ~20 inferring verbs: a
+// local socket answers in milliseconds or is not there at all.
+func localTurnIdentity(cfg config.Config) func() (string, error) {
+	return func() (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		resp, err := client.New(cfg.SocketPath()).TurnIdentity(ctx, os.Getpid())
+		if err != nil {
+			return "", err
+		}
+		return resp.ID, nil
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +221,10 @@ func resolveCurrentThreadWith(cfg config.Config, explicit, idFlag string) (strin
 //   - the live pane marker is VERIFIED — it is read from the pane this process
 //     actually runs in, so it cannot be inherited by a process living somewhere
 //     else;
+//   - a live TURN is VERIFIED on the same principle — the local daemon confirms
+//     that this process sits inside the process tree it created for that thread's
+//     turn. Both are "you are demonstrably INSIDE the thing the authority made",
+//     which is the only kind of evidence an environment variable can never be;
 //   - $SESH_THREAD_ID is UNVERIFIED — it is frozen into the process env at
 //     launch and is inherited by every descendant, including descendants that
 //     are no longer that thread. A claude BACKGROUND job/agent is hosted by a
@@ -216,12 +255,21 @@ type idSource string
 const (
 	srcExplicit idSource = "explicit" // the caller passed an id/prefix
 	srcPane     idSource = "pane"     // the calling pane's @sesh-thread-id marker
+	srcTurn     idSource = "turn"     // a headless turn the LOCAL daemon launched, confirmed by ancestry
 	srcEnv      idSource = "env"      // $SESH_THREAD_ID, with no pane to check it against
 )
 
 // verified reports whether the id came from something the calling process could
 // not have merely INHERITED. Only an unverified id is corroborated/refusable.
-func (s idSource) verified() bool { return s == srcExplicit || s == srcPane }
+//
+// srcTurn qualifies for exactly the same reason srcPane does, and it is worth
+// being precise about why rather than taking it on trust: the answer is not read
+// from the process's own environment but computed, at the moment of asking, from
+// the kernel's parent links plus the daemon's record of the turn it started. A
+// process that merely inherited something cannot manufacture a place in that
+// tree, and a detached one (ancestry reaching pid 1 — the reported failure
+// shape) is refused by construction.
+func (s idSource) verified() bool { return s == srcExplicit || s == srcPane || s == srcTurn }
 
 // allowUnverifiedCurrent is the pseudo-global `--allow-unverified` escape hatch,
 // stripped from os.Args before dispatch (see extractAllowUnverifiedFlag). It is
@@ -294,6 +342,12 @@ type currentInputs struct {
 	cwd             string // the calling process's working directory
 	allowUnverified bool
 	idFlag          string // the flag THIS command takes for an explicit thread ("" = --id)
+	// turnOf asks the LOCAL daemon whether this process is running inside a
+	// headless turn it launched, returning that turn's thread id ("" = not a
+	// turn). Injected as a closure rather than reached through the client
+	// interface so the truth table stays unit-testable with no daemon at all,
+	// and so a nil value means "do not ask" for the tests that predate it.
+	turnOf func() (string, error)
 }
 
 // resolveCurrentThreadFrom is the inference truth table (see the package comment
@@ -313,9 +367,39 @@ func resolveCurrentThreadFrom(c threadListClient, in currentInputs) (id string, 
 			return in.paneID, srcPane, notes, nil
 		}
 	}
-	// No pane (a headless turn — env injected, no tmux pane), or the pane carries
-	// no valid marker: the env is all there is, and it is UNVERIFIED. A stale env
-	// (deleted thread, leaked across homes) falls through to the loud error.
+	// No pane, or the pane carries no valid marker. Before the env (which is not
+	// evidence), ask the local daemon whether this process is one of its own
+	// in-flight TURNS: a headless worker has no pane, but it does sit inside a
+	// process tree the daemon created and can recognise. Verified, for the reasons
+	// in idSource.verified.
+	//
+	// Deliberately AFTER the pane check, not before: a turn's environment has
+	// $TMUX/$TMUX_PANE stripped (agents.TurnEnv), so the two sources can never
+	// both answer, and asking second means a pane agent — the overwhelmingly
+	// common caller — pays nothing for a question that is not about it.
+	if in.turnOf != nil {
+		turnID, turnErr := in.turnOf()
+		switch {
+		case turnErr != nil:
+			// Never silent, never fatal: a missing local daemon is a legitimate
+			// state, and so is a peer running a pre-50 binary mid-rollout. The
+			// note is what turns "my identity was refused" into "my identity
+			// could not be CHECKED, and here is why".
+			if in.env != "" {
+				notes = append(notes, fmt.Sprintf("could not ask the local daemon whether this process is running a turn it launched (%v) — "+
+					"if this IS a daemon-launched turn, its identity cannot be confirmed here (a daemon older than api %d has no such answer)",
+					turnErr, api.SchemaVersion))
+			}
+		case turnID != "":
+			if in.env != "" && in.env != turnID {
+				notes = append(notes, fmt.Sprintf("$%s=%s disagrees with the turn this process is actually running (%s); using the turn",
+					agents.EnvThreadID, short8(in.env), short8(turnID)))
+			}
+			return turnID, srcTurn, notes, nil
+		}
+	}
+	// The env is all there is, and it is UNVERIFIED. A stale env (deleted thread,
+	// leaked across homes) falls through to the loud error.
 	if in.env != "" {
 		if th, ok := lookupThread(c, in.env); ok {
 			if cwdContradicts(th.Cwd, in.cwd) {

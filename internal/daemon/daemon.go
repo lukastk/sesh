@@ -44,6 +44,14 @@ type Daemon struct {
 	hlMu       sync.Mutex
 	hlInFlight map[string]bool
 	hlReply    map[string]string
+	// turnPID is the ROOT pid of each in-flight turn process, the fact behind
+	// GET /v1/threads/turn-identity: it is what lets the daemon tell a worker
+	// running inside a turn it launched which thread that turn belongs to, which
+	// no environment variable can honestly do (see api.TurnIdentityResponse and
+	// internal/procs). Same lock and exactly the same lifetime as hlInFlight —
+	// an identity that outlived its turn would be the stale-id bug again, in a
+	// new costume.
+	turnPID map[string]int
 
 	// State authority (schema 43): per-thread reported turn state from in-agent
 	// reporters, preferred over the content-diff heuristic by the maintainer.
@@ -169,6 +177,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		hlInFlight: map[string]bool{},
 		hlReply:    map[string]string{},
+		turnPID:    map[string]int{},
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)

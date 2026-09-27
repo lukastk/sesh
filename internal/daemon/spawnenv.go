@@ -42,8 +42,24 @@ func (d *Daemon) spawnEnv(id string) map[string]string {
 		env = map[string]string{}
 	}
 	env[agents.EnvThreadID] = id
-	if exe, err := os.Executable(); err == nil {
-		env[agents.EnvSeshBin] = exe
+	if bin := seshBinPath(); bin != "" {
+		env[agents.EnvSeshBin] = bin
 	}
 	return env
+}
+
+// seshBinPath is this daemon's own executable, injected as $SESH_BIN into every
+// pane AND (since schema 50) every headless turn. Empty when the path cannot be
+// determined, in which case the carrier is omitted rather than guessed — a wrong
+// binary path is worse than none, because the caller then gets a confusing
+// failure from something that is not sesh instead of falling back to PATH.
+//
+// Shared by spawnEnv and the headless turn env so the two cannot drift: a worker
+// should not be able to call sesh in a pane and not in a turn.
+func seshBinPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
 }

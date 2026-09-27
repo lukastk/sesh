@@ -97,6 +97,24 @@ func TestTurnOwnerOfRealProcesses(t *testing.T) {
 		}
 	})
 
+	t.Run("the identity does not outlive the turn, and the reason DISCRIMINATES", func(t *testing.T) {
+		// This is the observable that tells a cleared registry from a leaked one:
+		// a dropped entry gives "no turn in flight", whereas an entry left behind
+		// would still give "not inside any of the 1 turn(s) in flight" for the
+		// same pid. The end-to-end cell cannot see the difference — every vantage
+		// point that survives a turn is outside its tree and is refused either
+		// way — so the discrimination lives here.
+		delete(d.turnPID, "thread-a")
+		id, _, reason := d.turnOwnerOf(child)
+		if id != "" {
+			t.Fatalf("resolved %q after the turn ended", id)
+		}
+		if !strings.Contains(reason, "no headless turn is in flight") {
+			t.Errorf("reason = %q — an entry appears to have been left behind", reason)
+		}
+		d.turnPID["thread-a"] = os.Getpid() // restore for any later subtest
+	})
+
 	t.Run("an unreadable tree is a refusal carrying the read error", func(t *testing.T) {
 		const impossible = 2147483646 // above any pid_max
 		id, _, reason := d.turnOwnerOf(impossible)

@@ -162,9 +162,10 @@ func testTurnIdentity(t *testing.T, agent string) {
 	// DROPPED when the turn ends. Every vantage point that survives the turn is
 	// outside the turn's process tree, and such a process is refused before AND
 	// after — so an assertion from here would pass without the removal and prove
-	// nothing (the vacuous-negative trap). The property rests on two things that
-	// are each really tested: the pid is dropped in the SAME critical section
-	// that clears the in-flight flag (whose clearing thread.send.headless proves,
-	// via the busy→idle edge asserted above), and turnOwnerOf with no live entry
-	// refuses — TestTurnOwnerOfRealProcesses/"nothing in flight".
+	// nothing (the vacuous-negative trap). It is asserted where the difference is
+	// actually visible: TestTurnOwnerOfRealProcesses/"the identity does not
+	// outlive the turn" keys on the REASON string, which says "no turn in flight"
+	// for a cleared registry and "not inside any of the 1 turn(s)" for a leaked
+	// one. The wiring rides on the shared critical section that also clears the
+	// in-flight flag — whose clearing the busy→idle edge above proves ran.
 }

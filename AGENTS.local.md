@@ -6,6 +6,167 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H113 — THE DAEMON-LAUNCHED WORKER COULD NOT PROVE WHO IT WAS: `sesh whoami` gains a third VERIFIED source, `turn`, by PROCESS ANCESTRY — deliberately not a token, because a token is the bug class (2026-09-27, sesh 11c1843; api 49→50, NO store migration; DAEMON rebuild + supervised RESTART; **DEPLOYED 5/6** — pocket4 offline, pending)
+Relayed by Lukas from the **myhealthtracker manager** (thread 73827e84 on mymain), holding weekly
+health-report activation on a technical provenance gate. Its measurement, from a real **pi** probe on
+mymain 2026-09-26 inside a native `schedule spawn --headless` run: `whoami --json` exit **1**,
+`info --json` exit 0 `source=env verified=false`. Probe thread 934dc3b4, parent b3f9872f; its one-shot
+schedule was removed afterwards. Its ask was exactly right and its constraint sharper than the ask:
+give a genuine daemon-launched worker a supported verified identity **without** trusting inherited
+env, guessing from cwd/name/latest-schedule-row, or weakening the background-agent protections — and
+do not quietly switch the health schedule to headed workers as a workaround.
+
+**THE GAP, stated precisely.** H112 made `whoami` refuse an identity resting on `$SESH_THREAD_ID`
+alone, which is right: a detached job carries a valid id belonging to unrelated work. But a headless
+turn — `thread send-headless`, and therefore every `schedule spawn --headless` run — is a process the
+DAEMON starts itself, `$SHELL -c '<agent> --print …'`, with no pane. So the **one process on the
+machine whose identity the daemon knows for certain was the only one that could not prove it**, and
+the gate was refusing the caller it should have been serving. Not a hole in H112; the missing half of
+it.
+
+**THE DESIGN DECISION THAT MATTERS, and it is a REJECTION.** The obvious fix is a per-turn secret
+injected into the turn's env and checked against the daemon. **Do not build that.** A token in the
+environment is inherited by exactly the detached and background processes this whole model distrusts
+— every incident in the series (H82 background job, H92 the compacted stranger, H95 the silent
+subscriptions, H112 `adi-requests`) is a frozen environment outliving the context that produced it —
+so shipping a new frozen variable as the cure reproduces the bug class with a fresh name, and a
+leaked token in a log or a note is worse still.
+So: **ancestry**. The daemon records the ROOT PID of each in-flight turn (`Daemon.turnPID`) and
+serves `GET /v1/threads/turn-identity?pid=N`, walking UP from the asking pid
+(`internal/procs.IsAncestor`) to find the turn whose root is an ancestor. Nothing is inheritable —
+the only input is a pid and the answer is recomputed from the live tree — so a reparented process
+(ancestry reaching pid 1, **the exact shape of the reported incident**) is refused by construction.
+It is the precise analogue of the pane marker: *you are demonstrably inside the thing the authority
+made*. New source `srcTurn`, verified, ranked between `pane` and `env`. Design record:
+**`_dev/IDENTITY.md`** (new, with a row in AGENTS.md's table) — the whole provenance area in one
+place, including what is NOT claimed.
+
+**THE RULES THAT KEEP IT HONEST**, each load-bearing: only turns in flight RIGHT NOW (the pid is
+dropped in the SAME critical section that clears `hlInFlight` — an identity outliving its turn is the
+stale-id bug again); an unreadable process tree is a **refusal carrying the read error**, never a
+quiet "not a descendant" (the difference between *provably not yours* and *could not tell* is the
+entire value of the gate); two in-flight turns claiming one pid is impossible by construction (the
+daemon starts each turn as its own child) and is therefore **refused naming both**, never guessed;
+asked on the **LOCAL socket explicitly**, not through `daemonClient`, which honours `$SESH_REMOTE` and
+would have a PEER answer about our pid from its own process table — the confident-but-wrong shape
+itself; and a pre-50 daemon 404s the route, so the worker still fails **CLOSED** with a stderr note
+saying the identity could not be *checked* rather than implying it was checked and rejected.
+NOT claimed, written into the doc: not a security boundary (the pid is self-reported and the API is
+already RCE-equivalent behind one token, H73) — it defends against ACCIDENTAL misattribution, which
+never lies about its pid. `noIdentityError`'s text stays byte-identical (its pinning test too): the
+fuller enumeration went into whoami's own gate message, which is what an agent actually reads, rather
+than churning ~20 verbs' output.
+
+**TWO TURN-ENV FIXES THAT SHOULD ALWAYS HAVE BEEN THERE.** `agents.TurnEnv` is now the SINGLE builder
+for all three agents, above the per-agent switch (a carrier added to pi's branch and forgotten in
+codex's would give a worker an identity on two agents and none on the third; `HeadlessTurn`'s nine
+positional params became `agents.TurnSpec`).
+- **`$TMUX`/`$TMUX_PANE` are STRIPPED.** A headless turn has no pane but inherits the DAEMON's env,
+  and inference reads exactly those two variables to find the marker it treats as GROUND TRUTH — so a
+  daemon started from inside a pane would hand every worker a live reference to a stranger's pane, a
+  mis-identification through the *most* trusted source in the model. **Measured: every supervised
+  daemon on the fleet carries neither**, so this removes nothing in production — but the property must
+  not depend on how the daemon happened to be started, and a test daemon carries both. (Harmless by
+  LUCK until now: the leaked marker named a thread the sandbox daemon did not know, so the lookup
+  failed.)
+- **`$SESH_BIN` is ADDED** (panes have had it since schema 43). A worker should not have to hope PATH
+  resolves a compatible sesh: from a login shell `sesh` may be myrig's wrapper FUNCTION (which
+  re-pins SESH_HOME) or an older install. mysystem's `_thread-ref.ts` already preferred `$SESH_BIN`
+  and its comment claimed turns carried it — now true; `ms attach-thread` from a scheduled worker
+  works as a side effect, with no mysystem change.
+
+**THE CONTRACT** (`sesh help whoami` / `schedule spawn`, sesh-cli SKILL): `TID=$("$SESH_BIN" whoami)
+|| exit 1` — verified in a headless run (`source=turn`) and a `--headed` one (`source=pane`). Still
+refused, correctly: a process the worker DETACHED from its own turn, and anything asking after the
+turn ended.
+
+**GREEN.** `go vet ./...`; gofmt clean on every file I touched (the pre-existing drift files —
+`internal/agents/agents.go`, `internal/daemon/{grid.go,cwd_test.go}`, `internal/agents/pi/*` — are
+untouched, H48; each confirmed with a per-file `git diff --quiet`). Every non-conformance package
+plain; `internal/procs`, `internal/agents`, `internal/matrix`, `cmd/sesh`, `internal/daemon` also
+`-race`, sequentially. NEW cells **`thread.turn-identity` × {claude, codex, pi} / local — 3/3 pass**
+(12–16 s each). BLAST RADIUS, all pass: `thread.whoami`, `thread.info` ×2, `thread.parent` ×2,
+`ticket.list-current`, `daemon.hooks` ×2, `thread.new.headless` ×6 (14 cells, 96 s);
+**`thread.send.headless` ×6** (223 s — the refactored turn path, the core risk);
+`schedule.spawn` ×6, `schedule.message` ×4 of 6, `schedule.catchup`, `schedule.lifecycle`; and per
+H92's lesson that `-run TestMatrix/…` **excludes every non-matrix test in the package**,
+`TestEmptyIDFlagIsLoud` / `TestEmptyThreadName` / `TestTailCLIForms` explicitly.
+**THE FULL 283-CELL MATRIX WAS NOT RUN — do not read this as all-green.**
+**TWO REDS, PROVEN PRE-EXISTING rather than assumed: `schedule.message/codex/{local,remote}`** fail
+`schedule_test.go:261` "the headless turn's reply never carried the sentinel" — and reproduce
+**byte-identically on a clean detached worktree at the base commit 94ddae6**, serially, both
+localities. The shape is a HEADED-BORN codex thread taking a scheduled headless turn; codex is fine
+everywhere this change touches (`thread.send.headless/codex` ×2 and `thread.turn-identity/codex` all
+pass, all real codex headless turns with the reply asserted), so it is the H93/H102 codex-drift
+family, not this. Unfixed here, deliberately: out of scope and not mine.
+ANTI-GAMING, three, each reversed and **md5-verified byte-identical** (H44): dropping `srcTurn` from
+`idSource.verified()` — the plausible half-fix where the source is resolved but not TRUSTED — reddens
+the cell at "the worker could not obtain its OWN identity" (`cmd/sesh/current.go` b7ee7e65…);
+neutering the ancestry check so possession of the id is enough reddens it at "whoami accepted a
+process that merely INHERITED the worker's $SESH_THREAD_ID while the worker's turn was live"
+(`internal/daemon/headless.go` d25a85ea…); un-stripping TMUX reddens the unit naming both variables
+(`internal/agents/headless.go` 618f4f72…). **The first neuter attempt PROVED NOTHING and I nearly
+took it: it left `procs` imported-and-unused, so the harness failed at "build sesh: exit status 1" —
+a compile error, not a discriminating red (H88). Re-applied compilably before believing it.**
+**THE CELL IS BUILT SO IT CANNOT PASS AGAINST A LOOSER GATE:** the refusal half is asserted with the
+worker's turn STILL LIVE and paired with `sesh info` SUCCEEDING on identical inputs (a loud
+PRECONDITION if info ever stops), and a **DECOY** headless thread is planted in the SAME directory
+first, so an implementation that guessed from the cwd or the newest schedule row resolves two
+candidates and fails the positive half. PER-AGENT axes on purpose: the env is shared, but whether an
+agent runs a shell command as a DESCENDANT of its turn is not, and ancestry is the whole mechanism
+(H93). **All three harnesses do — that is a real finding, not an assumption.**
+NOT asserted in the cell and stated rather than faked: that the registry entry is DROPPED at turn
+end. Every vantage point surviving a turn is outside its tree and is refused before AND after, so an
+assertion there would pass without the removal (the vacuous-negative trap). It is asserted where the
+difference IS visible — a daemon unit keyed on the REASON string ("no turn in flight" for a cleared
+registry vs "not inside any of the 1 turn(s)" for a leaked one).
+
+**LIVE ACCEPTANCE on mymain, the real native scheduled path, configured default harness (`--agent`
+OMITTED → pi):** `schedule spawn --cwd /tmp --yolo --max-fires 1`, fired with `run-now` → headless run
+414e3a86. The worker replied **`BIN=414e3a86-…` and `PATH=414e3a86-…`** — i.e. BOTH `"$SESH_BIN"
+whoami` AND a bare `sesh whoami` through myrig's wrapper function return its own uuid; a second turn
+returned `"source": "turn", "verified": true`. **THE MONEY SHOT, with that turn still busy:** an
+outside process carrying `SESH_THREAD_ID=414e3a86` and standing in the worker's OWN cwd (`/tmp`, so
+the cwd does NOT contradict — the residual) is **REFUSED exit 1** with the new clause "the local
+daemon does not recognise this process as one of the turns it launched", while `sesh info` on
+byte-identical inputs exits **0** `source=env verified=false`. Also probed the endpoint read-only
+over the unix socket: with no turn in flight it answers `reason: "no headless turn is in flight on
+this machine"` (the discriminating string above — the registry really does empty), and a malformed pid
+is a loud **400**. Schedule removed, thread deleted, both verified gone.
+
+DEPLOY: **api 49→50, additive, NO store migration** (the registry is in-memory) — but the endpoint is
+daemon-side, so this is a rebuild **AND** a supervised restart, not binary-only. Mixed fleet safe both
+ways: a pre-50 daemon 404s the route and its workers simply cannot verify themselves (fails closed); a
+pre-50 client never asks.
+**DEPLOY RESULT (2026-09-27): LIVE ON 5/6 at 11c1843**, every installed binary `vcs.modified=false`,
+every checkout verified clean **and on main** BEFORE pulling (the script refuses otherwise — H49/H63):
+mymain (local), ideapad, macbook + macstudio (`/opt/homebrew/bin/go`), termux (plain `go build`,
+CGO=1/android — H22; old daemon 17285 killed by its OWN reported pid, the zshenv guard relaunched
+14429 and `/proc/<pid>/exe` re-read to confirm the new inode, not `(deleted)`). All five report
+**api schema 50**, store 26 unchanged. mymain pre/post `VACUUM INTO` backups byte-identical —
+**2,124 threads / 420 tickets / 98 subscriptions** (`~/.sesh/backups/sesh-{pre,post}-v50-h113-20260927.db`).
+Mesh healthy after every restart. **pocket4 OFFLINE** (ssh :22 timed out; the mesh already read it
+unreachable — still pending from H112) → PENDING, harmless: it 404s the route and its workers keep
+the old refusal. When it returns:
+`cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh && supervisorctl restart sesh-daemon`
+(plus H112's still-pending mysystem `npm run build` and the three `npx skills add` refreshes).
+**THE H112 SKILL-COPY TRAP, AGAIN, AND IT WAS STALE:** `~/.agents/skills/sesh-cli` is a real
+directory (a GitHub COPY, not a symlink), and `diff -q` confirmed today's SKILL edit was invisible
+after the binary deploy. Refreshed with `npx -y skills add lukastk/sesh@sesh-cli -g -y -a codex -a
+claude-code -a pi` on mymain, ideapad, macbook, macstudio and termux, each verified by grepping the
+installed copy. **Check this every single time a skill in this repo changes.**
+
+**MY OWN PROCESS MISTAKES, worth not repeating.**
+- **`go test ./internal/...` INCLUDES `internal/conformance`.** I ran it for a quick sanity check,
+  interrupted it, and `t.Cleanup` never ran — leaving **2 sandbox daemons, 2 real pi agents and 3
+  leaked tmux servers** (the H75 leak class, self-inflicted). Cleaned up by EXPLICIT pid after
+  verifying each `SESH_HOME` was under `/tmp/sesh-sb-*`, and the test servers by socket NAME, with the
+  live daemon (uptime 153,657 s) and its 86 sessions verified untouched. `reapStaleTestServers` would
+  NOT have caught them — they were minutes old, under the 2 h bound. **Name the packages.**
+- **`schedule spawn` has no `--headless` flag** — headless is the DEFAULT and only `--headed` exists.
+  My first cell run died on `flag provided but not defined: -headless`. Read the flags, do not infer
+  them from the field name.
+
 ## H112 — `sesh whoami`: the identity GATE, because `sesh info` is a DIAGNOSTIC and the two want opposite defaults; plus mysystem's `attach-thread` stops reading `$SESH_THREAD_ID` raw (2026-09-25, sesh 98c622a + mysystem 113da0e + myagent 704ae92; NO schema/API/daemon change; sesh BINARY-ONLY, no daemon restart; **DEPLOYED 5/6** — pocket4 offline, pending)
 Bug report relayed by Lukas from a claude BACKGROUND JOB in `mosaic-v3/courses/finnish` — an agent
 that is deliberately **not** a sesh thread. Its inherited `$SESH_THREAD_ID=c194478c` resolved to

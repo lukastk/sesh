@@ -156,6 +156,15 @@ after the binary deploy. Refreshed with `npx -y skills add lukastk/sesh@sesh-cli
 claude-code -a pi` on mymain, ideapad, macbook, macstudio and termux, each verified by grepping the
 installed copy. **Check this every single time a skill in this repo changes.**
 
+**CONFIRMED IN PRODUCTION BY THE REQUESTER (2026-09-28 activation, reported back the same day):** a
+second native scheduled headless retest on mymain at api 50, run thread **d756ff77**, returned its
+exact own uuid via `"$SESH_BIN" whoami` with `source=turn verified=true`. The weekly health schedule
+and an independent 07:05 systemd watchdog are enabled for 2026-09-28 (myhealthtracker 18b1173). So the
+contract holds on a run this agent did not stage, which is the only confirmation that really counts —
+every measurement above is mine. NB their schedule executes on **mymain**; pocket4 is the one machine
+that would still fail closed (see the PENDING note above), so do not move a health schedule there
+until it has caught up.
+
 **MY OWN PROCESS MISTAKES, worth not repeating.**
 - **`go test ./internal/...` INCLUDES `internal/conformance`.** I ran it for a quick sanity check,
   interrupted it, and `t.Cleanup` never ran — leaving **2 sandbox daemons, 2 real pi agents and 3

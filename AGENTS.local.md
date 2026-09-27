@@ -6,6 +6,136 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H114 — THE REPORTER WAS A THREAD ALL ALONG: `$SESH_THREAD_ID` can be WRONG while the daemon holds the right answer; fix = a fourth source from the HARNESS's own session id, plus refusals that carry a LEAD — and stop telling an agent it is not a thread (2026-09-27, sesh 11e9705; NO api/schema/daemon change; **BINARY-ONLY, no restart**; DEPLOYED 5/6 — pocket4 offline, pending)
+The H112 reporter came back and **withdrew its own conclusion**, and the withdrawal is worth more than
+the original report. It had written that an agent in its position "has no valid sesh identity at all"
+and should sign as `Claude Code job <id>`. False. VERIFIED HERE against the live daemon before
+believing any of it: it **was** thread `1a26989d` — *mosaic-finnish*, headful claude on mymain, pane
+`%1745`, cwd `…/mosaic-v3/courses/finnish` — the pane carries the marker, the record carries the cwd,
+and `%1745`'s process is `claude --session-id 07998bab…` with the thread record holding **exactly that
+session id**. Its `$SESH_THREAD_ID` said `c194478c` (*adi-requests*, a different project). It found out
+by accident: a decision record assigned work to `1a26989d`, it read that as a second agent in its own
+directory, captured that "other agent's" pane to avoid colliding — and saw its own prose.
+
+**THE FINDING, and it is sharper than H112's.** The variable is not merely absent-or-stale for a
+detached process: **it can be WRONG while a correct answer sits in the daemon the whole time.** Nothing
+about that situation was unknowable. The tooling had no way to be asked. That also INVERTS the original
+report's suggestion (2) — "unset the variable for detached jobs" — which would have left it with
+nothing while the daemon knew.
+
+**WHY H113 CANNOT REACH THIS CASE, and it is a real limit rather than a bug in it.** The reporter's
+ancestry is `zsh <- claude <- claude <- systemd` — reparented. So the pane marker is unreachable (it is
+found via `$TMUX_PANE`, and this process's env is the frozen one from another pane) and H113's turn
+ancestry is unreachable *by construction*: the pane records pid 1838169 and this process does not
+descend from it. H113 answers for a process the daemon STARTED; this one it did not. The reporter said
+so itself ("a whoami that walks parents will fail for a reparented agent") and it was right.
+
+**WHAT I DID NOT BUILD, and the measurement is the reason.** It asked for cwd (plus pid) matching
+against the thread table. MEASURED on the real fleet across **2,311 threads: 937 of them (41 %) sit on
+a cwd shared with another thread**; 1,480 distinct cwds, 113 shared; `~/mysetup/sesh` has **38** and
+`…__mosaic-v2` has **174**. Its own directory has 3 (2 archived, 1 live) — so cwd matching would have
+worked for it *by luck of that directory* and is a coin flip in the common case. **A cwd match is a
+LEAD, never an identity.** Told it so plainly rather than shipping what was asked for.
+
+**THE FOURTH SOURCE: `harness`.** `$CLAUDE_CODE_SESSION_ID` — written by the RUNNING harness for the
+conversation it is actually serving — matched against the `agent_session_id` the daemon already records
+(sesh spawns claude with `--session-id`, so the mapping is the daemon's own). **No API change, no new
+endpoint, no schema bump: the id is already in the thread list**, so this is CLI-side and the deploy is
+binary-only. Found by inspecting MY OWN env as a claude agent (`CLAUDE_CODE_SESSION_ID`, and
+`CLAUDE_PID` which equals my pane's `pane_pid`) — the cheapest measurement available and I should have
+reached for it in H112.
+**THE BAR IS HIGHER THAN A PANE MARKER'S, deliberately.** The marker is read FROM the container the
+process is in; this is a **CLAIM** the process presents. If a harness ever froze its session var the
+way `$SESH_THREAD_ID` gets frozen, the claim would name a real thread belonging to unrelated work and
+look perfect. So it is accepted only when TWO independent things agree: the calling directory does not
+contradict the thread's cwd (**mandatory here, optional for `$SESH_THREAD_ID`, because here it is the
+entire warrant** — and it is what makes the mechanism fail CLOSED on the frozen case), and the thread
+still has a **live pane**. An unreachable liveness probe reads as NOT live, never as a pass; two
+threads on one session id is refused **naming both**; an archived thread is not an identity.
+Claude only and not dressed up as generic — no equivalent var is known for codex or pi, and their tool
+calls are not detached from their panes, so `$TMUX_PANE` already answers for them. Adding one is a
+single entry in `harnessSessionEnvVars`. NOT BUILT, recorded: `$CLAUDE_PID` == the pane's `pane_pid`
+would strengthen the claim further, but a reparented agent's `CLAUDE_PID` may be a CHILD claude, so
+requiring it would refuse the very case this exists for.
+
+**THE HALF THAT ACTUALLY CAUSED THE HARM WAS MY WORDING.** whoami said "this process has **NO sesh
+thread identity**" and the agent believed it — that sentence is why it concluded it was not a thread and
+wrote a wrong id into three other threads' inboxes. **sesh can know that it FAILED TO RESOLVE an
+identity; it cannot know that the caller HAS none, and it must not say so.** The refusal now reads
+`could not establish a verified identity …` and states explicitly that this means UNRESOLVED, not "you
+are not a thread", naming the reparented case where a real thread looks exactly like this. The skill's
+"if you have no sesh identity, say so" paragraph now leads with the same distinction.
+**TWO TESTS WERE PINNING THE BUG** — the `whoamiGate` unit and the `thread.whoami` cell both asserted
+the literal phrase "NO sesh thread identity". Rewritten to assert the corrected property (the refusal
+must be about resolution failing, must say UNRESOLVED, must name the reparented case, and must NOT
+contain the old phrase). A test that pins harmful wording is not protection.
+
+**REFUSALS NOW CARRY A LEAD**, which answers its real complaint ("I just could not get it from the
+environment and did not think to ask the daemon"). When exactly ONE live non-archived thread is
+registered in the caller's **EXACT** directory, the refusal names it, with `sesh info <id>` — the
+POSITIONAL form, because whoami has no `--id` and H95 says a refusal must not offer a flag the caller
+cannot type — and "capture its pane" as the confirmation, which is literally how the reporter found
+itself. More than one: the count is given and **none** is named, because several candidates is not a
+lead. Exact directory only, never containment, or a 174-thread box arrives as "candidates". Probes are
+bounded (`maxLeadProbes` 8). **The wording `LEAD, NOT your identity` is load-bearing** — a lead that
+reads like an answer is worse than no lead.
+
+**CONFERRED with Lukas before building** (AskUserQuestion, both recommendations taken): add `harness`
+as a verified source with corroboration MANDATORY (over leads-only, and over deferring until the
+reporter measures its env), and correct the wording across sesh + the agent-facing skills.
+
+**GREEN.** `go vet ./...`; gofmt clean on every touched file; every non-conformance package plain,
+`cmd/sesh` + `internal/daemon` also `-race`. `thread.whoami` extended and passing — a REAL claude
+thread with a real pane, its real recorded session id, accepted from its own directory
+(`source=harness verified=true` with the wrong `$SESH_THREAD_ID` called out), refused from an unrelated
+one, refused once stopped, and the no-identity refusal required to offer the live thread as a lead.
+Blast radius all pass: `thread.info` ×2, `thread.parent` ×2, `ticket.list-current`, `daemon.hooks` ×2,
+`thread.turn-identity` ×3 (H113's source must still win over this one), plus the three non-matrix
+inference tests. **THE FULL 283-CELL MATRIX WAS NOT RUN.** The two pre-existing
+`schedule.message/codex` reds from H113 stand, unfixed, still not mine.
+ANTI-GAMING, three, each reversed **md5-verified byte-identical** (`cmd/sesh/current.go` 400a6dd2…,
+`cmd/sesh/whoami.go` dc4c43c0…): dropping the cwd corroboration reddens the cell at "certified a
+harness session whose thread sits in an unrelated directory"; dropping the liveness requirement reddens
+it at "still certified a harness session whose conversation is no longer running"; removing the lead
+reddens it at "the refusal must offer the live thread in this directory as a lead".
+**FIXTURE TRAP I walked into: I gave the harness thread the SAME path the cell already used as its
+`unrelatedCwd`** (the incident happened in that directory, so both wanted the name), which made the
+"unrelated" leg run from the thread's own cwd and pass vacuously — it failed loudly, but only because
+the accept-leg assertion ran first. A cell's "unrelated" fixture has to be checked against every other
+directory the cell builds.
+**AND a neuter exposed a real wording bug:** with the lead removed, the no-identity text still said
+"If any thread below might be you" — dangling when no lead follows. Reworded. Neuters find prose
+defects too.
+
+**LIVE-PROVEN read-only against the real mymain daemon, all four cases** — including the reported
+scenario exactly: from the finnish box with `SESH_THREAD_ID=c194478c` and
+`CLAUDE_CODE_SESSION_ID=07998bab…`, whoami prints **`1a26989d-…`** on stdout, exit **0**, and says on
+stderr `$SESH_THREAD_ID=c194478c is WRONG for this process: the harness session it is actually serving
+belongs to thread 1a26989d ("mosaic-finnish")`. That is precisely the line the reporter said would have
+stopped it. Also: my own pane agent with `TMUX`/`TMUX_PANE` stripped resolves via `harness`
+(`source=harness verified=true`); the same claim from `~/mysetup/sesh` is REFUSED naming mosaic-finnish;
+and standing in the finnish box with nothing at all, the refusal hands over `1a26989d
+("mosaic-finnish")` as a lead — the thread the reporter spent real effort discovering by accident.
+
+DEPLOY: **CLI-side only — no daemon, no schema, no wire change ⇒ BINARY-ONLY, NO restart anywhere**,
+and a mixed fleet is trivially safe (an old binary simply has no `harness` source). **LIVE ON 5/6 at
+11e9705**, every binary `vcs.modified=false`, every checkout verified clean and on main before pulling:
+mymain, ideapad, macbook + macstudio (`/opt/homebrew/bin/go`), termux (plain `go build`, H22 — and no
+daemon kill needed this time, which is the point of a CLI-side change). `sesh help whoami` carries the
+harness text on all five. **pocket4 still OFFLINE** → PENDING for H112, H113 AND this; when it returns:
+`cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh && supervisorctl restart sesh-daemon`
+(the restart is H113's, not this change's). **Skill refreshed** on all five via
+`npx -y skills add lukastk/sesh@sesh-cli …` and verified by grep — the H112 trap, third time, checked
+without being reminded this time.
+
+**THE DURABLE LESSON, and it is not about identity.** Both of this reporter's messages were acted on;
+the first one's *reasoning* was wrong and its *symptom* was real. It also had to correct me indirectly:
+H112 shipped advice ("say what you actually are, never borrow an id") that was right about borrowing
+and wrong about what the agent was, and I had no way to notice because I never asked whether an agent
+that cannot resolve itself might still BE something. **When a report concludes "X does not exist",
+check whether X exists before designing around its absence** — the check here was three read-only
+commands, and it overturned the premise of the entire previous round.
+
 ## H113 — THE DAEMON-LAUNCHED WORKER COULD NOT PROVE WHO IT WAS: `sesh whoami` gains a third VERIFIED source, `turn`, by PROCESS ANCESTRY — deliberately not a token, because a token is the bug class (2026-09-27, sesh 11c1843; api 49→50, NO store migration; DAEMON rebuild + supervised RESTART; **DEPLOYED 5/6** — pocket4 offline, pending)
 Relayed by Lukas from the **myhealthtracker manager** (thread 73827e84 on mymain), holding weekly
 health-report activation on a technical provenance gate. Its measurement, from a real **pi** probe on

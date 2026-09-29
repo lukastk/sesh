@@ -6,6 +6,47 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H117 — prefix+L RECORDED THE WRONG CLIENT'S WINDOW, AND nav'S OUTER SELECT WAS AMBIENT TOO (#14) (2026-09-29, sesh b022e0e merged as b1f1be8; NO API/schema/daemon change; BINARY-ONLY; DEPLOYED 5/6 — macbook asleep, pending)
+`resolveMasterLocation` read the carrier's master window with `display-message -c` — the H98
+fu2 ambient read (`-c` says where to PRINT, not what to expand against). Now #11's
+`masterClientWindow` (list-clients iteration). REACHABILITY: clients in the one `master`
+session share its current window, so it needs a client in a SECOND master-server session.
+Building that topology exposed a second instance: nav's outer `select-window -t <machine>`
+named no session and resolved against the session that last had a client move — with a
+second session it failed outright ("can't find window"). Now `master:=<machine>`; WITHOUT
+the `=` a missing `mac` silently selects `macbook` (measured 3.6a / 3.6b / 3.7c).
+**GENERAL RULE: on a server with >1 session, every `-t` must name its session, not just every
+client-scoped read.** New cell `tmux.nav-last` (remote): real carrier on `master`, a real
+decoy client in a second master session whose window is named after a real machine,
+switch-client'd LAST before every nav; asserts `nav --to` records `peer:A` and `nav --last`
+lands on A. Unit `TestMasterClientWindowIgnoresTheAmbientClient` (two real clients, two
+sessions, unique socket names — the H116 fixed-name trap). ANTI-GAMING (reversed, restore
+`cmp`-verified): ambient read back → cell red "recorded the DECOY client's window"; bare
+select-window → red "can't find window"; ambient read inside masterClientWindow → unit red.
+GREEN on the merged main: cmd/sesh, internal/tmux, internal/matrix, internal/tui, `go vet`;
+**19/19 cells** tmux.nav* + tmux.master-current + master.* + route.* (-v -count=1). Full
+matrix NOT run. DEPLOY: binary-only at b1f1be8 (`vcs.modified=false`) on mymain, macstudio,
+ideapad, pocket4, termux; **macbook asleep (ssh timed out) — PENDING**, still on f1441cb
+(harmless: this is a fix for a topology the standard cockpit does not create).
+
+### H116 follow-up — the phone's Shift+F12 popup showed `[all]` instead of `active flagged` whenever the current thread was not flagged; an EXPLICIT --view is now never abandoned (2026-09-29, sesh f1441cb; NO API/schema/daemon change; BINARY-ONLY; DEPLOYED ALL SIX — pocket4 via b1f1be8)
+Lukas: Shift+F12 on the phone "just shows you that thread in `all`" when it is not flagged —
+it should always be `active flagged`, cursor on the current thread if flagged, else row one.
+CAUSE: the popup carries SESH_TUI_MASTER_MACHINE, so the TUI async-resolves and PRESELECTS the
+cockpit's current thread; the meshMsg handler's "preselect exists but the view hides it →
+escalate to ViewAll" branch (built for prefix+s finding an archived current thread) fired.
+FIX: `Model.viewPinned`, set by WithInitialView (--view). A preselect present in the mesh but
+hidden by a PINNED view is released and the cursor re-anchored (first row on launch) — no
+escalation, no refetch. Unpinned launches keep escalating. Tests
+TestPreselectPinnedViewDoesNotEscalate (view unchanged, preselect released, first row, the only
+cmd is the poll tick) + TestPreselectPinnedViewLandsWhenVisible. ANTI-GAMING: `m.viewPinned =
+true` neutered → red "got view=3" (all); reversed. GREEN: internal/tui plain + -race, cmd/sesh,
+full TUI claims suite (75). **LIVE-PROVEN on the phone WITHOUT touching its screen**: the exact
+popup command run in an isolated tmux pane against the phone cockpit's REAL current thread
+(3dcf625e, unflagged): before `[all]` with that thread selected, after `[active flagged]` with
+the first row. The flagged-current case was NOT exercised live (it would mean flagging his
+thread) — covered by the unit test.
+
 ## H116 — THE COCKPIT'S `,`/`.` IN ONE CALL AND ONE LOOKUP (#11), ROUTED CALLS OVER THE DAEMON'S WARM CONNECTION (#12), AND THE "WHERE AM I" MIRROR DERISKED AND PARKED (#13) (2026-09-29, sesh 5ac4a22 = 50d3800 + bf47cb7 merged + myrig 2dc4c33; api 50→51, NO store migration; DAEMON rebuild + supervised RESTART; **DEPLOYED ALL SIX**)
 Lukas: `,`/`.` "at least half a second" on desktop, worse on the phone, while sidebar clicks
 feel instant. Developed in box `20260929_oaqduz__sesh-nav-latency`, one worktree per issue.

@@ -674,3 +674,53 @@ func TestMasterCursorPreselectRefetchesImmediately(t *testing.T) {
 		t.Fatalf("cursor not on the visible target: %+v ok=%v", sel, ok)
 	}
 }
+
+// TestPreselectPinnedViewDoesNotEscalate: a view chosen EXPLICITLY at launch (--view,
+// e.g. the phone's Shift+F12 opening `active flagged`) must not be abandoned for ViewAll
+// to land a preselect the view hides. The preselect is released and the cursor stays on
+// the first row; no escalation refetch is issued.
+func TestPreselectPinnedViewDoesNotEscalate(t *testing.T) {
+	m, err := Model{expanded: map[string]bool{}}.WithInitialView("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.preselectID = "hidden" // the current thread — present in the mesh, not in this view
+	rows := []api.ThreadRow{{Thread: api.Thread{ID: "a", Name: "first"}}, {Thread: api.Thread{ID: "b", Name: "second"}}}
+	updated, cmd := m.Update(meshMsg{rows: rows, preselectSeen: true, fetchedAt: 1})
+	mm := updated.(Model)
+	if mm.view != ViewActive {
+		t.Fatalf("a pinned view must not escalate to ViewAll for a hidden preselect, got view=%d", mm.view)
+	}
+	if mm.preselectID != "" {
+		t.Fatalf("a preselect the pinned view hides can never land — it must be released, still %q", mm.preselectID)
+	}
+	if sel, ok := mm.Selected(); !ok || sel.ID != "a" {
+		t.Fatalf("cursor must stay on the FIRST row, got %+v ok=%v", sel, ok)
+	}
+	if cmd == nil {
+		t.Fatal("the first fetch must still bootstrap the poll tick")
+	}
+	// Exactly the tick, not an escalation refetch: the returned cmd yields a tickMsg.
+	if _, isTick := cmd().(tickMsg); !isTick {
+		t.Fatal("a pinned view must not issue an escalation refetch")
+	}
+}
+
+// TestPreselectPinnedViewLandsWhenVisible: pinning the view never stops a preselect that
+// the view DOES show from landing (the phone's Shift+F12 on a flagged current thread).
+func TestPreselectPinnedViewLandsWhenVisible(t *testing.T) {
+	m, err := Model{expanded: map[string]bool{}}.WithInitialView("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.preselectID = "b"
+	rows := []api.ThreadRow{{Thread: api.Thread{ID: "a", Name: "first"}}, {Thread: api.Thread{ID: "b", Name: "current"}}}
+	updated, _ := m.Update(meshMsg{rows: rows, preselectSeen: true, fetchedAt: 1})
+	mm := updated.(Model)
+	if sel, ok := mm.Selected(); !ok || sel.ID != "b" {
+		t.Fatalf("a visible preselect must land on a pinned view, got %+v ok=%v", sel, ok)
+	}
+	if mm.preselectID != "" {
+		t.Fatalf("a landed preselect must be released, still %q", mm.preselectID)
+	}
+}

@@ -130,6 +130,7 @@ func (m Model) WithInitialView(name string) (Model, error) {
 		return m, err // every caller already says WHICH setting/flag asked for it
 	}
 	m.view = v
+	m.viewPinned = true
 	return m, nil
 }
 
@@ -390,6 +391,13 @@ type Model struct {
 	// machine's daemon (the work server it owns): a direct daemon-client call when the
 	// active window is local (no `sesh` subprocess), routed via a subprocess when remote.
 	masterCursorMachine string
+	// viewPinned: the view was chosen EXPLICITLY at launch (--view / WithInitialView).
+	// A preselect (the master cursor, --cursor) must then never escalate to ViewAll to
+	// land a thread the view hides — the caller asked for THAT view (e.g. the phone's
+	// Shift+F12 opens `active flagged`: the current thread is selected when it is in
+	// the view, otherwise the cursor stays on the first row). Unpinned launches keep
+	// the escalation (prefix+s on `active` still finds an archived current thread).
+	viewPinned bool
 
 	// uuidPopup: `y` shows the selected thread's FULL uuid in a popup; `c` inside
 	// it copies to the system clipboard, any other key closes. note is the last
@@ -1402,6 +1410,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyPending(true) // reconcile: re-apply optimistic patches, GC satisfied/expired ones
 			if m.preselectID != "" && m.positionCursorOn(m.preselectID) {
 				m.preselectID = "" // landed — release it so the user can move freely
+			} else if m.preselectID != "" && msg.preselectSeen && m.viewPinned {
+				// The thread exists but the EXPLICITLY requested view hides it: honour the
+				// view. Release the preselect (it can never land here) and leave the cursor
+				// where it is — the first row on a fresh launch.
+				m.preselectID = ""
+				m.reanchorCursor(anchorID)
 			} else if m.preselectID != "" && msg.preselectSeen && m.view != ViewAll {
 				// Preselect couldn't land but the thread DOES exist in the mesh — it's just
 				// hidden by the current view (e.g. an archived thread while the default view

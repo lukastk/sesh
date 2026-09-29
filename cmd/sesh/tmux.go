@@ -306,8 +306,13 @@ func tmuxNavRun(cfg config.Config, args []string) error {
 	}
 
 	// (1) Outer: switch the mymastertmux client to machine M's window.
+	// Qualified as master:=<machine>. A BARE window name resolves against tmux's current
+	// session — the one whose client moved last — so a client in any second session on
+	// the master server made nav fail with "can't find window" (#14). `=` is an EXACT
+	// window-name match: without it a missing "mac" window silently selects "macbook"
+	// (measured on tmux 3.6a/3.6b/3.7c).
 	master := tmux.NewServer(cfg.MasterSocket)
-	if err := master.SelectWindow(machine); err != nil {
+	if err := master.SelectWindow(masterSession + ":=" + machine); err != nil {
 		return fmt.Errorf("nav outer select (window %q on %s): %w", machine, cfg.MasterSocket, err)
 	}
 

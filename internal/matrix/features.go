@@ -302,6 +302,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-last",
+		Description: "a cockpit-carried `tmux nav --to` records prefix+L's from-location from the CARRIER client's own master window (list-clients, not the ambient `display-message -c` read — #14), and `tmux nav --last` returns there; proved with a real carrier on `master` and a real DECOY client in a SECOND master-server session (window named after a real machine) switch-client'd LAST before every nav",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-master-http",
 		Description: "the master-path nav's INNER switch-client FOLLOWS the peer's transport: for an http peer (api_addr set) it is carried over the daemon's TCP API (POST /v1/tmux/nav) with NO ssh hop — proved by a deliberately broken ssh dest (http-only.invalid) + the switch still landing; ssh peers keep the (now connection-multiplexed) ssh inner switch",
 		Localities:  []Locality{Remote},

@@ -113,8 +113,37 @@ func tmuxNavRun(cfg config.Config, args []string) error {
 	thread := fs.String("thread", "", "the thread id whose pane to land on: nav targets the WINDOW holding its @sesh-thread-id pane, not just the session's last-active window (omit for a plain session nav)")
 	last := fs.Bool("last", false, "switch to the PREVIOUS sesh-nav location — the cross-machine 'last window' toggle (ignores --to)")
 	windowFlag := fs.Int("window", -1, "explicit window index to land on (internal: prefix+L replays a recorded location)")
+	cycle := fs.String("cycle-flagged", "", "next|prev: step through the FLAGGED threads of the active view, in the TUI's order (master prefix+, / prefix+.)")
+	dryRun := fs.Bool("dry-run", false, "with --cycle-flagged: print the resolved ring, current thread, target and from-location as JSON; do not navigate")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	// --cycle-flagged resolves the target itself, AND where the cockpit is now — which is
+	// also prefix+L's from-location, so it is recorded from this one resolve below
+	// instead of being resolved a second time (issue #11).
+	var cycleFrom *navLoc
+	if *cycle != "" {
+		if *to != "" || *last || *attach || *inClient || *thread != "" || *windowFlag >= 0 {
+			return errors.New("nav: --cycle-flagged picks its own target; it cannot be combined with --to/--thread/--window/--last/--attach/--in-client")
+		}
+		plan, err := planCycleFlagged(cfg, *cycle)
+		if *dryRun {
+			if plan.Outcome == "" { // a hard failure (bad dir, no mesh, stale carrier), not an empty ring
+				return err
+			}
+			return emitJSON(plan)
+		}
+		if err != nil {
+			return err
+		}
+		if plan.CurrentNote != "" {
+			fmt.Fprintln(os.Stderr, "sesh tmux nav: cycle:", plan.CurrentNote+"; starting from the ring's end")
+		}
+		*to = plan.Target.Machine + ":" + plan.Target.Session
+		*thread = plan.Target.ID
+		cycleFrom = plan.From
+	} else if *dryRun {
+		return errors.New("nav: --dry-run only applies to --cycle-flagged")
 	}
 	windowTarget := *windowFlag
 	// prefix+L: target the previously-recorded location instead of --to. Read it BEFORE
@@ -135,7 +164,11 @@ func tmuxNavRun(cfg config.Config, args []string) error {
 	// Record where the cockpit is NOW (the "from"), so the NEXT prefix+L returns here.
 	// Master-path only (the cockpit carries SESH_NAV_CLIENT); best-effort — a failure to
 	// resolve just skips the history update and never blocks the nav.
-	if !*attach && !*inClient {
+	if *cycle != "" {
+		if cycleFrom != nil {
+			writeNavPrev(cfg.Home, cycleFrom.Machine, cycleFrom.Session, cycleFrom.Window)
+		}
+	} else if !*attach && !*inClient {
 		if cm, cs, cw, ok := resolveMasterLocation(cfg); ok {
 			writeNavPrev(cfg.Home, cm, cs, cw)
 		}

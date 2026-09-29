@@ -656,6 +656,8 @@ var flagDocs = map[string][]flagDoc{
 		{"--to", "target as <machine>:<session> (required unless --last)"},
 		{"--thread", "thread id whose @sesh-thread-id pane window to land on (omit for plain session nav)"},
 		{"--last", "switch to the previous sesh-nav location — the cross-machine 'last window' toggle (ignores --to)"},
+		{"--cycle-flagged", "next|prev: step to the next/previous FLAGGED thread of the active view (all machines, offline peers hidden) in the TUI's render order, wrapping; headless rows are stepped over, never revived. The start point is what the pressing client's active master window shows ($SESH_NAV_CLIENT; unset => next starts at the first entry, prev at the last). Refuses loudly with 'no flagged active threads' or 'flagged threads are all dead'. Exclusive with --to/--thread/--last/--attach/--in-client"},
+		{"--dry-run", "with --cycle-flagged: print the plan as JSON {outcome: ok|no-flagged|all-dead, ring, current, target, from} and do not navigate (exit 0 for an empty ring; a hard failure still errors)"},
 		{"--in-client", "switch the CURRENT tmux client to the target (local target on the current work socket; no master)"},
 		{"--client", "with --in-client: the exact tmux client to switch; required when stdin is not a tty"},
 		{"--attach", "ATTACH this terminal to the target thread (from a plain shell outside tmux); replaces the process"},

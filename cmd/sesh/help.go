@@ -98,9 +98,9 @@ var helpRegistry = map[string]cmdHelp{
 		examples: []string{"sesh tmux stage-file --to macbook ./screenshot.png", "cat f | sesh tmux stage-file --to mymain --stdin --name f"},
 	},
 	"tmux nav": {
-		summary:  "navigate to a thread's session+window: switch the master's outer+inner clients, or the current client (--in-client), or attach this terminal (--attach). --thread lands on the thread's window; --last toggles to the previous sesh-nav location (the prefix+L 'last window'). Carve-out: stays on ssh transport",
-		usage:    "sesh tmux nav (--to <machine>:<session> [--thread <id>] | --last) [--in-client [--client <client>]] [--attach] [--machine <m>]",
-		examples: []string{"sesh tmux nav --to mymain:sesh_fix-bug", "sesh tmux nav --to mymain:sesh_x --in-client", "sesh tmux nav --last"},
+		summary:  "navigate to a thread's session+window: switch the master's outer+inner clients, or the current client (--in-client), or attach this terminal (--attach). --thread lands on the thread's window; --last toggles to the previous sesh-nav location (the prefix+L 'last window'); --cycle-flagged next|prev steps the cockpit through the FLAGGED threads of the active view in the TUI's own order (master prefix+, / prefix+.), resolving where the cockpit is ONCE — as both the start point and the prefix+L from-location. Carve-out: stays on ssh transport",
+		usage:    "sesh tmux nav (--to <machine>:<session> [--thread <id>] | --last | --cycle-flagged <next|prev> [--dry-run]) [--in-client [--client <client>]] [--attach] [--machine <m>]",
+		examples: []string{"sesh tmux nav --to mymain:sesh_fix-bug", "sesh tmux nav --to mymain:sesh_x --in-client", "sesh tmux nav --last", "SESH_NAV_CLIENT=/dev/pts/3 sesh tmux nav --cycle-flagged next", "sesh tmux nav --cycle-flagged prev --dry-run"},
 	},
 	"tmux master-current": {
 		summary:  "print the thread id (or --session name, or --json {thread_id,session,window}) the origin master's window currently shows on this work server; routes cross-machine",

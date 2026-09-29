@@ -297,6 +297,11 @@ func init() {
 		Localities:  []Locality{Remote},
 	})
 	Register(Feature{
+		ID:          "tmux.nav-cycle-flagged",
+		Description: "`tmux nav --cycle-flagged next|prev` (master prefix+, / prefix+.) steps a REAL cockpit through the flagged threads of the active view in the TUI's own order — wrapping, stepping over a flagged HEADLESS thread, starting from what the carrier client's master window shows even with a decoy client moving last on the peer, recording prefix+L's from-location — with EXACTLY ONE 'where am I' resolve per press (counted at the peer's binary, with a plain nav as the control); the two empty rings refuse loudly and distinctly and move nothing",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "tmux.nav-master-http",
 		Description: "the master-path nav's INNER switch-client FOLLOWS the peer's transport: for an http peer (api_addr set) it is carried over the daemon's TCP API (POST /v1/tmux/nav) with NO ssh hop — proved by a deliberately broken ssh dest (http-only.invalid) + the switch still landing; ssh peers keep the (now connection-multiplexed) ssh inner switch",
 		Localities:  []Locality{Remote},

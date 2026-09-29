@@ -958,6 +958,21 @@ sesh thread new --agent claude --name x --cwd ~/proj --machine macbook
 `enter`/nav is normally done from the TUI; the underlying primitive is `sesh tmux nav --to
 <machine>:<session>` (mycockpit + the inner client switch).
 
+The cockpit's flagged ring (master `prefix+,` / `prefix+.`) is one call:
+
+```bash
+SESH_NAV_CLIENT=<master client> sesh tmux nav --cycle-flagged next   # or prev
+sesh tmux nav --cycle-flagged next --dry-run   # JSON plan: outcome, ring, current, target, from
+```
+
+It steps through the **flagged** threads of the `active` view (every machine, offline
+peers hidden) in the TUI's own render order, wrapping, stepping over headless rows (a
+cycle key never revives). Where the cockpit is now is resolved **once** and used both as
+the start point and as `prefix+L`'s from-location. An empty ring refuses loudly and
+distinctly: `no flagged active threads` vs `flagged threads are all dead`. Without
+`$SESH_NAV_CLIENT` there is no start point: `next` enters at the first entry, `prev` at the
+last.
+
 ## Driving an agent, delegating, awaiting
 
 ```bash

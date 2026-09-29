@@ -122,11 +122,22 @@ and a mixed fleet is trivially safe (an old binary simply has no `harness` sourc
 11e9705**, every binary `vcs.modified=false`, every checkout verified clean and on main before pulling:
 mymain, ideapad, macbook + macstudio (`/opt/homebrew/bin/go`), termux (plain `go build`, H22 — and no
 daemon kill needed this time, which is the point of a CLI-side change). `sesh help whoami` carries the
-harness text on all five. **pocket4 still OFFLINE** → PENDING for H112, H113 AND this; when it returns:
+harness text on all five. **pocket4 still OFFLINE** → PENDING for H112, H113 AND this [STALE: caught up by itself 2026-09-29 — see the catch-up addendum below]; when it returns:
 `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh && supervisorctl restart sesh-daemon`
 (the restart is H113's, not this change's). **Skill refreshed** on all five via
 `npx -y skills add lukastk/sesh@sesh-cli …` and verified by grep — the H112 trap, third time, checked
 without being reminded this time.
+
+### H112/H113/H114 pocket4 catch-up — IT SELF-HEALED, and the entries above were stale (2026-09-29; verification only, no code change)
+pocket4 came back on the tailnet and was found **already at 33661cf** — current main, carrying all
+three changes — with api schema 50, store 26, its mysystem `dist/` built and its `sesh-cli` skill copy
+fresh. Nothing had to be deployed. The mechanism is the H92 one and it is worth not re-learning:
+**myrig's post phase builds sesh per machine**, so a box that misses a deploy window catches itself up
+at its next install/boot rather than staying behind. Verified BEHAVIOURALLY rather than from the
+revision string — `GET /v1/threads/turn-identity` answers `{"schema":50,…,"reason":"no headless turn is
+in flight on this machine"}` (H113 live) and whoami's refusal carries the corrected UNRESOLVED wording
+plus the harness clause (H114 live). **The fleet is 6/6 on H112, H113 and H114.** The three "pocket4
+OFFLINE → PENDING" notes above were true when written and are now stale; each is marked.
 
 **THE DURABLE LESSON, and it is not about identity.** Both of this reporter's messages were acted on;
 the first one's *reasoning* was wrong and its *symptom* was real. It also had to correct me indirectly:
@@ -275,7 +286,7 @@ CGO=1/android — H22; old daemon 17285 killed by its OWN reported pid, the zshe
 14429 and `/proc/<pid>/exe` re-read to confirm the new inode, not `(deleted)`). All five report
 **api schema 50**, store 26 unchanged. mymain pre/post `VACUUM INTO` backups byte-identical —
 **2,124 threads / 420 tickets / 98 subscriptions** (`~/.sesh/backups/sesh-{pre,post}-v50-h113-20260927.db`).
-Mesh healthy after every restart. **pocket4 OFFLINE** (ssh :22 timed out; the mesh already read it
+Mesh healthy after every restart. **pocket4 OFFLINE** [STALE — caught up by itself 2026-09-29, see H114's catch-up addendum] (ssh :22 timed out; the mesh already read it
 unreachable — still pending from H112) → PENDING, harmless: it 404s the route and its workers keep
 the old refusal. When it returns:
 `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh && supervisorctl restart sesh-daemon`
@@ -405,7 +416,7 @@ H49/H63): mymain (local), ideapad, macbook, macstudio (`/opt/homebrew/bin/go` au
 (plain `go build`, CGO=1/android — H22). NO daemon was restarted anywhere and none needed to be.
 **mysystem rebuilt on 4** (mymain, ideapad, macbook, macstudio); **termux has the repo but no
 `node_modules`** — its mysystem CLI is not built there, so it was correctly skipped rather than
-forced. **pocket4 OFFLINE** (ssh :22 timed out, and the mesh already read it unreachable) → PENDING
+forced. **pocket4 OFFLINE** [STALE — caught up by itself 2026-09-29, see H114's catch-up addendum] (ssh :22 timed out, and the mesh already read it unreachable) → PENDING
 for both, harmless: it simply has no `whoami` and keeps the old attach behaviour until it catches
 up. When it returns:
 `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh`

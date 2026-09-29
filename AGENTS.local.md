@@ -98,6 +98,15 @@ carries `view_ring`, both new scripts are symlinked, and `sesh tui` now starts p
 server (mymain, pocket4, macbook, termux) — the binding is NEW, so a running cockpit needs it.
 **A RUNNING SIDEBAR KEEPS BOTH ITS BINARY AND ITS CONFIG (H70), so the ring is inert inside Lukas's
 open sidebars until `prefix+r`** — and inert means the key looks dead, not loud. Told him.
+**THE H112 SKILL-COPY TRAP, checked without being reminded: `~/.agents/skills/{sesh-cli,
+mysetup-navigator}` are real DIRECTORIES (GitHub copies), and `grep` confirmed both were stale after
+the binary deploy** — a concurrent install had even refreshed them from GitHub at 14:01, i.e. from
+BEFORE my push. Refreshed with `npx -y skills add lukastk/sesh@sesh-cli` and
+`lukastk/myrig@mysetup-navigator` (`-g -y -a codex -a claude-code -a pi`) on all six, each verified by
+grepping the installed copy. **NEW TRAP WORTH KEEPING: `npx` READS STDIN**, so in a script piped to
+`zsh -ls` over ssh the first `npx` swallows every remaining line and the rest silently never runs (my
+verification `print` vanished on five machines and the run still exited 0). Give each `npx` a
+`</dev/null`.
 KNOWN EDGE, stated rather than hidden: a key injected while the sidebar is EDITING ITS `/` FILTER goes
 to the filter and is ignored (its pane wears the red filter tint, so the state is visible). Making the
 ring key work from every mode would mean handling it in three key handlers — the H41 drift class — so

@@ -54,7 +54,7 @@ func TestKillCodexHomeProcs(t *testing.T) {
 		if err := c.Start(); err != nil {
 			t.Fatal(err)
 		}
-		go c.Wait() //nolint:errcheck — reaps the zombie so liveness checks are honest
+		go c.Wait()                            //nolint:errcheck — reaps the zombie so liveness checks are honest
 		t.Cleanup(func() { c.Process.Kill() }) //nolint:errcheck
 		return c
 	}

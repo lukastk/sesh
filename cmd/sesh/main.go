@@ -41,24 +41,20 @@ func main() {
 
 	// `--machine X` is a pseudo-global routing flag handled before dispatch: if X is
 	// a remote peer, forward the command there over the peer's EXPLICIT transport —
-	// ssh (a real ssh hop) or http (the peer's TCP API). Local-only meta commands
-	// (`peer`, `matrix`, help) are excluded — their own args may legitimately contain
-	// `--machine` (e.g. `peer add --machine Q`).
-	//
-	// postRouteNudge, when set, fires after a ROUTED command completes successfully
-	// (error paths os.Exit before reaching it): it asks the LOCAL daemon to re-sync
-	// its cached view of the routed-to peer now, so a routed mutation shows up in
-	// local reads in ~an RTT (see nudgeLocalMesh). Set for the http-routed
-	// continue-local-dispatch path; the ssh-handled path nudges inline below.
-	var postRouteNudge func()
+	// ssh (a real ssh hop) or http (the peer's TCP API, reached through the LOCAL
+	// daemon's /v1/route proxy since schema 51). Local-only meta commands (`peer`,
+	// `matrix`, help) are excluded — their own args may legitimately contain
+	// `--machine` (e.g. `peer add --machine Q`). After a routed mutation the local
+	// daemon's cached view of the peer is re-synced at once: by nudgeLocalMesh on the
+	// ssh path, by the route proxy itself on the http path.
 	if routableSubcommand(os.Args[1]) {
 		machine, rest := extractMachineFlag(os.Args[1:])
 		if machine != "" {
-			cfg := config.Load() // the LOCAL config — captured before routing can set SESH_REMOTE
+			cfg := config.Load() // the LOCAL config — captured before routing can set SESH_ROUTE_MACHINE
 			if machine != cfg.Machine {
 				// handled=true: ran remotely over ssh (done). handled=false: pointed
-				// this process at the peer's TCP API (SESH_REMOTE now set) — continue
-				// local dispatch, where daemonClient reaches the peer.
+				// this process at the peer through the local daemon (SESH_ROUTE_MACHINE
+				// now set) — continue local dispatch, where daemonClient reaches it.
 				handled, err := routeMachine(cfg, machine, rest)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "sesh:", err)
@@ -68,7 +64,9 @@ func main() {
 					nudgeLocalMesh(cfg, machine)
 					return
 				}
-				postRouteNudge = func() { nudgeLocalMesh(cfg, machine) }
+				// http-routed (schema 51): the command goes THROUGH the local daemon's
+				// /v1/route proxy, which re-syncs the peer's cached view itself after a
+				// successful mutation — no separate nudge from here.
 			}
 			// machine == self, or http-routed: drop the flag and run locally.
 			os.Args = append([]string{os.Args[0]}, rest...)
@@ -242,11 +240,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "sesh: unknown command %q\n", os.Args[1])
 		usage()
 		os.Exit(2)
-	}
-	// Reached only when an http-routed command dispatched above and SUCCEEDED
-	// (every failure path exits). See postRouteNudge above.
-	if postRouteNudge != nil {
-		postRouteNudge()
 	}
 }
 

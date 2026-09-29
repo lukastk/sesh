@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -50,6 +51,63 @@ func NewRemote(addr, token string) *Client {
 		token: token,
 		http:  &http.Client{Timeout: 15 * time.Second},
 	}
+}
+
+// NewRouted builds a client for PEER machine's daemon that goes THROUGH the local
+// daemon on socketPath (schema 51, /v1/route/<machine>/...): the local daemon
+// forwards each request on the keep-alive connection its mesh sync already holds to
+// that peer, so a fresh CLI process no longer pays a cold TCP dial per call. Same
+// methods, same surface, no token here (the local daemon authenticates to the peer).
+// Only for http peers — the caller decides the transport; this never changes it.
+func NewRouted(socketPath, machine string) *Client {
+	unix := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
+		},
+	}
+	return &Client{
+		base: "http://unix/v1/route/" + url.PathEscape(machine),
+		http: &http.Client{
+			Timeout:   15 * time.Second,
+			Transport: routeGuard{next: unix, machine: machine},
+		},
+	}
+}
+
+// routeGuard turns the one ambiguous answer into a loud one: a 404 that does NOT
+// carry api.RoutedByHeader came from a local daemon with no /v1/route at all (it
+// predates schema 51 — the binary was updated but the daemon not restarted). Passed
+// through, it would read as "thread/session not found" on the peer. Never a silent
+// fallback to dialing the peer directly.
+type routeGuard struct {
+	next    http.RoundTripper
+	machine string
+}
+
+func (g routeGuard) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := g.next.RoundTrip(req)
+	if err != nil {
+		// A routed call depends on the local daemon (it holds the peer connection);
+		// say so, rather than surfacing a bare unix-socket dial error.
+		return nil, fmt.Errorf("routing to %s goes through the LOCAL sesh daemon, which did not answer: %w", g.machine, err)
+	}
+	if resp.StatusCode == http.StatusNotFound && resp.Header.Get(api.RoutedByHeader) == "" {
+		resp.Body.Close() //nolint:errcheck
+		return nil, fmt.Errorf("routing to %s: the LOCAL sesh daemon has no /v1/route (it predates schema %d) — restart it through its service manager (supervisorctl restart sesh-daemon; termux: see AGENTS.local.md)", g.machine, api.SchemaVersion)
+	}
+	// The route handler's OWN refusal (offline, unknown machine, dial failed…): make it
+	// an error carrying the message, so callers whose methods report only a status code
+	// (Health, Status, Snapshot) still say WHY. The peer's own answers pass through.
+	if resp.Header.Get(api.RouteRefusedHeader) != "" {
+		defer resp.Body.Close() //nolint:errcheck
+		var e api.ErrorResponse
+		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Error != "" {
+			return nil, fmt.Errorf("%s (HTTP %d)", e.Error, resp.StatusCode)
+		}
+		return nil, fmt.Errorf("routing to %s refused by the local daemon (HTTP %d)", g.machine, resp.StatusCode)
+	}
+	return resp, nil
 }
 
 // req builds a request with the base host substituted and the bearer token

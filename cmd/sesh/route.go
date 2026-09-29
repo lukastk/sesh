@@ -163,11 +163,14 @@ func httpRoutable(rest []string) bool {
 // transport (peers.Peer.Transport) — never an automatic fallback. It returns:
 //   - handled=true: it ran the command remotely itself (ssh transport); the caller
 //     is done.
-//   - handled=false: it has pointed THIS process at the peer's TCP API by setting
-//     SESH_REMOTE/SESH_API_TOKEN (http transport); the caller should drop --machine
-//     and continue LOCAL dispatch, where daemonClient reaches the peer's API.
+//   - handled=false: it has pointed THIS process at the peer THROUGH the local
+//     daemon's /v1/route proxy by setting SESH_ROUTE_MACHINE (http transport,
+//     schema 51); the caller should drop --machine and continue LOCAL dispatch, where
+//     daemonClient reaches the peer via the local daemon's warm connection.
 //
-// An http peer with an unresolvable token is a LOUD error, not a silent ssh attempt.
+// The http path does no work here beyond reading peers.json: the local daemon answers
+// the offline gate from memory and resolves the peer's token itself, so a fresh CLI
+// process no longer fetches the whole mesh (~2,400 threads) nor dials the peer cold.
 func routeMachine(cfg config.Config, machine string, rest []string) (handled bool, err error) {
 	reg, err := peers.Load(cfg.PeersPath())
 	if err != nil {
@@ -177,25 +180,19 @@ func routeMachine(cfg config.Config, machine string, rest []string) (handled boo
 	if !ok {
 		return false, fmt.Errorf("unknown machine %q: no peer registered (see `sesh peer add`)", machine)
 	}
-	// Fast-fail a peer the local daemon's liveness cache DEFINITIVELY knows is offline,
-	// instead of stalling on a dial (15s HTTP client timeout, or an ssh TCP-connect
-	// wait). Same failure the dial would eventually produce — just instant and clearer.
-	// Conservative: an unknown/never-synced peer, a reachable peer, or a down local
-	// daemon all fall through to the live dial (no behavior change).
+	// HTTP transport for a client-only command: aim this process at the peer through
+	// the local daemon (which applies the same known-offline gate, from memory).
+	if peer.Transport() == "http" && httpRoutable(rest) {
+		os.Setenv("SESH_ROUTE_MACHINE", machine)
+		return false, nil
+	}
+	// SSH transport (the default, and the only path for the carve-outs). Fast-fail a
+	// peer the local daemon's liveness cache DEFINITIVELY knows is offline, instead of
+	// stalling on an ssh TCP-connect wait. Conservative: an unknown/never-synced peer, a
+	// reachable peer, or a down local daemon all fall through to the live ssh hop.
 	if peerKnownOffline(cfg, machine) {
 		return false, fmt.Errorf("machine %q is offline per the local mesh cache; not routing (check `sesh mesh`, retry when it is back)", machine)
 	}
-	// HTTP transport for a client-only command: aim this process at the peer's API.
-	if peer.Transport() == "http" && httpRoutable(rest) {
-		token, err := peer.ResolveAPIToken()
-		if err != nil {
-			return false, err
-		}
-		os.Setenv("SESH_REMOTE", peer.ApiAddr)
-		os.Setenv("SESH_API_TOKEN", token)
-		return false, nil
-	}
-	// SSH transport (the default, and the only path for the carve-outs).
 	return true, routeToMachineSSH(peer, rest)
 }
 
@@ -204,7 +201,9 @@ func routeMachine(cfg config.Config, machine string, rest []string) (handled boo
 // ROUTED command, so a mutation on the peer becomes visible in local reads
 // (TUI/mesh) in ~an RTT instead of at the next sync-cadence tick. cfg must be
 // the LOCAL config captured BEFORE routing (http routing points config.Load at
-// the peer via SESH_REMOTE — the nudge must reach the local daemon).
+// the peer — the nudge must reach the local daemon). Since schema 51 only the SSH
+// path calls this: an http-routed mutation is nudged by the local daemon's route
+// proxy itself, which saw it succeed.
 //
 // BEST-EFFORT BY DESIGN, errors dropped: the routed command already succeeded,
 // and this is a pure freshness hint to a component that may legitimately be

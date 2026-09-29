@@ -59,7 +59,16 @@ type Config struct {
 	// TCP API (SESH_REMOTE + SESH_API_TOKEN) instead of the local unix socket.
 	RemoteAddr  string
 	RemoteToken string
+	// RouteMachine, when set (SESH_ROUTE_MACHINE — set by the `--machine` router for
+	// an http peer, schema 51), makes the CLI/TUI target that PEER through the LOCAL
+	// daemon's /v1/route proxy, reusing the daemon's warm connection to it.
+	RouteMachine string
 }
+
+// Routed reports whether this process has been pointed at another machine's
+// daemon — directly (SESH_REMOTE) or through the local daemon (SESH_ROUTE_MACHINE).
+// A routed process must not route again.
+func (c Config) Routed() bool { return c.RemoteAddr != "" || c.RouteMachine != "" }
 
 // ResolveHome returns the sesh base dir: $SESH_HOME, else ~/.sesh. It is the
 // single source of truth for "where sesh lives" — used by Load and by
@@ -118,12 +127,12 @@ func Load() Config {
 	}
 
 	return Config{
-		Home:         home,
+		Home:            home,
 		Machine:         machine,
 		MachineExplicit: machineExplicit,
-		TmuxSocket:   socket,
-		MasterSocket: masterSocket,
-		TmuxConf:     os.Getenv("SESH_TMUX_CONF"),
+		TmuxSocket:      socket,
+		MasterSocket:    masterSocket,
+		TmuxConf:        os.Getenv("SESH_TMUX_CONF"),
 		MasterSelfheal: func() bool {
 			switch os.Getenv("SESH_MASTER_SELFHEAL") {
 			case "off", "0", "false":
@@ -131,12 +140,13 @@ func Load() Config {
 			}
 			return true
 		}(),
-		TicketOwner: os.Getenv("SESH_TICKET_OWNER"),
-		CodexHome:   os.Getenv("SESH_CODEX_HOME"),
-		APIAddr:     os.Getenv("SESH_API_ADDR"),
-		APIToken:    resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
-		RemoteAddr:  os.Getenv("SESH_REMOTE"),
-		RemoteToken: resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		TicketOwner:  os.Getenv("SESH_TICKET_OWNER"),
+		CodexHome:    os.Getenv("SESH_CODEX_HOME"),
+		APIAddr:      os.Getenv("SESH_API_ADDR"),
+		APIToken:     resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		RemoteAddr:   os.Getenv("SESH_REMOTE"),
+		RemoteToken:  resolveToken(os.Getenv("SESH_API_TOKEN"), os.Getenv("SESH_API_TOKEN_FILE")),
+		RouteMachine: os.Getenv("SESH_ROUTE_MACHINE"),
 	}
 }
 

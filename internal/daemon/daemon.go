@@ -243,7 +243,9 @@ func New(cfg config.Config) (*Daemon, error) {
 	if cfg.MasterSelfheal {
 		d.mmaint = newMasterMaint(d)
 	}
-	d.srv = &http.Server{Handler: d.routes()}
+	// unixRoutes = routes() + the /v1/route proxy, which is deliberately NOT on the TCP
+	// API server (route.go).
+	d.srv = &http.Server{Handler: d.unixRoutes()}
 	return d, nil
 }
 

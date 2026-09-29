@@ -321,7 +321,28 @@ package api
 // old refusal (fails CLOSED — a worker on an old daemon simply cannot verify
 // itself and is told so), and a pre-50 CLIENT never asks. No store migration —
 // the registry is in-memory, exactly as long-lived as the turn.
-const SchemaVersion = 50
+// 51: ROUTED CALLS THROUGH THE LOCAL DAEMON — ANY /v1/route/<machine>/<v1 path>
+// on the UNIX socket only (additive; issue #12). An http-routed CLI command
+// (`--machine X`, and `tmux nav`'s inner switch) now asks its local daemon, which
+// forwards on the keep-alive connection its mesh sync already holds to X and
+// answers reachability from memory — instead of each fresh CLI process fetching
+// the whole mesh and dialing X cold. Every response carries X-Sesh-Routed-To.
+// NOT mixed-safe for a NEW client on an OLD local daemon: the route 404s without
+// that header and the client refuses LOUDLY ("restart the local daemon") rather
+// than silently dialing direct. Peers are unaffected (they see ordinary requests).
+const SchemaVersion = 51
+
+// RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
+// proxied peer's answer and the route's own refusals alike — naming the machine it
+// was routed to. A 404 WITHOUT it means the local daemon predates the route.
+const RoutedByHeader = "X-Sesh-Routed-To"
+
+// RouteRefusedHeader marks a response the /v1/route handler produced ITSELF (the
+// request never reached, or could not reach, the peer — offline, unknown machine, an
+// ssh peer, the dial failed), as opposed to the peer's own answer. The routed client
+// turns these into an error carrying the message whatever method made the call, so a
+// refusal is never reduced to a bare status code.
+const RouteRefusedHeader = "X-Sesh-Route-Refused"
 
 // UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
 // and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does

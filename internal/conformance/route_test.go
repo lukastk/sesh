@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,8 +64,25 @@ func setupRoutedPeer(t *testing.T, tr meshTransport) *Sandbox {
 	if tr.name == "http" {
 		add = append(add, "--api-addr", apiAddr, "--api-token", apiToken)
 	}
-	if _, stderr, err := (&localRunner{bin: bin, env: clientEnv}).Run(t, add...); err != nil {
+	clientRunner := &localRunner{bin: bin, env: clientEnv}
+	if _, stderr, err := clientRunner.Run(t, add...); err != nil {
 		t.Fatalf("peer add (%s): %v\n%s", tr.name, err, stderr)
+	}
+	if tr.name == "http" {
+		// Since schema 51 an http-routed command goes THROUGH the client's own local
+		// daemon (/v1/route), so the client machine needs one — with its work/master
+		// sockets isolated like any sandbox daemon's. The ssh variant stays daemon-less
+		// on purpose: the ssh route must keep working with no local daemon at all.
+		clientEnv["SESH_TMUX_SOCKET"] = fmt.Sprintf("sesh-test-rcwork-%d", stamp)
+		clientEnv["SESH_CODEX_HOME"] = setupCodexHome(t)
+		if _, stderr, err := clientRunner.Run(t, "daemon", "start"); err != nil {
+			t.Fatalf("start client daemon: %v\n%s", err, stderr)
+		}
+		t.Cleanup(func() {
+			clientRunner.Run(t, "daemon", "stop")                                            //nolint:errcheck — best-effort
+			exec.Command("tmux", "-L", clientEnv["SESH_TMUX_SOCKET"], "kill-server").Run()   //nolint:errcheck — best-effort
+			exec.Command("tmux", "-L", clientEnv["SESH_MASTER_SOCKET"], "kill-server").Run() //nolint:errcheck — best-effort
+		})
 	}
 	peer.Runner = &routingRunner{bin: bin, env: clientEnv, peerMachine: peer.Machine}
 	return peer
@@ -120,6 +139,24 @@ func testRouteParity(t *testing.T, tr meshTransport) {
 	}
 	if threadOnPeer(t, peerDaemon, th.ID) {
 		t.Errorf("routed `thread delete` left the record on the peer over %s", tr.name)
+	}
+
+	// THROUGH-THE-DAEMON PROOF (http, schema 51): the calls above would also pass if the
+	// CLI still dialed the peer directly. Stop the CLIENT's own daemon — the peer is
+	// untouched and still reachable — and a routed call must now FAIL, naming the local
+	// daemon. A direct dial cannot depend on it, so this discriminates the two paths.
+	if tr.name == "http" {
+		rr := sb.Runner.(*routingRunner)
+		if _, stderr, err := (&localRunner{bin: rr.bin, env: rr.env}).Run(t, "daemon", "stop"); err != nil {
+			t.Fatalf("stop client daemon: %v\n%s", err, stderr)
+		}
+		_, stderr, err := sb.Runner.Run(t, "tmux", "info")
+		if err == nil {
+			t.Fatalf("routed `tmux info` SUCCEEDED with the client's daemon stopped — the http route is not going through the local daemon")
+		}
+		if want := "goes through the LOCAL sesh daemon"; !strings.Contains(stderr, want) {
+			t.Errorf("routed call with the client daemon down: stderr %q, want it to contain %q", stderr, want)
+		}
 	}
 }
 

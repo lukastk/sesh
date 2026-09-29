@@ -300,13 +300,12 @@ func tmuxNavRun(cfg config.Config, args []string) error {
 
 	// The inner switch FOLLOWS the peer's transport (same rule as every other
 	// cross-machine command). For an http peer the remote daemon runs the
-	// switch-client in-process — no ssh hop on this interactive hot path.
+	// switch-client in-process — no ssh hop on this interactive hot path. The request
+	// goes THROUGH the local daemon's /v1/route proxy (schema 51), riding the
+	// connection its mesh sync keeps warm to that peer instead of a cold dial from
+	// this fresh process (one tailnet round trip saved per nav).
 	if peer.Transport() == "http" {
-		token, err := peer.ResolveAPIToken()
-		if err != nil {
-			return err
-		}
-		c := client.NewRemote(peer.ApiAddr, token)
+		c := client.NewRouted(cfg.SocketPath(), machine)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		var wptr *int

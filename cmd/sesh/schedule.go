@@ -171,7 +171,7 @@ func scheduleMessage(cfg config.Config, args []string) error {
 	}
 	// A message schedule lives on its target's OWNER. Route there when the
 	// thread is a peer's (the request must carry the full id, resolved above).
-	if snap, found, ferr := meshThread(c, rid); ferr == nil && found && snap.Machine != cfg.Machine && cfg.RemoteAddr == "" {
+	if snap, found, ferr := meshThread(c, rid); ferr == nil && found && snap.Machine != cfg.Machine && !cfg.Routed() {
 		routed := append([]string{"schedule", "message"}, rewriteIDArg(args, rid)...)
 		handled, rerr := routeMachine(cfg, snap.Machine, routed)
 		if rerr != nil {

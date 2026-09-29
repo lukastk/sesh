@@ -3,6 +3,7 @@ package conformance
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,5 +87,20 @@ func testNavMasterHTTP(t *testing.T) {
 	if !waitUntil(10*time.Second, func() bool { return innerClientSession(t, peer.TmuxSocket) == tgt.SessionName }) {
 		t.Errorf("http nav: peer client on %q, want %q (a silent ssh attempt would have failed)",
 			innerClientSession(t, peer.TmuxSocket), tgt.SessionName)
+	}
+
+	// THROUGH-THE-DAEMON PROOF (schema 51): the inner switch rides self's LOCAL daemon's
+	// /v1/route proxy (its warm connection to the peer), not a cold dial from the nav
+	// process. Stop self's daemon — the peer is untouched — and the same nav must now
+	// fail naming the local daemon; a direct dial could not depend on it.
+	if _, stderr, err := self.Runner.Run(t, "daemon", "stop"); err != nil {
+		t.Fatalf("stop self daemon: %v\n%s", err, stderr)
+	}
+	_, stderr, err := self.Runner.Run(t, "tmux", "nav", "--to", peer.Machine+":"+park.SessionName)
+	if err == nil {
+		t.Fatalf("http nav SUCCEEDED with self's daemon stopped — the inner switch is not going through the local daemon")
+	}
+	if want := "goes through the LOCAL sesh daemon"; !strings.Contains(stderr, want) {
+		t.Errorf("http nav with self's daemon down: stderr %q, want it to contain %q", stderr, want)
 	}
 }

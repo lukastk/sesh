@@ -1328,10 +1328,17 @@ default_chat_view = "terminal"   # terminal | transcript | rpc
 
 - `--json` — machine-readable output (use it when scripting).
 - `--machine <m>` — route to a peer (real ssh hop or its HTTP API; not for peer/matrix/master).
+  An **http** peer is reached THROUGH your local daemon (it reuses the daemon's warm
+  connection to that peer), so routing to an http peer needs the local daemon running —
+  if it is down you get "routing to <m> goes through the LOCAL sesh daemon, which did not
+  answer"; and right after a sesh upgrade, "the LOCAL sesh daemon has no /v1/route" means
+  the daemon was not restarted yet. ssh peers need no local daemon.
 - `--all-machines` — fan a read out across the mesh.
 - `SESH_HOME` (default `~/.sesh`), `SESH_MACHINE` (this machine's identity — the daemon
   refuses to run without it), `SESH_THREAD_ID` (the current thread, for inference),
-  `SESH_REMOTE`/`SESH_API_TOKEN` (target a remote daemon's TCP API directly).
+  `SESH_REMOTE`/`SESH_API_TOKEN` (target a remote daemon's TCP API directly),
+  `SESH_ROUTE_MACHINE` (target an http peer through the local daemon — what `--machine`
+  sets for an http peer; rarely set by hand).
 
 Errors are loud by design (an unimplemented or impossible request fails explicitly rather
 than degrading to a plausible-but-wrong result) — read the error; it usually tells you the

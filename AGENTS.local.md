@@ -6,6 +6,88 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H116 — THE COCKPIT'S `,`/`.` IN ONE CALL AND ONE LOOKUP (#11), ROUTED CALLS OVER THE DAEMON'S WARM CONNECTION (#12), AND THE "WHERE AM I" MIRROR DERISKED AND PARKED (#13) (2026-09-29, sesh 5ac4a22 = 50d3800 + bf47cb7 merged + myrig 2dc4c33; api 50→51, NO store migration; DAEMON rebuild + supervised RESTART; **DEPLOYED ALL SIX**)
+Lukas: `,`/`.` "at least half a second" on desktop, worse on the phone, while sidebar clicks
+feel instant. Developed in box `20260929_oaqduz__sesh-nav-latency`, one worktree per issue.
+
+**WHERE THE HALF SECOND WENT (macbook, active window = mymain, RTT 39 ms), measured not guessed:**
+~25 ms key→shell, ~130 ms ring (`sesh mesh --json` 2.4 MB + myrig jq) ∥ "where am I"
+(`master-current --machine`), **~170 ms nav's `resolveMasterLocation` re-resolving THE SAME
+location** for prefix+L, ~200 ms the switch (fresh TCP = 2 RTT + ~50 ms of tmux on the target).
+**THE SIDEBAR PAYS THE SAME SWITCH** — a click runs the identical `sesh tmux nav` subprocess; it
+only *feels* instant (in-memory ring, the cursor moves at once, follow-on-arrow has usually
+landed before the click). A keypress path has nothing to hide behind.
+
+**#12 — ROUTED HTTP CALLS GO THROUGH THE LOCAL DAEMON (50d3800, schema 51).** Two costs per
+`--machine X` call from a fresh CLI process: a cold TCP connection (~87 ms vs ~46 ms warm,
+mymain→macbook) AND an offline check that DOWNLOADED THE WHOLE MESH (2,379 threads) to read one
+flag (34-102 ms). New `/v1/route/<machine>/<path>` on the UNIX socket only (never the TCP API —
+tested), a ReverseProxy on `http.DefaultTransport` = the SAME pool mesh sync keeps warm, the
+offline check answered from memory, the peer's token added by the daemon, 15 s = NewRemote's
+old per-call bound (so no routed command lost time). ssh peers untouched; a successful routed
+write kicks an immediate sync of that peer (replaces the CLI's postRouteNudge). Loud edges:
+self/bad path/nested/unknown/ssh/known-offline refused with `X-Sesh-Route-Refused`; a NEW binary
+against an OLD daemon is a loud "predates schema 51 — restart it through its service manager"
+(the routed-by header is what tells a missing endpoint from a peer's own 404). MEASURED LIVE
+after deploy: mymain→{macbook,pocket4,ideapad} routed master-current 58-105 ms (was ~165);
+termux→{mymain,macbook} 187-252 ms (was ~300).
+
+**#11 — `sesh tmux nav --cycle-flagged next|prev [--dry-run]` (bf47cb7, binary-only).** The ring
+is `tui.FlaggedRing` = the grid's own `flattenMeshRows(ViewActive, all, hideOffline)` +
+`visibleMatches` — the TUI's code, replacing myrig's jq copy (a drift hazard). Fold state cannot
+change the ring (a 500-iteration property against the collapsed render). The carrier's master
+window is read by iterating `list-clients -F` (never `display-message -c`, H98 fu2); the mesh
+read runs ∥ ONE daemon-routed master-current, which is both the start point and prefix+L's
+from-location. Distinct loud errors "no flagged active threads" / "flagged threads are all dead
+(N flagged, none enterable)". The cell `tmux.nav-cycle-flagged` COUNTS resolves with a wrapper
+peer binary that logs every master-current it serves (plain `nav --to` = 1 as control; a press
+= 1). TRAP: the cell's own read-back also goes through the wrapper — read the counter first.
+myrig's `_mmt_nav_cycle_active` is now one call + the two flashes; `,`/`.` carry only
+`$SESH_NAV_CLIENT`. ORDER: binary before the myrig render, or the key flashes an error.
+
+**THE LIVE NUMBER — real presses on macbook's idle cockpit (next then prev, net zero move, the
+function exactly as the binding runs it): ~495-545 ms BEFORE → 216-247 ms AFTER.** Proven the
+presses really move (e1a96add → 705eef80 → e1a96add) — the window name alone cannot show it, the
+ring was all on mymain. Phone (NOT pressed: Lukas was on it) — `--dry-run` = everything but the
+jump: 434-493 ms; the remaining phone cost is dominated by the daemon serialising the whole
+2.4 MB mesh to the CLI per press (~250 ms there) — a ring endpoint that returns only the ring is
+the next lever if wanted.
+
+**#13 — a mirror of "what each cockpit window shows" in the mesh: DERISKED, NOT BUILT**
+(branch issue-13 ba3eb78, experiments in `_dev/experiments/09_cockpit_mirror/`). Poll beats
+hooks (the maintainer's existing 300 ms list-clients sees all 8 move kinds; hooks need ≥4 kinds,
+`after-switch-client` is absent in 3.6b); propagation 165-1,184 ms under demand, up to
+idle_interval cold; the ceiling of the saving is ~1 RTT per press once #12 exists. A mirror is
+either wrong for rapid `,`/`.` / hand moves or no faster than a warm live resolve. **Lukas chose
+(c): no mirror; revisit (push, not pull) only if this is still not enough.** Recorded on #13.
+
+**GATES.** All 18 non-conformance packages green; `go vet` clean. **FULL MATRIX: 277/284, 7 fail,
+0 skip** — all seven codex, and NOT this change: 6 fail identically on UNMODIFIED main 0b51f73
+(`Refusing to create helper binaries under temporary dir "/tmp"` — codex-cli 0.159.0 vs the
+harness's /tmp codex home; schedule.message ×2, thread.adopt, thread.codex-session-capture,
+thread.send.headless ×2); the seventh (thread.flagged/codex/remote, an SSH cell #12 does not
+touch) was a load flake — 18/18 on three reruns. Every routing / nav / mesh / master cell green,
+including route.parity(.http), all 11 tmux.nav* cells, tmux.master-current, master.reconnect.
+**THE CODEX /tmp FAILURE IS A LIVE MATRIX RED THAT PREDATES THIS — needs its own fix.**
+TRAP (mine): a `go test | tail > <bad path>` pipe broke instantly, SIGPIPE killed the test binary
+before its defers, and TestMaintainerDropsStaleReportedIdle's FIXED socket name
+(`seshidle-test-<name>`) then failed every later run on a duplicate session until the leaked
+server was killed. Fixed-name sockets are not covered by the `sesh-test-*` reaper.
+
+**DEPLOY — ALL SIX at 5ac4a22, every binary `vcs.revision=5ac4a22 vcs.modified=false`, every
+checkout clean + ff-only via myrig-git-sync:** mymain, macbook, macstudio, ideapad, pocket4
+(native build → mv → immediately `supervisorctl restart sesh-daemon` — the mixed new-CLI/old-
+daemon window is loud, so it was kept to seconds), termux (plain build; old daemon killed by its
+own reported pid; the next login's zshenv guard relaunched it on the new exe, schema 51, all six
+reachable). Mixed-version peers were fine throughout (the proxy sends ordinary requests). myrig
+2dc4c33 rendered on all six; the master conf re-sourced where a master runs (mymain, macbook,
+pocket4, termux) and the binding verified (NB tmux 3.7c's `list-keys -T prefix .` prints
+NOTHING — list the table and grep). **Running SIDEBARS keep their old process (H70) but their
+navs exec the on-disk binary, so they get #12 at once; `prefix+r` for anything TUI-side.**
+FOLLOW-UP filed: #14 — plain nav's `resolveMasterLocation` still reads the carrier's window with
+`display-message -c` (wrong client with several masters attached); #11's `masterClientWindow`
+is the fix.
+
 ## H115 — Shift+F12 FLIPS THE SIDEBAR between `active` and `flagged` and focuses it: the mechanism is a configured VIEW RING driven by an INJECTED key, because the only way into a running TUI is its own input (2026-09-29, sesh 9adb44b + myrig 96eef4c; NO schema/API/daemon change; BINARY-ONLY, no restart anywhere; **DEPLOYED ALL SIX**)
 Lukas: "in my cockpit, if you press Shift and F12 together, it switches between showing the active
 threads and the flagged threads in the sidebar. And then also it focuses the sidebar."

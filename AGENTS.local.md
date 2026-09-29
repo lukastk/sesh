@@ -112,6 +112,37 @@ to the filter and is ignored (its pane wears the red filter tint, so the state i
 ring key work from every mode would mean handling it in three key handlers — the H41 drift class — so
 it is an ordinary normal-mode command like every other.
 
+### H115 follow-up — the ring's second entry was the WRONG SET: `flagged` includes PARKED threads, so the ring now flips to a new `active flagged` view; plus Shift+F12 on the phone's quick-key row (2026-09-29, myrig fe7bf6d; NO sesh change — config + docs only; DEPLOYED ALL SIX)
+Lukas, straight after using it: "the flagged view on Sesh seems to show all flagged, including those
+on hold." Correct, and it is the view's definition rather than a bug: `[[tui.views]] flagged` is
+`filter = "flagged"`, the RAW axis. **HOLD BEATS FLAG everywhere else in sesh** (H26/H104: an on-hold
+thread never shows in `active` whatever its state, and its ⚑ is only visible in `on hold`), so a ring
+entry that resurfaces deliberately parked work is the opposite of a working set — the ring is the one
+place the raw axis is the wrong answer.
+NEW VIEW `active flagged` = `flagged and not onhold`, at position 2 (right after `active`); `flagged`
+keeps its place behind it at position 3 for when the parked ones ARE wanted; `view_ring = ["active",
+"active flagged"]`. The reduction is worth stating because it is why the filter is that short: a
+flagged thread always satisfies `active`'s first clause `(flagged OR not archived OR headful OR busy)`,
+so `active AND flagged` ≡ `flagged AND not onhold`.
+VERIFIED against the RENDERED config through sesh's own view compiler (a throwaway test, removed
+after): the display order comes out **active / active flagged / flagged / on hold / archived / all /
+ticketed / unticketed**, the ring resolves to `[active, active flagged]` — a view name with a SPACE
+resolves fine — and over a truth table `active flagged` agrees with `active` on EVERY flagged row
+(flagged+archived in, flagged+on-hold OUT) which is the property it exists for. All six machines then
+resolve `--view "active flagged"` past config resolution with the deployed binary.
+**PHONE: the ⎘ PASTE extra-key became `{macro: "SHIFT F12", display: "S-F12"}`** (Lukas asked; pasting
+stays on the terminal's long-press menu). **CONFERRED first because "this shift plus tab combo" had two
+readings** — a literal Shift+Tab (Claude Code's mode cycler, awkward to type on Android) or the new
+cockpit combo — and the option text said plainly that Shift+F12 currently NO-OPS on the phone: the
+termux cockpit has no sidebar by design (SIDEBAR.md decision 3 — mobile data, small screen), so
+`sidebar-view-ring.sh` exits at its termux guard. He chose it anyway, for muscle memory with the
+desktops; recorded at the key's own comment so nobody later reads the dead key as a bug. Offered, NOT
+built: giving the termux branch a phone-appropriate action (open the TUI popup on `active flagged`)
+instead of exiting. `termux-reload-settings` applied it.
+DEPLOY: config + properties only — **no sesh change, no binary, no restart**. myrig fe7bf6d rendered on
+all six; `~/.sesh/config.toml` carries the new view and ring everywhere. **A running sidebar still
+holds its OLD config as well as its old binary (H70), so `prefix+r` is what picks both up.**
+
 ## H114 — THE REPORTER WAS A THREAD ALL ALONG: `$SESH_THREAD_ID` can be WRONG while the daemon holds the right answer; fix = a fourth source from the HARNESS's own session id, plus refusals that carry a LEAD — and stop telling an agent it is not a thread (2026-09-27, sesh 11e9705; NO api/schema/daemon change; **BINARY-ONLY, no restart**; DEPLOYED 5/6 — pocket4 offline, pending)
 The H112 reporter came back and **withdrew its own conclusion**, and the withdrawal is worth more than
 the original report. It had written that an agent in its position "has no valid sesh identity at all"

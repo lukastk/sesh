@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -124,6 +125,49 @@ func (m Model) WithViews(views []customView) Model {
 // Ambiguous or unknown names are loud: silently opening a different view would make
 // a launch wrapper look correctly scoped while hiding rows the user asked to see.
 func (m Model) WithInitialView(name string) (Model, error) {
+	v, err := m.viewByName(name)
+	if err != nil {
+		return m, err // every caller already says WHICH setting/flag asked for it
+	}
+	m.view = v
+	return m, nil
+}
+
+// WithViewRing resolves the [tui] view_ring shortlist — the views one key flips
+// between (see the `view-ring` command). Names resolve exactly as an initial view
+// does, so it must be installed AFTER WithViews or a custom view's name is not
+// resolvable yet. An empty list leaves the ring unconfigured.
+//
+// A REPEATED name is refused. The ring is a cycle, and "active, flagged, active"
+// would advance to a different slot depending on which of the two matches was
+// found first — an order nobody could predict from reading the config.
+func (m Model) WithViewRing(names []string) (Model, error) {
+	if len(names) == 0 {
+		m.viewRing = nil
+		return m, nil
+	}
+	ring := make([]View, 0, len(names))
+	for _, name := range names {
+		v, err := m.viewByName(name)
+		if err != nil {
+			return m, fmt.Errorf("[tui] view_ring: %w", err)
+		}
+		for _, have := range ring {
+			if have == v {
+				return m, fmt.Errorf("[tui] view_ring: %q appears twice — a ring visits each view once", name)
+			}
+		}
+		ring = append(ring, v)
+	}
+	m.viewRing = ring
+	return m, nil
+}
+
+// viewByName resolves a view NAME (a built-in, or a [[tui.views]] name) to its
+// index. Unknown and AMBIGUOUS names are both loud — two views may legitimately
+// share a name in config, and picking one of them silently is exactly the
+// plausible-but-wrong behaviour this project refuses.
+func (m Model) viewByName(name string) (View, error) {
 	var matches []View
 	for i := 0; i < m.viewCount(); i++ {
 		if m.viewNameAt(i) == name {
@@ -131,17 +175,16 @@ func (m Model) WithInitialView(name string) (Model, error) {
 		}
 	}
 	switch len(matches) {
+	case 1:
+		return matches[0], nil
 	case 0:
 		var names []string
 		for _, v := range m.orderedViews() {
 			names = append(names, m.viewNameAt(int(v)))
 		}
-		return m, fmt.Errorf("unknown initial TUI view %q (valid: %s)", name, strings.Join(names, ", "))
-	case 1:
-		m.view = matches[0]
-		return m, nil
+		return 0, fmt.Errorf("unknown view %q (valid: %s)", name, strings.Join(names, ", "))
 	default:
-		return m, fmt.Errorf("initial TUI view %q is ambiguous (%d views have that name)", name, len(matches))
+		return 0, fmt.Errorf("view %q is ambiguous (%d views have that name)", name, len(matches))
 	}
 }
 
@@ -390,6 +433,11 @@ type Model struct {
 	// index order. viewPickerCursor is a position into this order, not a raw
 	// view index. See buildViewOrder / orderedViews.
 	viewOrder []View
+	// viewRing is the [tui] view_ring shortlist the `view-ring` command flips
+	// between — resolved from names to view indices at startup (WithViewRing).
+	// Empty = unconfigured, and the command then refuses LOUDLY rather than
+	// picking some plausible pair of its own.
+	viewRing []View
 
 	// Tree fold state: per-node overrides + the configured default (children
 	// start collapsed unless [tui] expand_children / --expand).
@@ -2450,6 +2498,8 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		// next one was disorienting; advancing is one more tab).
 		m.viewPicker = true
 		m.viewPickerCursor = m.viewPos(m.view)
+	case "view-ring":
+		return m.cycleViewRing()
 	case "palette":
 		m.openPalette()
 	case "toggle-id":
@@ -3639,6 +3689,15 @@ func (m Model) Rows() []api.ThreadRow { return m.rows }
 // CurrentView exposes the active view (for tests).
 func (m Model) CurrentView() View { return m.view }
 
+// ViewRingNames is the resolved [tui] view_ring, by name (diagnostics/tests).
+func (m Model) ViewRingNames() []string {
+	out := make([]string, 0, len(m.viewRing))
+	for _, v := range m.viewRing {
+		out = append(out, m.viewNameAt(int(v)))
+	}
+	return out
+}
+
 // Cursor exposes the cursor index (for tests).
 func (m Model) Cursor() int { return m.cursor }
 
@@ -3838,6 +3897,32 @@ func (m Model) applyPickedView(i int) (tea.Model, tea.Cmd) {
 	m.view = View(i)
 	m.cursor = 0
 	return m, m.fetch()
+}
+
+// cycleViewRing advances to the next view in the configured [tui] view_ring (the
+// `view-ring` command): ONE key to flip between the two or three views you
+// actually live in, instead of Tab-walking a picker of seven.
+//
+// From a view INSIDE the ring it steps to the next one, wrapping. From anywhere
+// else — a view the ring does not mention — it enters the ring at its FIRST
+// entry, which is the only answer that does not depend on where you came from.
+//
+// An unconfigured ring is a LOUD refusal naming the setting, never a no-op: the
+// command is reachable from the palette on every machine, and a key that
+// silently does nothing is indistinguishable from a broken one.
+func (m Model) cycleViewRing() (tea.Model, tea.Cmd) {
+	if len(m.viewRing) == 0 {
+		m.actionErr = errors.New(`no view ring configured — set [tui] view_ring = ["active", "flagged"] in ~/.sesh/config.toml`)
+		return m, nil
+	}
+	next := m.viewRing[0]
+	for i, v := range m.viewRing {
+		if v == m.view {
+			next = m.viewRing[(i+1)%len(m.viewRing)]
+			break
+		}
+	}
+	return m.applyPickedView(int(next))
 }
 
 // viewPickerView renders the Tab view picker: one view per line, the selection

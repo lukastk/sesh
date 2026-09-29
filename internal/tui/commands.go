@@ -59,6 +59,7 @@ var commands = []Command{
 	{ID: "filter", Desc: "filter mode (fuzzy)", Keys: []string{"/"}},
 	{ID: "goto-uuid", Desc: "go to a thread by UUID (full or short)"},
 	{ID: "view-picker", Desc: "view picker", Keys: []string{"tab"}},
+	{ID: "view-ring", Desc: "flip to the next view in [tui] view_ring"},
 	{ID: "palette", Desc: "command palette", Keys: []string{"p"}},
 
 	// --- thread actions ---

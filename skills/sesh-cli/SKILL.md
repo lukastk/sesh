@@ -561,6 +561,13 @@ tab          view PICKER: a popup listing every view (active / on hold / archive
              all / custom [[tui.views]]) opening on the CURRENT one — tab/↑/↓ move
              (wrap), enter or a mouse click applies, esc cancels; the wheel moves
              the selection.
+             A VIEW RING flips ONE key between the two or three views you actually
+             live in instead of Tab-walking the picker: name them in `[tui]
+             view_ring = ["active", "flagged"]` and bind the `view-ring` command
+             to a key with `[[tui.key]]` (it has no default). It steps to the next
+             ring entry, wrapping; from a view the ring does not mention it enters
+             at the FIRST entry. In the cockpit, Shift+F12 focuses the traveling
+             sidebar and presses that key for you.
              The default `active` view shows every non-archived thread PLUS archived
              threads that are still headful (a live pane, glyph `⊘`) or RUNNING, and
              hides on-hold threads — i.e.
@@ -1230,6 +1237,10 @@ color = "2"                      # a name, a 0-255 number, or #rrggbb; empty cle
 command = "fork"                 #   first entry for a command REPLACES its defaults (a MOVE);
 key     = "F"                    #   further entries ADD keys; key = "" unbinds (palette-only).
                                  #   Unknown id / unusable key / two entries on one key = loud error.
+view_ring = ["active", "flagged"]  # ONE key flips between these views (the `view-ring` command;
+                                 #   bind it with [[tui.key]] — no default key). Names are built-ins
+                                 #   or [[tui.views]] names; unknown/ambiguous/repeated = loud at
+                                 #   startup. Keep it in [tui] itself, ABOVE the [[tui.*]] tables.
 [[tui.views]]                    # custom Tab-cycle views over the predicate language
 name = "ticketed"
 filter = "ticketed and not archived"   # keywords incl. headful/headless/busy/idle/archived/onhold/flagged/flagdisabled/ticketed

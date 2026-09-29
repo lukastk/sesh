@@ -59,6 +59,10 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	// Commands that never touch the owner — gating them would wrongly block offline browsing.
 	local := []string{"cursor-up", "cursor-down", "scroll-up", "scroll-down", "fold", "unfold",
 		"pan-left", "pan-right", "filter", "view-picker", "palette", "toggle-id",
+		// view-ring only changes which rows are SHOWN — like view-picker, it
+		// touches no owner, and gating it would refuse a flip away from a view
+		// whose selected row happens to sit on an offline machine.
+		"view-ring",
 		// goto-uuid only moves the cursor (and the view) — it never touches an owner,
 		// and gating it would refuse a jump AWAY from an offline machine's row.
 		"goto-uuid",

@@ -95,6 +95,7 @@ var declaredTUIClaims = []string{
 	"command-palette",           // `p` opens the COMMAND PALETTE; a fuzzy query reaches a command with no key at all and Enter runs it for real (the daemon's record changes); esc cancels without running it
 	"keymap-config",             // a [[tui.key]] rebinding really moves a command's key against a live daemon: the NEW key performs the routed action and the key it moved off does nothing
 	"goto-uuid",                 // the goto-uuid command jumps the cursor to a thread named only by its uuid, switching to the first view that shows it (a REAL archived thread hidden by the default view)
+	"view-ring",                 // ONE key (delivered as an F-key, the way the cockpit's Shift+F12 injects it) flips the grid between the views in [tui] view_ring and back, and the rows really change with it
 	"action-set-parent",         // the INTERACTIVE reparent picker: pick the new parent from the list (no uuid typed) and the daemon really moves the thread; a descendant is never offered (cycle); the (root) entry clears the parent
 }
 

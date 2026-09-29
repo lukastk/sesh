@@ -299,6 +299,16 @@ func runTUI(args []string) error {
 			return fmt.Errorf("tui --view: %w", err)
 		}
 	}
+	// [tui] view_ring: the shortlist the `view-ring` command flips between.
+	// Resolved AFTER WithViews (a ring may name a custom view) and LOUD on an
+	// unknown/ambiguous/repeated name — a ring that silently dropped an entry
+	// would leave a cockpit key flipping between the wrong views.
+	if tcfg != nil && len(tcfg.ViewRing) > 0 {
+		m, err = m.WithViewRing(tcfg.ViewRing)
+		if err != nil {
+			return fmt.Errorf("tui view ring: %w", err)
+		}
+	}
 	// Mouse-wheel sensitivity ([tui] mouse_scroll_v/h; default 1 = move every notch).
 	if tcfg != nil {
 		m = m.WithMouseScroll(tcfg.ScrollV(), tcfg.ScrollH())

@@ -87,6 +87,19 @@ type TUIConfig struct {
 	//	name   = "ticketed"
 	//	filter = "ticketed and not archived"
 	Views []TUIView `toml:"views"`
+	// ViewRing is the shortlist of views the `view-ring` command flips between —
+	// ONE key for the two or three views you actually live in, instead of
+	// Tab-walking the whole picker. Names are built-ins (active / on hold /
+	// archived / all) or [[tui.views]] names, resolved LOUDLY at startup
+	// (unknown, ambiguous or repeated = refuse to start). Unset = no ring, and
+	// the command then refuses loudly too.
+	//
+	// It is what the cockpit's Shift+F12 drives: that binding focuses the
+	// traveling sidebar and injects the key bound to view-ring.
+	//
+	//	[tui]
+	//	view_ring = ["active", "flagged"]
+	ViewRing []string `toml:"view_ring"`
 	// MouseScrollV / MouseScrollH set mouse-wheel SENSITIVITY: how many wheel
 	// notches it takes to move one row (vertical) or pan one column (horizontal).
 	// 1 (the default) moves on every notch; higher = LESS sensitive (dampens fast
@@ -364,7 +377,7 @@ func LoadSpawn(home string) (Spawn, error) {
 	return out, nil
 }
 
-// ModeFor resolves an agent's mode ([spawn.<agent>] wins over [spawn]; '' =
+// ModeFor resolves an agent's mode ([spawn.<agent>] wins over [spawn]; ” =
 // default).
 func (s Spawn) ModeFor(agent string) string {
 	if a, ok := s.agents[agent]; ok && a.Mode != "" {

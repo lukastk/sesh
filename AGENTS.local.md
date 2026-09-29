@@ -6,6 +6,103 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H115 — Shift+F12 FLIPS THE SIDEBAR between `active` and `flagged` and focuses it: the mechanism is a configured VIEW RING driven by an INJECTED key, because the only way into a running TUI is its own input (2026-09-29, sesh 9adb44b + myrig 96eef4c; NO schema/API/daemon change; BINARY-ONLY, no restart anywhere; **DEPLOYED ALL SIX**)
+Lukas: "in my cockpit, if you press Shift and F12 together, it switches between showing the active
+threads and the flagged threads in the sidebar. And then also it focuses the sidebar."
+
+**THE CONSTRAINT THAT DECIDES THE WHOLE DESIGN: the sidebar is a long-running process, so a tmux
+binding cannot ask it anything — it can only TYPE at it.** `tmux send-keys` into the sidebar's pane is
+the one channel, and it is the TUI's own native input path (MEASURED: `send-keys F12` delivers exactly
+`\x1b[24~`, which is bubbletea's `KeyF12`). But no command landed on a SPECIFIC view: `tab` opens a
+PICKER you then navigate, which cannot be driven blind. So the gap was real and sesh-side.
+
+**WHAT I BUILT: `[tui] view_ring = ["active", "flagged"]` + a `view-ring` command** that steps to the
+next entry, wrapping; from a view the ring does not mention it enters at the FIRST entry (the only
+answer that does not depend on where you came from). No default key — myrig binds `f12` via
+`[[tui.key]]` and the cockpit injects it.
+**WHAT I REJECTED, and the reason is the reusable part.** The obvious mechanism is a command per view
+(`view:flagged`). It needs a DYNAMIC command registry (the view set is config, and the registry is a
+compile-time constant validated at init) AND — because ONE key must flip both ways — it needs the TUI
+to PUBLISH its current view as a pane option so the script can choose a direction. Two new mechanisms
+to the ring's one, and the ring puts "which views" in config right beside the `[[tui.views]]` entry
+that defines `flagged`. The script is then four lines with no state to read.
+LOUD, at both ends: an unknown/ambiguous/**repeated** ring name refuses at startup (a repeat would make
+"next" depend on which match was found first — an order nobody can predict from reading the config),
+and pressing the command with no ring configured sets a LOUD error, never a no-op: it is
+palette-reachable on every machine and a key that does nothing cannot be told from a broken one.
+
+**THE KEY WAS MEASURED BEFORE ANY CODE, because if `S-F12` never arrives the whole ask is moot.** Both
+cockpit terminals promise the same bytes — ghostty (macbook) and foot (pocket4) both give
+`kf24 = \E[24;2~` — and tmux parses that as `S-F12` and fires a ROOT-table binding (proved with a real
+pty client against a throwaway server). Caps Lock is F12 via Karabiner on the Macs and **keyd**
+(`capslock = f12`) on the Arch boxes, both plain remaps, so Shift passes through.
+MEASURED SIDE-NOTE, and the comments now say it: a root binding does **not** fire while a tmux
+`display-popup` has focus, so a real F12 inside the prefix+s TUI popup reaches the grid and flips its
+ring too — the same thing the key means there anyway. Everywhere else in the cockpit the master's own
+root-table F12 (sidebar zoom) swallows it before any pane sees it, which is what makes `f12` the one
+key that cannot arrive in the sidebar by accident.
+
+**myrig: `sidebar-locate.sh` is a REFACTOR, not a new feature** — "find the sidebar, and make it be
+here" (here / parked elsewhere → swap / closed → open / impossible → fail) was inside sidebar-zoom.sh,
+and Shift+F12 needs the identical behaviour. Two copies would drift the moment one learned about a new
+pane marker. `sidebar-view-ring.sh` = locate → `select-pane` → `send-keys F12`.
+
+**GREEN.** `go vet ./...`; gofmt clean on every touched file; EVERY non-conformance package plain
+(incl. internal/daemon) and `internal/tui` + `internal/config` + `cmd/sesh` also `-race`. **The FULL
+TUI CLAIMS SUITE: 75 pass, 0 fail (254 s)** — no pre-existing reds on this box. New claim `view-ring`
+(registered AND declared — the H25 gotcha) drives a REAL daemon with a REAL flagged thread and presses
+the **F-KEY through a `[[tui.key]]`-resolved keymap**, i.e. byte-for-byte what send-keys delivers, then
+asserts the **ROWS** change and not merely the title — with the BASELINE (both rows really in `active`)
+asserted first so "only the flagged row" cannot pass vacuously. Six units cover the truth table.
+**THE FULL 283-CELL MATRIX WAS NOT RUN** — this touches no daemon, no wire and no matrix-registered
+feature; the TUI claims suite is the blast radius.
+ANTI-GAMING, three, each reversed and **md5-verified byte-identical** (`internal/tui/model.go`
+1986a93d…): a plain forward cycle through the DISPLAY order instead of the ring — the
+plausible-but-wrong version that looks right on the FIRST press — reddens the claim at "the second
+press did not come back to active (it must not walk on to the next view)" showing `[on hold]`; keeping
+the current view when it is outside the ring reddens it at the last leg; a silent no-op for an
+unconfigured ring reddens the unit. **The third neuter first left `errors` imported-and-unused — a
+compile error, not a discriminating red (H88/H113). Re-applied compilably before believing it.**
+
+**LIVE-PROVEN in an ISOLATED COCKPIT RIG** (own HOME, own daemon + SESH_HOME, own tmux sockets, the
+REAL tmux.master.conf, the REAL scripts, the REAL new binary, a REAL attached pty client, two real
+threads one of which is really flagged): the real `CSI 24;2~` reaches the master's root table, focuses
+the sidebar and flips it to `[flagged]` with ONLY the flagged thread rendered, then back to `[active]`
+with all rows — **and it fires from INSIDE a NESTED tmux client, which is the shape of every real
+cockpit window**. F12's zoom still works after the locate refactor (zoom on → sidebar focused; again →
+restored, focus back on the thread pane). Rig daemon killed by EXPLICIT pid after checking its
+SESH_HOME, both rig tmux servers killed by socket name, tree removed; the live daemon verified
+untouched (uptime unchanged).
+**NOT driven against Lukas's REAL cockpit, deliberately.** It would mean attaching a client to a master
+whose windows hold ssh attaches into other machines' work servers — and `window-size latest` would then
+size HIS live panes to my client. The rig proves the same path; what was checked live is read-only: the
+`S-F12` binding really is in each running master's root table, and `sidebar-locate.sh` resolves the
+real cockpit's sidebar pane without mutating it.
+
+**THE DEPLOY-ORDER RULE, LEARNED THE HARD WAY MID-SESSION: the BINARY must land BEFORE the config
+render.** A concurrent session ran a myrig install on mymain at 13:59 while this was being written; it
+rendered my still-UNCOMMITTED `config.toml.jinja` edit into the live `~/.sesh/config.toml`, and every
+`sesh tui` on mymain then refused to start with `[[tui.key]] "view-ring": unknown command — valid ids:
+…`. The loud error is exactly right and the mechanism worked; the ORDER was wrong. So on every machine:
+sesh binary first, `install-home` second. (It also means an UNCOMMITTED template edit is not private on
+mymain — another session's install can ship it.)
+DEPLOY: **CLI-side only — no schema/API/wire change, nothing daemon-side ⇒ BINARY-ONLY, NO restart
+anywhere**, and a mixed fleet is safe in one direction only (an old binary + the new config REFUSES to
+start the TUI), which is what the order rule is for. **LIVE ON ALL SIX at sesh 9adb44b / myrig
+96eef4c**, every binary `vcs.modified=false`, every checkout verified clean and on main BEFORE pulling
+(H49/H63): mymain, ideapad, pocket4, macbook + macstudio (`/opt/homebrew/bin/go`, `uv run --with
+jinja2` render), termux (plain `go build`, H22; render logged to `$HOME` — /tmp is unwritable, H38).
+Each verified for all four artifacts: `sesh help tui` carries the ring text, `~/.sesh/config.toml`
+carries `view_ring`, both new scripts are symlinked, and `sesh tui` now starts past config resolution.
+`tmux -L sesh-master source-file ~/.sesh/myrig/tmux.master.conf` on the four machines running a master
+server (mymain, pocket4, macbook, termux) — the binding is NEW, so a running cockpit needs it.
+**A RUNNING SIDEBAR KEEPS BOTH ITS BINARY AND ITS CONFIG (H70), so the ring is inert inside Lukas's
+open sidebars until `prefix+r`** — and inert means the key looks dead, not loud. Told him.
+KNOWN EDGE, stated rather than hidden: a key injected while the sidebar is EDITING ITS `/` FILTER goes
+to the filter and is ignored (its pane wears the red filter tint, so the state is visible). Making the
+ring key work from every mode would mean handling it in three key handlers — the H41 drift class — so
+it is an ordinary normal-mode command like every other.
+
 ## H114 — THE REPORTER WAS A THREAD ALL ALONG: `$SESH_THREAD_ID` can be WRONG while the daemon holds the right answer; fix = a fourth source from the HARNESS's own session id, plus refusals that carry a LEAD — and stop telling an agent it is not a thread (2026-09-27, sesh 11e9705; NO api/schema/daemon change; **BINARY-ONLY, no restart**; DEPLOYED 5/6 — pocket4 offline, pending)
 The H112 reporter came back and **withdrew its own conclusion**, and the withdrawal is worth more than
 the original report. It had written that an agent in its position "has no valid sesh identity at all"

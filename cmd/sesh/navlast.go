@@ -58,12 +58,13 @@ func resolveMasterLocation(cfg config.Config) (machine, session string, window i
 	if carrier == "" {
 		return "", "", -1, false
 	}
-	out, err := exec.Command("tmux", "-L", cfg.MasterSocket, "display-message", "-p", "-c", carrier, "#{window_name}").Output()
-	if err != nil {
-		return "", "", -1, false
-	}
-	activeMachine := strings.TrimSpace(string(out))
-	if activeMachine == "" {
+	// The carrier's OWN window, read by iterating list-clients (masterClientWindow) —
+	// NOT `display-message -c`, which only says where to print and expands the format
+	// against whichever client tmux ambiently considers current (H98 follow-up 2, #14).
+	// With a second session on the master server that ambient client can be sitting on
+	// a different window, and prefix+L would record somewhere the user never was.
+	activeMachine, err := masterClientWindow(cfg.MasterSocket, carrier)
+	if err != nil || activeMachine == "" {
 		return "", "", -1, false
 	}
 	resp, ok := masterCurrentJSON(cfg, activeMachine)

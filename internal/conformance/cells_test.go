@@ -74,6 +74,7 @@ var skipReasons = map[string]string{
 	"tmux.nav-master-http":       "the master-path nav's inner switch-client follows the peer's transport: an http peer carries it over POST /v1/tmux/nav (no ssh) — proved by a broken ssh dest + the switch still landing",
 	"tmux.master-current":        "`tmux master-current --origin X` resolves the thread a master window is currently showing (routed) and tracks the client across nav — the data behind the TUI's async prefix+s preselect",
 	"tmux.nav-cycle-flagged":     "nav --cycle-flagged steps the cockpit through the flagged active-view ring in TUI order with ONE location resolve per press (prefix+, / prefix+.)",
+	"tmux.nav-last":              "a cockpit nav records prefix+L's from-location from the carrier's OWN master window even with a decoy client in another master session moving last; nav --last returns there (#14)",
 	"tmux.nav-attach":            "nav --attach (Enter from a plain shell) attaches the terminal to the thread (a client lands on it)",
 	"api.tcp-auth":               "TCP API bearer-token auth: 401 on missing/wrong, 200 on correct, refuses to start without a token",
 	"api.tcp-parity":             "TCP API full parity: a remote client drives thread/ticket/tmux/mesh/snapshot over TCP+token",

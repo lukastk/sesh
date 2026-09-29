@@ -143,6 +143,45 @@ DEPLOY: config + properties only — **no sesh change, no binary, no restart**. 
 all six; `~/.sesh/config.toml` carries the new view and ring everywhere. **A running sidebar still
 holds its OLD config as well as its old binary (H70), so `prefix+r` is what picks both up.**
 
+### H115 follow-up 2 — the phone's Shift+F12 was a DEAD KEY, so termux got the same answer by the means it has: the TUI popup on `active flagged` (2026-09-29, myrig c8892a2; NO sesh change; render + a binding re-source; DEPLOYED ALL SIX)
+Lukas, from the phone: "the button does nothing when I go on mobile … it should essentially do the
+same thing as master prefix+s, but instead open up the sesh TUI into the active flagged view." He is
+right, and the dead key was MY call in follow-up 1: the option text said plainly it would no-op on
+termux (no sidebar — SIDEBAR.md decision 3), he took it for muscle memory, and a key that does
+nothing is exactly the thing this project refuses everywhere else. **Shipping a knowingly-inert
+control is not a neutral outcome; it reads as broken the first time you press it.**
+THE FIX IS A BRANCH, NOT A SECOND KEY. `sidebar-view-ring.sh` keeps one meaning — "show me my
+working set" — and spends it differently per device: DESKTOP focuses the traveling sidebar and
+injects the ring key; TERMUX has no sidebar to drive, so it opens the surface prefix+s opens (`sesh
+tui` in a 95×90 popup) already scoped, `--view 'active flagged'`. The question is the same; only the
+instrument differs.
+**THE WHICH-CLIENT LAW decided the plumbing.** A popup must be told WHICH client to draw on, and a
+`run-shell` subprocess cannot resolve that (tmux cannot map it back to the presser) while
+`display-popup` does not format-expand at all. So the BINDING now carries `SESH_NAV_CLIENT=#{client_
+name}` and `SESH_TUI_MASTER_MACHINE=#{window_name}` (run-shell DOES expand), exactly as prefix+s/,/.
+already do, and a missing client is a LOUD refusal rather than a popup on an arbitrary terminal.
+That binding change is why every running cockpit needed a `source-file`, not just a pull.
+The view name is duplicated (script + `[tui] view_ring`), deliberately and with a comment at both
+ends: a rename fails CLOSED and visibly (`sesh tui --view` refuses an unknown view and the popup
+holds on `|| sleep 3`) rather than silently opening the wrong list.
+**VERIFIED IN AN ISOLATED RIG POSING AS TERMUX** (own HOME/daemon/sockets, the REAL conf + scripts +
+deployed binary, a REAL attached pty client, `SESH_MACHINE=termux` in the tmux server env) with a
+three-row fixture — plain, flagged, and **flagged-but-PARKED**: the real `CSI 24;2~` opens a popup
+whose TUI renders `[active flagged]` with ONLY the flagged live thread, excluding the unflagged row
+AND the parked one, and **no sidebar pane is created**. The terminal's own byte stream was read back
+for that (a tmux popup is not a pane, so `capture-pane` cannot see it — read the client's pty).
+Then the SAME rig under a non-termux machine name re-proved the desktop path: still flips active <->
+active flagged, still focuses the sidebar. Rig daemon killed by explicit pid after checking its
+SESH_HOME; all three rig servers killed by socket name; tree removed; live daemon untouched.
+**CHECKED ON THE REAL PHONE, read-only, because the guard depends on it:** its master server's global
+env really carries `SESH_MACHINE=termux` **and** `TERMUX_VERSION=0.118.3`, and a `run-shell`
+subprocess there really sees both — so the branch fires. Not driven live: a client IS attached to his
+phone cockpit, and a popup would have taken over the screen he is using.
+DEPLOY: myrig only. All six at c8892a2; `source-file` on the four machines running a master (mymain,
+pocket4, macbook, termux) so the new carriers are live — verified by grepping each server's root key
+table for `SESH_NAV_CLIENT`. Three stale doc sites corrected in the same commit (the phone key row's
+"currently NO-OPS" note, the config comment, the navigator skill).
+
 ## H114 — THE REPORTER WAS A THREAD ALL ALONG: `$SESH_THREAD_ID` can be WRONG while the daemon holds the right answer; fix = a fourth source from the HARNESS's own session id, plus refusals that carry a LEAD — and stop telling an agent it is not a thread (2026-09-27, sesh 11e9705; NO api/schema/daemon change; **BINARY-ONLY, no restart**; DEPLOYED 5/6 — pocket4 offline, pending)
 The H112 reporter came back and **withdrew its own conclusion**, and the withdrawal is worth more than
 the original report. It had written that an agent in its position "has no valid sesh identity at all"

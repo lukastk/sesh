@@ -1164,6 +1164,20 @@ sesh daemon restart       # bounce the daemon (e.g. after a binary update)
 sesh doctor               # diagnose the install (binary, config, SESH_MACHINE, daemon checks)
 ```
 
+**codex's shared app-server daemon is kept OFF.** codex ≥ 0.157 starts one detached
+app-server per codex home from every interactive `codex`, and it keeps a conversation's
+writer lock after its pane is killed — so `sesh thread stop` then a headless turn / resume
+fails "already has an active writer", and `thread adopt` cannot identify the pane. The sesh
+daemon therefore writes `[features] daemon_auto_start = false` into the codex home's
+`config.toml` at startup and before every codex launch (a surgical edit: every other key and
+comment is kept; a config it cannot parse is refused, never rewritten). It overrides an
+explicit `true` — loudly, in the log and in `sesh doctor`. `sesh doctor` shows three rows:
+`codex daemon` (the setting), `codex daemon pin` (an override or edit failure, if any), and
+`codex app-server` — a daemon ALREADY running for that home (started before the pin) still
+holds locks until stopped: `CODEX_HOME=<home> codex app-server daemon stop` (when no codex
+pane is mid-turn), then kill its leftover `… daemon pid-update-loop` updater (pid in
+`<home>/app-server-daemon/daemon-updater.pid`), which `daemon stop` does not stop.
+
 The target machine's supervised daemon is the sole creator of its work tmux server. If a
 master window finds no sessions, it asks the target daemon to create `scratch`; it does not
 run `tmux new-session` in the local or SSH attach shell. This matters on macOS because tmux

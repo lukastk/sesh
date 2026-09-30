@@ -85,6 +85,19 @@ func setupClaudeConfigDir(t *testing.T) string {
 		t.Fatalf("setup claude config dir: %v", err)
 	}
 	t.Cleanup(func() {
+		// STOP THIS CONFIG DIR'S CLAUDE DAEMON FIRST. An isolated CLAUDE_CONFIG_DIR gets
+		// its own `claude daemon run --origin transient` (plus a /tmp/cc-daemon-*/ state
+		// dir and any background-session workers), and it OUTLIVES the test: removing the
+		// config dir does not stop it. Five had leaked on mymain within an hour of running
+		// these cells, 56 min to 1 h 16 m old — the H75 leak class, and invisible because
+		// they look identical to the user's own on-demand daemon. --any is required: this
+		// one is transient, not a service. --keep-workers is deliberately NOT passed, so
+		// any background session the test created dies with it.
+		stop := exec.Command("claude", "daemon", "stop", "--any")
+		stop.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
+		if out, err := stop.CombinedOutput(); err != nil {
+			t.Logf("cleanup: claude daemon stop for %s: %v\n%s", dir, err, out)
+		}
 		for i := 0; i < 20; i++ {
 			if os.RemoveAll(dir) == nil {
 				return

@@ -121,6 +121,15 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 	codexHome := ""
 	if thread.AgentKind == string(agents.Codex) {
 		codexHome, _ = agents.CodexHome(d.cfg.CodexHome)
+		// `codex exec` does not start the shared daemon itself, but it must not find
+		// one a hand-started codex left enabled either (sesh#15).
+		if err := d.ensureCodexNoDaemon(codexHome, "headless turn"); err != nil {
+			d.hlMu.Lock()
+			delete(d.hlInFlight, req.ID)
+			d.hlMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "send-headless: "+err.Error())
+			return
+		}
 	}
 
 	// A HEADED-BORN codex thread began its conversation in a pane, but codex mints

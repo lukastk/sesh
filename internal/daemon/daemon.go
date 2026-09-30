@@ -121,6 +121,11 @@ type Daemon struct {
 	apiBound     atomic.Bool
 	apiBindErr   atomic.Value // string: the most recent bind error
 	apiBoundAddr atomic.Value // string: the address actually bound (the `tailnet` sentinel resolves to a concrete IP)
+
+	// codexDaemonNote is the most recent loud event from pinning codex's
+	// daemon_auto_start=false (codexdaemon.go): an override of the user's explicit
+	// true, or a config sesh could not edit. Surfaced by doctor.
+	codexDaemonNote atomic.Value // string
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses
@@ -266,6 +271,13 @@ func (d *Daemon) Serve() error {
 		ln.Close()
 		return fmt.Errorf("daemon: %w", err)
 	}
+	// Pin codex's shared app-server daemon OFF in this machine's codex home at
+	// startup (sesh#15, codexdaemon.go) — not only at spawns — so a codex the user
+	// starts BY HAND, which `thread adopt` may pick up later, also runs without it.
+	// Not fatal: a user's config sesh cannot edit must not take the daemon (and the
+	// machine) off the mesh; it is logged and doctor reports it, and every codex
+	// launch re-ensures and fails that launch loudly instead.
+	d.startupCodexNoDaemon()
 	d.ln = ln
 	d.started = time.Now()
 	d.maint.start()     // begin keeping local thread state fresh in the background

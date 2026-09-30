@@ -24,6 +24,9 @@ func TestMain(m *testing.M) {
 	// out, and a leaked sandbox session keeps a real agent alive indefinitely —
 	// see reapStaleTestServers.
 	reapStaleTestServers()
+	// ...and codex managed app-server daemons, which a sandbox's tmux teardown never
+	// reaches (codexdaemon_test.go).
+	reapStaleCodexDaemons()
 
 	// Bind a Skip to every cell no real test claimed (order-independent: runs
 	// after all init()s, before any test).

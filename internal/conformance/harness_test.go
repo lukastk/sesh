@@ -371,6 +371,12 @@ func setupCodexHome(t *testing.T) string {
 		t.Fatalf("setup codex home: %v", err)
 	}
 	t.Cleanup(func() {
+		// Stop the managed app-server daemon an interactive codex auto-started in this
+		// home FIRST (codexdaemon_test.go): it is detached, so the sandbox's tmux
+		// teardown never reaches it, and it keeps running from a deleted home.
+		if _, err := killCodexHomeProcs(ch+string(os.PathSeparator), 0); err != nil {
+			t.Errorf("stop codex managed daemon for %s: %v", ch, err)
+		}
 		for i := 0; i < 20; i++ {
 			if os.RemoveAll(ch) == nil {
 				return

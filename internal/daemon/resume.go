@@ -50,6 +50,12 @@ func (d *Daemon) prepCodexEnv(env map[string]string, cwd string) error {
 	if err := agents.EnsureCodexTrust(codexHome, cwd); err != nil {
 		return err
 	}
+	// codex's shared app-server daemon breaks stop/resume/adopt (sesh#15): pin it
+	// off before every headed launch. Fatal for this launch — a codex started with
+	// the daemon would hold its writer lock past the pane.
+	if err := d.ensureCodexNoDaemon(codexHome, "spawn"); err != nil {
+		return err
+	}
 	// Wire the turn-end reporter (the flagged system, schema 44): materialize
 	// the embedded script and reference it from the codex config's notify key
 	// (left alone if the user already has one — see EnsureCodexNotify).

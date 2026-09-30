@@ -59,6 +59,12 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// codex's shared app-server daemon (sesh#15): the pinned setting, any loud
+	// event from pinning it, and any daemon ALREADY RUNNING for this codex home —
+	// one started before the pin keeps holding thread writer locks until stopped,
+	// whatever the config now says.
+	d.doctorCodexDaemon(add)
+
 	// Config files parse (a broken one would already have refused the daemon,
 	// but report which policies are active).
 	add("config", "ok", configSummary(d))

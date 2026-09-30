@@ -61,24 +61,44 @@ cannot verify: claude decides.** What sesh adds:
   real hold — while resolving every claude thread's leaf would scan every transcript on the box
   (48 MB files exist here).
 
-**WHAT THE TRIGGER IS NOT — ruled out, not assumed.**
+**THE TRIGGER, FOUND AND REPRODUCED: the `/background` SLASH COMMAND.** claude's own daemon log
+(`~/.claude/daemon.log` — 194 KB, **appends since 2026-07-01 and never rotates**, so it covered both
+incidents; I should have gone there hours earlier) records the SOURCE of every background session:
+    [2026-09-18T20:54:58.283Z] [bg] bg claimed-spare 92e176d4 (slash)
+    [2026-09-23T07:52:59.979Z] [bg] bg claimed-spare ef96bf74 (slash)
+`(slash)` vs the other sources it uses (`spare`, `fleet`). The bundle names the command:
+`{name:"background", aliases:["bg"], description:"Send this session to the background and free the
+terminal"}`. REPRODUCED from scratch: typing `/background` in a real pane writes a `continued-in`
+record, registers the successor (`registry: background/3d946691/blocked`), logs
+`[bg] bg spawned 3d946691 (slash)` — the identical source tag — and **kills the pane (status 0)**,
+which is exactly why both stuck threads' tmux windows were simply GONE with only a stray zsh window
+left. Every production observable matches. Over the whole log, 10 of Lukas's background sessions are
+`(slash)`, including `4c6b03bf` = the leaf of `192250cf` (scuttlebug-platform-hq) and `ff0fe30e`
+(boxyard-go), so this is a recurring habit, not a one-off.
+**SO THE THING TO CHANGE IS BEHAVIOURAL, NOT TECHNICAL: do not run `/background` inside a
+sesh-managed thread.** It hands the conversation to claude, frees the pane, and sesh keeps a record
+pointing at a session it no longer controls — un-revivable for good once the holder outlives a
+claude release.
+
+**WHAT THE TRIGGER IS NOT — each ruled out by measurement, and each was a plausible guess:**
 - **NOT `sesh thread stop`.** It is `tmux kill-pane`; tested three ways on 2.1.286 in isolated rigs
-  — idle, with a live `run_in_background` shell ("1 shell still running", the exact state both
-  stuck sessions were in), and with a live SUBAGENT plus a shell. **No background session, no
-  `continued-in`, no new session file, ever; `--resume` kept working.** So Lukas's premise ("it
-  happens when I kill a thread") is wrong in a useful way: the kill is when he DISCOVERS it.
-- **NOT an auto-update restart** (my leading hypothesis, killed by data): the claude version is
-  byte-identical across both handoffs — 2.1.280→2.1.280 and 2.1.277→2.1.277.
-- The handoff COPIES the transcript into the new id and the background session then **keeps working
-  for 20+ minutes**, so it is a deliberate "continue this work elsewhere" move, not a crash.
-- **STILL OPEN.** Both stuck panes had live subagents (`← 3 agents`) and unfinished background
-  shells. `CLAUDE_BG_POST_CLEAR_RESPAWN` exists in the binary and the french pane was displaying
-  "/clear to save 618.9k tokens", so **`/clear` with live work is the leading remaining candidate**;
-  my `/clear` fixture had no live work at clear time, so it is untested. Ctrl-C/Ctrl-D quit is also
-  untested (send-keys did not take). `CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1` exists and would be
-  the H118-shaped structural fix (pin it in `prepAgentEnv`), but it is NOT recommended until the
-  trigger reproduces — pinning an undocumented env var we cannot prove works is the thing this
-  repo forbids.
+  — idle, with a live `run_in_background` shell ("1 shell still running", the exact state both stuck
+  sessions were in), and with a live SUBAGENT plus a shell. **No background session, no
+  `continued-in`, no new session file, ever; `--resume` kept working.** Lukas's premise ("it happens
+  when I kill a thread") is wrong in a useful way: the kill is when he DISCOVERS it.
+- **NOT an auto-update restart** (my leading hypothesis for hours, killed by data): the claude
+  version is byte-identical across both handoffs — 2.1.280→2.1.280 and 2.1.277→2.1.277.
+- **NOT `/clear`** with a live subagent: no `continued-in`, and the subagent stayed in-process.
+- **NOT Ctrl-C ×2 or `/quit`** with a live subagent: Ctrl-C prints "Waiting for 1 background agent
+  to finish" / "All background agents stopped" — the OPPOSITE of a handoff — and `/quit` exits with
+  no `continued-in`. Nor Ctrl-B.
+- `CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF` exists in the binary and I never saw the exit handoff fire;
+  it is NOT the mechanism here and must not be pinned on that theory. (The earlier draft of this
+  entry and of the code comments blamed an "exit handoff" — corrected throughout once `(slash)` was
+  found. A plausible name in a binary is not evidence of the code path you are chasing.)
+- **`"sessionKind":"bg"` is on every record of both successors and absent from both predecessors**,
+  which is what proved the handoff converts a FOREGROUND session into a background one rather than
+  relocating an already-background one.
 
 **GREEN.** `go build ./...`, `go vet ./...`, gofmt clean on every touched file; ALL non-conformance
 packages plain, and `internal/agents/claude` + `internal/daemon` + `internal/client` + `cmd/sesh`

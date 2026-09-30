@@ -1,9 +1,10 @@
 package conformance
 
 // thread.revive-held-session (sesh#16): a claude conversation can be OWNED by a
-// BACKGROUND SESSION — explicitly (`claude --bg`, `claude --bg --resume <id>`) or by
-// claude's own exit handoff, which writes a `continued-in` record into the old
-// transcript and registers the successor. sesh resolves a thread's session FORWARD
+// BACKGROUND SESSION — `claude --bg [--resume <id>]` at launch, or the `/background`
+// slash command run inside a live session, which writes a `continued-in` record into
+// the old transcript, registers the successor and exits the pane. sesh resolves a
+// thread's session FORWARD
 // through that chain (it must: the pre-handoff file is frozen), so the session a
 // revive tries to resume is exactly the held one.
 //

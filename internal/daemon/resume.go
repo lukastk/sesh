@@ -242,8 +242,8 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 	}
 
 	// claude's BACKGROUND SESSIONS (sesh#16). The leaf we are about to resume may be
-	// OWNED by a background session, and claude's own behaviour then splits — MEASURED
-	// on 2.1.286, not inferred:
+	// OWNED by a background session (`/background` in the session, or `claude --bg` at
+	// launch), and claude's own behaviour then splits — MEASURED on 2.1.286, not inferred:
 	//
 	//   - a holder from the SAME claude build makes an interactive `claude --resume`
 	//     silently re-exec itself as `claude attach <id>`. The revive "succeeds" and the

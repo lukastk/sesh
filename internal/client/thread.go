@@ -220,17 +220,43 @@ func (c *Client) ThreadGrid(ctx context.Context, includeArchived, allMachines bo
 	return out, c.getJSON(ctx, u, &out)
 }
 
-// ThreadResume posts POST /v1/threads/resume (revive a dead headed thread).
-func (c *Client) ThreadResume(ctx context.Context, id string) (api.ThreadResponse, error) {
-	var out api.ThreadResponse
-	return out, c.postJSON(ctx, "http://unix/v1/threads/resume", api.ThreadResumeRequest{ID: id}, &out)
+// ThreadResume posts POST /v1/threads/resume (revive a dead headed thread). force
+// releases a claude background session holding the conversation — see ThreadHeadful.
+func (c *Client) ThreadResume(ctx context.Context, id string, force bool) (api.ReviveThreadResponse, error) {
+	var out api.ReviveThreadResponse
+	if err := c.postJSON(ctx, "http://unix/v1/threads/resume", api.ThreadResumeRequest{ID: id, Force: force}, &out); err != nil {
+		return out, err
+	}
+	return out, guardForceHonoured(out, force)
 }
 
 // ThreadHeadful posts POST /v1/threads/headful (promote a live headless thread into a
-// headed tmux pane).
-func (c *Client) ThreadHeadful(ctx context.Context, id string) (api.ThreadResponse, error) {
-	var out api.ThreadResponse
-	return out, c.postJSON(ctx, "http://unix/v1/threads/headful", api.ThreadHeadfulRequest{ID: id}, &out)
+// headed tmux pane). force runs `claude stop <id>` on a background session that owns
+// the thread's conversation before reviving (schema 52).
+func (c *Client) ThreadHeadful(ctx context.Context, id string, force bool) (api.ReviveThreadResponse, error) {
+	var out api.ReviveThreadResponse
+	if err := c.postJSON(ctx, "http://unix/v1/threads/headful", api.ThreadHeadfulRequest{ID: id, Force: force}, &out); err != nil {
+		return out, err
+	}
+	return out, guardForceHonoured(out, force)
+}
+
+// guardForceHonoured refuses LOUDLY when --force was asked of a daemon that predates
+// it. A pre-52 daemon ignores the unknown `force` field and revives normally, so
+// without this the CLI would report a successful revive for a call whose whole point
+// (release the hold) was silently dropped — the plausible-but-wrong class. The revive
+// itself either already succeeded (nothing was held: harmless) or failed with the
+// daemon's own error, so this only ever converts a MISLEADING success into a clear
+// instruction.
+func guardForceHonoured(out api.ReviveThreadResponse, force bool) error {
+	if force && out.Schema < 52 {
+		return fmt.Errorf(
+			"--force needs a daemon at api schema 52 or later; this one reports %d, so it IGNORED the flag "+
+				"(any claude background session holding the conversation is still held). "+
+				"Restart that machine's daemon through its service manager (e.g. `supervisorctl restart sesh-daemon`) after deploying the new binary",
+			out.Schema)
+	}
+	return nil
 }
 
 // ThreadRealize posts POST /v1/threads/realize (convert a VIRTUAL grouping

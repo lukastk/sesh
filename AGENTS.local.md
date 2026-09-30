@@ -6,6 +6,120 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H119 — "I CAN'T KILL AND REVIVE THIS THREAD": a claude conversation had MIGRATED INTO A BACKGROUND SESSION, and sesh only found out at revive time, days later. THE KILL IS NOT THE CAUSE — it is when you notice (2026-09-30, sesh <this commit>; api 51→52, NO store migration; DAEMON rebuild + supervised RESTART; NOT YET DEPLOYED)
+Lukas: "I wanted to kill and revive sesh thread ef96bf74 … but I can't", then the same for
+296e85ae and "something is wrong with 192250cf too". Three ids, and they were three different
+things — which is the first lesson: do not assume a batch of reports shares a cause.
+
+**DIAGNOSIS.** `ef96bf74` was NOT a sesh thread id at all: it is the claude SESSION id, and the
+thread is `1a26989d` (mosaic-finnish). `sesh info --id ef96bf74` says "thread … vanished
+mid-lookup", which is sesh's badly-worded "no such thread" — worth fixing, not fixed here.
+`296e85ae` (mosaic-french-listening) IS a thread. `192250cf` (scuttlebug-platform-hq) was never
+broken: its leaf transcript is **48 MB / 1,238 replies** and `claude --resume` spent ~2 min pinned
+at 100 % CPU (RSS peaking ~366 MB) with a COMPLETELY BLANK pane before the TUI drew. It settled to
+1 % and worked. NB a blank byte-stable pane is exactly what sesh's content-diff probe reads as
+IDLE, so during that load the thread looks idle while it is grinding.
+
+**THE MECHANISM, from Lukas's own transcripts.** A claude conversation can be OWNED by a
+BACKGROUND SESSION. The old session file gets a `continued-in` record naming a NEW session id and
+claude registers the successor within ~1 s (`/tmp/cc-daemon-1000/<hash>/rv/<short>.sock`). Twice,
+exactly:
+    07998bab → continued-in → ef96bf74   2026-09-23T07:53:00.008Z   (rv socket 07:53:00.404)
+    f1a4d35a → continued-in → 92e176d4   2026-09-18T20:54:58.363Z   (rv socket 20:54:59.615)
+sesh resolves a claude thread's session FORWARD through that chain (`ResolveLeafSession` — correct
+and necessary: the pre-handoff file is frozen), so the session revive tries to resume is EXACTLY
+the held one. **Both threads had been un-revivable since 18 and 23 September — 10 and 5 days —
+with nothing surfacing it.** That is the actual defect: a silent divergence discovered by accident.
+
+**WHAT CLAUDE DOES WITH A HELD SESSION — MEASURED, and it is two behaviours, not one:**
+- **same claude build** → an interactive `claude --resume` silently **re-execs itself as `claude
+  attach <id>`**. Found by printing the pane's argv (`/home/lukastk/.local/bin/claude attach
+  2b2ead13`) — the rendered pane is indistinguishable from a resume. The revive "succeeds" and the
+  pane is marked, but it is a VIEW onto the background session. True for a settled (`done`) holder
+  AND a live (`blocked`) one.
+- **older build** → cannot be taken over: the resume REFUSES and exits 1. **THIS IS THE PRODUCTION
+  CASE** (holders built by 2.1.277/278, reviving claude 2.1.286). Reproduced outside the suite:
+  2.1.284 holds, 2.1.286 revives → pane dead status 1 with claude's own refusal.
+- `--print --resume` refuses in EVERY case.
+
+**WHAT I BUILT, and the FIRST VERSION WAS WRONG — the anti-gaming neuter is what caught it.** I
+first made revive PRE-REFUSE whenever the leaf was held. Neutering that check turned the cell red
+with "revive SUCCEEDED" — i.e. claude was perfectly willing to resume (by attaching), so the
+pre-refusal would have blocked revives that work. Removed. **sesh does not invent a policy it
+cannot verify: claude decides.** What sesh adds:
+- **`sesh doctor` reports every held thread** (`claude background session:<id>`, warn not fail),
+  naming the holder, its state, the leaf, and what a revive would actually do. This is the half
+  that answers "how do we avoid this" — it would have shown both threads on 18 and 23 September.
+- **a failed revive names the holder and every remedy in typeable form** (`claude attach <id>` /
+  `claude stop <id>` / `--force`), replacing the generic "agent exited immediately after launch"
+  with claude's real reason buried in captured pane text.
+- **`--force`** (api 52) runs `claude stop <id>` — conversation KEPT — and then a REAL resume,
+  reporting which session it stopped. Never implied: the TUI's revive and a scheduled revive both
+  pass force=false, because stopping a `working` holder interrupts a turn running right now.
+- Candidate narrowing in doctor is EXACT, not an optimisation: a session can only be a thread's
+  leaf if both live in the same claude project dir, so comparing `ProjectDirName` cannot drop a
+  real hold — while resolving every claude thread's leaf would scan every transcript on the box
+  (48 MB files exist here).
+
+**WHAT THE TRIGGER IS NOT — ruled out, not assumed.**
+- **NOT `sesh thread stop`.** It is `tmux kill-pane`; tested three ways on 2.1.286 in isolated rigs
+  — idle, with a live `run_in_background` shell ("1 shell still running", the exact state both
+  stuck sessions were in), and with a live SUBAGENT plus a shell. **No background session, no
+  `continued-in`, no new session file, ever; `--resume` kept working.** So Lukas's premise ("it
+  happens when I kill a thread") is wrong in a useful way: the kill is when he DISCOVERS it.
+- **NOT an auto-update restart** (my leading hypothesis, killed by data): the claude version is
+  byte-identical across both handoffs — 2.1.280→2.1.280 and 2.1.277→2.1.277.
+- The handoff COPIES the transcript into the new id and the background session then **keeps working
+  for 20+ minutes**, so it is a deliberate "continue this work elsewhere" move, not a crash.
+- **STILL OPEN.** Both stuck panes had live subagents (`← 3 agents`) and unfinished background
+  shells. `CLAUDE_BG_POST_CLEAR_RESPAWN` exists in the binary and the french pane was displaying
+  "/clear to save 618.9k tokens", so **`/clear` with live work is the leading remaining candidate**;
+  my `/clear` fixture had no live work at clear time, so it is untested. Ctrl-C/Ctrl-D quit is also
+  untested (send-keys did not take). `CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1` exists and would be
+  the H118-shaped structural fix (pin it in `prepAgentEnv`), but it is NOT recommended until the
+  trigger reproduces — pinning an undocumented env var we cannot prove works is the thing this
+  repo forbids.
+
+**GREEN.** `go build ./...`, `go vet ./...`, gofmt clean on every touched file; ALL non-conformance
+packages plain, and `internal/agents/claude` + `internal/daemon` + `internal/client` + `cmd/sesh`
+also `-race`. NEW cells **`thread.revive-held-session` × claude × {local, remote} — 2/2** (65 s,
+real ssh hop). Blast radius: `thread.resume` ×6, `daemon.doctor`, `thread.claude-trust` ×2,
+`schedule.spawn` ×6 — all pass. Help meta-tests pass (usage lines + `flagDoc` for `--force`).
+**THE FULL 289-CELL MATRIX WAS NOT RUN.**
+ANTI-GAMING, three, each reversed and **md5-verified byte-identical**: neutering the doctor row
+reddens the cell at "doctor must report the held thread" naming all four expected strings;
+neutering `--force`'s clearing reddens it three ways, including "the pane must be a real `claude
+--resume`, not an attach; got: … claude attach ffc998e4"; matching the recorded ANCHOR instead of
+the resolved LEAF reddens three units. A fourth neuter (dropping the pre-flight) is what proved the
+pre-flight was WRONG and got it deleted.
+**WHAT THE CELL DOES NOT COVER, stated rather than implied:** the cross-build refusal — production's
+case — is not reproducible in a cell, because the holder's worker build is chosen by whichever
+claude owns claude's DAEMON for that config dir, and that daemon self-restarts onto whatever
+`~/.local/bin/claude` is ("binary at … changed — self-restarting for upgrade"), which is exactly
+how production got there. It is covered by `TestHeldSessionRefusal`, the out-of-suite 2.1.284/2.1.286
+reproduction, and the incident itself. The cell's own comment says so.
+
+**THE INCIDENT I ALMOST MISREPORTED.** Mid-session, agent panes across claude/pi/node dropped from
+~45 to 21 and long-lived sessions (29 d, 27 d) died. My cleanup had just run a `pkill -f "$RIG"` —
+the pattern-kill this file forbids (H101/H107/H118) — so I began reporting it as mine. **It was
+Lukas killing his own threads to restart the cockpit.** Two lessons: the claude daemon log
+(`~/.claude/daemon.log`) is the authority for background-session lifecycle and exonerated me
+("bg settled 92e176d4 (killed)" at my `claude stop`, then "idle 5s with no clients — exiting"); and
+do not narrate a self-blame conclusion before the evidence is in. Also from that log, worth
+keeping: the daemon **retires settled background sessions itself** — "bg retire ac5c34be: settled,
+idle 633h" — so holds do clear, on a useless timescale.
+
+**LIVE.** The two reported threads were fixed by hand with Lukas's go-ahead: `claude stop 92e176d4`
+/ `claude stop ef96bf74`, then `sesh thread headful`, then the two orphan tmux windows killed. The
+finnish turn was 13 min in and lost 4 unfinished background shell tasks — stated, not hidden.
+DEPLOY: **api 51→52 (additive), no store migration, but the registry read + `claude stop` run in
+the DAEMON ⇒ rebuild AND supervised restart on all six.** Mixed-fleet safe both ways: a pre-52
+daemon ignores the unknown `force` field, and a client that ASKED to force refuses loudly on seeing
+schema < 52 rather than reporting a force that was silently dropped. **NOT YET DEPLOYED.**
+Skill updated (`skills/sesh-cli/SKILL.md`, "A CLAUDE THREAD THAT WILL NOT COME BACK") — and per
+H112/H113/H115 the `~/.agents/skills/sesh-cli` copy is a GitHub COPY, so it needs
+`npx -y skills add lukastk/sesh@sesh-cli -g -y -a codex -a claude-code -a pi </dev/null` after push.
+
 ## H118 — THE SIX RED CODEX CELLS WERE CODEX ≥0.157's SHARED DETACHED APP-SERVER HOLDING THE THREAD WRITER LOCK — NOT THE `/tmp` WARNING — AND IT WAS LATENT IN PRODUCTION; sesh now pins `[features] daemon_auto_start = false` (#15) (2026-09-30, sesh ee9969f + 0096473 + 991107c merged as 4885b2a; NO schema/API change; DAEMON rebuild + supervised RESTART; DEPLOYED 5/6 — pocket4 offline, pending)
 The matrix red quoted `Refusing to create helper binaries under temporary dir "/tmp"` — a
 HARMLESS warning (a headless `codex exec` with a /tmp codex home still exits 0). The real error

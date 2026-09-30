@@ -445,15 +445,38 @@ type DeleteThreadRequest struct {
 }
 
 // ThreadResumeRequest is the body of POST /v1/threads/resume (revive a dead
-// headed thread).
+// headed thread). Force is ThreadHeadfulRequest.Force.
 type ThreadResumeRequest struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Force bool   `json:"force,omitempty"`
 }
 
 // ThreadHeadfulRequest is the body of POST /v1/threads/headful (promote a live
 // headless thread into a headed tmux pane, resuming its conversation).
+//
+// Force (schema 52) releases a claude BACKGROUND SESSION that owns the thread's
+// conversation, by running `claude stop <id>` before reviving — the conversation is
+// kept. Without it, a held conversation is a loud 409 naming the holder: stopping a
+// background session whose state is "working" interrupts a turn that is running
+// right now, so it is never done implicitly.
 type ThreadHeadfulRequest struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// ReviveThreadResponse is what POST /v1/threads/{resume,headful} answer (schema 52).
+// It is a SUPERSET of ThreadResponse with identical `schema`/`thread` tags, so a
+// pre-52 client decoding ThreadResponse is unaffected (the H103 pattern).
+//
+// ClearedBackgroundSession names the claude background session a Force revive
+// stopped, and is empty when none was held. It is what lets a client tell a daemon
+// that HONOURED --force from one that predates the flag and ignored it: the latter
+// answers with schema < 52, which the client refuses loudly rather than reporting a
+// force that never happened.
+type ReviveThreadResponse struct {
+	Schema                   int    `json:"schema"`
+	Thread                   Thread `json:"thread"`
+	ClearedBackgroundSession string `json:"cleared_background_session,omitempty"`
 }
 
 // PaneLocator is a resolved live pane for a thread.

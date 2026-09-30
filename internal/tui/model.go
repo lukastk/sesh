@@ -3006,7 +3006,11 @@ func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 			if local {
 				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer cancel()
-				resp, err := m.client.ThreadResume(ctx, row.ID)
+				// force=false: reviving from the grid must NEVER implicitly stop a claude
+				// background session that owns the conversation (sesh#16) — that can
+				// interrupt a turn running right now. A held conversation surfaces as the
+				// daemon's loud 409, which names `--force` as the explicit remedy.
+				resp, err := m.client.ThreadResume(ctx, row.ID, false)
 				if err != nil {
 					return actionMsg{err: fmt.Errorf("revive %q: %w", row.Name, err)}
 				}

@@ -330,7 +330,14 @@ package api
 // NOT mixed-safe for a NEW client on an OLD local daemon: the route 404s without
 // that header and the client refuses LOUDLY ("restart the local daemon") rather
 // than silently dialing direct. Peers are unaffected (they see ordinary requests).
-const SchemaVersion = 51
+// SCHEMA 52 (issue #16): `thread resume|headful` take Force, and answer with
+// ReviveThreadResponse — a ThreadResponse superset naming the claude background
+// session a forced revive released. Additive and mixed-safe in BOTH directions: a
+// pre-52 daemon ignores the unknown `force` field, and a client that ASKED to force
+// refuses loudly on seeing schema < 52 rather than reporting a force that was
+// silently dropped; a pre-52 client never sends it and decodes the superset as the
+// ThreadResponse it expects.
+const SchemaVersion = 52
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

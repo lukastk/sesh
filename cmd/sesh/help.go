@@ -319,13 +319,15 @@ does not wrap can be driven straight against the tmux server.`,
 	},
 	"thread resume": {
 		summary:  "revive a dead thread into a new headed tmux pane, restoring its conversation (also top-level `sesh resume`)",
-		usage:    "sesh thread resume --id <id> [--machine <m>] [--json]",
-		examples: []string{"sesh thread resume --id 1a2b3c4d", "sesh thread resume 1a2b3c4d"},
+		usage:    "sesh thread resume --id <id> [--force] [--machine <m>] [--json]",
+		long:     heldBackgroundSessionHelp,
+		examples: []string{"sesh thread resume --id 1a2b3c4d", "sesh thread resume 1a2b3c4d", "sesh thread resume --id 1a2b3c4d --force"},
 	},
 	"thread headful": {
 		summary:  "promote a live headless thread into a headed tmux pane; 409 if a turn is in flight, N/A for a codex thread with no first turn yet",
-		usage:    "sesh thread headful --id <id> [--machine <m>] [--json]",
-		examples: []string{"sesh thread headful --id 1a2b3c4d", "sesh thread headful 1a2b3c4d"},
+		usage:    "sesh thread headful --id <id> [--force] [--machine <m>] [--json]",
+		long:     heldBackgroundSessionHelp,
+		examples: []string{"sesh thread headful --id 1a2b3c4d", "sesh thread headful 1a2b3c4d", "sesh thread headful --id 1a2b3c4d --force"},
 	},
 	"thread realize": {
 		summary:  "convert a VIRTUAL grouping thread in place into a real thread — sets the agent kind and cwd; the result is exactly a fresh never-started headless thread (id, children, tags, holds and ticket bindings all survive), so enter it or send-headless afterwards to start the conversation. --cwd defaults to the cwd stored at creation and is required if none was; --id must be explicit (a prefix resolves; the current thread is never inferred). Refuses a non-virtual thread loudly.",
@@ -1072,3 +1074,24 @@ func isRoutable(cmd string) bool {
 	}
 	return true
 }
+
+// heldBackgroundSessionHelp is the long help both revive verbs carry (sesh#16). A
+// claude conversation owned by a background session cannot be resumed, and the
+// symptom — a thread that simply will not come back — reads as a sesh bug, so the
+// help says plainly what is holding it and how to see it coming.
+const heldBackgroundSessionHelp = "A CLAUDE CONVERSATION CAN BE OWNED BY A BACKGROUND SESSION — because " +
+	"someone ran `claude --bg`, or because claude's own exit handoff moved it there (it writes a `continued-in` " +
+	"record into the old transcript and registers the successor). sesh follows a thread's session FORWARD through " +
+	"that chain — it must, or a revive would resume a frozen pre-handoff transcript — so the session it tries to " +
+	"resume is exactly the held one. What claude does then was measured, and it is two different things. A holder " +
+	"started by the SAME claude build: an interactive `--resume` silently re-execs as `claude attach <id>`, so the " +
+	"revive looks fine but the pane is a VIEW onto the background session rather than a conversation it owns. A " +
+	"holder started by an OLDER build: it cannot be taken over, claude refuses, and the thread cannot be revived at " +
+	"all until the hold is released — and since claude updates near-daily, any holder that outlives a release lands " +
+	"there. sesh does NOT pre-refuse (claude decides); a revive that DOES fail names the holder, its state and every " +
+	"remedy: `claude attach <id>` opens it here without stopping it, `claude stop <id>` releases it (the conversation " +
+	"is KEPT), and --force does the stop and then a REAL resume, reporting which session it stopped. --force is never " +
+	"implied — stopping a holder whose state is \"working\" interrupts a turn running right now, so neither the TUI's " +
+	"revive nor a scheduled one ever forces. `sesh doctor` reports every thread whose conversation a background " +
+	"session owns, so the state is visible before a revive meets it. NB `sesh thread stop` does NOT create a " +
+	"background session: that was measured, and the handoff happens on claude's own exit paths."

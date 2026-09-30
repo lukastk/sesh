@@ -511,7 +511,10 @@ func (s *scheduler) runMessage(ctx context.Context, sc api.Schedule, firedAt tim
 		case "skip":
 			return api.OutcomeSkipped, "headless"
 		case "revive":
-			if _, err := c.ThreadResume(ctx, th.ID); err != nil {
+			// force=false: a scheduled revive must not stop a claude background session
+			// on its own (sesh#16) — an unattended job silently interrupting live work is
+			// exactly the surprise this is guarded against. It fails loudly instead.
+			if _, err := c.ThreadResume(ctx, th.ID, false); err != nil {
 				return api.OutcomeFailed, "revive: " + err.Error()
 			}
 			if _, err := s.d.waitPaneReady(th, 90*time.Second); err != nil {

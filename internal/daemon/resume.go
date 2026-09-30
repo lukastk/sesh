@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -106,7 +108,7 @@ func (d *Daemon) handleThreadResume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "resume: id is required")
 		return
 	}
-	d.reviveThread(w, req.ID)
+	d.reviveThread(w, r, req.ID, req.Force)
 }
 
 // reviveThread is the single revive-into-a-pane implementation behind BOTH
@@ -116,7 +118,11 @@ func (d *Daemon) handleThreadResume(w http.ResponseWriter, r *http.Request) {
 //     cannot start underneath the revival.
 //   - a live pane already bearing the marker => 409 (already live).
 //   - a codex thread with no minted session id (no turn ever) => explicit N/A.
-func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
+func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string, force bool) {
+	// cleared records the background session --force released, so the response can
+	// report it: a client that ASKED to force and gets no such field back is talking
+	// to a daemon that predates the flag, and must say so rather than assume it worked.
+	cleared := ""
 	thread, err := d.store.GetThread(id)
 	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
@@ -235,6 +241,47 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		sessionID = resolved
 	}
 
+	// claude's BACKGROUND SESSIONS (sesh#16). The leaf we are about to resume may be
+	// OWNED by a background session, and claude's own behaviour then splits — MEASURED
+	// on 2.1.286, not inferred:
+	//
+	//   - a holder from the SAME claude build makes an interactive `claude --resume`
+	//     silently re-exec itself as `claude attach <id>`. The revive "succeeds" and the
+	//     pane is marked, but it is a VIEW onto the background session rather than a
+	//     conversation this pane owns.
+	//   - a holder from a DIFFERENT (older) build cannot be taken over, so the resume
+	//     REFUSES and exits ("That session is running in the background (<id>) …"). The
+	//     pane dies a beat after spawning, which confirmAgentLaunched catches — but only
+	//     as the generic "agent exited immediately", with claude's real reason buried in
+	//     captured pane text. THIS IS THE PRODUCTION CASE, and since claude updates
+	//     near-daily any holder that outlives a release lands in it.
+	//
+	// So sesh does NOT pre-refuse: claude decides, and for a same-build holder its
+	// answer (attach) is a working outcome sesh must not break. Uncertainty likewise
+	// never blocks a revive. What sesh adds is (a) --force, an explicit way to stop the
+	// holder and get a REAL resume instead of an attach, and (b) naming the holder when
+	// the revive does fail (below, after confirmAgentLaunched).
+	if force {
+		bg, held, herr := d.heldBackgroundSession(r.Context(), kind, sessionID)
+		switch {
+		case herr != nil:
+			// --force was asked for explicitly, so failing to even check is an error
+			// rather than something to shrug past: the caller would otherwise be told a
+			// hold was cleared when sesh never looked.
+			writeError(w, http.StatusConflict, fmt.Sprintf(
+				"revive --force: could not read claude's background-session registry, so the hold could not be released: %v", herr))
+			return
+		case held:
+			if cerr := d.clearHeldBackgroundSession(r.Context(), bg); cerr != nil {
+				writeError(w, http.StatusConflict, fmt.Sprintf(
+					"revive --force: could not release background session %s holding this conversation: %v", bg.ID, cerr))
+				return
+			}
+			log.Printf("revive %s: --force stopped background session %s (%q) holding leaf %s", id, bg.ID, bg.Name, sessionID)
+			cleared = bg.ID
+		}
+	}
+
 	env := d.spawnEnv(id)
 	if err := d.prepAgentEnv(kind, env, thread.Cwd); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -292,7 +339,16 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 	// silently un-enterable. Tear down what we created and report the reason LOUDLY.
 	if err := d.confirmAgentLaunched(id); err != nil {
 		teardown()
-		writeError(w, http.StatusConflict, "revive: "+err.Error())
+		msg := "revive: " + err.Error()
+		// The pre-flight above can legitimately miss a hold: the registry may have
+		// been unreadable, or the session may have been backgrounded in the moment
+		// between the check and the spawn. Re-check now, so the failure still names
+		// the holder and the remedy instead of leaving claude's 409 buried in the
+		// captured pane output.
+		if bg, held, herr := d.heldBackgroundSession(r.Context(), kind, sessionID); herr == nil && held {
+			msg = heldSessionRefusal(id, bg, sessionID)
+		}
+		writeError(w, http.StatusConflict, msg)
 		return
 	}
 
@@ -305,5 +361,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, id string) {
 		return
 	}
 	thread, _ = d.store.GetThread(id)
-	writeJSON(w, http.StatusOK, api.ThreadResponse{Schema: api.SchemaVersion, Thread: thread})
+	writeJSON(w, http.StatusOK, api.ReviveThreadResponse{
+		Schema: api.SchemaVersion, Thread: thread, ClearedBackgroundSession: cleared,
+	})
 }

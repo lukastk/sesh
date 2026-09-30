@@ -919,7 +919,36 @@ sesh thread realize --id <id> --agent claude --cwd ~/proj            # convert a
 sesh thread stop --id <id>           # end runtime (kills the thread's PANE; a session shared with siblings survives), keep the record (revivable)
 sesh thread resume --id <id>         # revive a dead thread into a fresh pane (restores convo)
 sesh thread headful --id <id>        # promote a live HEADLESS thread into a pane
+sesh thread headful --id <id> --force   # ...and first stop a claude BACKGROUND SESSION that owns the
+                                        # conversation (see "A thread that will not come back", below)
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first); children promote to the grandparent
+
+# ── A CLAUDE THREAD THAT WILL NOT COME BACK: a held background session ──────────────
+# A claude conversation can be OWNED by a BACKGROUND SESSION — either because someone
+# ran `claude --bg`, or because claude's own EXIT HANDOFF moved it there (it writes a
+# `continued-in` record into the old transcript and registers the successor). sesh
+# follows a thread's session forward through that chain, so the session it tries to
+# resume is exactly the held one. Two things then happen, and they look nothing alike:
+#
+#   * the holder was started by the SAME claude build -> an interactive resume silently
+#     becomes `claude attach <id>`. The revive LOOKS fine, but the pane is a view onto
+#     the background session, not a conversation it owns.
+#   * the holder was started by an OLDER build -> claude refuses, the pane exits at
+#     once, and `sesh thread headful` fails. Since claude updates near-daily, any
+#     holder that outlives a release lands here — and the thread is un-revivable until
+#     the hold is released. (Two threads sat like this for 5 and 10 days.)
+#
+# The failure NAMES the holder, its state and every remedy. To see it coming instead:
+sesh doctor                          # reports every thread whose conversation a background session owns
+claude agents --json                 # claude's own registry: kind == "background"
+claude attach <short-id>             # open the background session here, without stopping it
+claude stop <short-id>               # release it; the conversation is KEPT (`--resume` works after)
+sesh thread headful --id <id> --force   # do both: stop the holder, then a REAL resume
+#
+# --force is never implied: stopping a holder whose state is "working" interrupts a turn
+# running right now, so neither the TUI's revive nor a scheduled one ever forces.
+# NB `sesh thread stop` (which kills the pane) does NOT create a background session —
+# that was measured. The handoff happens on claude's own exit paths, not on your kill.
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --release                   # release it (+ its subtree) from an ANCESTOR's hold, until tomorrow

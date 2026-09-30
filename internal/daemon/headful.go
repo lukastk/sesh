@@ -24,5 +24,5 @@ func (d *Daemon) handleThreadHeadful(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "headful: id is required")
 		return
 	}
-	d.reviveThread(w, req.ID)
+	d.reviveThread(w, r, req.ID, req.Force)
 }

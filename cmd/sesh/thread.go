@@ -228,6 +228,7 @@ func threadDelete(cfg config.Config, args []string) error {
 func threadResume(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
+	force := fs.Bool("force", false, "release a claude background session that owns this thread's conversation (runs `claude stop <id>`, keeping the conversation) and then revive")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -240,15 +241,27 @@ func threadResume(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
-	resp, err := c.ThreadResume(context.Background(), *id)
+	resp, err := c.ThreadResume(context.Background(), *id, *force)
 	if err != nil {
 		return err
 	}
 	if *asJSON {
-		return emitJSON(resp.Thread)
+		return emitJSON(resp)
 	}
+	reportClearedBackgroundSession(resp)
 	fmt.Printf("resumed %s (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
 	return nil
+}
+
+// reportClearedBackgroundSession says so when a forced revive actually released a
+// claude background session. Stopping someone's background session is a side effect
+// on state outside this thread, so it is never silent — even on success.
+func reportClearedBackgroundSession(resp api.ReviveThreadResponse) {
+	if resp.ClearedBackgroundSession == "" {
+		return
+	}
+	fmt.Printf("--force: stopped claude background session %s, which owned this conversation (its history is kept)\n",
+		resp.ClearedBackgroundSession)
 }
 
 // threadHeadful promotes a live headless thread into a headed tmux pane (resuming its
@@ -257,6 +270,7 @@ func threadResume(cfg config.Config, args []string) error {
 func threadHeadful(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("headful", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
+	force := fs.Bool("force", false, "release a claude background session that owns this thread's conversation (runs `claude stop <id>`, keeping the conversation) and then revive")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -269,13 +283,14 @@ func threadHeadful(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
-	resp, err := c.ThreadHeadful(context.Background(), *id)
+	resp, err := c.ThreadHeadful(context.Background(), *id, *force)
 	if err != nil {
 		return err
 	}
 	if *asJSON {
-		return emitJSON(resp.Thread)
+		return emitJSON(resp)
 	}
+	reportClearedBackgroundSession(resp)
 	fmt.Printf("promoted %s to headed (%s)\n", resp.Thread.ID, resp.Thread.SessionName)
 	return nil
 }

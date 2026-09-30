@@ -31,11 +31,12 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 		checks = append(checks, api.DoctorCheck{Name: name, Status: status, Detail: detail})
 	}
 
-	// SHELL: headless turns run through $SHELL -c, so it must be set.
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		add("daemon SHELL", "warn", "unset — headless turns fall back to /bin/sh (zshenv PATH/keys won't load)")
-		shell = "/bin/sh"
+	// SHELL: headless turns run through $SHELL -c, so it must be set. daemonShell()
+	// is the single resolver (it is also what the claude-registry hops use), so the
+	// row reports exactly the shell those paths get.
+	shell := daemonShell()
+	if os.Getenv("SHELL") == "" {
+		add("daemon SHELL", "warn", "unset — headless turns fall back to "+shell+" (zshenv PATH/keys won't load)")
 	} else {
 		add("daemon SHELL", "ok", shell)
 	}
@@ -64,6 +65,13 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	// one started before the pin keeps holding thread writer locks until stopped,
 	// whatever the config now says.
 	d.doctorCodexDaemon(add)
+
+	// claude's BACKGROUND SESSIONS (sesh#16): a conversation owned by a background
+	// session cannot be `--resume`d, so its thread is silently un-revivable until
+	// the hold is released. Two production threads sat that way for 5 and 10 days
+	// with nothing surfacing it — this row is what makes it visible before someone
+	// trips over it at revive time.
+	d.doctorClaudeBackground(add)
 
 	// Config files parse (a broken one would already have refused the daemon,
 	// but report which policies are active).

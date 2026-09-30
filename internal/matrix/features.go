@@ -575,6 +575,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.revive-held-session",
+		Description: "sesh#16: a claude conversation OWNED by a background session (`claude --bg`, or claude's exit handoff, which writes `continued-in` and registers the successor). MEASURED: a same-build holder makes an interactive `claude --resume` silently re-exec as `claude attach <id>` — the revive looks fine but the pane is a VIEW onto the holder; a holder from an OLDER build cannot be taken over, so the resume refuses and the thread is un-revivable (the production case: two threads stuck for 5 and 10 days). sesh therefore does NOT pre-refuse (claude decides); it reports every held thread in `sesh doctor`, names the holder + every remedy when a revive does fail, and `--force` stops the holder (`claude stop`, conversation KEPT) for a REAL resume. Proven against claude's OWN registry, with a BASELINE resume asserted first and the resume-vs-attach distinction pinned on the pane's argv. The cross-build refusal leg is NOT cell-covered (the holder's build follows claude's self-upgrading daemon) — see the cell's comment; remote = routed, the owner reads the registry and stops the session",
+		Agents:      []Agent{Claude},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.backup",
 		Description: "backup/restore/copy: sha256-idempotent transcript backups into portable SQLite; restore --to-dir (all agents) / --native (claude; others reported Unsupported); copy composes them; remote = routed",
 		Agents:      agentic,

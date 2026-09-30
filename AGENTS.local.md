@@ -6,6 +6,49 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H118 — THE SIX RED CODEX CELLS WERE CODEX ≥0.157's SHARED DETACHED APP-SERVER HOLDING THE THREAD WRITER LOCK — NOT THE `/tmp` WARNING — AND IT WAS LATENT IN PRODUCTION; sesh now pins `[features] daemon_auto_start = false` (#15) (2026-09-30, sesh ee9969f + 0096473 + 991107c merged as 4885b2a; NO schema/API change; DAEMON rebuild + supervised RESTART; DEPLOYED 5/6 — pocket4 offline, pending)
+The matrix red quoted `Refusing to create helper binaries under temporary dir "/tmp"` — a
+HARMLESS warning (a headless `codex exec` with a /tmp codex home still exits 0). The real error
+further down the same output: `thread-store conflict: thread … already has an active writer`
+(codex-rs/rollout/src/writer_lock.rs). Since 0.157 every interactive `codex` spawns a shared,
+DETACHED `codex app-server --managed-daemon` per codex home (feature `daemon_auto_start`, Stable,
+default on) that runs the turns; `sesh thread stop` kills the pane but that server keeps the
+writer lock (observed held >150 s after the kill), so stop-then-headless fails, and `adopt` breaks
+because the server — not the pane's process — has the rollout open. **PRODUCTION: latent on
+mymain (0.159.0)** — its codex panes predated 0.157, so no server had started yet; the first new
+headed codex there would have broken stop→headless / capture / adopt for real threads.
+Lukas chose (a): **sesh pins `daemon_auto_start = false`** (`agents.EnsureCodexNoDaemon`): parse,
+refuse what it cannot understand (invalid TOML, non-bool, inline `features = {…}` — file left
+untouched), edit the one key as TEXT so every other key/table/comment survives, re-parse and
+assert equality modulo that key, atomic write preserving mode, never rewrite an already-false
+file. TRIGGERS: daemon startup for the machine's codex home (the only trigger that covers a
+HAND-started codex that `adopt` later picks up; non-fatal so an unfixable user config never takes
+the daemon off the mesh — logged + doctor), and fatal before every headed spawn/resume
+(prepCodexEnv) and every headless turn. A user's explicit `true` is overridden LOUDLY (log +
+doctor). `sesh doctor` gains `codex daemon`, `codex daemon pin`, `codex app-server` (running
+servers matched by EXECUTABLE PATH under `<home>/packages/app-server-daemon/` — a pure matcher).
+Stop recipe for a pre-existing server (measured 0.159): `CODEX_HOME=<home> codex app-server
+daemon stop` stops the app-server but NOT its `pid-update-loop` updater (pid in
+`<home>/app-server-daemon/daemon-updater.pid`). codex 0.142.5 / 0.150.0 accept the key.
+**THE HARNESS DOES NOT SET THE KEY** — the cells go green through the production path only.
+HARNESS LEAK FIX: each sandbox now stops its codex daemon in cleanup and TestMain reaps leaked
+ones older than 2 h (127 had leaked on mymain, 3.4 GB RAM, oldest 49 h).
+GREEN (merged main): all 18 non-conformance packages, `go vet`; **the FULL CODEX COLUMN 49/49**
+(-v -count=1), zero "active writer". ANTI-GAMING: ensure made a no-op → exactly the original six
+red again with "active writer"; matcher widened → TestMatchExePrefix red (asserted on matcher
+OUTPUT). **TRAP — AND IT HURT: an earlier neuter experiment WIDENED A LIVE PROCESS MATCH and
+killed 23 of Lukas's supervisor `sleep`s on mymain** (2026-09-29 18:23 UTC): every while-sleep
+loop woke early — borg-backup ran early (OK 19:44), borg-prune ran its monthly pass ~2 days early
+and **FAILED mymain's repo on `lock.exclusive (timeout)`** against that concurrent backup (the
+other five pruned+checked OK; next pass now 2026-10-29), gcal/todoist/vault-git-backup did one
+extra pass, mymain's cockpit lost its sidebar placeholder panes. **NEVER let an anti-gaming
+experiment execute a widened kill on a live machine — assert on the matcher's output.**
+DEPLOY at 4885b2a (`vcs.modified=false`): mymain, macbook, macstudio, ideapad (supervised
+restart), termux (kill-by-own-pid, relaunched by the next login); on each, `~/.codex/config.toml`
+now has `[features] daemon_auto_start = false`, `codex features list` exits 0 and reports it
+false, doctor ✓ both rows, no managed app-server running anywhere. **pocket4 OFFLINE — PENDING**
+(run the same recipe, then check doctor's `codex app-server` row).
+
 ## H117 — prefix+L RECORDED THE WRONG CLIENT'S WINDOW, AND nav'S OUTER SELECT WAS AMBIENT TOO (#14) (2026-09-29, sesh b022e0e merged as b1f1be8; NO API/schema/daemon change; BINARY-ONLY; DEPLOYED 5/6 — macbook asleep, pending)
 `resolveMasterLocation` read the carrier's master window with `display-message -c` — the H98
 fu2 ambient read (`-c` says where to PRINT, not what to expand against). Now #11's

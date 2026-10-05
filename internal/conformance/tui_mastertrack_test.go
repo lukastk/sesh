@@ -90,8 +90,9 @@ func claimSidebarTracksCockpit(t *testing.T) {
 	// A master server with a window per machine, so the nav's OUTER select has a target.
 	master := "sesh-tuitrack-" + thB.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+	// Use the real cockpit session name, including for a nav through the CLI (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", local.Machine)
 
 	bin := seshBin(t)
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
@@ -196,8 +197,9 @@ func claimSidebarArrowNoRevert(t *testing.T) {
 	}
 	master := "sesh-tuiarrow-" + thA.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
+	// Use the real cockpit session name, including for a nav through the CLI (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", local.Machine)
 
 	bin := seshBin(t)
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}

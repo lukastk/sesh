@@ -413,9 +413,10 @@ func claimActionNavRemoteDead(t *testing.T) {
 
 	master := "sesh-tuirdead-" + th.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", peer.Machine)
-	mustTmux(t, master, "select-window", "-t", "m:home")
+	// Nav targets the real cockpit session name explicitly (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", peer.Machine)
+	mustTmux(t, master, "select-window", "-t", "master:home")
 
 	bin := seshBin(t)
 	local := newSandbox(t, matrix.Local)
@@ -535,9 +536,10 @@ func claimActionNavQuits(t *testing.T) {
 
 	master := "sesh-tuinavq-" + th.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
-	mustTmux(t, master, "select-window", "-t", "m:home")
+	// Nav targets the real cockpit session name explicitly (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "master:home")
 
 	bin := seshBin(t)
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
@@ -598,9 +600,10 @@ func claimSidebarNavStays(t *testing.T) {
 
 	master := "sesh-tuisbnav-" + th.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
-	mustTmux(t, master, "select-window", "-t", "m:home")
+	// Nav targets the real cockpit session name explicitly (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "master:home")
 
 	bin := seshBin(t)
 	navEnv := []string{"SESH_HOME=" + local.Home, "SESH_MACHINE=" + local.Machine, "SESH_TMUX_SOCKET=" + local.TmuxSocket, "SESH_MASTER_SOCKET=" + master}
@@ -655,7 +658,7 @@ func claimSidebarNavStays(t *testing.T) {
 		t.Fatalf("sidebar nav errored: %v", m.ActionErr())
 	}
 	// (a) The nav REALLY happened: the master's active window is the machine window.
-	out2, err2 := exec.Command("tmux", "-L", master, "display-message", "-t", "m", "-p", "#{window_name}").Output()
+	out2, err2 := exec.Command("tmux", "-L", master, "display-message", "-t", "master", "-p", "#{window_name}").Output()
 	if err2 != nil {
 		t.Fatalf("read master active window: %v", err2)
 	}
@@ -717,9 +720,10 @@ func claimActionNavHeadless(t *testing.T) {
 	// A master window for this machine, so the (master-path) nav has a window to switch to.
 	master := "sesh-tuihlmaster-" + th.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", local.Machine)
-	mustTmux(t, master, "select-window", "-t", "m:home")
+	// Nav targets the real cockpit session name explicitly (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", local.Machine)
+	mustTmux(t, master, "select-window", "-t", "master:home")
 
 	bin := seshBin(t)
 	// A local thread's inner switch uses cfg.TmuxSocket, so the nav subprocess needs the
@@ -761,9 +765,10 @@ func claimActionNav(t *testing.T) {
 	// A master tmux with a window for the peer machine, NOT currently focused.
 	master := "sesh-tuinavmaster-" + th.ID[:8]
 	t.Cleanup(func() { exec.Command("tmux", "-L", master, "kill-server").Run() }) //nolint:errcheck
-	mustTmux(t, master, "new-session", "-d", "-s", "m", "-n", "home")
-	mustTmux(t, master, "new-window", "-t", "m", "-n", peer.Machine)
-	mustTmux(t, master, "select-window", "-t", "m:home")
+	// Nav targets the real cockpit session name explicitly (H117).
+	mustTmux(t, master, "new-session", "-d", "-s", "master", "-n", "home")
+	mustTmux(t, master, "new-window", "-t", "master", "-n", peer.Machine)
+	mustTmux(t, master, "select-window", "-t", "master:home")
 
 	// The local client machine: knows the peer (incl. its tmux socket) and the
 	// master socket. The TUI runs here.

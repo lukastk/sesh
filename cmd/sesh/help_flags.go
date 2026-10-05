@@ -248,7 +248,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread headful": {
 		{"--id", "thread id or unique prefix (required)"},
-		{"--force", "release a claude BACKGROUND SESSION that owns this thread's conversation and then revive: runs `claude stop <id>`, which KEEPS the conversation. Without it claude decides — a same-build holder is silently attached to instead of resumed, an older-build holder makes the revive fail (loudly, naming the holder). Never implicit: stopping a holder whose state is \"working\" interrupts a turn running right now"},
+		{"--force", "release a claude BACKGROUND SESSION that owns this thread's conversation and then revive: runs `claude stop <id>`, which KEEPS the conversation. Without it a held conversation makes the revive fail, loudly, naming the holder. Never implicit: stopping a holder whose state is \"working\" interrupts a turn running right now"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
@@ -361,7 +361,7 @@ var flagDocs = map[string][]flagDoc{
 	},
 	"thread resume": {
 		{"--id", "thread id or unique prefix (required)"},
-		{"--force", "release a claude BACKGROUND SESSION that owns this thread's conversation and then revive: runs `claude stop <id>`, which KEEPS the conversation. Without it claude decides — a same-build holder is silently attached to instead of resumed, an older-build holder makes the revive fail (loudly, naming the holder). Never implicit: stopping a holder whose state is \"working\" interrupts a turn running right now"},
+		{"--force", "release a claude BACKGROUND SESSION that owns this thread's conversation and then revive: runs `claude stop <id>`, which KEEPS the conversation. Without it a held conversation makes the revive fail, loudly, naming the holder. Never implicit: stopping a holder whose state is \"working\" interrupts a turn running right now"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},

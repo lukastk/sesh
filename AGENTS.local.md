@@ -77,6 +77,45 @@ cannot verify: claude decides.** What sesh adds:
   real hold — while resolving every claude thread's leaf would scan every transcript on the box
   (48 MB files exist here).
 
+**✅ THE ACTUAL CAUSE (2026-10-05, found + reproduced + FIXED): ← ← on an empty claude prompt.**
+Read the code instead of guessing inputs. `source: r==="repl" ? "slash" : r` — the daemon's `(slash)`
+tag means "backgrounded FROM THE REPL", nothing about a typed command (sources:
+shell/slash/fleet/spare/respawn). The `/background` module also exports `BackgroundAndExit` (an exit
+dialog, "Background this session? · Background / Stay") and the REPL class `BackgroundGesture`, whose
+strings include **"Press ← again to open agents"** — every claude footer says `← for agents`. Opening
+the agents view MOVES THE CONVERSATION INTO A BACKGROUND SESSION. REPRODUCED in an isolated rig, both
+production signatures exactly: ← ← idle → agents view ("Finished sessions wait here for you to
+review"), `continued-in`, registry `background/<id>/blocked`, daemon log `bg spawned <id> (slash)` +
+a `(spare)` — the production pair; ← ← MID-TOOL → `● Backgrounding after the current tool finishes…`
+as the same `system/informational` record french-listening has, then the handoff when the tool ends.
+Nothing typed, so nothing in history — consistent with Lukas. In his cockpit ← is "fold" in the sesh
+TUI/sidebar (and the sidebar hands focus to the thread pane after a jump), `prefix ←` is select-pane
+toward the LEFT sidebar, and the phone's key row has LEFT — one slip with focus in the claude pane is
+enough. Which of those it was is not recoverable (keys are not logged).
+**FIX (Lukas chose: sesh-spawned panes only):** claude's documented switch `disableAgentView` /
+**`CLAUDE_CODE_DISABLE_AGENT_VIEW=1`** ("Disable agent view (`claude agents`, `--bg`, /background, the
+on-demand daemon)"), pinned in `prepAgentEnv`'s claude branch — the single seam every headed launch
+(new session/window, split, `--into-pane` via LaunchEnv, revive) passes through. Measured with it set:
+← ← does nothing (no `← for agents` hint, no hold); **subagents and `run_in_background` shells still
+work.** Side effect, and it is an improvement: with the view disabled claude can no longer silently
+re-exec a held revive as `claude attach` — it REFUSES, so a held thread fails LOUDLY with sesh's
+named remedy instead of a pane that only looks revived. `thread.revive-held-session` was rewritten to
+assert that (the refusal leg it previously could not cover is now covered).
+NEW cell **`thread.claude-no-agent-view` × claude × {local, remote}** delivers a real ← ← through tmux
+to a real claude, spawn AND revive, and asserts on the pane process's environ, claude's own registry,
+the transcripts and the pane. NEUTER (pin dropped, effect assertions kept running — the first neuter
+stopped at a Fatalf on the env check and proved only the mechanism, so the env check became Errorf):
+red with REAL background sessions, `continued-in` written and the agents view in the pane, on both
+legs. Neuter of the post-spawn named failure: red, the message loses `claude attach`, `--force`,
+`BACKGROUND SESSION`. Both md5-restored. Blast radius green: thread.claude-trust ×2, thread.new.headed/
+claude ×2, thread.resume/claude ×2, thread.state-authority/claude ×2, revive-held-session ×2.
+**CONCURRENT SESSION in the shared checkout** (a pi-delivery feature, ~18 dirty/untracked files incl.
+features.go) broke the conformance build mid-run (`pirpcsend_test.go: undefined: repoRoot`) — my
+"red" was a COMPILE ERROR, not a result (H88/H113, again). Moved my change into a detached worktree
+at HEAD (only my hunks; features.go hunk-split), tested and committed THERE, then removed my edits
+from the shared checkout without touching theirs. A linked worktree is the right tool when the main
+checkout is someone else's WIP.
+
 **⚠ CORRECTION (2026-10-05) — the "TRIGGER FOUND" paragraph below is WRONG about WHO, and it was
 deployed in the skill before being caught.** Lukas: "But I've never run /background". He was right,
 and it was checkable: claude's prompt history `~/.claude/history.jsonl` records EVERY slash command

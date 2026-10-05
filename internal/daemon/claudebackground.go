@@ -84,9 +84,10 @@ func heldSessionRefusal(threadID string, bg claude.BackgroundSession, leaf strin
 	}
 	msg := fmt.Sprintf(
 		"revive: this thread's claude conversation is owned by a BACKGROUND SESSION (%s, state %q%s), and claude "+
-			"refused to resume it — which is why the pane exited immediately. That happens when the holder was "+
-			"started by a DIFFERENT claude build than the one reviving (claude updates near-daily, so any holder "+
-			"that outlives a release lands here).",
+			"refused to resume it while another session holds it — which is why the pane exited immediately. "+
+			"(Typically the conversation was moved there by pressing ← twice on an empty claude prompt, which opens "+
+			"claude's agents view; sesh now launches claude with that view disabled, but a hold made before that, or "+
+			"by a claude sesh did not launch, still blocks the revive.)",
 		bg.ID, doing, nameSuffix(bg.Name))
 	if leaf != "" {
 		msg += fmt.Sprintf(" Held session: %s.", leaf)
@@ -184,22 +185,19 @@ func (d *Daemon) doctorClaudeBackground(add func(name, status, detail string)) {
 		return
 	}
 	for _, h := range held {
-		// warn, not fail: a hold does not always BREAK a revive, it changes what one
-		// means. MEASURED — a holder from a DIFFERENT claude build cannot be taken over,
-		// so claude refuses `--resume` and the thread cannot be revived at all (the
-		// production case, unnoticed for days); a holder from the SAME build makes an
-		// interactive claude re-exec itself as `claude attach`, so the revive appears to
-		// work but the pane is a VIEW onto the background session rather than a
-		// conversation it owns. Both are worth knowing before someone meets them at
-		// revive time; neither is a daemon fault, so neither is a "fail".
+		// warn, not fail: the thread is stuck, but nothing is wrong with the daemon. sesh
+		// launches claude with its agent view disabled (claudeAgentViewEnv), so a revive
+		// of a held conversation is REFUSED by claude until the hold is released — the
+		// state the production threads sat in for 5 and 10 days, unnoticed. (A claude
+		// WITH the agent view would instead silently re-exec as `claude attach`, a pane
+		// that only looks revived; sesh's panes no longer do that.)
 		add("claude background session:"+h.Thread.ID[:8], "warn", fmt.Sprintf(
 			"thread %q (%s): its claude conversation is owned by background session %s (state %q%s, leaf %s). "+
-				"While it is held, reviving this thread either is REFUSED by claude (a live holder) or silently becomes "+
-				"`claude attach %s` instead of a resume (a settled one). "+
+				"While it is held, claude refuses to resume it, so reviving this thread fails. "+
 				"`sesh thread headful --id %s --force` stops the holder (`claude stop %s`, conversation KEPT) and does a real resume; "+
 				"`claude attach %s` opens it here without stopping it. NB state \"working\" means a turn is running right now.",
 			h.Thread.Name, h.Thread.ID[:8], h.Background.ID, h.Background.State, nameSuffix(h.Background.Name),
-			h.Leaf, h.Background.ID, h.Thread.ID[:8], h.Background.ID, h.Background.ID))
+			h.Leaf, h.Thread.ID[:8], h.Background.ID, h.Background.ID))
 	}
 }
 

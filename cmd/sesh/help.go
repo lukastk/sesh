@@ -1079,21 +1079,18 @@ func isRoutable(cmd string) bool {
 // claude conversation owned by a background session cannot be resumed, and the
 // symptom — a thread that simply will not come back — reads as a sesh bug, so the
 // help says plainly what is holding it and how to see it coming.
-const heldBackgroundSessionHelp = "A CLAUDE CONVERSATION CAN BE OWNED BY A BACKGROUND SESSION — because " +
-	"someone ran `claude --bg`, or because a live session went through claude's `/background` path (claude's " +
-	"daemon log tags it `(slash)`) without anyone typing the command — what triggers that is not yet known. It " +
-	"writes a `continued-in` record into the old transcript, registers the successor as a background session " +
-	"and EXITS the pane. sesh follows a thread's session FORWARD through " +
-	"that chain — it must, or a revive would resume a frozen pre-handoff transcript — so the session it tries to " +
-	"resume is exactly the held one. What claude does then was measured, and it is two different things. A holder " +
-	"started by the SAME claude build: an interactive `--resume` silently re-execs as `claude attach <id>`, so the " +
-	"revive looks fine but the pane is a VIEW onto the background session rather than a conversation it owns. A " +
-	"holder started by an OLDER build: it cannot be taken over, claude refuses, and the thread cannot be revived at " +
-	"all until the hold is released — and since claude updates near-daily, any holder that outlives a release lands " +
-	"there. sesh does NOT pre-refuse (claude decides); a revive that DOES fail names the holder, its state and every " +
-	"remedy: `claude attach <id>` opens it here without stopping it, `claude stop <id>` releases it (the conversation " +
-	"is KEPT), and --force does the stop and then a REAL resume, reporting which session it stopped. --force is never " +
-	"implied — stopping a holder whose state is \"working\" interrupts a turn running right now, so neither the TUI's " +
-	"revive nor a scheduled one ever forces. `sesh doctor` reports every thread whose conversation a background " +
-	"session owns, so the state is visible before a revive meets it. NB `sesh thread stop` (the TUI's `x`) does NOT " +
-	"create a background session — measured, including mid-tool."
+const heldBackgroundSessionHelp = "A CLAUDE CONVERSATION CAN BE OWNED BY A BACKGROUND SESSION, and while it is, " +
+	"claude refuses to `--resume` it, so the thread cannot be revived. The usual way in is pressing ← TWICE on an " +
+	"empty claude prompt: that opens claude's agents view, which moves the conversation into a background session " +
+	"(a `continued-in` record in the old transcript; the pane becomes the agents view). Nothing is typed, so nothing " +
+	"is in any history — it is an easy slip where ← also means fold (the sesh TUI) or go-left-to-the-sidebar. sesh " +
+	"now launches every claude pane with CLAUDE_CODE_DISABLE_AGENT_VIEW=1, so ← ← does nothing there (subagents and " +
+	"background shells are unaffected); `claude --bg` started by hand can still produce a hold. sesh follows a " +
+	"thread's session FORWARD through the `continued-in` chain — it must, or a revive would resume a frozen " +
+	"transcript — so the session it tries to resume is exactly the held one. A revive that fails names the holder, " +
+	"its state and every remedy: `claude attach <id>` opens it here without stopping it, `claude stop <id>` releases " +
+	"it (the conversation is KEPT), and --force does the stop and then a real resume, reporting which session it " +
+	"stopped. --force is never implied — stopping a holder whose state is \"working\" interrupts a turn running right " +
+	"now, so neither the TUI's revive nor a scheduled one ever forces. `sesh doctor` reports every thread whose " +
+	"conversation a background session owns, so the state is visible before a revive meets it. NB `sesh thread stop` " +
+	"(the TUI's `x`) does NOT create a background session — measured, including mid-tool."

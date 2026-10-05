@@ -169,3 +169,18 @@ func TestHeldSessionRefusalNamesTheRemedy(t *testing.T) {
 		t.Errorf("refusal must not suggest the conversation is lost; got:\n%s", msg)
 	}
 }
+
+// The pin itself. The end-to-end proof that it reaches the claude process and stops
+// ← ← is the thread.claude-no-agent-view cell; this guards the value and the override.
+func TestPinClaudeAgentView(t *testing.T) {
+	env := map[string]string{}
+	pinClaudeAgentView(env)
+	if env["CLAUDE_CODE_DISABLE_AGENT_VIEW"] != "1" {
+		t.Fatalf("pin did not set CLAUDE_CODE_DISABLE_AGENT_VIEW=1: %v", env)
+	}
+	env = map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "0"}
+	pinClaudeAgentView(env)
+	if env["CLAUDE_CODE_DISABLE_AGENT_VIEW"] != "1" {
+		t.Fatalf("a user-set 0 must be overridden inside a sesh pane: %v", env)
+	}
+}

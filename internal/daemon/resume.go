@@ -22,6 +22,7 @@ func (d *Daemon) routesResume(mux *http.ServeMux) {
 //   - claude: pre-trust the cwd in claude's global config (its workspace-trust
 //     dialog otherwise eats the first keystrokes — ticket 4b069b88; see
 //     claude.EnsureTrust for why --dangerously-skip-permissions is not enough);
+//   - claude: also pin CLAUDE_CODE_DISABLE_AGENT_VIEW=1 (see claudeAgentViewEnv);
 //   - codex: pre-trust the cwd (same prompt class), wire the turn-end notify
 //     reporter, and inject CODEX_HOME.
 //
@@ -34,7 +35,11 @@ func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd strin
 		if err != nil {
 			return err
 		}
-		return claude.EnsureTrust(cfgPath, cwd)
+		if err := claude.EnsureTrust(cfgPath, cwd); err != nil {
+			return err
+		}
+		pinClaudeAgentView(env)
+		return nil
 	case agents.Codex:
 		return d.prepCodexEnv(env, cwd)
 	}
@@ -242,25 +247,18 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 	}
 
 	// claude's BACKGROUND SESSIONS (sesh#16). The leaf we are about to resume may be
-	// OWNED by a background session (`/background` in the session, or `claude --bg` at
-	// launch), and claude's own behaviour then splits — MEASURED on 2.1.286, not inferred:
+	// OWNED by a background session — in production, because ← ← on an empty claude
+	// prompt opened claude's agents view, which moves the conversation there. sesh's
+	// panes run with that view disabled (claudeAgentViewEnv), and with it disabled
+	// claude REFUSES to `--resume` a held conversation (measured: without the switch a
+	// same-build holder made claude silently re-exec as `claude attach`, a pane that
+	// only looked revived). The pane dies a beat after spawning, which
+	// confirmAgentLaunched catches; the post-spawn re-check below names the holder.
 	//
-	//   - a holder from the SAME claude build makes an interactive `claude --resume`
-	//     silently re-exec itself as `claude attach <id>`. The revive "succeeds" and the
-	//     pane is marked, but it is a VIEW onto the background session rather than a
-	//     conversation this pane owns.
-	//   - a holder from a DIFFERENT (older) build cannot be taken over, so the resume
-	//     REFUSES and exits ("That session is running in the background (<id>) …"). The
-	//     pane dies a beat after spawning, which confirmAgentLaunched catches — but only
-	//     as the generic "agent exited immediately", with claude's real reason buried in
-	//     captured pane text. THIS IS THE PRODUCTION CASE, and since claude updates
-	//     near-daily any holder that outlives a release lands in it.
-	//
-	// So sesh does NOT pre-refuse: claude decides, and for a same-build holder its
-	// answer (attach) is a working outcome sesh must not break. Uncertainty likewise
-	// never blocks a revive. What sesh adds is (a) --force, an explicit way to stop the
-	// holder and get a REAL resume instead of an attach, and (b) naming the holder when
-	// the revive does fail (below, after confirmAgentLaunched).
+	// sesh does NOT pre-refuse: claude is the authority on whether a hold blocks, and
+	// uncertainty never blocks a revive. What sesh adds is (a) --force, an explicit way
+	// to stop the holder and get a real resume, and (b) naming the holder when the
+	// revive does fail (below, after confirmAgentLaunched).
 	if force {
 		bg, held, herr := d.heldBackgroundSession(r.Context(), kind, sessionID)
 		switch {
@@ -364,4 +362,30 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 	writeJSON(w, http.StatusOK, api.ReviveThreadResponse{
 		Schema: api.SchemaVersion, Thread: thread, ClearedBackgroundSession: cleared,
 	})
+}
+
+// claudeAgentViewEnv is claude's own switch for its AGENT VIEW (sesh#16). Documented
+// in claude's settings schema as "Disable agent view (`claude agents`, `--bg`,
+// /background, the on-demand daemon). Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1."
+//
+// WHY sesh pins it in every claude pane it launches. Pressing ← twice on an empty
+// claude prompt opens that view, and opening it MOVES THE CONVERSATION INTO A CLAUDE
+// BACKGROUND SESSION (it writes a `continued-in` record, the daemon logs the source as
+// `(slash)` — meaning "from the REPL" — and mid-tool it prints "Backgrounding after
+// the current tool finishes…"). sesh's record then points at a conversation it no
+// longer owns, and the thread cannot be revived until the hold is released. Two of
+// Lukas's threads were stranded that way for 5 and 10 days, with nothing typed — ←
+// means "fold" in the sesh TUI and "go to the sidebar" in the cockpit, so it is an
+// easy slip with focus in the agent pane. Both production signatures reproduced from
+// ← ← alone; with this variable set, ← ← does nothing.
+//
+// Scoped to sesh-launched panes on purpose (Lukas's choice): it removes the agents
+// view, `--bg` and /background ONLY where sesh owns the lifecycle. Subagents and
+// `run_in_background` shells are NOT affected — measured with the variable set.
+// A user-set value is overridden: inside a sesh pane the feature is exactly what
+// strands the thread, so there is no setting of it that sesh can work with.
+const claudeAgentViewEnv = "CLAUDE_CODE_DISABLE_AGENT_VIEW"
+
+func pinClaudeAgentView(env map[string]string) {
+	env[claudeAgentViewEnv] = "1"
 }

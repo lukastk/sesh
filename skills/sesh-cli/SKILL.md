@@ -924,23 +924,18 @@ sesh thread headful --id <id> --force   # ...and first stop a claude BACKGROUND 
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first); children promote to the grandparent
 
 # ── A CLAUDE THREAD THAT WILL NOT COME BACK: a held background session ──────────────
-# A claude conversation can be OWNED by a BACKGROUND SESSION: the conversation moves into
-# a claude background session, a `continued-in` record is written into the old transcript,
-# and the pane EXITS (which is why the thread's tmux window is simply gone afterwards).
-# It runs through the same code path as claude's `/background` command (claude's
-# ~/.claude/daemon.log tags it `(slash)`) — but on Lukas's fleet NOBODY TYPED `/background`:
-# claude's prompt history records every slash command and has none. What invokes it is not
-# yet known. sesh
-# follows a thread's session forward through that chain, so the session it tries to
-# resume is exactly the held one. Two things then happen, and they look nothing alike:
+# A claude conversation can be OWNED by a BACKGROUND SESSION, and while it is, claude
+# refuses to `--resume` it — the thread cannot be revived. THE CAUSE (measured, both
+# production cases reproduced): pressing ← TWICE on an empty claude prompt opens claude's
+# agents view, which moves the conversation into a background session (`continued-in`
+# record in the old transcript; claude's daemon log tags it `(slash)` = "from the REPL").
+# Nothing is typed, so nothing shows in any history. Easy to do by accident: ← is "fold"
+# in the sesh TUI and "go left to the sidebar" in the cockpit.
 #
-#   * the holder was started by the SAME claude build -> an interactive resume silently
-#     becomes `claude attach <id>`. The revive LOOKS fine, but the pane is a view onto
-#     the background session, not a conversation it owns.
-#   * the holder was started by an OLDER build -> claude refuses, the pane exits at
-#     once, and `sesh thread headful` fails. Since claude updates near-daily, any
-#     holder that outlives a release lands here — and the thread is un-revivable until
-#     the hold is released. (Two threads sat like this for 5 and 10 days.)
+# sesh now launches every claude pane with CLAUDE_CODE_DISABLE_AGENT_VIEW=1, so ← ← does
+# nothing there (subagents and background shells still work). A hold can still come from
+# `claude --bg` run by hand, or from before this change. sesh follows the `continued-in`
+# chain, so the session a revive tries to resume is exactly the held one.
 #
 # The failure NAMES the holder, its state and every remedy. To see it coming instead:
 sesh doctor                          # reports every thread whose conversation a background session owns
@@ -952,8 +947,7 @@ sesh thread headful --id <id> --force   # do both: stop the holder, then a REAL 
 # --force is never implied: stopping a holder whose state is "working" interrupts a turn
 # running right now, so neither the TUI's revive nor a scheduled one ever forces.
 # NB measured NOT to cause it: `sesh thread stop` / the TUI's `x` (kills the pane — even
-# mid-tool), Ctrl-C, Ctrl-B, /quit, /clear, a claude auto-update. Don't go looking for a
-# typed command; `sesh doctor` is how you find out a thread is held.
+# mid-tool), Ctrl-C, Ctrl-B, /quit, /clear, a claude auto-update.
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --release                   # release it (+ its subtree) from an ANCESTOR's hold, until tomorrow

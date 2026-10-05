@@ -8,31 +8,22 @@ package conformance
 // through that chain (it must: the pre-handoff file is frozen), so the session a
 // revive tries to resume is exactly the held one.
 //
-// WHAT CLAUDE ACTUALLY DOES THEN — measured, not inferred, and it is not one
-// behaviour but two, which is the whole reason this cell exists:
+// WHAT CLAUDE DOES THEN, measured. sesh launches claude with its agent view disabled
+// (CLAUDE_CODE_DISABLE_AGENT_VIEW=1 — see thread.claude-no-agent-view, which is what
+// stops ← ← from creating the hold in the first place), and in that mode claude REFUSES
+// to `--resume` a held conversation: the pane exits at once. That is the production
+// failure — two threads sat un-revivable for 5 and 10 days, and the symptom was the
+// generic "agent exited immediately after launch" with claude's real reason buried in
+// captured pane text. (Without the switch, a same-build holder instead made claude
+// silently re-exec as `claude attach <id>` — a pane that only LOOKED revived. sesh's panes
+// no longer do that, which turns a silent divergence into a loud failure.)
 //
-//   - SAME-VERSION holder: an interactive `claude --resume` silently RE-EXECS ITSELF as
-//     `claude attach <id>`. The revive appears to succeed and the pane is marked, but it
-//     is a VIEW onto the background session, not a conversation that pane owns. True for
-//     a settled holder (state "done") and a live one (state "blocked") alike.
-//   - VERSION-MISMATCHED holder (the worker was started by an older claude build): the
-//     resume REFUSES and exits 1 — "That session is running in the background (<id>) …
-//     Add --fork-session to branch off a copy instead." THIS IS THE PRODUCTION CASE:
-//     Lukas's two stuck holders were created by 2.1.277/278 workers while the reviving
-//     claude was 2.1.286, and claude auto-updates near-daily, so any holder that outlives
-//     a release becomes unreviveable. The symptom was the generic "agent exited
-//     immediately after launch" with claude's real reason buried in captured pane text,
-//     and the threads sat that way for 5 and 10 days.
-//   - `--print --resume` refuses in EVERY case, version-matched or not.
-//
-// So sesh does NOT pre-refuse — claude decides, and for a version-matched holder its
-// answer (attach) is a working outcome sesh must not break. What sesh adds, and what
-// this cell pins:
-//   (1) `doctor` reports every held thread with the holder's state and what a revive
-//       would actually do, so the state is visible before someone meets it;
-//   (2) a failed revive names the holder and every remedy in typeable form;
+// sesh does NOT pre-refuse — claude is the authority on whether a hold blocks. What sesh
+// adds, and what this cell pins:
+//   (1) `doctor` reports every held thread, so the state is visible before a revive;
+//   (2) the failed revive names the holder and every remedy in typeable form;
 //   (3) --force stops the holder (`claude stop`, conversation KEPT) and does a REAL
-//       resume, reported in the output — the explicit way out of both halves.
+//       resume, reported in the output.
 //
 // Everything is real: a real claude in a real tmux pane against an ISOLATED claude
 // config dir, a real turn so the conversation exists on disk, a real `claude --bg
@@ -230,35 +221,39 @@ func testReviveHeldSession(t *testing.T, loc matrix.Locality) {
 	}
 	sb.stopAndWait(t, th.ID, "pre-hold")
 
-	// ---- PHASE A: a SAME-VERSION holder. claude re-execs an interactive resume into
-	// an attach, so the revive "works" while the pane is a view onto the holder. ----
+	// ---- The held state, put into claude's REAL registry. ----
 	leaf, short := sb.holdLeaf(t, cfgDir, cwd, th.ID)
 
-	// doctor must report it — naming the thread, the holder, its state and the remedy.
-	// This is the half that makes the hold visible instead of discovered days later.
+	// doctor must report it — naming the thread, the holder and the remedy. This is the
+	// half that makes the hold visible instead of discovered days later.
 	doctor := sb.doctorText(t)
-	for _, want := range []string{"claude background session", th.ID[:8], short, "--force", "attach"} {
+	for _, want := range []string{"claude background session", th.ID[:8], short, "--force"} {
 		if !strings.Contains(doctor, want) {
-			t.Errorf("same-version hold: doctor must report the held thread and name %q; got:\n%s", want, doctor)
+			t.Errorf("held: doctor must report the held thread and name %q; got:\n%s", want, doctor)
 		}
 	}
 
-	// The revive succeeds, but as an ATTACH — pinned on the argv, because the pane's
-	// rendered text looks identical to a resume.
-	if _, stderr, err := sb.Runner.Run(t, "thread", "headful", "--id", th.ID); err != nil {
-		t.Fatalf("same-version hold: revive failed, but claude re-execs into attach for a settled holder: %v\n%s", err, stderr)
+	// The revive FAILS, and says why — instead of the generic "agent exited immediately".
+	_, stderr, err := sb.Runner.Run(t, "thread", "headful", "--id", th.ID)
+	if err == nil {
+		t.Fatalf("held: revive SUCCEEDED while %s was held as background session %s — claude cannot have resumed it\npane argv: %s",
+			leaf, short, sb.paneArgv(t, th.ID, "held"))
 	}
-	if argv := sb.paneArgv(t, th.ID, "same-version hold"); !strings.Contains(argv, "attach "+short) {
-		t.Errorf("same-version hold: expected claude to re-exec as `claude attach %s` (the measured behaviour this cell pins), got: %s", short, argv)
+	for _, want := range []string{short, "claude attach " + short, "claude stop " + short, "--force", "BACKGROUND SESSION"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("held: the failure must name %q so the caller can act on it; got:\n%s", want, stderr)
+		}
 	}
-	sb.stopAndWait(t, th.ID, "same-version hold")
+	if p, _, ok := sb.markedPane(t, th.ID); ok {
+		t.Errorf("held: a failed revive left a marked pane %s behind", p)
+	}
 
 	// --force stops the holder and does a REAL resume. Observable effects, all three:
 	// the reply names what it stopped, claude's registry no longer holds the session,
 	// and the pane is a resume rather than an attach.
 	stdout, stderr, err := sb.Runner.Run(t, "thread", "headful", "--id", th.ID, "--force")
 	if err != nil {
-		t.Fatalf("same-version hold: revive --force failed: %v\n%s", err, stderr)
+		t.Fatalf("held: revive --force failed: %v\n%s", err, stderr)
 	}
 	if !strings.Contains(stdout, short) {
 		t.Errorf("--force must report the background session it stopped (%s); got:\n%s", short, stdout)
@@ -277,21 +272,4 @@ func testReviveHeldSession(t *testing.T, loc matrix.Locality) {
 	}
 	sb.stopAndWait(t, th.ID, "post-force")
 
-	// ---- WHAT THIS CELL DOES NOT COVER, said plainly rather than left to be assumed.
-	//
-	// The CROSS-BUILD refusal — the production failure, where the holder's worker was
-	// started by an older claude build, `claude --resume` refuses outright and the thread
-	// cannot be revived at all — is NOT reproduced here, and it is not for want of
-	// trying. The holder's worker build is chosen by whichever claude owns claude's
-	// DAEMON for that config dir, not by the binary that runs `--bg`; and that daemon
-	// self-restarts onto whatever ~/.local/bin/claude currently is ("binary at … changed
-	// — self-restarting for upgrade"), which is precisely how production got there. So a
-	// cell cannot pin the holder to an old build without fighting claude's own upgrade
-	// path, and a fixture that fought it would be testing the fight.
-	//
-	// That leg is covered instead by: TestHeldSessionRefusal (the message names the
-	// holder, its state and every remedy), a measured reproduction outside the suite
-	// (claude 2.1.284 holding, 2.1.286 reviving → exit 1 with claude's own refusal in the
-	// pane), and the production incident itself. If claude ever makes the holder build
-	// selectable, this is the cell to extend.
 }

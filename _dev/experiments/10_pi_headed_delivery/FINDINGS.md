@@ -1,6 +1,8 @@
 # Headed Pi delivery — live derisking (2026-10-05)
 
-Status: message transport proven; command semantics require a decision before production wiring.
+Status: initial findings below are historical. The user approved literal messages plus
+explicit extension-owned commands; implemented as API 53 / pi-rpc-socket 0.2.0.
+See `../../PI_DELIVERY.md` and AGENTS.local.md H121 for the contract and current gates.
 
 ## Request and scope
 

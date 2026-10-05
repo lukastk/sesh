@@ -278,7 +278,7 @@ fixed by routing through a non-browser HTTP layer and (optionally) adding a WS/S
 
 ### `10_pi_headed_delivery`
 
-**Status:** in progress — transport derisked; command contract awaiting decision.
+**Status:** derisking complete; approved contract implemented in API 53 / pi-rpc-socket 0.2.0. See `../PI_DELIVERY.md` and H121 for implementation, tests and deployment.
 
 Lukas requested RPC delivery for ordinary headed Pi messages, without a terminal fallback.
 Live isolated Pi 0.99.1 probes preserved an attached viewer's unsent editor draft and

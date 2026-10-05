@@ -52,7 +52,7 @@ func threadCommand(cfg config.Config, args []string) error {
 	}
 	for {
 		if err != nil {
-			return fmt.Errorf("Pi command %s: %w; outcome may be unknown, no automatic retry", *requestID, err)
+			return fmt.Errorf("Pi command %s: %w; no automatic retry (a transport failure can leave the outcome unknown)", *requestID, err)
 		}
 		if out.RequestID != *requestID {
 			return fmt.Errorf("Pi command: uncorrelated response")

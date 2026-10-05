@@ -61,6 +61,8 @@ func runThread(args []string) error {
 		return threadStatus(cfg, rest)
 	case "send":
 		return threadSend(cfg, rest)
+	case "command":
+		return threadCommand(cfg, rest)
 	case "send-headless":
 		return threadSendHeadless(cfg, rest)
 	case "headless-reply":

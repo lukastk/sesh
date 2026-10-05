@@ -6,6 +6,41 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H121 — Headed Pi delivery implemented over RPC; explicit command protocol and real completion (2026-10-05; API 53; NOT YET DEPLOYED)
+User approved extension-first implementation after H120. Code lives across sesh,
+lukastk/pi-rpc-socket (new development checkout ~/mysetup/pi-rpc-socket), and myagent's
+self-compact skill. Design: _dev/PI_DELIVERY.md. Literal messages use the existing stable
+message operation (so old running 0.1.0 extensions need NO reload for ordinary sends).
+Explicit thread command uses protocol 2 / extension 0.2.0 and requires /reload in existing
+Pi processes. No auto-reload, paste fallback, or automatic retry after uncertain ACKs.
+Compaction uses the public onComplete/onError callbacks: a kickoff is NOT success.
+Resources (extension commands/templates/skills) honestly report SUBMITTED, not completed:
+Pi's sendUserMessage returns void, and async handler failures only surface in Pi's UI.
+One native compact at a time; results retained 1h after completion, capacity 256,
+unknown/expired/lost-on-reload results fail loudly. Polling keeps HTTP requests short.
+Socket ACKs bounded, positive/echo validated, actual pane+server identity checked before
+writes. All headed send sites use the same selector; Pi bypasses the terminal typing guard.
+
+Real Pi 0.99.1 + real SSH local/remote cells BOTH GREEN (142.9s): a real viewer's Unicode
+draft persists and never reaches the transcript; a running sleep completes under steering;
+literal /name does not rename; explicit commands run, async resource errors are visible,
+templates AND skills expand; empty-session compact fails, a sufficiently large REAL session
+compacts and persists the compaction; initial --msg is literal; missing socket never pastes.
+Fixture lesson: PI_CODING_AGENT_DIR isolates settings/transcripts, but sesh's ResolveHomes
+ignored that documented override, making a successful reply invisible to transcript reads.
+Now honours it (unit test). A fake HOME instead broke mise's pi shim — abandoned, not shipped.
+Terminal typing cells now use real Claude; their cat-based daemon UNIT fixture uses argv0
+claude rather than Pi. Socket names unique and fixture paths passed as separate argv.
+Also removed remote subscription's send-then-send-headless fallback: a lost headed ACK
+followed by pane exit could duplicate delivery. Read owner runtime, choose ONE guarded path.
+
+Gates so far: every non-conformance package, vet, touched packages -race; extension units
++ typecheck. Anti-gaming: terminal delivery restored -> cell red "draft submitted or lost";
+kickoff-as-completion restored -> unit red completed != running. Both reverse-edited and
+SHA256-verified identical. Full conformance run IN FLIGHT, /tmp/sesh-rpc-full-matrix.log
+(and .rc); wrapper PID 2345946. No deploy yet. npm audit found a transitive brace-expansion
+advisory in the dev dependency tree; not silently upgraded outside this change.
+
 ## H120 — Headed Pi RPC delivery derisked; slash-command contract remains open (2026-10-05; NO production change or deploy)
 Lukas asked to replace terminal pastes with RPC for headed Pi messages. Isolated real Pi
 0.99.1 + the installed pi-rpc-socket proved: an attached viewer's half-written draft stays

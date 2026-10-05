@@ -67,6 +67,11 @@ func (c *Client) Close() error { return c.conn.Close() }
 
 // roundTrip sends one request object and decodes one reply line into out.
 func (c *Client) roundTrip(req any, out any) error {
+	// Every request has a bounded ACK wait, including a connected but hung Pi.
+	if err := c.conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		return err
+	}
+	defer c.conn.SetDeadline(time.Time{}) // subscriptions keep streaming after their ACK
 	b, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -77,6 +82,19 @@ func (c *Client) roundTrip(req any, out any) error {
 	line, err := c.r.ReadBytes('\n')
 	if err != nil {
 		return err
+	}
+	var ack struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(line, &ack); err != nil {
+		return err
+	}
+	if ack.Error != "" {
+		return fmt.Errorf("pi RPC: %s", ack.Error)
+	}
+	if !ack.OK {
+		return fmt.Errorf("pi RPC: no positive acknowledgement")
 	}
 	if out == nil {
 		return nil
@@ -96,6 +114,9 @@ func (c *Client) GetTmuxInfo() (TmuxInfo, error) {
 		Tmux TmuxInfo `json:"tmux"`
 	}
 	err := c.roundTrip(map[string]any{"getTmuxInfo": true}, &resp)
+	if err == nil && !resp.OK {
+		err = fmt.Errorf("pi getTmuxInfo: no positive acknowledgement")
+	}
 	return resp.Tmux, err
 }
 
@@ -114,6 +135,9 @@ func (c *Client) Message(text string) error {
 	if resp.Error != "" {
 		return fmt.Errorf("pi message: %s", resp.Error)
 	}
+	if !resp.OK || resp.Delivered != text {
+		return fmt.Errorf("pi message: invalid acknowledgement (delivery uncertain; do not automatically retry)")
+	}
 	return nil
 }
 
@@ -121,21 +145,20 @@ func (c *Client) Abort() error {
 	return c.roundTrip(map[string]any{"abort": true}, nil)
 }
 
-// Compact triggers compaction. v1 exp03 §5.1: pi-rpc-socket replies with
-// an error even though compaction succeeds — so a non-nil error here is
-// NOT necessarily a failure. We surface it but callers should treat it as
-// best-effort (the bug is upstream).
-func (c *Client) Compact() error {
-	return c.roundTrip(map[string]any{"compact": true}, nil)
-}
+// Compaction uses Command("/compact") + Operation polling (commands.go), not
+// the old fire-and-forget helper: kickoff is not evidence of completion.
 
 func (c *Client) AppendSystemPrompt(text string) error {
-	var resp struct{ OK bool `json:"ok"` }
+	var resp struct {
+		OK bool `json:"ok"`
+	}
 	return c.roundTrip(map[string]any{"appendSystemPrompt": text}, &resp)
 }
 
 func (c *Client) ClearSystemPrompt() error {
-	var resp struct{ OK bool `json:"ok"` }
+	var resp struct {
+		OK bool `json:"ok"`
+	}
 	return c.roundTrip(map[string]any{"clearSystemPrompt": true}, &resp)
 }
 

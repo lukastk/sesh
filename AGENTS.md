@@ -31,6 +31,7 @@ thing; do not write "the master cockpit", which is redundant.
 | `MASTER.md` | **mycockpit**, the cross-machine tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
 | `SHELL.md` | **Shell threads** — a tracked tmux session as a first-class thread, and the `S` shells viewer over live/ghost sessions. Carries the tmux marker-inheritance trap digest. |
 | `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
+| `PI_DELIVERY.md` | Headed Pi messages over RPC, explicit commands and pollable outcomes; no terminal fallback (API 53). |
 | `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
 | `STATUS_OPTIONS.md` | The work server's status row without a shell per redraw: the daemon stamps `@sesh-name` etc. as pane user options, the conf renders them with a pure format. Built. |
 | `IDENTITY.md` | **How a process finds out which thread it is** — the provenance model (explicit / pane / turn / harness / env), why `$SESH_THREAD_ID` is only ever a hint, the gate-vs-diagnostic split between `whoami` and `info`, and the daemon-launched-worker identity (schema 50). Read before touching current-thread inference. |

@@ -13,6 +13,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -102,9 +103,9 @@ func (d *Daemon) deliverTo(subscriberID, subscribeeID, text string) {
 		}
 		return
 	}
-	// Not local: the subscriber lives on a peer — find its owner in the mesh
-	// cache and route a send (pane first, headless turn as the idle fallback;
-	// both failing is loud in the log).
+	// Not local: ask the owner for runtime state, then choose ONE delivery path.
+	// Never try headless after a failed headed send: a lost RPC ACK is ambiguous,
+	// and retrying after the pane happens to exit could duplicate an accepted message.
 	machine := d.peerMachineOf(subscriberID)
 	if machine == "" {
 		log.Printf("subscriptions: delivery %s→%s: subscriber not found anywhere on the mesh", subscribeeID, subscriberID)
@@ -115,12 +116,41 @@ func (d *Daemon) deliverTo(subscriberID, subscribeeID, text string) {
 		log.Printf("subscriptions: routed delivery: %v", berr)
 		return
 	}
-	if out, rerr := exec.Command(bin, "thread", "send", "--id", subscriberID, "--text", text, "--machine", machine).CombinedOutput(); rerr != nil {
-		if out2, rerr2 := exec.Command(bin, "thread", "send-headless", "--id", subscriberID, "--text", text, "--machine", machine).CombinedOutput(); rerr2 != nil {
-			log.Printf("subscriptions: routed delivery %s→%s on %s failed both ways: send: %v %s; send-headless: %v %s",
-				subscribeeID, subscriberID, machine, rerr, out, rerr2, out2)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	run := func(args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, bin, args...)
+		out, err := cmd.Output()
+		if e, ok := err.(*exec.ExitError); ok {
+			return out, fmt.Errorf("%w: %s", err, e.Stderr)
 		}
+		return out, err
 	}
+	if err := routedSubscription(run, subscriberID, machine, text); err != nil {
+		log.Printf("subscriptions: routed delivery %s→%s on %s: %v (not retried)", subscribeeID, subscriberID, machine, err)
+	}
+}
+
+func routedSubscription(run func(...string) ([]byte, error), id, machine, text string) error {
+	out, err := run("thread", "status", "--id", id, "--machine", machine, "--json")
+	if err != nil {
+		return err
+	}
+	var state api.ThreadStatusResponse
+	if err := json.Unmarshal(out, &state); err != nil {
+		return fmt.Errorf("subscriber runtime: %w", err)
+	}
+	verb := ""
+	switch {
+	case state.Head == api.Headful:
+		verb = "send"
+	case state.Head == api.Headless && state.Busy == api.BusyIdle:
+		verb = "send-headless"
+	default:
+		return fmt.Errorf("subscriber %s is not deliverable (%s·%s)", id, state.Head, state.Busy)
+	}
+	_, err = run("thread", verb, "--id", id, "--text", text, "--machine", machine)
+	return err
 }
 
 // peerMachineOf finds which peer machine owns a thread (from the mesh cache).

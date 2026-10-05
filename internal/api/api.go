@@ -337,7 +337,9 @@ package api
 // refuses loudly on seeing schema < 52 rather than reporting a force that was
 // silently dropped; a pre-52 client never sends it and decodes the superset as the
 // ThreadResponse it expects.
-const SchemaVersion = 52
+// 53: headed Pi sends use literal RPC messages; /v1/threads/command starts/polls
+// explicit Pi commands. No store migration. Other agents retain terminal delivery.
+const SchemaVersion = 53
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

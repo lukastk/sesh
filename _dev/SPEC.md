@@ -105,7 +105,7 @@ Runtime-resolved (not stored): `pane`, `runtime_state`, liveness.
 
 ### Operations
 
-start (headed/headless), send a message (headful → live pane; headless → a turn), list, **rename**, **tag**, and the lifecycle verbs that act on the *record* and/or the *runtime*:
+start (headed/headless), send a message (headful Pi → literal RPC steer, other headful agents → guarded terminal paste; headless → a turn), list, **rename**, **tag**, and the lifecycle verbs that act on the *record* and/or the *runtime*:
 
 These are **orthogonal primitives** over two independent axes — the *record*
 (exists until `delete`) and the *runtime* (`stop` ↔ `resume`). `kill` is NOT a
@@ -209,3 +209,11 @@ roots; paths outside home remain absolute. `--view` selects the initial view onl
 1. **Which machine is the canonical ticket owner?** (Needs to be the most-always-on node; `hetzner-box` / a `myserver` is the obvious pick.) Everything else in the ticket layer follows from this.
 2. **Box↔thread linkage:** confirmed as a stored `cwd` on the thread (not a boxyard dependency). Any richer box/note grouping stays in the vault as a projection.
 3. **Does the agent write any ticket state beyond `done`?** Current design: agent may set `done`; everything else is human/myrig-driven; `needs-input` is derived. Confirm this stays minimal.
+
+## Headed Pi delivery (API 53, 2026-10-05)
+
+See `PI_DELIVERY.md`: one transport selector covers initial messages, ordinary sends,
+ticket prompts, subscriptions and schedules. Pi RPC never touches the editor and
+never falls back to paste. `thread command` deliberately separates command dispatch
+from literal messages; native commands have correlated, pollable outcomes. Resources
+report submission only (the public Pi API cannot expose their async completion).

@@ -128,6 +128,14 @@ func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
 	if !found {
 		return pasteOutcome{}, errors.New("thread has no live pane (dead); cannot send")
 	}
+	// Pi uses no editor input: the terminal typing guard is inapplicable.
+	if req.thread.AgentKind == "pi" {
+		if err := d.deliverHeaded(req.thread, target, req.text); err != nil {
+			return pasteOutcome{}, err
+		}
+		d.pasteDelivered.Add(1)
+		return pasteOutcome{Sent: true}, nil
+	}
 	quiet, ago, err := d.paneQuiet(session, req.guard, time.Now())
 	if err != nil {
 		return pasteOutcome{}, err
@@ -135,7 +143,7 @@ func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
 	if !quiet {
 		return pasteOutcome{InputAgo: ago}, errTyping{ago: ago}
 	}
-	if err := d.tmux.SendText(target, req.text, true); err != nil {
+	if err := d.deliverHeaded(req.thread, target, req.text); err != nil {
 		return pasteOutcome{}, err
 	}
 	d.pasteDelivered.Add(1)
@@ -278,7 +286,7 @@ func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 			return
 		}
 		if quiet {
-			if serr := d.tmux.SendText(target, req.text, true); serr != nil {
+			if serr := d.deliverHeaded(req.thread, target, req.text); serr != nil {
 				d.failHeldPaste(req, serr.Error())
 				return
 			}

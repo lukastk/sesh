@@ -9,7 +9,7 @@ package conformance
 // The honest proof needs a REAL viewer: a nested tmux client attached to the
 // agent's session, typing THROUGH that client (which is what bumps tmux's
 // client_activity — the daemon's own send-keys into the pane does not, and a
-// stubbed activity would prove nothing). A real pi runs in the pane so the
+// stubbed activity would prove nothing). A real Claude runs in the pane so the
 // delivery's landing is observable as a real turn starting. The remote cell
 // drives every verb over the real ssh hop; the viewer sits on the peer's socket.
 
@@ -54,8 +54,8 @@ func testSendRespectTyping(t *testing.T, loc matrix.Locality) {
 	}
 	sb := newSandbox(t, loc)
 	sb.startDaemon(t)
-	th := sb.newThread(t, "pi", "typing-guard", "/tmp")
-	pane := sb.waitThreadReady(t, th.ID, "pi")
+	th := sb.newThread(t, "claude", "typing-guard", "/tmp")
+	pane := sb.waitThreadReady(t, th.ID, "claude")
 	session := th.SessionName
 	sb.attachViewer(t, session)
 	viewer := "viewer_" + session

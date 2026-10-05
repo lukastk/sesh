@@ -28,6 +28,8 @@ func (d *Daemon) routesThreads(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/threads/capture", d.handleThreadCapture)
 	mux.HandleFunc("GET /v1/threads/status", d.handleThreadStatus)
 	mux.HandleFunc("POST /v1/threads/send", d.handleThreadSend)
+	mux.HandleFunc("POST /v1/threads/command", d.handlePiCommand)
+	mux.HandleFunc("GET /v1/threads/command", d.handlePiCommand)
 }
 
 // handleThreadSend delivers a message into a headed thread's LIVE pane (resolved
@@ -483,7 +485,7 @@ func (d *Daemon) sendWhenReady(th api.Thread, text string) {
 		if err == nil && found {
 			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && agent.Kind == th.AgentKind {
 				if cap, cerr := d.tmux.CapturePane(loc.Pane); cerr == nil && nonBlank(cap) >= 3 {
-					if serr := d.tmux.SendText(loc.Pane, text, true); serr != nil {
+					if serr := d.deliverHeaded(th, loc.Pane, text); serr != nil {
 						log.Printf("thread %s: --msg delivery failed: %v", th.ID, serr)
 					}
 					return

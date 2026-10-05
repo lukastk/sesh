@@ -144,9 +144,14 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.send.headful",
-		Description: "send a message into a thread's live pane",
+		Description: "send a message into a live conversation (Pi RPC, other agents terminal paste)",
 		Agents:      agentic,
 		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.pi-rpc-send",
+		Description: "Pi socket delivery preserves an attached editor draft, steers mid-tool, never falls back to paste; explicit commands report real outcomes",
+		Agents:      []Agent{Pi}, Localities: bothLoc,
 	})
 	Register(Feature{
 		ID:          "thread.send.headless",

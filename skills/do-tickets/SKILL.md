@@ -54,5 +54,10 @@ sesh ticket get --id <id> --field prompt | sesh blob expand   # @blob(..) → re
 
 Other ops: `ticket create --name <n> [--prompt <t>]`,
 `ticket set --id <id> [--name|--prompt|--notes|--append-note]`,
-`ticket send-prompt --id <id>` (type the prompt into the bound thread's pane),
+`ticket send-prompt --id <id>` (deliver to the bound thread: literal Pi RPC steering, guarded terminal paste for other headed agents),
 `ticket delete --id <id>`. (`sesh ticket --help` for the rest.)
+
+Pi delivery preserves an unsent editor draft and does not interpret leading slash
+commands. Missing/broken RPC is a loud failure, never a terminal-paste fallback.
+Use `sesh thread command` deliberately for Pi commands such as `/compact`, not a
+ticket prompt. Submission acknowledgement is not completion of the agent's turn.

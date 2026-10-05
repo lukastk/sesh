@@ -924,3 +924,11 @@ the honest record, not a plan.
   under the marked pane, not merely a pane.
 - **`sesh mesh --json` is pretty-printed** — a substring match on `"on_hold":true` never
   matches; decode it. (Re-learned; H55 had recorded it.)
+
+### API 53 amendment — Pi transport (2026-10-05)
+
+`PI_DELIVERY.md` supersedes the terminal-typing assumption for headed Pi: every
+scheduled Pi message uses literal RPC steering, bypassing only the typing guard.
+Busy/head/hold/archive/previous-run guards remain unchanged. Claude/Codex/shell
+retain terminal delivery and its typing guard; the guard conformance subject is
+now real Claude and the daemon unit fixture uses a cat process named claude.

@@ -219,9 +219,28 @@ does not wrap can be driven straight against the tmux server.`,
 		examples: []string{"sesh thread status --id 1a2b3c4d --json"},
 	},
 	"thread send": {
-		summary:  "send a message into a headed thread's live pane (requires a live pane; 409 otherwise). The TYPING GUARD holds the paste while a viewer is at the keyboard: a paste is appended to whatever is half-typed and submitted with it, so the daemon waits until the pane has seen no viewer input for [send] respect_typing (60s), delivering it then (`deferred`), or — still in use at the deadline (10m) — failing loudly and FLAGGING the thread with the undelivered message. --wait blocks here for the quiet pane instead.",
+		summary: "send to a live headed conversation: Pi uses RPC steering without touching the editor; other agents use guarded terminal paste",
+		long: `Pi text is LITERAL, including a leading slash: use thread command for commands.
+Pi RPC acknowledgement means submitted, not model completion. Missing/broken RPC
+fails loudly; no terminal fallback and no automatic retry. Pi bypasses typing guards.
+For other agents the daemon holds the paste until [send] respect_typing (60s) of
+viewer quiet, or fails and flags at the deadline (10m). --wait waits for the turn.`,
 		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m", "sesh thread send --id 1a2b3c4d --text 'now' --respect-typing 0"},
+	},
+	"thread command": {
+		summary:  "explicitly invoke a command in a live Pi session (never terminal paste)",
+		usage:    "sesh thread command [--id <id>] [--text </command> | --request-id <uuid>] --timeout <dur> [--json] [--machine <m>]",
+		examples: []string{"sesh thread command --id 1a2b3c4d --text '/compact retain the plan' --timeout 5m"},
+		long: `Requires pi-rpc-socket protocol 2 (update then /reload in Pi).
+Supported native commands: /compact [instructions], /model <pattern>, /thinking
+[level], /name [name], /session. Compaction reports real completion or failure.
+Registered extension commands, templates and skills can be dispatched, but return
+submitted: Pi’s public API cannot report their async completion/errors to the caller.
+Identity-changing commands, reload, auth and UI pickers are not supported.
+A request UUID is printed before sending. After timeout/lost response, poll with
+--request-id rather than sending again: the operation may still be running.
+Operations expire an hour after completion and are lost on reload/exit.`,
 	},
 	"thread wait": {
 		summary:  "block until a thread reaches a state (server-owned wait; one routed hop for --machine)",
@@ -546,7 +565,7 @@ wrapper function or an older install.`,
 		examples: []string{"sesh ticket needs-input --id t1 --json"},
 	},
 	"ticket send-prompt": {
-		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call). Goes through the same typing guard as `thread send` (held while a viewer types; deferred, then flagged at the deadline).",
+		summary:  "send a ticket's prompt into its bound thread; by default prepends the ticket's name + id (the [ticket] send_prepend config default; --prepend/--no-prepend overrides per call). Uses the same transport as thread send: literal RPC steering for Pi (draft untouched), typing-guarded terminal paste for other headed agents.",
 		usage:    "sesh ticket send-prompt --id <id> [--prepend | --no-prepend] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh ticket send-prompt --id t1", "sesh ticket send-prompt --id t1 --no-prepend"},
 	},

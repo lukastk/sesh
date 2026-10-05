@@ -43,23 +43,23 @@ func newPasteFixture(t *testing.T) *pasteFixture {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	sock := "seshpaste-" + strings.ReplaceAll(t.Name(), "/", "_")
+	sock := fmt.Sprintf("sesh-test-paste-%d", time.Now().UnixNano())
 	f := &pasteFixture{t: t, sock: sock, st: st}
-	// The pane runs `cat` under the argv0 "pi" (a symlink — a shebang script
-	// would read as "sh"), so the runtime resolver sees a live pi of the right
+	// The pane runs `cat` under the argv0 "claude" (a symlink — a shebang script
+	// would read as "sh"), so the runtime resolver sees an agent of the right
 	// kind: the scheduler's state read, like the maintainer's, requires an
 	// agent process under the marked pane, not just the pane.
 	catBin, err := exec.LookPath("cat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fakePi := filepath.Join(t.TempDir(), "pi")
+	fakePi := filepath.Join(t.TempDir(), "claude")
 	if err := os.Symlink(catBin, fakePi); err != nil {
 		t.Fatal(err)
 	}
 	// stdout to /dev/null: the tty echo alone shows what arrived, once (cat's
 	// own output would print every line a second time).
-	if _, err := f.raw("-f", "/dev/null", "new-session", "-d", "-s", "watched", "-x", "80", "-y", "24", fakePi+" >/dev/null"); err != nil {
+	if _, err := f.raw("-f", "/dev/null", "new-session", "-d", "-s", "watched", "-x", "80", "-y", "24", "/bin/sh", "-c", `exec "$1" >/dev/null`, "sesh-paste", fakePi); err != nil {
 		t.Fatalf("new-session watched: %v", err)
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", sock, "kill-server").Run() }) //nolint:errcheck
@@ -71,7 +71,7 @@ func newPasteFixture(t *testing.T) *pasteFixture {
 		t.Fatalf("pane id: %v", err)
 	}
 	f.pane = pane
-	f.th = api.Thread{ID: "tid-paste-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Machine: "test", SessionName: "watched", AgentKind: "pi", Name: "target", Cwd: "/tmp"}
+	f.th = api.Thread{ID: "tid-paste-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Machine: "test", SessionName: "watched", AgentKind: "claude", Name: "target", Cwd: "/tmp"}
 	if err := st.InsertThread(f.th); err != nil {
 		t.Fatalf("InsertThread: %v", err)
 	}

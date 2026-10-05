@@ -51,7 +51,7 @@ var subcommandSets = map[string][]string{
 	"schedule": {"message", "spawn", "list", "show", "runs", "pause", "resume", "remove", "edit", "run-now"},
 	"daemon":   {"run", "start", "stop", "restart", "status"},
 	"tmux":     {"current", "info", "create-session", "kill-session", "create-pane", "send-text", "stage-file", "nav", "master-current"},
-	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "send-headless",
+	"thread": {"new", "list", "stop", "pane", "capture", "status", "send", "command", "send-headless",
 		"headless-reply", "rename", "info", "adopt", "transcript", "notify", "report-state", "wait", "flag", "hold", "pin",
 		"unpin", "reparent", "tag", "archive", "delete", "resume", "headful", "grid", "snapshot"},
 	"shell":   {"new", "enter", "here", "promote", "sessions", "info", "panes"},

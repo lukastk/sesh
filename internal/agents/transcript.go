@@ -37,8 +37,11 @@ func ResolveHomes(codexHome string) Homes {
 	uh, _ := os.UserHomeDir()
 	h := Homes{
 		Claude: os.Getenv("CLAUDE_CONFIG_DIR"),
-		Pi:     filepath.Join(uh, ".pi", "agent"),
+		Pi:     os.Getenv("PI_CODING_AGENT_DIR"),
 		Codex:  codexHome,
+	}
+	if h.Pi == "" {
+		h.Pi = filepath.Join(uh, ".pi", "agent")
 	}
 	if h.Claude == "" {
 		h.Claude = filepath.Join(uh, ".claude")

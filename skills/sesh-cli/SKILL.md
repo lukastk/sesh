@@ -1004,7 +1004,8 @@ last.
 ## Driving an agent, delegating, awaiting
 
 ```bash
-sesh thread send --id <id> --text 'run the tests'          # inject into a LIVE pane
+sesh thread send --id <id> --text 'run the tests'          # live Pi: RPC steer; others: guarded terminal paste
+sesh thread command --id <pi-id> --text '/compact retain the plan' --timeout 5m # explicit Pi command; real completion/error
 sesh thread send --id <id> --text 'fix it' --wait --timeout 5m  # ...and block until the turn SETTLES (idle/blocked);
                                                            # fails fast (~5s) if the input produces no state change
 sesh thread wait --id <id> --until settled --timeout 5m    # block until a state: busy|idle|blocked|settled
@@ -1023,7 +1024,7 @@ sesh thread send --id <id> --text 'now' --respect-typing 0 # bypass the typing g
 `paste-buffer` then Enter, so text delivered while a human is mid-line in that
 pane is appended to their half-typed prompt and SUBMITTED with it — the live
 case was child threads reporting into a supervisor its user was typing in. So
-the owning daemon holds every thread-level delivery (`thread send`, `ticket
+for terminal-delivered agents (Claude/Codex/shell), the owning daemon holds every thread-level delivery (`thread send`, `ticket
 send-prompt`, subscription deliveries, scheduled messages) while the thread's
 session has seen viewer INPUT within `[send] respect_typing` (default 60s —
 tmux's `client_activity`, bumped by keystrokes through an attached client, not
@@ -1401,3 +1402,29 @@ Errors are loud by design (an unimplemented or impossible request fails explicit
 than degrading to a plausible-but-wrong result) — read the error; it usually tells you the
 exact precondition that failed (e.g. a 409 "thread has no live pane" on `send` to a dead
 thread).
+
+### Headed Pi messages and explicit commands (API 53)
+
+Pi `thread send` is literal RPC input: even `/compact` is a MESSAGE, not a command.
+It preserves the editor draft, bypasses terminal typing guards, and steers after a
+running tool completes. This applies to initial `--msg`, tickets, subscriptions and
+schedules too. Missing/broken sockets fail loudly; there is **no paste fallback** and
+no automatic retry after an uncertain delivery. `sent` acknowledges submission, not
+model completion (`--wait` observes the turn as before).
+
+Use `thread command --text '/compact [instructions]' --timeout 5m` for compaction;
+it returns success only after Pi's completion callback, and reports errors such as
+`Nothing to compact`. Also supported: `/model <pattern>`, `/thinking [level]`,
+`/name [name]`, `/session` (structured session/context/model info), and registered
+extension commands, templates and `/skill:<name>`. Resource dispatch reports
+**submitted**, not completed: Pi's public API cannot report asynchronous resource
+handler failures to RPC callers; inspect Pi's UI/transcript for those. No UI pickers,
+auth, reload, or session-replacement commands (`/new`, `/resume`, `/fork`, etc.).
+
+The command prints a request UUID before sending. After timeout/lost response,
+`thread command --id <id> --request-id <uuid> --timeout 5m [--json]` polls without
+re-executing. A timeout does not cancel; never blindly resend. Results expire an
+hour after completion and are lost on Pi reload/exit. Commands require
+pi-rpc-socket 0.2.0/protocol 2: update the extension and run `/reload` in Pi. Existing
+0.1.0 runtimes already support ordinary message delivery; no reload is needed for
+that. Transcript lookup also honours Pi's `PI_CODING_AGENT_DIR` override.

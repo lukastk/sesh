@@ -6,7 +6,7 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
-## H119 — "I CAN'T KILL AND REVIVE THIS THREAD": a claude conversation had MIGRATED INTO A BACKGROUND SESSION, and sesh only found out at revive time, days later. THE KILL IS NOT THE CAUSE — it is when you notice (2026-09-30, sesh <this commit>; api 51→52, NO store migration; DAEMON rebuild + supervised RESTART; NOT YET DEPLOYED)
+## H119 — "I CAN'T KILL AND REVIVE THIS THREAD": a claude conversation had MIGRATED INTO A BACKGROUND SESSION, and sesh only found out at revive time, days later. THE KILL IS NOT THE CAUSE — it is when you notice (2026-09-30, sesh 3dd3d53 + 16e68cf + d2fae71; api 51→52, NO store migration; DAEMON rebuild + supervised RESTART; DEPLOYED 5/6 2026-10-05 — pocket4 offline, pending)
 Lukas: "I wanted to kill and revive sesh thread ef96bf74 … but I can't", then the same for
 296e85ae and "something is wrong with 192250cf too". Three ids, and they were three different
 things — which is the first lesson: do not assume a batch of reports shares a cause.
@@ -135,7 +135,7 @@ finnish turn was 13 min in and lost 4 unfinished background shell tasks — stat
 DEPLOY: **api 51→52 (additive), no store migration, but the registry read + `claude stop` run in
 the DAEMON ⇒ rebuild AND supervised restart on all six.** Mixed-fleet safe both ways: a pre-52
 daemon ignores the unknown `force` field, and a client that ASKED to force refuses loudly on seeing
-schema < 52 rather than reporting a force that was silently dropped. **NOT YET DEPLOYED.**
+schema < 52 rather than reporting a force that was silently dropped. **DEPLOYED 2026-10-05 at d2fae71 on 5/6**, every binary `vcs.modified=false`, every checkout verified clean and on main before pulling: mymain (local), ideapad, macstudio + macbook (`/opt/homebrew/bin/go`) via supervised restart; termux by plain `go build`, old daemon 6062 killed by its OWN reported pid, the zshenv login guard relaunched 20012 on the new inode. All five report **api 52 / store 26**. LIVE-PROVEN on mymain against the REAL registry: doctor reads `claude background sessions 3 registered, none owning a live thread's conversation` — correct, those three sit in archived boxes. `--force` was NOT smoked against the real registry (it would mean creating and stopping a background session in Lukas's live claude config); the cell proves the same daemon path end to end over a real ssh hop. **pocket4 OFFLINE** (ssh :22 timed out, mesh unreachable since 2026-09-30) → PENDING; it has self-healed at its next install before (H114 addendum). If not: `cd ~/mysetup/sesh && git pull && go build -o ~/.local/bin/sesh.new ./cmd/sesh && mv -f ~/.local/bin/sesh.new ~/.local/bin/sesh && supervisorctl restart sesh-daemon`. Skill copy refreshed on all five via `npx -y skills add lukastk/sesh@sesh-cli … </dev/null` and verified by grepping the installed copy for `/background`.
 Skill updated (`skills/sesh-cli/SKILL.md`, "A CLAUDE THREAD THAT WILL NOT COME BACK") — and per
 H112/H113/H115 the `~/.agents/skills/sesh-cli` copy is a GitHub COPY, so it needs
 `npx -y skills add lukastk/sesh@sesh-cli -g -y -a codex -a claude-code -a pi </dev/null` after push.

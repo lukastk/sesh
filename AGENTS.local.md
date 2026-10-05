@@ -109,6 +109,19 @@ red with REAL background sessions, `continued-in` written and the agents view in
 legs. Neuter of the post-spawn named failure: red, the message loses `claude attach`, `--force`,
 `BACKGROUND SESSION`. Both md5-restored. Blast radius green: thread.claude-trust ×2, thread.new.headed/
 claude ×2, thread.resume/claude ×2, thread.state-authority/claude ×2, revive-held-session ×2.
+**DEPLOYED d8ba8d8 (2026-10-05) on 5/6** — daemon rebuild + supervised restart: mymain (built from a
+fresh `git clone --depth 1` of origin, because the shared checkout is thread 032e3a24's pi-delivery
+WIP and must not be pulled or built from), ideapad, macstudio, macbook; termux by own-pid kill +
+zshenv relaunch. All api 52 / store 26, `vcs.modified=false`. **pocket4 OFFLINE — pending.** LIVE-PROVEN
+on mymain's real daemon: a throwaway sesh-spawned claude carried `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`
+in /proc/<pid>/environ and its footer no longer offered `← for agents` (thread deleted after).
+**THE PIN APPLIES AT LAUNCH: all 25 claude panes already running on mymain at deploy time were
+unpinned and keep ← ← armed until their next revive** — told Lukas, did not restart his threads.
+Skill copy refreshed on all five (grep for the variable). Issue #16 retitled + updated.
+TRAP, mine: the first live smoke parsed `sesh info --json`'s `pane` as an object (it is a string),
+resolved nothing, and `capture-pane -t ""` captured an UNRELATED pane whose footer read `← 3
+agents` — which looked like a failed pin. Find a thread's pane by its `@sesh-thread-id` marker.
+
 **CONCURRENT SESSION in the shared checkout** (a pi-delivery feature, ~18 dirty/untracked files incl.
 features.go) broke the conformance build mid-run (`pirpcsend_test.go: undefined: repoRoot`) — my
 "red" was a COMPILE ERROR, not a result (H88/H113, again). Moved my change into a detached worktree

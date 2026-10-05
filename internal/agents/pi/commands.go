@@ -2,6 +2,7 @@ package pi
 
 import (
 	"fmt"
+
 	"github.com/google/uuid"
 	"github.com/lukastk/sesh/internal/api"
 )
@@ -21,8 +22,6 @@ func (c *Client) CheckPane(pane, socket string) error {
 
 type commandReply struct {
 	ID        string          `json:"id"`
-	OK        bool            `json:"ok"`
-	Error     string          `json:"error"`
 	Protocol  int             `json:"protocol"`
 	Operation api.PiOperation `json:"operation"`
 }
@@ -30,12 +29,11 @@ type commandReply struct {
 func (c *Client) commandRequest(req map[string]any) (commandReply, error) {
 	var out commandReply
 	if err := c.roundTrip(req, &out); err != nil {
-		return out, fmt.Errorf("pi RPC: %w (outcome uncertain; do not automatically retry)", err)
+		return out, fmt.Errorf("pi RPC: %w", err)
 	}
-	if out.Error != "" {
-		return out, fmt.Errorf("pi RPC: %s", out.Error)
-	}
-	if !out.OK || out.ID != req["id"] {
+	// roundTrip has already required a positive ACK; command replies must also
+	// correlate to this particular request.
+	if out.ID != req["id"] {
 		return out, fmt.Errorf("pi RPC: invalid or uncorrelated acknowledgement")
 	}
 	return out, nil

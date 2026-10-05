@@ -34,12 +34,37 @@ claude rather than Pi. Socket names unique and fixture paths passed as separate 
 Also removed remote subscription's send-then-send-headless fallback: a lost headed ACK
 followed by pane exit could duplicate delivery. Read owner runtime, choose ONE guarded path.
 
-Gates so far: every non-conformance package, vet, touched packages -race; extension units
-+ typecheck. Anti-gaming: terminal delivery restored -> cell red "draft submitted or lost";
-kickoff-as-completion restored -> unit red completed != running. Both reverse-edited and
-SHA256-verified identical. Full conformance run IN FLIGHT, /tmp/sesh-rpc-full-matrix.log
-(and .rc); wrapper PID 2345946. No deploy yet. npm audit found a transitive brace-expansion
-advisory in the dev dependency tree; not silently upgraded outside this change.
+FINAL GATES before deploy: build + vet, every non-conformance package, touched packages
+-race; extension 5/5 units + typecheck (including a REAL JSONL server and split Unicode).
+Anti-gaming: terminal delivery restored -> cell red "draft submitted or lost";
+kickoff-as-completion restored -> unit red completed != running. Both reversed with SHA256
+identity checks. A final CLI review caught the H92 empty-selector class AGAIN:
+`--text /compact --request-id ""` must refuse, never become a fresh command. Now checks
+flag PRESENCE, not values; units + both real RPC cells prove it. Its neuter used Go's
+`-overlay` so the production checkout was NEVER temporarily weakened; discriminating red.
+
+FULL pre-rebase run: **286/289 pass, 3 fail, 0 skip/missing/not-run, 2 justified N/A**
+(72m including non-matrix tests). Gemini model cell had no GEMINI_API_KEY (on-demand, not
+in ~/.env); reran with `secret get GEMINI_API_KEY` passed through child env only: GREEN.
+Two Codex 0.160.0 failures: schedule.message/local lost its revived pane; flagged/local
+did not clear. Neither reproduced in THREE repetitions EACH on clean ec9b6b4 OR this
+branch. No assertion was weakened and no Codex fix is claimed; root causes remain unknown.
+Optional real-cross-host SSH/HTTP tests skipped (their manual prerequisites absent).
+The full run's six TUI nav reds were a DIFFERENT, reproducible test defect from H117:
+fixtures created session `m`, but nav correctly selects `master:=<machine>`. Two reproduce
+verbatim on clean ec9b6b4. Fixed the fixture topology only, including its read-back; every
+navigation/quit/tracking assertion retained. FULL TUI rerun: **75/75 green (244s)**.
+After integrating concurrent d8ba8d8/ec9b6b4: new Claude no-agent-view cells 2/2 GREEN,
+RPC cells 2/2 GREEN, and final RPC re-run after empty-recovery guard: **2/2 (141s)**.
+Current registry: 291 cells. This is NOT a fresh all-green 291-cell full run. Logs:
+/tmp/sesh-rpc-{full-matrix,baseline,codex-reruns,model-auth,nav-baseline,final-tui-rerun,final-rpc-rerun,final-units}.log.
+
+Packaging: per-machine generated package-lock.json is ignored (existing git installs
+already have one; tracking it would obstruct their update). `npm audit` still reports
+brace-expansion bundled inside the DEV SDK pi-coding-agent 0.99.1; normal npm update/audit
+fix do not repair that bundle. No override/workaround added. Pi's git installer omits
+dev AND peer dependencies, so the added test SDK/tooling is not installed on the fleet.
+DEPLOY: not yet performed; extension first, API-53 daemon next, skills last.
 
 ## H120 — Headed Pi RPC delivery derisked; slash-command contract remains open (2026-10-05; NO production change or deploy)
 Lukas asked to replace terminal pastes with RPC for headed Pi messages. Isolated real Pi

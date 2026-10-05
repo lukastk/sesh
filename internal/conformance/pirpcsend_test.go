@@ -132,6 +132,17 @@ export default function(pi) {
 	if !strings.Contains(string(info.Operation.Result), "rpc-renamed") {
 		t.Fatal(info)
 	}
+	// Losing a recovery id must not turn polling into a new side-effecting request.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "command", "--id", th.ID, "--text", "/name MUST-NOT-RENAME", "--request-id", "", "--timeout", "5s"); err == nil || !strings.Contains(stderr, "exactly one") {
+		t.Fatalf("empty recovery handle was not refused before dispatch: %v %s", err, stderr)
+	}
+	if got := command("/name", false); !strings.Contains(string(got.Operation.Result), "rpc-renamed") {
+		t.Fatal("empty recovery handle dispatched a new command", got)
+	}
+	// A completed operation can be recovered without re-executing its text.
+	if out, stderr, err := sb.Runner.Run(t, "thread", "command", "--id", th.ID, "--request-id", info.RequestID, "--timeout", "5s", "--json"); err != nil || !strings.Contains(out, "rpc-renamed") {
+		t.Fatalf("recover completed operation: %v %s %s", err, out, stderr)
+	}
 	command("/thinking low", false)
 	command("/unknown-rpc-command", true)
 	command("/reload", true)

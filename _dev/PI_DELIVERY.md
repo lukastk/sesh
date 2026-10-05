@@ -23,6 +23,9 @@ copy of Pi's command parser. Findings: experiments/10_pi_headed_delivery/FINDING
   is potentially ambiguous and is never automatically retried or pasted instead.
 - Ordinary RPC messages bypass the terminal typing guard; no editor is involved.
   All headed send sites (including initial --msg) share transport selection.
+  Initial --msg still runs asynchronously: creation is not a delivery receipt, and
+  delivery failures go to the daemon log, as before. Subscription failures likewise
+  retain their existing daemon-log channel; neither path silently tries another transport.
   Scheduler busy/hold/etc guards stay in force; only the Pi typing guard is inapplicable.
 - Existing running extensions already support the stable message operation. No
   protocol upgrade is required for ordinary sends. New commands require capability

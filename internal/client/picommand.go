@@ -2,8 +2,9 @@ package client
 
 import (
 	"context"
-	"github.com/lukastk/sesh/internal/api"
 	"net/url"
+
+	"github.com/lukastk/sesh/internal/api"
 )
 
 func (c *Client) PiCommand(ctx context.Context, req api.PiCommandRequest) (api.PiCommandResponse, error) {

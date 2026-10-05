@@ -23,13 +23,19 @@ func threadCommand(cfg config.Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || *timeout <= 0 || ((*text == "") == (*requestID == "")) {
+	seen := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+	if fs.NArg() != 0 || *timeout <= 0 || seen["text"] == seen["request-id"] {
 		return fmt.Errorf("thread command requires --timeout and exactly one of --text or --request-id")
 	}
-	if *text != "" && !strings.HasPrefix(strings.TrimSpace(*text), "/") {
+	if seen["text"] && !strings.HasPrefix(strings.TrimSpace(*text), "/") {
 		return fmt.Errorf("command text must start with /")
 	}
-	if *requestID != "" {
+	if seen["request-id"] {
+		// An explicitly empty recovery handle must NEVER become a new command.
+		if strings.TrimSpace(*requestID) == "" {
+			return fmt.Errorf("--request-id was passed but is empty; refusing to start a new command")
+		}
 		if _, err := uuid.Parse(*requestID); err != nil {
 			return fmt.Errorf("request-id must be a UUID: %w", err)
 		}

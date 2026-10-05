@@ -1080,9 +1080,10 @@ func isRoutable(cmd string) bool {
 // symptom — a thread that simply will not come back — reads as a sesh bug, so the
 // help says plainly what is holding it and how to see it coming.
 const heldBackgroundSessionHelp = "A CLAUDE CONVERSATION CAN BE OWNED BY A BACKGROUND SESSION — because " +
-	"someone ran `claude --bg`, or because the `/background` slash command (alias `/bg`) was run inside the " +
-	"session, which writes a `continued-in` record into the old transcript, registers the successor as a " +
-	"background session and EXITS the pane. sesh follows a thread's session FORWARD through " +
+	"someone ran `claude --bg`, or because a live session went through claude's `/background` path (claude's " +
+	"daemon log tags it `(slash)`) without anyone typing the command — what triggers that is not yet known. It " +
+	"writes a `continued-in` record into the old transcript, registers the successor as a background session " +
+	"and EXITS the pane. sesh follows a thread's session FORWARD through " +
 	"that chain — it must, or a revive would resume a frozen pre-handoff transcript — so the session it tries to " +
 	"resume is exactly the held one. What claude does then was measured, and it is two different things. A holder " +
 	"started by the SAME claude build: an interactive `--resume` silently re-execs as `claude attach <id>`, so the " +
@@ -1094,5 +1095,5 @@ const heldBackgroundSessionHelp = "A CLAUDE CONVERSATION CAN BE OWNED BY A BACKG
 	"is KEPT), and --force does the stop and then a REAL resume, reporting which session it stopped. --force is never " +
 	"implied — stopping a holder whose state is \"working\" interrupts a turn running right now, so neither the TUI's " +
 	"revive nor a scheduled one ever forces. `sesh doctor` reports every thread whose conversation a background " +
-	"session owns, so the state is visible before a revive meets it. NB `sesh thread stop` does NOT create a " +
-	"background session: that was measured, and the handoff happens on claude's own exit paths."
+	"session owns, so the state is visible before a revive meets it. NB `sesh thread stop` (the TUI's `x`) does NOT " +
+	"create a background session — measured, including mid-tool."

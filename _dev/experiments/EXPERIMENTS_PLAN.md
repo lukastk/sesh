@@ -273,3 +273,20 @@ fixed by routing through a non-browser HTTP layer and (optionally) adding a WS/S
 - Android shell: Capacitor vs. Tauri-mobile vs. native Kotlin (all must use native HTTP from day one).
 - `/v1/peers` CRUD + backup/restore scope (the CLI/file-only gap that blocks Android management).
 - Run `02_detach_safety` before any live-attach ships.
+
+## Headed Pi message delivery (2026-10-05)
+
+### `10_pi_headed_delivery`
+
+**Status:** in progress — transport derisked; command contract awaiting decision.
+
+Lukas requested RPC delivery for ordinary headed Pi messages, without a terminal fallback.
+Live isolated Pi 0.99.1 probes preserved an attached viewer's unsent editor draft and
+delivered a busy-turn message as steering after the current tool completed. Slash input
+is literal model input through this API, not interactive command dispatch. The separate
+compact operation acknowledges initiation before eventual failure (reproduced: session
+too small), so its ACK must not be presented as successful compaction.
+
+Full findings and open command choices:
+[`10_pi_headed_delivery/FINDINGS.md`](10_pi_headed_delivery/FINDINGS.md).
+No production wiring or deploy yet; these probes are not green matrix cells.

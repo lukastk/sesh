@@ -6,6 +6,22 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
+## H120 — Headed Pi RPC delivery derisked; slash-command contract remains open (2026-10-05; NO production change or deploy)
+Lukas asked to replace terminal pastes with RPC for headed Pi messages. Isolated real Pi
+0.99.1 + the installed pi-rpc-socket proved: an attached viewer's half-written draft stays
+in the editor (absent from transcript), and a mid-tool RPC message steers after the real
+`sleep 8` completes without aborting it. BUT the extension's `message` uses
+`sendUserMessage(..., {deliverAs: "steer"})`, with template/command expansion off: slash text
+is model input, not the interactive dispatcher. Mapping `/compact` to `{compact:true}` is
+not automatically an equivalent contract either: twice its ACK said compacted=true and the
+real pane later said `Nothing to compact (session too small)`, with no compaction record.
+ACK = initiation, NOT completion. Stop before silently breaking self-compact or restoring
+terminal pasting as a hidden exception; command-policy decision requested. Findings:
+`_dev/experiments/10_pi_headed_delivery/FINDINGS.md`. Probe was temporarily in conformance,
+then removed; no matrix cells added/green, full matrix NOT run, nothing deployed. First
+probe also hit the transcript-not-yet-created 404: a polling helper must tolerate expected
+absence until the first real message is persisted (the existing transcriptText helper fatals).
+
 ## H119 — "I CAN'T KILL AND REVIVE THIS THREAD": a claude conversation had MIGRATED INTO A BACKGROUND SESSION, and sesh only found out at revive time, days later. THE KILL IS NOT THE CAUSE — it is when you notice (2026-09-30, sesh 3dd3d53 + 16e68cf + d2fae71; api 51→52, NO store migration; DAEMON rebuild + supervised RESTART; DEPLOYED 5/6 2026-10-05 — pocket4 offline, pending)
 Lukas: "I wanted to kill and revive sesh thread ef96bf74 … but I can't", then the same for
 296e85ae and "something is wrong with 192250cf too". Three ids, and they were three different
@@ -60,6 +76,29 @@ cannot verify: claude decides.** What sesh adds:
   leaf if both live in the same claude project dir, so comparing `ProjectDirName` cannot drop a
   real hold — while resolving every claude thread's leaf would scan every transcript on the box
   (48 MB files exist here).
+
+**⚠ CORRECTION (2026-10-05) — the "TRIGGER FOUND" paragraph below is WRONG about WHO, and it was
+deployed in the skill before being caught.** Lukas: "But I've never run /background". He was right,
+and it was checkable: claude's prompt history `~/.claude/history.jsonl` records EVERY slash command
+(`/model` 127×, `/compact` 113×, `/btw` 72× …) and holds **zero** `/background` or `/bg`, and no
+prompt reached either session in the minutes before its handoff. What IS still established: both
+handoffs ran through the `/background` HANDLER — the daemon log's `(slash)` source tag, and
+french-listening's transcript has the handler's own `"Backgrounding after the current tool
+finishes…"` (`system/informational`, 20:54:47.821, 11 s before the handoff, while a 3-minute Bash was
+running). What invoked that handler without anyone typing it is **NOT KNOWN**. Further ruled out by
+VALID measurement (the first two attempts were invalid — once claude refused a foreground `sleep`,
+once the kill landed before the tool started; the fix was to detect the running tool by its PROCESS,
+`/proc/<pid>/cwd` = the rig dir, not by pane text): **the TUI's `x` is `sesh thread stop` = `tmux
+kill-pane`, and a kill WITH A FOREGROUND TOOL RUNNING creates no background session**; Ctrl-B single
+or double mid-tool does nothing to the session — the only background keybinding is `task:background`
+(Ctrl-B, `ctrl+x ctrl+b`, context `Task`), and its handler `hq()` backgrounds running SHELLS
+(`task_local_shell_background_all`), not the session. NB claude's hint under tmux reads `ctrl+b
+ctrl+b (twice)` and the work server keeps tmux's default `prefix C-b → send-prefix`, which looked
+like the answer and was not. **LESSON: a code-path tag (`(slash)`) proves which HANDLER ran, not who
+invoked it — check the input log before naming a human action as the cause, especially when the
+human is the person you are telling.** Untested remaining entry points: a remote/bridge control of
+the session (the binary has `CLAUDE_BRIDGE_*`), and anything else that dispatches commands without
+the local prompt. The sesh-side fix (doctor, named failure, `--force`) does not depend on the trigger.
 
 **THE TRIGGER, FOUND AND REPRODUCED: the `/background` SLASH COMMAND.** claude's own daemon log
 (`~/.claude/daemon.log` — 194 KB, **appends since 2026-07-01 and never rotates**, so it covered both

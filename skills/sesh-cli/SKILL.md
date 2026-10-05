@@ -924,12 +924,13 @@ sesh thread headful --id <id> --force   # ...and first stop a claude BACKGROUND 
 sesh thread delete --id <id>         # drop the record (refuses a live thread; stop first); children promote to the grandparent
 
 # ── A CLAUDE THREAD THAT WILL NOT COME BACK: a held background session ──────────────
-# A claude conversation can be OWNED by a BACKGROUND SESSION. Two ways in, and the
-# second is the one that has bitten: `claude --bg` at launch, or the **`/background`**
-# slash command (alias `/bg`, "Send this session to the background and free the
-# terminal") run INSIDE a live session — it writes a `continued-in` record into the old
-# transcript, registers the successor as a background session, and EXITS the pane (which
-# is why the thread's tmux window is simply gone afterwards). sesh
+# A claude conversation can be OWNED by a BACKGROUND SESSION: the conversation moves into
+# a claude background session, a `continued-in` record is written into the old transcript,
+# and the pane EXITS (which is why the thread's tmux window is simply gone afterwards).
+# It runs through the same code path as claude's `/background` command (claude's
+# ~/.claude/daemon.log tags it `(slash)`) — but on Lukas's fleet NOBODY TYPED `/background`:
+# claude's prompt history records every slash command and has none. What invokes it is not
+# yet known. sesh
 # follows a thread's session forward through that chain, so the session it tries to
 # resume is exactly the held one. Two things then happen, and they look nothing alike:
 #
@@ -950,10 +951,9 @@ sesh thread headful --id <id> --force   # do both: stop the holder, then a REAL 
 #
 # --force is never implied: stopping a holder whose state is "working" interrupts a turn
 # running right now, so neither the TUI's revive nor a scheduled one ever forces.
-# NB `sesh thread stop` (which kills the pane) does NOT create a background session, and
-# neither does Ctrl-C, /quit, /clear or a claude auto-update — all measured. It is
-# `/background` (or `claude --bg`). So if a thread becomes un-revivable, look for a
-# `/background` in its transcript, not at how you stopped it.
+# NB measured NOT to cause it: `sesh thread stop` / the TUI's `x` (kills the pane — even
+# mid-tool), Ctrl-C, Ctrl-B, /quit, /clear, a claude auto-update. Don't go looking for a
+# typed command; `sesh doctor` is how you find out a thread is held.
 sesh thread archive --id <id>        # park it; --unarchive to restore
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --release                   # release it (+ its subtree) from an ANCESTOR's hold, until tomorrow

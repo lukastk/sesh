@@ -3,19 +3,20 @@ package claude
 // background.go reads claude's BACKGROUND SESSION registry.
 //
 // WHY sesh cares. A claude conversation can stop being owned by a terminal and
-// become a *background session*: `claude --bg [--resume <id>]` at launch, or — and
-// this is what actually happened here — the **`/background`** slash command (alias
-// `/bg`, "Send this session to the background and free the terminal") run inside a
-// live session. It writes a
+// become a *background session*: `claude --bg [--resume <id>]` at launch, or a live
+// session going through the `/background` code path, which writes a
 //
 //	{"type":"continued-in","sessionId":"<old>","continuedInSessionId":"<new>"}
 //
 // record into the old transcript, registers the successor as a background session,
 // and EXITS the pane. Measured twice on Lukas's fleet — 07998bab -> ef96bf74 at
-// 2026-09-23T07:53:00.008Z and f1a4d35a -> 92e176d4 at 2026-09-18T20:54:58.363Z,
-// each with a rendezvous socket ~1 s later and claude's own daemon log recording
-// `[bg] bg claimed-spare <id> (slash)` — and reproduced from scratch by running
-// `/background`, which yields the identical `(slash)` tag and a dead pane.
+// 2026-09-23T07:53:00.008Z and f1a4d35a -> 92e176d4 at 2026-09-18T20:54:58.363Z —
+// with claude's daemon log recording `[bg] bg claimed-spare <id> (slash)`, the same
+// tag typing `/background` produces. BUT NOBODY TYPED IT: claude's prompt history
+// (~/.claude/history.jsonl) records every slash command and holds no `/background` or
+// `/bg` at all. What invokes that path is not yet known; ruled out by measurement are a
+// pane kill (sesh thread stop / the TUI's `x`, even mid-tool), Ctrl-C, Ctrl-B, /quit,
+// /clear and a claude auto-update.
 //
 // While a session is held, `claude --resume <id>` REFUSES:
 //

@@ -6,7 +6,7 @@ entries, moved 2026-09-17. This file holds H91 onwards, plus the "Trap digest" a
 "Reference" sections at the bottom. Nothing was lost - the moved entries are in the archive
 in full and in git history.
 
-## H121 — Headed Pi delivery implemented over RPC; explicit command protocol and real completion (2026-10-05; API 53; NOT YET DEPLOYED)
+## H121 — Headed Pi delivery implemented over RPC; explicit command protocol and real completion (2026-10-05; API 53; DEPLOYED 5/6 — pocket4 offline)
 User approved extension-first implementation after H120. Code lives across sesh,
 lukastk/pi-rpc-socket (new development checkout ~/mysetup/pi-rpc-socket), and myagent's
 self-compact skill. Design: _dev/PI_DELIVERY.md. Literal messages use the existing stable
@@ -49,13 +49,22 @@ in ~/.env); reran with `secret get GEMINI_API_KEY` passed through child env only
 Two Codex 0.160.0 failures: schedule.message/local lost its revived pane; flagged/local
 did not clear. Neither reproduced in THREE repetitions EACH on clean ec9b6b4 OR this
 branch. No assertion was weakened and no Codex fix is claimed; root causes remain unknown.
-Optional real-cross-host SSH/HTTP tests skipped (their manual prerequisites absent).
+Optional real-cross-host SSH/HTTP tests skipped because MYRIG_MACHINES was not exported.
 The full run's six TUI nav reds were a DIFFERENT, reproducible test defect from H117:
 fixtures created session `m`, but nav correctly selects `master:=<machine>`. Two reproduce
 verbatim on clean ec9b6b4. Fixed the fixture topology only, including its read-back; every
 navigation/quit/tracking assertion retained. FULL TUI rerun: **75/75 green (244s)**.
 After integrating concurrent d8ba8d8/ec9b6b4: new Claude no-agent-view cells 2/2 GREEN,
 RPC cells 2/2 GREEN, and final RPC re-run after empty-recovery guard: **2/2 (141s)**.
+TUI/RPC reproduction: `PI_RPC_EXTENSION_UNDER_TEST=~/mysetup/pi-rpc-socket/index.ts
+ go test ./internal/conformance -run '^TestMatrix$/^thread.pi-rpc-send$/^pi$' -v
+ -count=1 -timeout 12m`; `go test ./internal/conformance -run '^TestTUIClaims' -v
+ -count=1 -timeout 12m`. Real Pi runs on isolated `sesh-test-{local,remote}-<UnixNano>`
+servers with own homes; t.Cleanup kills only those servers/daemons. Input is literal
+`DRAFT-NOT-SUBMITTED-π` through a nested viewer, then RPC steering; captured draft stays
+and transcript contains RPC-STEER-DONE but never the draft. Pane dimensions were tmux's
+default, not explicitly fixed/recorded; no visual-layout claim is made. Production smoke
+threads had NO attached test viewer, so none resized the user's panes.
 Current registry: 291 cells. This is NOT a fresh all-green 291-cell full run. Logs:
 /tmp/sesh-rpc-{full-matrix,baseline,codex-reruns,model-auth,nav-baseline,final-tui-rerun,final-rpc-rerun,final-units}.log.
 
@@ -64,7 +73,34 @@ already have one; tracking it would obstruct their update). `npm audit` still re
 brace-expansion bundled inside the DEV SDK pi-coding-agent 0.99.1; normal npm update/audit
 fix do not repair that bundle. No override/workaround added. Pi's git installer omits
 dev AND peer dependencies, so the added test SDK/tooling is not installed on the fleet.
-DEPLOY: not yet performed; extension first, API-53 daemon next, skills last.
+DEPLOYED 2026-10-05: **mymain, ideapad, macstudio, macbook, termux**, all binaries
+56f68dd with vcs.modified=false; all daemons API 53 / store 26 (NO migration). Extension
+978be7d / 0.2.0 installed FIRST via targeted `pi update git:github.com/lukastk/pi-rpc-socket`;
+myagent 4837f0b and both sesh-cli/do-tickets copies refreshed. Clean exact-revision
+checkouts required; no headless busy turns at the restart guard. Four service-manager
+restarts; termux exact old-pid TERM, fresh-login guard, then /proc/exe inode equality
+against the installed binary verified (pid 21105). Pocket4 SSH :22 still times out,
+mesh marks it offline: PENDING. Logs /tmp/sesh-rpc-deploy-<machine>.log; reusable recipe
+/tmp/sesh-rpc-deploy.zsh (pins all three revisions). No existing Pi process was reloaded.
+
+LIVE-PROVEN against the SUPERVISED production daemons with disposable headed Pi threads:
+mymain, ideapad and macbook; the latter two via real-network routed HTTP. Native /session
+matches the thread's exact session UUID; operation recovery returns the SAME completed
+operation; /name sets a name; a literal /name-prefixed MESSAGE gets a real assistant
+sentinel reply without changing that name. Every scratch thread stopped, deleted and
+absence checked. The installed 0.2.0 extension also passes the real TestThreadRPCWebSocket streaming
+regression (13s; /tmp/sesh-rpc-installed-ws.log). The current agent's OLD 0.1.0
+runtime was left alone and its read-only
+command request correctly refuses with the explicit update + /reload remedy. Ordinary
+messages already use its stable RPC operation; commands need manual reload/restart.
+
+LIVE-SMOKE TRAP: macbook's first smoke DID reply (confirmed in the real pane), but its
+transcript read 404'd. This is the old Pi symlink-CWD lookup class, NOT a delivery failure:
+thread CWD `/tmp`, Pi cwd `/private/tmp`, actual file under `sessions/--private-tmp--/`.
+Re-ran with canonical `/private/tmp`: native commands, literal send, transcript and recovery
+all GREEN. No transcript resolver change made here; symlink-CWD lookup remains open.
+Also still open: the development-only bundled SDK audit finding above and the two
+nonreproducing Codex full-run failures. No fresh full-grid all-green claim.
 
 ## H120 — Headed Pi RPC delivery derisked; slash-command contract remains open (2026-10-05; NO production change or deploy)
 Lukas asked to replace terminal pastes with RPC for headed Pi messages. Isolated real Pi

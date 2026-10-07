@@ -1,148 +1,110 @@
-# sesh v2 — agent instructions
+# sesh v2 — operating guide
 
-**sesh v2** is one Go binary + per-machine daemon that owns multi-machine coding-agent session management, tmux orchestration, and tickets.
+One Go binary + per-machine daemon owns multi-machine coding-agent threads, tmux
+orchestration, tickets, and the TUI. **v2 is shipped on six machines; do not regress
+live work.** `sesh` owns mechanism/contracts; `myrig` owns policy, keybindings and
+shell UX. Keep the CLI explicit, machine-readable (`--json`), and schema-versioned;
+no magic defaults or new shell-glue layer. Explicit user-configured policy is allowed.
 
-**Naming.** The cross-machine tmux cockpit sesh builds — one window per machine, each an
-auto-reconnecting attach into that machine's work server — is called **mycockpit**, or just
-**the cockpit** / **my cockpit**. It was formerly "the master tmux setup"; that name is
-retired.
+The cross-machine whole is **mycockpit / the cockpit**, not “the master tmux setup”
+or “the master cockpit”. Its **master** level is `SESH_MASTER_SOCKET` / `C-a`;
+**base** is one machine's `SESH_TMUX_SOCKET` / `C-b`. Keep these level names in APIs,
+files and myrig's `mmt-*` / `mt-*` vocabulary.
 
-**`master` and `base` are its two LEVELS**, and stay as the vocabulary: the **master** level
-is the cockpit's own tmux server (`SESH_MASTER_SOCKET`, prefix `C-a`), cross-machine; the
-**base** level is one machine's work server (`SESH_TMUX_SOCKET`, prefix `C-b`). So `sesh
-master …`, `cmd/sesh/master.go`, `master-client.*` and myrig's `mmt-*`/`mt-*` split are all
-naming a level, not carrying the old name — leave them. Reserve "the cockpit" for the whole
-thing; do not write "the master cockpit", which is redundant.
+## Map and task routing (read only what the task needs)
 
-**It is shipped.** v1 is gone; v2 runs in production on all six machines and is what Lukas works in every day. You are almost certainly *extending or fixing* it, not building it — so the bar is "do not regress the fleet", and every change lands against a live system. Treat `_dev/PLAN.md`'s Phase 0 ("build the tracking spine first") as history: the spine exists.
+- `cmd/sesh/`: CLI, routing, help; `internal/client/` + `internal/api/`: contracts.
+- `internal/daemon/`: owner-side runtime, mesh, delivery; `internal/store/` +
+  `internal/migrate/`: persistence; `internal/agents/`: harness integrations.
+- `internal/tmux/`, `internal/tui/`: orchestration and UI;
+  `internal/matrix/`, `internal/conformance/`: feature registry and real e2e tests.
+- `skills/`: user-facing CLI and ticket guides; `_dev/`: on-demand designs/history.
 
-- This file: **the rules you must follow.** They are not optional and they are not negotiable.
-- **`AGENTS.local.md`** — the running engineering log (H-numbered entries: root causes, what was reverted and why, deploy state). **Read the last few entries before starting** — it is the fastest way to find out whether your idea has already been tried and reverted, and it is where you record what you learn.
-
-### `_dev/` — the design corpus
-
-`SPEC.md` and `PLAN.md` are the entry points; the rest are per-feature design records, each written *before* the feature and still the best explanation of why it works the way it does.
-
-| Doc | What it is |
+| Task | Read before changing that area |
 |---|---|
-| `SPEC.md` | The design. What sesh v2 is and the layer split (`sesh` = mechanism, `myrig` = policy/UX). Read first. |
-| `PLAN.md` | How we build and track it: the feature registry, the matrix harness, the testing framework. |
-| `MESH.md` | Mesh-replicated live state — the cross-machine thread view, sync cadence, delta sync. |
-| `MASTER.md` | **mycockpit**, the cross-machine tmux cockpit (`sesh master up\|window\|attach\|down`). Built. |
-| `SHELL.md` | **Shell threads** — a tracked tmux session as a first-class thread, and the `S` shells viewer over live/ghost sessions. Carries the tmux marker-inheritance trap digest. |
-| `SIDEBAR.md` | The persistent/traveling thread sidebar (`tui --sidebar`, issue #8). |
-| `PI_DELIVERY.md` | Headed Pi messages over RPC, explicit commands and pollable outcomes; no terminal fallback (API 53). |
-| `STATE_AUTHORITY.md` | Authoritative agent turn-state reporting — the reporter hooks behind busy/idle/flagged (issues #4–#6). |
-| `STATUS_OPTIONS.md` | The work server's status row without a shell per redraw: the daemon stamps `@sesh-name` etc. as pane user options, the conf renders them with a pure format. Built. |
-| `IDENTITY.md` | **How a process finds out which thread it is** — the provenance model (explicit / pane / turn / harness / env), why `$SESH_THREAD_ID` is only ever a hint, the gate-vs-diagnostic split between `whoami` and `info`, and the daemon-launched-worker identity (schema 50). Read before touching current-thread inference. |
-| `SCHEDULING.md` | **Scheduled work** — cron-style timed messages into a thread and timed thread spawns, with state-aware guards (`sesh schedule`). Scoped 2026-09-16, **NOT built**; the open decisions are in its §15. |
-| `CLI_TUI_FEATURES.md` | The 2026-06-11 CLI/TUI feature batch and its contract. |
-| `PARITY_ROADMAP.md` | The v1-parity contract: every v1 feature, ticked off. |
-| `V1_FEATURE_AUDIT.md` | The v1→v2 audit that produced that roadmap. Historical, but it is the record of what was deliberately *not* ported. |
-| `BACKLOG.md` | Designed but not yet built. Check here before designing something new. |
+| Architecture / feature work | [SPEC](_dev/SPEC.md) in full; [PLAN](_dev/PLAN.md) for registry/harness; [BACKLOG](_dev/BACKLOG.md) before designing something new |
+| Tests / conformance | [TESTING](_dev/TESTING.md), including teardown and real-cross-host prerequisites |
+| Deploy / services / machine operations | [OPERATIONS](_dev/OPERATIONS.md) |
+| Mesh / performance | [MESH](_dev/MESH.md), [MESH_SCALE](_dev/MESH_SCALE.md) |
+| Cockpit / shells / sidebar / status | [MASTER](_dev/MASTER.md), [SHELL](_dev/SHELL.md), [SIDEBAR](_dev/SIDEBAR.md), [STATUS_OPTIONS](_dev/STATUS_OPTIONS.md), as applicable |
+| Current-thread inference | [IDENTITY](_dev/IDENTITY.md): env is a hint, not verified identity |
+| Delivery / agent state | [PI_DELIVERY](_dev/PI_DELIVERY.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) |
+| Scheduling | [SCHEDULING](_dev/SCHEDULING.md), including §16 implementation departures (built, not merely scoped) |
+| CLI/TUI feature contracts / v1 archaeology | [CLI_TUI_FEATURES](_dev/CLI_TUI_FEATURES.md), [PARITY_ROADMAP](_dev/PARITY_ROADMAP.md), [V1_FEATURE_AUDIT](_dev/V1_FEATURE_AUDIT.md) |
+| Prior diagnoses, reversions, deployment evidence | [ENGINEERING_INDEX](_dev/ENGINEERING_INDEX.md); search topic/H-number, then read relevant entries **and corrections** |
 
----
+Do not load the entire design corpus or chronological archive at startup. PLAN's
+“build the tracking spine first” is history: the spine already exists.
 
-## The prime directive: the feature matrix is honest or it is worthless
+## Non-negotiable engineering rules
 
-The previous version of sesh failed in a specific, insidious way: features that *looked* implemented but silently did the wrong thing. `sesh new --machine X` returned success and set the machine field but **always spawned locally** — it only pretended to be remote. Codex liveness/headless detection returned plausible-but-wrong answers. These survived for months because nothing made them visibly false.
+- **Loud errors, no defensive fallbacks.** Reachable unimplemented paths must
+  panic/return `NOT IMPLEMENTED: <what>`, never plausible wrong success. Unexpected
+  empty/nil is a bug, not a cue to invent a default. If a hack/workaround seems
+  necessary, stop and ask Lukas rather than papering over it.
+- **The feature matrix measures truth, not effort.** Register each conformant
+  feature → bind initially Skip/red tests → implement. Axes are
+  `(local, remote) × (claude, codex, pi)` as declared by the feature.
+  - Never mock the thing under test: remote cells require a **real SSH hop** into
+    a real daemon/tmux (`ssh localhost` with isolated sockets is acceptable), not
+    stub transport. Agent cells use the **real agent binary in a real tmux pane**.
+  - Assert **observable external effects**, not fields set internally. For
+    liveness, kill the real process and assert dead; prove both directions.
+  - Unimplemented cells use loud, queryable `t.Skip("NOT IMPLEMENTED: …")`, never
+    count as done. N/A needs a justification **signed off by Lukas**.
+  - Never weaken assertions, shrink declared axes, stub-and-forget, or mock a
+    dependency to make green. Leave honest red/Skip and report it.
+  - **Feature done = full matrix green, zero skips and zero unjustified N/A.**
+    Unit and e2e tests are both required; neither substitutes for the other.
+    Units/regressions may live outside the matrix; per-cell obligations apply to
+    registered conformant features. A focused pass is not an all-green claim.
+- **Surface changes require matching docs in the same change:** commands, flags,
+  semantics, TUI keys/columns and env vars → `skills/sesh-cli/SKILL.md`; ticket
+  surface → `skills/do-tickets/SKILL.md` too. Keep `cmd/sesh/help.go` and
+  `cmd/sesh/help_flags.go` accurate. Help meta-tests require an entry per dispatched
+  command and a `flagDoc` per usage flag (no duplicates/orphans). `tui --columns`
+  values are generated from `tui.ValidColumnNames()`, not manually listed in help.
+- Store migrations are **append-only**. Never auto-delete durable thread records
+  because runtime vanished. Preserve single-authoritative-writer ownership.
+- Commit messages must be **prompts another agent could use to recreate the work**.
 
-This project defends against that with a **feature matrix**: every conformant feature is registered, and the testing framework loudly expects a real test for each cell of that feature's row across `(local, remote) × (claude, codex, pi)`. See `_dev/PLAN.md` for the mechanism.
+## Safety: this is the user's live rig
 
-**The integrity of the matrix is enforced by these rules and by Lukas auditing it — not by clever framework code.** That means the burden is on you to be honest. The following are hard rules:
+- Tests must isolate **SESH_HOME, SESH_TMUX_SOCKET, SESH_MASTER_SOCKET,
+  SESH_CODEX_HOME** and strip inherited **SESH_*** (`sandboxEnv`). Never default a
+  test home/socket to production. Invoke sandbox binaries by absolute path, not
+  myrig's `sesh` function. Never attach test viewers to live sessions (resize risk).
+- Teardown cannot rely only on `t.Cleanup`: aborting the test binary leaves agents
+  running. Keep TestMain's stale-test-server reaper and its **2h age/ownership
+  boundary**, which protects concurrent runs; see TESTING before changing cleanup.
+  Kill only verified owned PIDs/socket names, never broad process patterns.
+- **Never hand-restart a production daemon.** Except Termux, use
+  `supervisorctl restart sesh-daemon`. The supervisor ini owns `SESH_API_ADDR`,
+  `SESH_API_TOKEN_FILE`, PATH, SHELL, and `SESH_TMUX_CONF`. A shell-started daemon
+  can lose inbound API/mesh visibility and block supervisor recovery by holding
+  its socket. No-API warnings are actionable, not permission for a fallback.
+  Termux alone has no supervisor/API; use OPERATIONS' explicit-PID relaunch recipe.
+- Check git status before edits/deploys; preserve concurrent work. Never ship a
+  dirty checkout by accident. Do not widen live kill matchers for test experiments.
 
-### Honesty rules (a cell may go green ONLY if all of these hold)
+## Work and verification
 
-1. **Exercise the real thing. Never mock the thing under test.** The cardinal sin of this project is making a cell green by mocking away the behavior it is supposed to prove.
-   - A **`remote`** cell must perform a *real ssh hop* into a real remote daemon/tmux. `ssh localhost` into a second daemon/socket on the same box is acceptable and honest (it drives the actual remote code path — it would have caught the `--machine X` bug). A mocked or stubbed ssh/transport is a **violation**.
-   - An **agent** cell (`claude`/`codex`/`pi`) must spawn the *real agent binary* in a real tmux pane. Mocking the agent process is a **violation**.
-2. **Assert the observable external effect, not internal state.** "Did a process with this thread id actually land on the remote host?" — not "did we set `machine=remote`?". For liveness, **kill the real process and assert the state flips to dead** — test both directions, because the codex bug was a one-directional check.
-3. **Skips are allowed but never silent and never count as done.** An unimplemented cell is a `t.Skip("NOT IMPLEMENTED: …")` (renders yellow) — it must be queryable (`<matrix> skips`) and it never counts toward "done".
-4. **`N/A` requires a justification string** that Lukas has signed off (e.g. "pi has no headless mode — by design"). You may not silently drop a cell from a feature's declared axes to avoid testing it.
-5. **Done = the full matrix is green** with zero skips and zero unjustified N/A. "Done" is not a judgement call you make — it is the matrix all-green.
+Use `go build ./...`, `go vet ./...`, and explicitly named unit packages (e.g.
+`go test ./internal/tui -count=1`) as appropriate. **`go test ./internal/...` also
+runs real-agent conformance**; choose that expense deliberately. Full conformance:
+`go test ./internal/conformance -v -count=1`; results:
+`go run ./cmd/sesh matrix grid`. Keep the rendered matrix current for feature work;
+report greens/reds/skips and what was **not run**, never imply a fresh full run.
+Documentation-only work uses link/diff checks, not unrelated integration suites.
 
-### Do not game the matrix
+Deploy is part of implementation delivery unless the task explicitly defers it.
+Merged is not live: myrig builds the binary per machine. Report exactly which
+machines run the change and which do not; distinguish binary-only changes from
+changes requiring daemon rebuild + supervised restart. Live-smoke daemon-exec
+paths: test environments do not prove supervisor environments. Running sidebars
+keep their old binary/config until restarted (`prefix+r`).
 
-Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forget, or mock a dependency to turn a cell green. The grid is a *measurement*, not a goal. If you cannot honestly make a cell green, leave it `Skip`/red and say so — loudly, in your summary. A red matrix that tells the truth is infinitely more valuable than a green one that lies. Lukas runs an audit agent over the grid that checks exactly this; rigging will be found.
-
----
-
-## Other hard rules
-
-- **Loud errors over silent failures. No defensive fallbacks.** (This is a standing rule across all of Lukas's projects.) Any reachable-but-unimplemented code path must `panic`/return an explicit `"NOT IMPLEMENTED: <what>"` error — it must **never** degrade to a plausible-looking wrong behavior (that is the exact `--machine X` failure). Do not add fallback values that mask bugs. If something returns an unexpected empty/nil, let it fail loudly.
-- **Both unit and end-to-end tests are required.** Unit tests cover internal logic (fast, may live *outside* the matrix). The matrix cells are primarily **e2e** (real agent, real tmux, real ssh). Neither substitutes for the other.
-- **Tests may live outside the matrix.** Not every test maps to a cell — unit tests, regression tests, and helper tests are free. The per-cell expectation applies *only* to features registered as conformant in the matrix.
-- **`sesh` is mechanism, not UX.** Keep the CLI explicit (no magic defaults) and machine-readable (`--json`, stable/versioned schema). Ergonomics belong in `myrig` shell wrappers, not here. Do not grow a shell-glue layer inside this repo.
-- **If you find yourself implementing a hack to get something to work, stop.** It usually means a bug to fix or a design decision for Lukas. Surface it in your summary rather than papering over it.
-- **The CLI skill must stay in sync.** `skills/sesh-cli/SKILL.md` is the user-facing guide to the CLI/TUI. Any change to the CLI surface — a new or removed command, a renamed/added flag, changed semantics, new TUI keys or columns, new env vars — MUST be accompanied by an update to that skill file in the same change. A CLI change without a corresponding skill update is incomplete. (The skill documents *using* sesh, not developing it.) There is also an agent-facing `skills/do-tickets/SKILL.md` (the ticket find→read→report loop) — a change to the `sesh ticket` surface must keep it accurate too. The same in-repo sync applies to `--help`: `cmd/sesh/help.go` holds the registry (summary/usage/examples per command) and `cmd/sesh/help_flags.go` holds the per-flag explanations (`flagDocs`). Meta-tests in `help_test.go` enforce both — a help entry per dispatched command, and a `flagDoc` for **every** flag in a command's usage line (no orphans/dups) — so a new or renamed flag can't land undocumented. The `tui --columns` value list is rendered programmatically from `tui.ValidColumnNames()`, so column additions need no manual help edit.
-- **Commit messages are prompts.** Write each commit message so another agent could recreate the work from it.
-- **NEVER restart a machine's daemon by hand — always through its service manager.** On every machine except termux the daemon is a supervised service (`supervisorctl restart sesh-daemon`) and its **environment lives in the supervisor ini, not in any shell**: `SESH_API_ADDR`, `SESH_API_TOKEN_FILE`, the PATH that finds the agents, `SHELL`, `SESH_TMUX_CONF`. A hand-started `sesh daemon run` — especially from an agent pane, where it is one keystroke away — comes up **without `SESH_API_ADDR`, so it serves no TCP API and the machine silently drops off the mesh**: peers can't reach it, and since offline machines' threads are hidden it simply vanishes from everyone's `sesh tui`. Worse, the hand-started daemon holds the unix socket, so supervisor's own restarts die with "a live daemon already listens" until `startretries` is exhausted and the service goes **FATAL** — nothing self-heals. This is invisible from the affected box (outbound sync keeps working, so its own `sesh mesh` and `sesh doctor` look green); mymain sat off the mesh for 9 hours this way (H75). The daemon and `sesh doctor` now both warn loudly when no API is configured — heed that warning rather than working around it. Termux is the one exception: no supervisor, no API, relaunch per the recipe in `AGENTS.local.md`.
-
----
-
-## Workflow
-
-1. Read `_dev/SPEC.md` in full, plus the `_dev/` doc for the area you are touching, plus the recent `AGENTS.local.md` entries. Check `_dev/BACKLOG.md` before designing something new — it may already be designed.
-2. Each feature: **register it → write its matrix tests (they start as `Skip`/red) → implement until green honestly.** The registry and harness already exist (`_dev/PLAN.md` describes them); you are adding rows, not building the spine.
-3. Keep the rendered matrix current; when you stop, report the grid state (greens / reds / skips) truthfully in your summary.
-4. **Deploy is part of the job.** The binary is built per-machine from the clone by myrig, so a merged change is not live until the fleet has it. Say plainly in your summary which machines are running your change and which are not — a partially-deployed fix has burned time here before (see the H-entries in `AGENTS.local.md`).
-5. Record what you learned as the next `H<n>` entry in `AGENTS.local.md` — especially root causes and anything you tried that did **not** work.
-
----
-
-## Test environment notes
-
-- **Lukas's LIVE sesh — this very binary — is running on these machines, with his real
-  threads in it.** The conformance suite MUST never touch it: every test isolates
-  `SESH_HOME`, `SESH_TMUX_SOCKET`, `SESH_MASTER_SOCKET`, and `SESH_CODEX_HOME`, and
-  strips any inherited `SESH_*` from the test process env (`sandboxEnv` in the harness).
-  Never leave a socket/home at its default in a test. A test that kills panes or wipes a
-  store at the default paths destroys his working state, and you are probably running
-  *inside* one of those threads while you do it.
-
-- **Teardown cannot depend on the test process surviving — `TestMain` reaps the LAST
-  run's leaks.** Each sandbox kills its own tmux server in `t.Cleanup`, which covers the
-  ordinary path, but `t.Cleanup` never runs when the test BINARY dies: Ctrl-C on `go
-  test`, a `-timeout` abort, a SIGKILL. tmux cannot recover on its own either —
-  `exit-empty` would close an idle server, but a leaked sandbox session still holds a
-  live `claude`/`pi`, so the server stays up **forever** with a real agent in it.
-
-  Measured on mymain 2026-09-23: three leaked servers aged **5-6 days**, each still
-  running an agent, plus **349** dead socket files. They were invisible to `sesh thread
-  list` (their stores went with the temp dirs), so nothing surfaced them — one was found
-  only because its agent still held an ssh channel to macstudio and was starving
-  `ssh-target`'s ControlMaster.
-
-  So `reapStaleTestServers` (harness_test.go) runs from `TestMain` before `m.Run()` and
-  kills any `sesh-test-*` server whose embedded `-<UnixNano>` stamp is older than
-  `staleTestServerAge` (2h), unlinking dead sockets as it goes. The age bound is the only
-  reason it is safe: it must never kill a **concurrent** run's servers. It reports each
-  kill on stderr rather than sweeping silently, so a leak that keeps recurring stays
-  visible. `reap_test.go` covers the age split, that it touches nothing it does not own
-  (`sesh`, `sesh-master`, unparseable or lookalike names), and — end to end — that a real
-  server holding a real process is actually killed.
-
-- **Real cross-host test (`TestRealCrossHost`)** validates genuine multi-machine spawn
-  over a real network ssh hop (the one thing the `ssh localhost` matrix cells cannot
-  stand in for). Pairing: `mymain ↔ macbook` (from `$MYRIG_MACHINES`). It self-gates and
-  **skips with a warning** when it can't run. **Prerequisite (manual, by design — the
-  test does NOT ship the binary):**
-  1. Install the v2 binary on BOTH paired machines at `~/.local/bin/sesh-v2`, built for
-     that machine's GOOS/GOARCH (e.g. from mymain: `GOOS=darwin GOARCH=arm64 go build -o
-     /tmp/sesh-v2 ./cmd/sesh && scp /tmp/sesh-v2 lukas@macbook:.local/bin/sesh-v2`).
-     **Re-install after any wire/API-schema change** — the local side uses the freshly
-     built binary and the partner uses its installed one; they must be compatible.
-  2. `$MYRIG_MACHINES` is a zsh assoc array (NOT exported), so run the test with it
-     exported: `MYRIG_MACHINES="$MYRIG_MACHINES" go test ./internal/conformance -run
-     TestRealCrossHost -v`. (Self-detection uses `$MYRIG_TARGETS`, which IS exported.)
-  `peers.Peer` now has a `Port` field, so non-22 partners are supported.
-
-- **Real cross-host HTTP test (`TestRealCrossHostHTTP`)** is the symmetric real-network
-  proof for the **http transport** (the `127.0.0.1` `.http` cells exercise the code but
-  never cross a real network). Same wiring/pairing/prereq as `TestRealCrossHost`, but it
-  starts the partner's daemon with its TCP API on its tailscale interface, registers it
-  as an **http peer with a deliberately broken ssh dest**, and asserts routing + fan-out
-  + sync all cross the real network over HTTP (a silent ssh attempt would fail). Run:
-  `MYRIG_MACHINES="$MYRIG_MACHINES" go test ./internal/conformance -run
-  TestRealCrossHostHTTP -v`. It skips loudly if the partner binary is stale (no
-  `--api-addr`) — re-install after schema changes.
+Keep [AGENTS.local.md](AGENTS.local.md) a short current trap/index file, not a
+chronological log. Record substantial new findings (especially failed approaches)
+in a dated topic/history doc under `_dev/` and link it from ENGINEERING_INDEX;
+retain only active summaries locally. Preserve tracking/privacy when moving notes.

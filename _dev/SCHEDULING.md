@@ -709,8 +709,18 @@ says so in the delete output (`also removed 2 schedules`). Note the existing war
 `DeleteThread` does **not** clean up `subscriptions` rows today, so orphan edges linger; a
 schedule pointing at a deleted thread would fire into nothing forever, which is worse.
 
-Archiving does **not** delete schedules (archive is reversible) — the archived-skip guard covers
-it.
+Archiving a thread **archives** its active message schedules (§9.6) and un-archiving restores
+exactly those — identified by their `thread archived` state reason, so a schedule archived by
+hand, or already paused when the thread was parked, is never resurrected by the thread's state.
+The records are kept, because archive is reversible. A schedule carrying `--allow-archived` is
+exempt: it was created to fire into a parked thread, so the archive is not news to it.
+
+The per-run archived guard stays as the backstop (a schedule created *after* the thread was
+parked is still skipped). The cascade exists because the guard alone leaves the record `active`:
+it goes on waking the scheduler and writing a `skipped: archived` run row at every occurrence
+for as long as the thread stays parked, and goes on counting as pending work in the thread's
+`SCHED` digest. **Decided 2026-10-19** (Lukas: archiving a thread should archive the messages
+scheduled for it).
 
 ### 9.5 The security surface
 
@@ -720,6 +730,57 @@ posture from doing it by hand, and the fleet's default is yolo. Mitigation is di
 restriction: record the effective spawn mode on the schedule, print it at creation
 (`mode: yolo (from [spawn])`), and show it in `schedule show`. **Decided (§15.8): disclosure
 only, no mandatory `--yolo`.**
+
+### 9.6 The lifecycle (schema 54, added 2026-10-19)
+
+A schedule is in exactly **one state**, and it is the only firing gate:
+
+| state | meaning | fires | in `list` by default | reversible |
+|---|---|---|---|---|
+| `active` | on the clock | yes | yes | — |
+| `paused` | off by hand, will come back | no | yes | `resume` |
+| `spent` | its clock is exhausted | no | **no** | nothing to resume |
+| `broken` | the failure breaker tripped | no | **yes** | `resume` after a fix |
+| `archived` | set aside, or carried by its thread's archive | no | **no** | `unarchive` |
+
+`spent` is terminal **by arithmetic**: a one-shot that fired, `max_fires` reached, `not_after`
+passed, a cron with no further occurrence. That is what separates it from `archived` — both are
+inert, but `unarchive` works and there is nothing for a resume to do to a spent record.
+
+**This replaced `enabled bool` + a free-text `disabled_reason`,** which collapsed "off for now",
+"finished" and "broken" into one indistinguishable off. Nothing could filter it, so `schedule
+list` showed every record ever created, and `doctor` had to compare reason *strings*
+(`!= "paused" && != "one-shot fired"`) to find the ones worth reporting. On the rig this was
+written for that meant **117 records of which 101 could never fire again**, growing ~50/day from
+agent-made one-shot backstops.
+
+Two further faults the old shape hid, both fixed here:
+
+- **Terminality was labelled, not derived.** A paused one-shot whose instant had passed still
+  read `paused`. `effectiveState` now re-derives it wherever a state is read or written, so a
+  listing never offers a resumable label on a record that cannot resume (~60 rows).
+- **Every write re-validated the clock** through the create path, so a record with no future
+  occurrence 400'd on *any* update — it could not be renamed, paused or archived, only removed.
+  `buildSchedule`'s `requireFuture` is now true only when the caller **edited** the clock or on
+  create; a `resume` of an exhausted clock lands in `spent` with a reason instead of failing.
+
+**Nothing deletes a schedule record automatically.** `spent` and `archived` are *hidden*, not
+collected: a schedule carries the prompt text that was actually scheduled plus its run history,
+which is the only account of what ran. That matches the store's standing rule against
+auto-deleting durable records (`threads` holds thousands and is never swept), and it is the
+opposite trade-off from `schedule_runs`, where `PruneScheduleRuns` must cap an *infinite* series
+— a 20-minute cron emits 72 rows a day forever, while schedule records are bounded by activity.
+The accumulated history costs the firing loop nothing because `ListSchedulesActive` filters in
+**SQL**: the rev triggers reload the scheduler's cache on every fire, so that query must not
+scale with the archive. `sesh schedule prune` is the only delete sweep, always a deliberate
+call, refusing `active` (live work) and `broken` (a problem report), with `--dry-run` and
+`--before`. **Decided 2026-10-19** (Lukas, rejecting an earlier proposal of automatic retention
+on spent records: "why are we deleting records as opposed to just archiving them?").
+
+A write may set `active`, `paused` or `archived`. `spent` and `broken` are the daemon's own
+verdicts and are **refused** on the API — a caller that could declare a schedule broken could
+silence the breaker. The superseded `enabled` / `disabled_reason` columns are still written as
+mirrors of the state so a rollback to a pre-54 binary reads a coherent store; nothing reads them.
 
 ---
 

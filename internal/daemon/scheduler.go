@@ -132,16 +132,14 @@ func (s *scheduler) reload() error {
 	if s.haveRev && rev == s.lastRev {
 		return nil
 	}
-	all, err := s.d.store.ListSchedules()
+	// Only `active` can fire, and the store applies that filter: every fire
+	// bumps the rev and so reloads this cache, which must not scale with the
+	// history of spent/archived records kept for the audit trail.
+	active, err := s.d.store.ListSchedulesActive()
 	if err != nil {
 		return err
 	}
-	s.cache = s.cache[:0]
-	for _, sc := range all {
-		if sc.Enabled {
-			s.cache = append(s.cache, sc)
-		}
-	}
+	s.cache = append(s.cache[:0], active...)
 	s.lastRev, s.haveRev = rev, true
 	return nil
 }
@@ -182,18 +180,18 @@ func (s *scheduler) dispatch(sc api.Schedule, now time.Time) {
 		return
 	}
 	sc = fresh
-	if !sc.Enabled || sc.NextFireUnix == 0 || now.Unix() < sc.NextFireUnix {
+	if sc.State != api.ScheduleActive || sc.NextFireUnix == 0 || now.Unix() < sc.NextFireUnix {
 		return
 	}
 	spec, loc, err := s.parseSpec(sc)
 	if err != nil {
-		s.disable(sc, "spec no longer parses: "+err.Error())
+		s.disable(sc, api.ScheduleBroken, "spec no longer parses: "+err.Error())
 		return
 	}
 	nowLoc := now.In(loc)
 	// Life bounds.
 	if sc.NotAfterUnix > 0 && now.Unix() > sc.NotAfterUnix {
-		s.disable(sc, "not_after passed")
+		s.disable(sc, api.ScheduleSpent, "not_after passed")
 		return
 	}
 	// Missed occurrences: the daemon was not running when this was due.
@@ -218,7 +216,7 @@ func (s *scheduler) dispatch(sc api.Schedule, now time.Time) {
 	}
 	if !fireNow {
 		if sc.NextFireUnix == 0 {
-			sc.Enabled, sc.DisabledReason = false, "no future occurrence"
+			setScheduleState(&sc, api.ScheduleSpent, "no future occurrence", now)
 		}
 		if err := s.d.store.UpdateSchedule(sc); err != nil {
 			log.Printf("scheduler: %s: roll forward: %v", sc.ID, err)
@@ -227,7 +225,7 @@ func (s *scheduler) dispatch(sc api.Schedule, now time.Time) {
 	}
 	sc.LastFireUnix = now.Unix()
 	if sc.NextFireUnix == 0 { // a one-shot: this is its only fire
-		sc.Enabled, sc.DisabledReason = false, "one-shot fired"
+		setScheduleState(&sc, api.ScheduleSpent, "one-shot fired", now)
 	}
 	if err := s.d.store.UpdateSchedule(sc); err != nil {
 		log.Printf("scheduler: %s: advance: %v", sc.ID, err)
@@ -260,10 +258,12 @@ func (s *scheduler) parseSpec(sc api.Schedule) (schedule.Spec, *time.Location, e
 	return spec, loc, err
 }
 
-// disable turns a schedule off with a recorded, logged reason.
-func (s *scheduler) disable(sc api.Schedule, why string) {
-	sc.Enabled, sc.DisabledReason = false, why
-	log.Printf("scheduler: %s (%s) DISABLED: %s", sc.ID, sc.Name, why)
+// disable takes a schedule off the clock with a recorded, logged reason. The
+// state says whether a human needs to look: `broken` is a problem report and
+// stays visible in every listing, `spent` is a finished record and does not.
+func (s *scheduler) disable(sc api.Schedule, state, why string) {
+	setScheduleState(&sc, state, why, time.Now())
+	log.Printf("scheduler: %s (%s) %s: %s", sc.ID, sc.Name, strings.ToUpper(state), why)
 	if err := s.d.store.UpdateSchedule(sc); err != nil {
 		log.Printf("scheduler: %s: disable: %v", sc.ID, err)
 	}
@@ -332,8 +332,8 @@ func (s *scheduler) record(id string, firedAt time.Time, outcome, detail, thread
 			sc.LastRunThreadID = threadID
 		}
 		if sc.MaxFires > 0 && sc.FireCount >= sc.MaxFires {
-			sc.Enabled, sc.DisabledReason = false, fmt.Sprintf("max_fires %d reached", sc.MaxFires)
-			log.Printf("scheduler: %s (%s) DISABLED: max_fires %d reached", sc.ID, sc.Name, sc.MaxFires)
+			setScheduleState(&sc, api.ScheduleSpent, fmt.Sprintf("max_fires %d reached", sc.MaxFires), firedAt)
+			log.Printf("scheduler: %s (%s) SPENT: max_fires %d reached", sc.ID, sc.Name, sc.MaxFires)
 		}
 	case api.OutcomeSkipped:
 		sc.SkipCount++
@@ -341,8 +341,8 @@ func (s *scheduler) record(id string, firedAt time.Time, outcome, detail, thread
 		sc.FailStreak++
 		log.Printf("scheduler: %s (%s) run FAILED (%d in a row): %s", sc.ID, sc.Name, sc.FailStreak, detail)
 		if n := s.d.schedules.DisableAfterFailures; n > 0 && sc.FailStreak >= n {
-			sc.Enabled, sc.DisabledReason = false, fmt.Sprintf("%d consecutive failures — last: %s", sc.FailStreak, detail)
-			log.Printf("scheduler: %s (%s) DISABLED: %s", sc.ID, sc.Name, sc.DisabledReason)
+			setScheduleState(&sc, api.ScheduleBroken, fmt.Sprintf("%d consecutive failures — last: %s", sc.FailStreak, detail), firedAt)
+			log.Printf("scheduler: %s (%s) BROKEN: %s", sc.ID, sc.Name, sc.StateReason)
 		}
 	}
 	if err := s.d.store.UpdateSchedule(sc); err != nil {
@@ -454,7 +454,7 @@ func (s *scheduler) runMessage(ctx context.Context, sc api.Schedule, firedAt tim
 	th, err := s.d.store.GetThread(sc.ThreadID)
 	if err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
-			s.disable(sc, "target thread "+sc.ThreadID[:min(8, len(sc.ThreadID))]+" no longer exists")
+			s.disable(sc, api.ScheduleBroken, "target thread "+sc.ThreadID[:min(8, len(sc.ThreadID))]+" no longer exists")
 			return api.OutcomeFailed, "target thread no longer exists (schedule disabled)"
 		}
 		return api.OutcomeFailed, err.Error()

@@ -132,7 +132,7 @@ func testScheduleCRUD(t *testing.T, loc matrix.Locality) {
 	th := sb.newHeadlessThread(t, "pi", "crud-target")
 
 	sc := sb.scheduleJSON(t, "message", "--id", th.ID, "--every", "1h", "--text", "hello", "--name", "hourly", "--if", "idle,detached", "--when-busy", "skip")
-	if sc.ID == "" || sc.Machine != sb.Machine || sc.Spec != "every 1h0m0s" || sc.TZ == "" || sc.Catchup != "skip" || !sc.Enabled {
+	if sc.ID == "" || sc.Machine != sb.Machine || sc.Spec != "every 1h0m0s" || sc.TZ == "" || sc.Catchup != "skip" || sc.State != api.ScheduleActive {
 		t.Fatalf("created record: %+v", sc)
 	}
 	now := time.Now().Unix()
@@ -180,13 +180,13 @@ func testScheduleCRUD(t *testing.T, loc matrix.Locality) {
 	if _, stderr, err := sb.Runner.Run(t, "schedule", "pause", "--id", "hourly"); err != nil {
 		t.Fatalf("pause: %v\n%s", err, stderr)
 	}
-	if got := sb.scheduleGet(t, "hourly"); got.Enabled {
+	if got := sb.scheduleGet(t, "hourly"); got.State != api.SchedulePaused {
 		t.Fatalf("still enabled after pause")
 	}
 	if _, stderr, err := sb.Runner.Run(t, "schedule", "resume", "--id", "hourly"); err != nil {
 		t.Fatalf("resume: %v\n%s", err, stderr)
 	}
-	if got := sb.scheduleGet(t, "hourly"); !got.Enabled || got.NextFireUnix < time.Now().Unix()+7100 {
+	if got := sb.scheduleGet(t, "hourly"); got.State != api.ScheduleActive || got.NextFireUnix < time.Now().Unix()+7100 {
 		t.Fatalf("resume must re-enable and recompute next_fire from now: %+v", got)
 	}
 	// remove.
@@ -547,13 +547,13 @@ func testScheduleLifecycle(t *testing.T) {
 	if out, err := sb.scheduleRunNow(t, one.ID, false); err != nil || out.Outcome != api.OutcomeSkipped {
 		t.Fatalf("a skip must not count toward max_fires: %+v %v", out, err)
 	}
-	if got := sb.scheduleGet(t, one.ID); !got.Enabled {
+	if got := sb.scheduleGet(t, one.ID); got.State != api.ScheduleActive {
 		t.Fatalf("disabled by a skip: %+v", got)
 	}
 	if out, err := sb.scheduleRunNow(t, one.ID, true); err != nil || out.Outcome != api.OutcomeFired {
 		t.Fatalf("forced fire: %+v %v", out, err)
 	}
-	if got := sb.scheduleGet(t, one.ID); got.Enabled || !strings.Contains(got.DisabledReason, "max_fires") {
+	if got := sb.scheduleGet(t, one.ID); got.State != api.ScheduleSpent || !strings.Contains(got.StateReason, "max_fires") {
 		t.Fatalf("max_fires did not disable: %+v", got)
 	}
 
@@ -562,7 +562,7 @@ func testScheduleLifecycle(t *testing.T) {
 	shot := sb.scheduleJSON(t, "message", "--id", th.ID, "--at", at, "--name", "shot", "--when-headless", "skip", "--text", "x")
 	if !waitUntil(90*time.Second, func() bool {
 		got := sb.scheduleGet(t, shot.ID)
-		return !got.Enabled && got.DisabledReason == "one-shot fired"
+		return got.State == api.ScheduleSpent && got.StateReason == "one-shot fired"
 	}) {
 		t.Fatalf("one-shot: %+v", sb.scheduleGet(t, shot.ID))
 	}
@@ -578,13 +578,14 @@ func testScheduleLifecycle(t *testing.T) {
 			t.Fatalf("run %d: %+v", i, out)
 		}
 	}
-	if got := sb.scheduleGet(t, broken.ID); got.Enabled || !strings.Contains(got.DisabledReason, "3 consecutive failures") || got.FailStreak != 3 {
+	if got := sb.scheduleGet(t, broken.ID); got.State != api.ScheduleBroken || !strings.Contains(got.StateReason, "3 consecutive failures") || got.FailStreak != 3 {
 		t.Fatalf("breaker: %+v", got)
 	}
 
 	// Deleting the target removes its schedules in the same transaction, and
-	// the delete says so.
-	before, _, _ := sb.Runner.Run(t, "schedule", "list", "--json")
+	// the delete says so. --all, because by now both are SPENT and the default
+	// listing is the live set.
+	before, _, _ := sb.Runner.Run(t, "schedule", "list", "--all", "--json")
 	if !strings.Contains(before, one.ID) || !strings.Contains(before, shot.ID) {
 		t.Fatalf("schedules missing before delete: %s", before)
 	}
@@ -595,8 +596,110 @@ func testScheduleLifecycle(t *testing.T) {
 	if !strings.Contains(stdout, "also removed 2 message schedule(s)") {
 		t.Fatalf("delete did not report the cascade: %q", stdout)
 	}
-	after, _, _ := sb.Runner.Run(t, "schedule", "list", "--json")
+	after, _, _ := sb.Runner.Run(t, "schedule", "list", "--all", "--json")
 	if strings.Contains(after, one.ID) || strings.Contains(after, shot.ID) || !strings.Contains(after, broken.ID) {
 		t.Fatalf("cascade wrong: %s", after)
+	}
+
+	// --- the lifecycle states as the CLI presents them (schema 54) ---
+
+	// The DEFAULT listing is the live set. `broken` is live (it is a problem
+	// report), the spent records are not, and the footer names what it held back
+	// rather than hiding it.
+	target := sb.newHeadlessThread(t, "pi", "state-target")
+	live := sb.scheduleJSON(t, "message", "--id", target.ID, "--cron", "0 9 * * *", "--name", "state-live", "--when-headless", "skip", "--text", "x")
+	spent := sb.scheduleJSON(t, "message", "--id", target.ID, "--every", "1h", "--name", "state-spent", "--max-fires", "1", "--when-headless", "skip", "--text", "x")
+	if out, err := sb.scheduleRunNow(t, spent.ID, true); err != nil || out.Outcome != api.OutcomeFired {
+		t.Fatalf("spend it: %+v %v", out, err)
+	}
+	if got := sb.scheduleGet(t, spent.ID); got.State != api.ScheduleSpent {
+		t.Fatalf("want spent: %+v", got)
+	}
+	stdout, _, err = sb.Runner.Run(t, "schedule", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "state-live") || !strings.Contains(stdout, "broken") {
+		t.Fatalf("the default listing must show the live set incl. broken: %s", stdout)
+	}
+	if strings.Contains(stdout, "state-spent") {
+		t.Fatalf("the default listing must not show a spent record: %s", stdout)
+	}
+	if !strings.Contains(stdout, "spent not shown") {
+		t.Fatalf("the default listing must name what it held back: %s", stdout)
+	}
+	if out, _, _ := sb.Runner.Run(t, "schedule", "list", "--state", "spent"); !strings.Contains(out, "state-spent") {
+		t.Fatalf("--state spent must show it: %s", out)
+	}
+
+	// archive / unarchive: off the clock and out of the listing, record kept.
+	if _, _, err := sb.Runner.Run(t, "schedule", "archive", "--id", live.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if got := sb.scheduleGet(t, live.ID); got.State != api.ScheduleArchived {
+		t.Fatalf("want archived: %+v", got)
+	}
+	if out, _, _ := sb.Runner.Run(t, "schedule", "list"); strings.Contains(out, "state-live") {
+		t.Fatalf("an archived schedule must leave the default listing: %s", out)
+	}
+	if _, _, err := sb.Runner.Run(t, "schedule", "unarchive", "--id", live.ID); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	if got := sb.scheduleGet(t, live.ID); got.State != api.ScheduleActive || got.NextFireUnix <= time.Now().Unix() {
+		t.Fatalf("unarchive must put it back on the clock ahead of now: %+v", got)
+	}
+
+	// Archiving the TARGET THREAD carries its active schedules with it, and the
+	// archive says so; un-archiving the thread restores exactly those.
+	stdout, _, err = sb.Runner.Run(t, "thread", "archive", "--id", target.ID)
+	if err != nil {
+		t.Fatalf("thread archive: %v", err)
+	}
+	if !strings.Contains(stdout, "also archived 1 message schedule(s)") {
+		t.Fatalf("thread archive did not report the schedule cascade: %q", stdout)
+	}
+	if got := sb.scheduleGet(t, live.ID); got.State != api.ScheduleArchived || got.StateReason != "thread archived" {
+		t.Fatalf("the cascade must mark its own records: %+v", got)
+	}
+	// Nothing fires into an archived thread, and now nothing even tries: a
+	// forced run-now is the only way to reach it.
+	stdout, _, err = sb.Runner.Run(t, "thread", "archive", "--id", target.ID, "--unarchive")
+	if err != nil {
+		t.Fatalf("thread unarchive: %v", err)
+	}
+	if !strings.Contains(stdout, "also put 1 message schedule(s) back on the clock") {
+		t.Fatalf("thread unarchive did not report the restore: %q", stdout)
+	}
+	if got := sb.scheduleGet(t, live.ID); got.State != api.ScheduleActive {
+		t.Fatalf("want active after unarchive: %+v", got)
+	}
+
+	// prune: the only delete sweep, and never automatic. It refuses live work
+	// and problem reports, and --dry-run removes nothing.
+	if _, stderr, err := sb.Runner.Run(t, "schedule", "prune", "--state", "active"); err == nil || !strings.Contains(stderr, "refusing") {
+		t.Fatalf("prune --state active must be refused: %v %s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "schedule", "prune", "--state", "broken"); err == nil || !strings.Contains(stderr, "refusing") {
+		t.Fatalf("prune --state broken must be refused: %v %s", err, stderr)
+	}
+	stdout, _, err = sb.Runner.Run(t, "schedule", "prune", "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(stdout, "would remove") || !strings.Contains(stdout, "state-spent") {
+		t.Fatalf("dry run must name the spent record: %s", stdout)
+	}
+	if got := sb.scheduleGet(t, spent.ID); got.ID == "" {
+		t.Fatal("a dry run deleted the record")
+	}
+	if _, _, err := sb.Runner.Run(t, "schedule", "prune"); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	gone, _, _ := sb.Runner.Run(t, "schedule", "list", "--all", "--json")
+	if strings.Contains(gone, spent.ID) {
+		t.Fatalf("prune left the spent record: %s", gone)
+	}
+	if !strings.Contains(gone, broken.ID) || !strings.Contains(gone, live.ID) {
+		t.Fatalf("prune took something it must not: %s", gone)
 	}
 }

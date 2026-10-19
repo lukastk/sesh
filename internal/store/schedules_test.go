@@ -11,7 +11,7 @@ func TestScheduleCRUD(t *testing.T) {
 	st := openTestStore(t)
 	idle := int64(30)
 	sc := api.Schedule{
-		ID: "s1", Name: "heartbeat", Action: api.ScheduleActionMessage, Enabled: true,
+		ID: "s1", Name: "heartbeat", Action: api.ScheduleActionMessage, State: api.ScheduleActive, StateAtUnix: 500,
 		Spec: "every 20m0s", TZ: "Europe/London", Catchup: api.CatchupSkip, MaxFires: 30,
 		ThreadID: "t1", Text: "keep going",
 		Rules:        api.ScheduleRules{WhenBusy: "skip", If: []string{"idle"}, IdleForS: &idle},
@@ -24,11 +24,11 @@ func TestScheduleCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "heartbeat" || got.Rules.WhenBusy != "skip" || got.Rules.IdleForS == nil || *got.Rules.IdleForS != 30 || len(got.Rules.If) != 1 || got.NextFireUnix != 1000 || !got.Enabled {
+	if got.Name != "heartbeat" || got.Rules.WhenBusy != "skip" || got.Rules.IdleForS == nil || *got.Rules.IdleForS != 30 || len(got.Rules.If) != 1 || got.NextFireUnix != 1000 || got.State != api.ScheduleActive || got.StateAtUnix != 500 {
 		t.Fatalf("round trip lost fields: %+v", got)
 	}
 	rev1, _ := st.SchedulesRev()
-	got.Enabled, got.DisabledReason, got.FireCount, got.LastOutcome = false, "breaker", 3, "failed: x"
+	got.State, got.StateReason, got.StateAtUnix, got.FireCount, got.LastOutcome = api.ScheduleBroken, "breaker", 900, 3, "failed: x"
 	if err := st.UpdateSchedule(got); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestScheduleCRUD(t *testing.T) {
 		t.Fatalf("an update must bump the schedules rev (%d → %d)", rev1, rev2)
 	}
 	again, _ := st.GetSchedule("s1")
-	if again.Enabled || again.DisabledReason != "breaker" || again.FireCount != 3 {
+	if again.State != api.ScheduleBroken || again.StateReason != "breaker" || again.StateAtUnix != 900 || again.FireCount != 3 {
 		t.Fatalf("update lost fields: %+v", again)
 	}
 	if err := st.UpdateSchedule(api.Schedule{ID: "nope"}); !errors.Is(err, ErrScheduleNotFound) {
@@ -68,11 +68,11 @@ func TestScheduleRunsAndCascade(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"s1", "s2"} {
-		if err := st.InsertSchedule(api.Schedule{ID: id, Name: id, Action: api.ScheduleActionMessage, Enabled: true, Spec: "every 1h0m0s", TZ: "UTC", Catchup: "skip", ThreadID: "t1", CreatedAtUnix: 1}); err != nil {
+		if err := st.InsertSchedule(api.Schedule{ID: id, Name: id, Action: api.ScheduleActionMessage, State: api.ScheduleActive, Spec: "every 1h0m0s", TZ: "UTC", Catchup: "skip", ThreadID: "t1", CreatedAtUnix: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.InsertSchedule(api.Schedule{ID: "sp", Name: "spawner", Action: api.ScheduleActionSpawn, Enabled: true, Spec: "every 1h0m0s", TZ: "UTC", Catchup: "skip", Agent: "pi", Cwd: "/tmp", CreatedAtUnix: 1}); err != nil {
+	if err := st.InsertSchedule(api.Schedule{ID: "sp", Name: "spawner", Action: api.ScheduleActionSpawn, State: api.ScheduleActive, Spec: "every 1h0m0s", TZ: "UTC", Catchup: "skip", Agent: "pi", Cwd: "/tmp", CreatedAtUnix: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for i := int64(1); i <= 5; i++ {

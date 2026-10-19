@@ -16,6 +16,12 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
 - **Tests (H91/H113/H118):** a filtered `go test` can run zero tests and succeed;
   inspect `-v`. A compile failure is not a discriminating regression. Sandbox-only
   PIDs/sockets; no `pkill -f`, widened live kill matchers, or default homes.
+- **Schedules (schema 54):** a schedule's lifecycle is `state`
+  (active/paused/spent/broken/archived), the only firing gate; `enabled` +
+  `disabled_reason` remain as written-but-unread mirrors for rollback. `schedule
+  list` defaults to the live states and prints what it held back — a test or script
+  expecting every row needs `--all`. Nothing prunes records automatically. See
+  [SCHEDULING §9.6](_dev/SCHEDULING.md).
 - **Deploy (H70/H112):** sidebars keep old binaries/config; installed skill copies
   may stay stale after a repo pull. Verify actual artifacts, not just checkout SHA.
   Termux requires plain native `go build` (CGO=1); see OPERATIONS before deploying.

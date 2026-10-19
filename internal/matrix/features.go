@@ -660,7 +660,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "schedule.lifecycle",
-		Description: "deleting the target thread removes its message schedules in the same transaction (the delete reports the count); max_fires disables after the last delivered run; a one-shot --at disables itself after firing; the failure breaker ([schedules] disable_after_failures) disables a schedule whose runs keep failing, naming the reason",
+		Description: "deleting the target thread removes its message schedules in the same transaction (the delete reports the count); max_fires leaves the record SPENT after the last delivered run; a one-shot --at is spent once it fires; the failure breaker ([schedules] disable_after_failures) leaves a schedule whose runs keep failing BROKEN, naming the reason; `schedule list` shows the live states (active, paused, broken) and names the spent/archived count it held back, --state/--all reveal them; `schedule archive`/`unarchive` move a record off and back onto the clock keeping its history; archiving the TARGET THREAD archives its active message schedules and un-archiving restores exactly those (the thread archive reports the count); `schedule prune` is the only delete sweep, refuses active and broken, and --dry-run removes nothing",
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{

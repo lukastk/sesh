@@ -294,6 +294,50 @@ var migrations = []string{
 	CREATE TRIGGER schedules_trev_ins AFTER INSERT ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
 	CREATE TRIGGER schedules_trev_upd AFTER UPDATE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;
 	CREATE TRIGGER schedules_trev_del AFTER DELETE ON schedules BEGIN UPDATE revs SET rev = rev + 1 WHERE name = 'threads'; END;`,
+	// 27: THE SCHEDULE LIFECYCLE (api 54, _dev/SCHEDULING.md §9.6). schedules.state
+	// replaces `enabled` + the free-text `disabled_reason`, which collapsed three
+	// unrelated conditions into one indistinguishable off: a hand pause that will come
+	// back, a record whose clock is exhausted, and a schedule the failure breaker shot.
+	// Nothing could filter them (doctor resorted to comparing reason STRINGS), so a
+	// listing showed every record ever created — 117 rows of which 101 could never fire
+	// again on the rig this was written for, growing ~50/day from agent-made one-shots.
+	//
+	// The backfill derives, rather than copies, terminality: a paused one-shot whose
+	// instant has already passed is `spent`, not `paused`, because next_fire holds that
+	// instant and `at` specs yield nothing after it. Those rows had been unreachable —
+	// every write re-validated the clock through the create path and so 400'd, leaving
+	// ~60 records that claimed to be resumable and could not even be renamed.
+	//
+	// `enabled` and `disabled_reason` are KEPT and still written as mirrors of state
+	// (see scheduleWriteCols) so a rollback to a pre-54 binary reads a coherent store.
+	// They are no longer read. state_at records when the row entered its state: the age
+	// `schedule prune --before` reads. Nothing deletes schedule records automatically —
+	// spent and archived are hidden from the default listing, not collected, because a
+	// schedule carries the prompt text that was actually scheduled plus its run
+	// history. APPENDED last.
+	`ALTER TABLE schedules ADD COLUMN state TEXT NOT NULL DEFAULT 'active';
+	ALTER TABLE schedules ADD COLUMN state_reason TEXT NOT NULL DEFAULT '';
+	ALTER TABLE schedules ADD COLUMN state_at INTEGER NOT NULL DEFAULT 0;
+	UPDATE schedules SET
+		state = CASE
+			WHEN enabled = 1 THEN 'active'
+			WHEN disabled_reason IN ('one-shot fired', 'no future occurrence') THEN 'spent'
+			WHEN disabled_reason LIKE 'max_fires %' THEN 'spent'
+			WHEN disabled_reason = 'paused' AND spec LIKE 'at %' AND next_fire > 0
+				AND next_fire <= CAST(strftime('%s', 'now') AS INTEGER) THEN 'spent'
+			WHEN disabled_reason = 'paused' THEN 'paused'
+			ELSE 'broken'
+		END,
+		state_reason = CASE
+			WHEN enabled = 1 THEN ''
+			WHEN disabled_reason = 'paused' AND spec LIKE 'at %' AND next_fire > 0
+				AND next_fire <= CAST(strftime('%s', 'now') AS INTEGER)
+				THEN 'paused, and its one-shot instant passed'
+			WHEN disabled_reason = 'paused' THEN ''
+			ELSE disabled_reason
+		END,
+		state_at = CASE WHEN last_fire > 0 THEN last_fire ELSE created_at END;
+	CREATE INDEX schedules_state ON schedules (state);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

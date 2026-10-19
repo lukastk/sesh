@@ -245,10 +245,10 @@ func (s *scheduler) reap(threadID, why string, ok bool) {
 	case "stop":
 		perr = c.ThreadStopForce(ctx, threadID, true)
 	case "archive":
-		perr = c.ThreadArchive(ctx, threadID, true)
+		_, perr = c.ThreadArchive(ctx, threadID, true)
 	case "stop+archive":
 		if perr = c.ThreadStopForce(ctx, threadID, true); perr == nil {
-			perr = c.ThreadArchive(ctx, threadID, true)
+			_, perr = c.ThreadArchive(ctx, threadID, true)
 		}
 	case "delete":
 		if perr = c.ThreadStopForce(ctx, threadID, true); perr == nil {

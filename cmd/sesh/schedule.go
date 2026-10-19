@@ -1,6 +1,6 @@
 package main
 
-// `sesh schedule <message|spawn|list|show|runs|pause|resume|remove|edit|run-now>`
+// `sesh schedule <message|spawn|list|show|runs|pause|resume|archive|unarchive|remove|prune|edit|run-now>`
 // — scheduled work (_dev/SCHEDULING.md). A schedule is a record on the machine
 // that EXECUTES it: `message` auto-routes to its target thread's owner; `spawn`
 // lands on the local daemon unless --machine says otherwise (the cwd is there).
@@ -39,17 +39,23 @@ func runSchedule(cfg config.Config, args []string) error {
 	case "runs":
 		return scheduleRuns(cfg, rest)
 	case "pause":
-		return scheduleEnable(cfg, rest, false)
+		return scheduleSetState(cfg, rest, api.SchedulePaused)
 	case "resume":
-		return scheduleEnable(cfg, rest, true)
+		return scheduleSetState(cfg, rest, api.ScheduleActive)
+	case "archive":
+		return scheduleSetState(cfg, rest, api.ScheduleArchived)
+	case "unarchive":
+		return scheduleSetState(cfg, rest, api.ScheduleActive)
 	case "remove":
 		return scheduleRemove(cfg, rest)
+	case "prune":
+		return schedulePrune(cfg, rest)
 	case "edit":
 		return scheduleEdit(cfg, rest)
 	case "run-now":
 		return scheduleRunNow(cfg, rest)
 	default:
-		return fmt.Errorf("schedule: unknown subcommand %q (want message|spawn|list|show|runs|pause|resume|remove|edit|run-now)", sub)
+		return fmt.Errorf("schedule: unknown subcommand %q (want message|spawn|list|show|runs|pause|resume|archive|unarchive|remove|prune|edit|run-now)", sub)
 	}
 }
 
@@ -351,12 +357,21 @@ func scheduleList(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("schedule list", flag.ContinueOnError)
 	all := fs.Bool("all-machines", false, "include every reachable peer's schedules (a fan-out)")
 	thread := fs.String("thread", "", "only schedules targeting (or last spawned) this thread id")
+	state := fs.String("state", "", "comma-separated lifecycle states to show: active,paused,spent,broken,archived (default: active,paused,broken)")
+	everything := fs.Bool("all", false, "every state, including the inert ones (spent, archived)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	states := *state
+	if *everything {
+		if states != "" {
+			return errors.New("schedule list: --all and --state are mutually exclusive")
+		}
+		states = strings.Join(api.ScheduleAllStates, ",")
+	}
 	c := daemonClient(cfg)
-	resp, err := c.SchedulesList(context.Background(), *thread, *all)
+	resp, err := c.SchedulesList(context.Background(), *thread, *all, states)
 	if err != nil {
 		return err
 	}
@@ -368,6 +383,7 @@ func scheduleList(cfg config.Config, args []string) error {
 	}
 	if len(resp.Schedules) == 0 {
 		fmt.Println("no schedules")
+		printHeldBack(resp, states)
 		return nil
 	}
 	sort.SliceStable(resp.Schedules, func(i, j int) bool {
@@ -377,13 +393,13 @@ func scheduleList(cfg config.Config, args []string) error {
 		}
 		return a.CreatedAtUnix < b.CreatedAtUnix
 	})
-	fmt.Printf("%-8s  %-7s  %-22s  %-7s  %-20s  %-28s  %s\n", "ID", "MACHINE", "NAME", "ACTION", "SPEC", "NEXT", "LAST")
+	fmt.Printf("%-8s  %-7s  %-20s  %-7s  %-8s  %-18s  %-24s  %s\n", "ID", "MACHINE", "NAME", "ACTION", "STATE", "SPEC", "NEXT", "LAST")
 	for _, sc := range resp.Schedules {
 		next := fireAt(sc)
-		if !sc.Enabled {
-			next = "paused"
-			if sc.DisabledReason != "" && sc.DisabledReason != "paused" {
-				next = "DISABLED: " + sc.DisabledReason
+		if sc.State != api.ScheduleActive {
+			next = "-"
+			if sc.StateReason != "" {
+				next = sc.StateReason
 			}
 		}
 		last := sc.LastOutcome
@@ -393,8 +409,69 @@ func scheduleList(cfg config.Config, args []string) error {
 		if sc.Missed > 0 {
 			last += fmt.Sprintf(" (missed %d)", sc.Missed)
 		}
-		fmt.Printf("%-8s  %-7s  %-22s  %-7s  %-20s  %-28s  %s\n", sc.ID[:8], sc.Machine, trunc(sc.Name, 22), sc.Action, trunc(sc.Spec, 20), trunc(next, 28), last)
+		fmt.Printf("%-8s  %-7s  %-20s  %-7s  %-8s  %-18s  %-24s  %s\n", sc.ID[:8], sc.Machine, trunc(sc.Name, 20), sc.Action,
+			sc.State, trunc(sc.Spec, 18), trunc(next, 24), last)
 	}
+	printHeldBack(resp, states)
+	return nil
+}
+
+// printHeldBack names what the filter kept out. A default listing shows the
+// live set; saying how many records it did not show (and the flag that reveals
+// them) is what separates a useful default from a silent one.
+func printHeldBack(resp api.SchedulesResponse, states string) {
+	if states != "" {
+		return
+	}
+	var parts []string
+	for _, s := range api.ScheduleAllStates {
+		if !api.ScheduleStateLive(s) && resp.Counts[s] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", resp.Counts[s], s))
+		}
+	}
+	if len(parts) > 0 {
+		fmt.Printf("+ %s not shown (--all, or --state <s>)\n", strings.Join(parts, ", "))
+	}
+}
+
+// schedulePrune is the only destructive sweep, and it is always this call: no
+// retention policy runs in the background. Spent and archived records are kept
+// as history — each carries the text that was actually scheduled and its runs.
+func schedulePrune(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("schedule prune", flag.ContinueOnError)
+	state := fs.String("state", api.ScheduleSpent, "comma-separated states to delete: spent, archived, paused (active and broken are refused)")
+	before := fs.String("before", "", "only records that entered their state before this instant ('YYYY-MM-DD', 'YYYY-MM-DD HH:MM' or RFC3339)")
+	thread := fs.String("thread", "", "only schedules targeting (or last spawned) this thread id")
+	dry := fs.Bool("dry-run", false, "list what would be removed and remove nothing")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	beforeUnix, err := instantUnix(*before, "")
+	if err != nil {
+		return fmt.Errorf("--before: %w", err)
+	}
+	resp, err := daemonClient(cfg).SchedulesPrune(context.Background(), api.PruneSchedulesRequest{
+		States: splitList(*state), BeforeUnix: beforeUnix, Thread: *thread, DryRun: *dry,
+	})
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	if len(resp.Removed) == 0 {
+		fmt.Println("nothing to prune")
+		return nil
+	}
+	for _, sc := range resp.Removed {
+		fmt.Printf("%-8s  %-8s  %-24s  %s\n", sc.ID[:8], sc.State, trunc(sc.Name, 24), sc.StateReason)
+	}
+	verb := "removed"
+	if resp.DryRun {
+		verb = "would remove"
+	}
+	fmt.Printf("%s %d schedule(s) and their run history\n", verb, len(resp.Removed))
 	return nil
 }
 
@@ -424,9 +501,12 @@ func scheduleShow(cfg config.Config, args []string) error {
 		return emitJSON(sc)
 	}
 	rules, _ := json.Marshal(sc.Rules)
-	fmt.Printf("id:           %s\nname:         %s\nmachine:      %s\naction:       %s\nenabled:      %v", sc.ID, sc.Name, sc.Machine, sc.Action, sc.Enabled)
-	if sc.DisabledReason != "" {
-		fmt.Printf(" (%s)", sc.DisabledReason)
+	fmt.Printf("id:           %s\nname:         %s\nmachine:      %s\naction:       %s\nstate:        %s", sc.ID, sc.Name, sc.Machine, sc.Action, sc.State)
+	if sc.StateReason != "" {
+		fmt.Printf(" (%s)", sc.StateReason)
+	}
+	if sc.StateAtUnix > 0 && sc.State != api.ScheduleActive {
+		fmt.Printf(" since %s", time.Unix(sc.StateAtUnix, 0).Format("2006-01-02 15:04"))
 	}
 	fmt.Printf("\nspec:         %s\ntz:           %s\ncatchup:      %s\n", sc.Spec, sc.TZ, sc.Catchup)
 	if sc.NotBeforeUnix > 0 {
@@ -503,8 +583,13 @@ func scheduleRuns(cfg config.Config, args []string) error {
 	return nil
 }
 
-func scheduleEnable(cfg config.Config, args []string, enabled bool) error {
-	verb := map[bool]string{true: "resume", false: "pause"}[enabled]
+// scheduleSetState backs pause/resume/archive/unarchive — one transition each,
+// all through the same validated state write. Moving to `active` recomputes the
+// next fire from now (never a backlog); a record whose window has closed
+// meanwhile comes back `spent`, which the output reports rather than pretending
+// the schedule is live again.
+func scheduleSetState(cfg config.Config, args []string, state string) error {
+	verb := map[string]string{api.ScheduleActive: "resume", api.SchedulePaused: "pause", api.ScheduleArchived: "archive"}[state]
 	fs := flag.NewFlagSet("schedule "+verb, flag.ContinueOnError)
 	id := fs.String("id", "", "schedule id, unique prefix, or name (required)")
 	if err := fs.Parse(args); err != nil {
@@ -513,14 +598,18 @@ func scheduleEnable(cfg config.Config, args []string, enabled bool) error {
 	if *id == "" {
 		return fmt.Errorf("schedule %s: --id is required", verb)
 	}
-	resp, err := daemonClient(cfg).ScheduleUpdate(context.Background(), api.UpdateScheduleRequest{ID: *id, Enabled: &enabled})
+	resp, err := daemonClient(cfg).ScheduleUpdate(context.Background(), api.UpdateScheduleRequest{ID: *id, State: &state})
 	if err != nil {
 		return err
 	}
-	if enabled {
-		fmt.Printf("resumed %s (%s) — next fire %s\n", resp.Schedule.Name, resp.Schedule.ID[:8], fireAt(resp.Schedule))
-	} else {
-		fmt.Printf("paused %s (%s)\n", resp.Schedule.Name, resp.Schedule.ID[:8])
+	sc := resp.Schedule
+	switch sc.State {
+	case api.ScheduleActive:
+		fmt.Printf("%s is active (%s) — next fire %s\n", sc.Name, sc.ID[:8], fireAt(sc))
+	case api.ScheduleSpent:
+		fmt.Printf("%s (%s) is spent: %s — nothing left on its clock\n", sc.Name, sc.ID[:8], sc.StateReason)
+	default:
+		fmt.Printf("%s (%s) is now %s\n", sc.Name, sc.ID[:8], sc.State)
 	}
 	return nil
 }

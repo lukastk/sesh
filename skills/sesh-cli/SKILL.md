@@ -34,6 +34,12 @@ Read only the reference for the task, not the whole manual.
   routed root is a cross-machine child. For ordinary `thread new`, **omit `--agent`
   unless the user requested a harness**; the owner applies `[defaults] agent
   (unset fails loudly; `--fork-from` inherits the source harness).
+- **Schedules:** **archive one you are finished with** (`schedule archive`), do not
+  leave it paused — `paused` means "coming back" and stays in the default listing,
+  so a paused pile buries the live schedules. Archiving keeps the record and its
+  run history; `remove`/`prune` throw them away. This applies to the one-shot
+  backstops a thread sets for itself: when the work lands early, archive the
+  backstop. Archiving a THREAD archives the active message schedules aimed at it.
 - **Route for real:** `--machine <m>` uses SSH or peer HTTP, not a cosmetic field;
   HTTP routing needs the local daemon. Check owner/reachability with `mesh`/`info`.
   Quote owner-home paths: `--cwd '~/proj'` reaches the remote home; unquoted `~`
@@ -102,7 +108,7 @@ work from `active`. Offline rows are hidden by default, not deleted.
 | TUI scope, palette/keymap, parent picker, tickets/columns | [TUI](references/tui.md) |
 | Persistent/traveling sidebar and focus tracking | [sidebar](references/sidebar.md) |
 | Hold/release inheritance, pin/divider, archive/offline views | [views and holds](references/views-and-holds.md) |
-| Cron/interval/one-shot messages or spawns, guards, run history | [scheduling](references/scheduling.md) |
+| Cron/interval/one-shot messages or spawns, guards, run history, lifecycle | [scheduling](references/scheduling.md) |
 | Mesh, peers, cockpit/daemon recovery, environment | [fleet](references/fleet.md) |
 | Daemon/TUI config, hooks, separate sesh-ui preferences | [config](references/config.md) |
 | Remote directory listing or plugins (bundled manifest example) | [integrations](references/integrations.md) |

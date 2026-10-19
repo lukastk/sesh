@@ -177,7 +177,22 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 		d.threadOpErr(w, err)
 		return
 	}
-	d.respondThread(w, req.ID)
+	// Carry the thread's active message schedules with it (§9.4). Not in the
+	// same transaction as the record flip, and deliberately so: the failure
+	// mode is a schedule left active against an archived thread, which the
+	// per-run archived guard still skips — today's behaviour — so a loud
+	// error here beats refusing the archive the user asked for.
+	moved, serr := d.archiveSchedulesForThread(req.ID, req.Archived)
+	if serr != nil {
+		writeError(w, http.StatusInternalServerError, "archive: thread "+req.ID+" was archived but its schedules were not: "+serr.Error())
+		return
+	}
+	thread, err := d.store.GetThread(req.ID)
+	if err != nil {
+		d.threadOpErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ArchiveThreadResponse{Schema: api.SchemaVersion, Thread: thread, SchedulesMoved: moved})
 }
 
 // handleThreadDelete drops the record only — the runtime (agent + tmux session)

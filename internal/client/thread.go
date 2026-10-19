@@ -97,9 +97,12 @@ func (c *Client) ThreadTag(ctx context.Context, id string, add, remove []string)
 	return c.postJSON(ctx, "http://unix/v1/threads/tag", api.TagThreadRequest{ID: id, Add: add, Remove: remove}, nil)
 }
 
-// ThreadArchive posts POST /v1/threads/archive.
-func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) error {
-	return c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived}, nil)
+// ThreadArchive posts POST /v1/threads/archive, reporting how many of the
+// thread's message schedules the archive carried with it.
+func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) (api.ArchiveThreadResponse, error) {
+	var out api.ArchiveThreadResponse
+	err := c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived}, &out)
+	return out, err
 }
 
 // ThreadStop posts POST /v1/threads/stop (end the runtime, keep the record).
@@ -375,11 +378,24 @@ func (c *Client) ScheduleCreate(ctx context.Context, req api.CreateScheduleReque
 	return out, c.postJSON(ctx, "http://unix/v1/schedules", req, &out)
 }
 
-// SchedulesList fetches GET /v1/schedules (thread filters to one target; allMachines fans out).
-func (c *Client) SchedulesList(ctx context.Context, thread string, allMachines bool) (api.SchedulesResponse, error) {
+// SchedulesPrune posts POST /v1/schedules/prune — the only call that DELETES
+// schedule records, and only ever because someone asked for it.
+func (c *Client) SchedulesPrune(ctx context.Context, req api.PruneSchedulesRequest) (api.PruneSchedulesResponse, error) {
+	var out api.PruneSchedulesResponse
+	err := c.postJSON(ctx, "http://unix/v1/schedules/prune", req, &out)
+	return out, err
+}
+
+// SchedulesList fetches GET /v1/schedules (thread filters to one target;
+// allMachines fans out; states is a comma-separated lifecycle filter, empty =
+// the live set).
+func (c *Client) SchedulesList(ctx context.Context, thread string, allMachines bool, states string) (api.SchedulesResponse, error) {
 	u := "http://unix/v1/schedules?thread=" + url.QueryEscape(thread)
 	if allMachines {
 		u += "&all-machines=1"
+	}
+	if states != "" {
+		u += "&states=" + url.QueryEscape(states)
 	}
 	var out api.SchedulesResponse
 	return out, c.getJSON(ctx, u, &out)

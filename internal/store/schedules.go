@@ -12,9 +12,18 @@ import (
 // ErrScheduleNotFound is returned for an unknown schedule id.
 var ErrScheduleNotFound = errors.New("schedule not found")
 
-const scheduleCols = `id, name, action, enabled, disabled_reason, spec, tz, catchup, not_before, not_after, max_fires,
+const scheduleCols = `id, name, action, spec, tz, catchup, not_before, not_after, max_fires,
 	thread_id, text, agent, cwd, prompt, model, spawn_mode, headless, into_session, parent_id, name_template, rules,
-	next_fire, last_fire, last_outcome, fire_count, skip_count, fail_streak, missed, last_run_thread, created_at`
+	next_fire, last_fire, last_outcome, fire_count, skip_count, fail_streak, missed, last_run_thread, created_at,
+	state, state_reason, state_at`
+
+// scheduleWriteCols adds the two SUPERSEDED columns every write still fills:
+// `enabled` mirrors state == active and `disabled_reason` mirrors state_reason,
+// so a daemon rolled back to a pre-54 binary still reads a coherent store
+// instead of treating every schedule as enabled. Nothing READS them any more —
+// state is the single authority — and they are absent from scheduleCols for
+// exactly that reason.
+const scheduleWriteCols = scheduleCols + `, enabled, disabled_reason`
 
 // InsertSchedule persists a new schedule (state fields included — the caller
 // computes next_fire; the store never reads the clock).
@@ -23,11 +32,13 @@ func (s *Store) InsertSchedule(sc api.Schedule) error {
 	if err != nil {
 		return fmt.Errorf("store: insert schedule: rules: %w", err)
 	}
-	_, err = s.db.Exec(`INSERT INTO schedules (`+scheduleCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)`,
-		sc.ID, sc.Name, sc.Action, sc.Enabled, sc.DisabledReason, sc.Spec, sc.TZ, sc.Catchup, sc.NotBeforeUnix, sc.NotAfterUnix, sc.MaxFires,
+	_, err = s.db.Exec(`INSERT INTO schedules (`+scheduleWriteCols+`)
+		VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?,?,?, ?,?)`,
+		sc.ID, sc.Name, sc.Action, sc.Spec, sc.TZ, sc.Catchup, sc.NotBeforeUnix, sc.NotAfterUnix, sc.MaxFires,
 		sc.ThreadID, sc.Text, sc.Agent, sc.Cwd, sc.Prompt, sc.Model, sc.SpawnMode, sc.Headless, sc.IntoSession, sc.ParentID, sc.NameTemplate, string(rules),
-		sc.NextFireUnix, sc.LastFireUnix, sc.LastOutcome, sc.FireCount, sc.SkipCount, sc.FailStreak, sc.Missed, sc.LastRunThreadID, sc.CreatedAtUnix)
+		sc.NextFireUnix, sc.LastFireUnix, sc.LastOutcome, sc.FireCount, sc.SkipCount, sc.FailStreak, sc.Missed, sc.LastRunThreadID, sc.CreatedAtUnix,
+		sc.State, sc.StateReason, sc.StateAtUnix,
+		boolInt(sc.State == api.ScheduleActive), sc.StateReason)
 	if err != nil {
 		return fmt.Errorf("store: insert schedule: %w", err)
 	}
@@ -42,13 +53,15 @@ func (s *Store) UpdateSchedule(sc api.Schedule) error {
 		return fmt.Errorf("store: update schedule: rules: %w", err)
 	}
 	res, err := s.db.Exec(`UPDATE schedules SET
-		name=?, action=?, enabled=?, disabled_reason=?, spec=?, tz=?, catchup=?, not_before=?, not_after=?, max_fires=?,
+		name=?, action=?, spec=?, tz=?, catchup=?, not_before=?, not_after=?, max_fires=?,
 		thread_id=?, text=?, agent=?, cwd=?, prompt=?, model=?, spawn_mode=?, headless=?, into_session=?, parent_id=?, name_template=?, rules=?,
-		next_fire=?, last_fire=?, last_outcome=?, fire_count=?, skip_count=?, fail_streak=?, missed=?, last_run_thread=?
+		next_fire=?, last_fire=?, last_outcome=?, fire_count=?, skip_count=?, fail_streak=?, missed=?, last_run_thread=?,
+		state=?, state_reason=?, state_at=?, enabled=?, disabled_reason=?
 		WHERE id = ?`,
-		sc.Name, sc.Action, sc.Enabled, sc.DisabledReason, sc.Spec, sc.TZ, sc.Catchup, sc.NotBeforeUnix, sc.NotAfterUnix, sc.MaxFires,
+		sc.Name, sc.Action, sc.Spec, sc.TZ, sc.Catchup, sc.NotBeforeUnix, sc.NotAfterUnix, sc.MaxFires,
 		sc.ThreadID, sc.Text, sc.Agent, sc.Cwd, sc.Prompt, sc.Model, sc.SpawnMode, sc.Headless, sc.IntoSession, sc.ParentID, sc.NameTemplate, string(rules),
 		sc.NextFireUnix, sc.LastFireUnix, sc.LastOutcome, sc.FireCount, sc.SkipCount, sc.FailStreak, sc.Missed, sc.LastRunThreadID,
+		sc.State, sc.StateReason, sc.StateAtUnix, boolInt(sc.State == api.ScheduleActive), sc.StateReason,
 		sc.ID)
 	if err != nil {
 		return fmt.Errorf("store: update schedule: %w", err)
@@ -78,6 +91,69 @@ func (s *Store) ListSchedules() ([]api.Schedule, error) {
 	}
 	defer rows.Close()
 	return scanSchedules(rows)
+}
+
+// ListSchedulesActive returns only the schedules that can fire — the
+// scheduler's reload query. Filtering in SQL rather than loading every row and
+// discarding in Go is what makes an accumulated history of spent records cost
+// the firing loop nothing (and the rev triggers reload on every fire).
+func (s *Store) ListSchedulesActive() ([]api.Schedule, error) {
+	rows, err := s.db.Query(`SELECT `+scheduleCols+` FROM schedules WHERE state = ? ORDER BY created_at, id`, api.ScheduleActive)
+	if err != nil {
+		return nil, fmt.Errorf("store: list active schedules: %w", err)
+	}
+	defer rows.Close()
+	return scanSchedules(rows)
+}
+
+// CountSchedulesByState is the per-state census behind `schedule list`'s
+// footer: a default listing hides the inert states, and saying how many it hid
+// is what keeps the hiding honest.
+func (s *Store) CountSchedulesByState() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT state, count(*) FROM schedules GROUP BY state`)
+	if err != nil {
+		return nil, fmt.Errorf("store: count schedules by state: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var state string
+		var n int
+		if err := rows.Scan(&state, &n); err != nil {
+			return nil, err
+		}
+		out[state] = n
+	}
+	return out, rows.Err()
+}
+
+// SetSchedulesState moves a set of schedules into one state in a single
+// transaction — the thread archive/unarchive cascade (§9.4). next_fire is the
+// caller's business: it passes nextFire per id (nil = leave each alone), since
+// only the daemon can parse a spec.
+func (s *Store) SetSchedulesState(ids []string, state, reason string, now int64, nextFire map[string]int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: set schedules state: begin: %w", err)
+	}
+	defer tx.Rollback()
+	enabled := boolInt(state == api.ScheduleActive)
+	for _, id := range ids {
+		if nf, ok := nextFire[id]; ok {
+			_, err = tx.Exec(`UPDATE schedules SET state=?, state_reason=?, state_at=?, enabled=?, disabled_reason=?, next_fire=? WHERE id=?`,
+				state, reason, now, enabled, reason, nf, id)
+		} else {
+			_, err = tx.Exec(`UPDATE schedules SET state=?, state_reason=?, state_at=?, enabled=?, disabled_reason=? WHERE id=?`,
+				state, reason, now, enabled, reason, id)
+		}
+		if err != nil {
+			return fmt.Errorf("store: set schedule %s state: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // ListSchedulesByThread returns the message schedules targeting a thread.
@@ -207,14 +283,21 @@ type scheduleScanner interface {
 func scanSchedule(r scheduleScanner) (api.Schedule, error) {
 	var sc api.Schedule
 	var rules string
-	var enabled, headless int
-	err := r.Scan(&sc.ID, &sc.Name, &sc.Action, &enabled, &sc.DisabledReason, &sc.Spec, &sc.TZ, &sc.Catchup, &sc.NotBeforeUnix, &sc.NotAfterUnix, &sc.MaxFires,
+	var headless int
+	err := r.Scan(&sc.ID, &sc.Name, &sc.Action, &sc.Spec, &sc.TZ, &sc.Catchup, &sc.NotBeforeUnix, &sc.NotAfterUnix, &sc.MaxFires,
 		&sc.ThreadID, &sc.Text, &sc.Agent, &sc.Cwd, &sc.Prompt, &sc.Model, &sc.SpawnMode, &headless, &sc.IntoSession, &sc.ParentID, &sc.NameTemplate, &rules,
-		&sc.NextFireUnix, &sc.LastFireUnix, &sc.LastOutcome, &sc.FireCount, &sc.SkipCount, &sc.FailStreak, &sc.Missed, &sc.LastRunThreadID, &sc.CreatedAtUnix)
+		&sc.NextFireUnix, &sc.LastFireUnix, &sc.LastOutcome, &sc.FireCount, &sc.SkipCount, &sc.FailStreak, &sc.Missed, &sc.LastRunThreadID, &sc.CreatedAtUnix,
+		&sc.State, &sc.StateReason, &sc.StateAtUnix)
 	if err != nil {
 		return api.Schedule{}, err
 	}
-	sc.Enabled, sc.Headless = enabled != 0, headless != 0
+	sc.Headless = headless != 0
+	if !api.ScheduleStateKnown(sc.State) {
+		// Unreachable post-migration: every row is backfilled and every write
+		// goes through a validated state. An unknown value means the column was
+		// written by something that is not this code — loud, not coerced.
+		return api.Schedule{}, fmt.Errorf("store: schedule %s: unknown state %q", sc.ID, sc.State)
+	}
 	if err := json.Unmarshal([]byte(rules), &sc.Rules); err != nil {
 		return api.Schedule{}, fmt.Errorf("store: schedule %s: rules column is not valid JSON: %w", sc.ID, err)
 	}
@@ -252,9 +335,11 @@ type ScheduleDigest struct {
 	NextFireUnix int64
 }
 
-// ScheduleDigests returns the per-thread digest of ENABLED message schedules.
+// ScheduleDigests returns the per-thread digest of ACTIVE message schedules —
+// what the TUI's SCHED column counts, so a parked or finished schedule never
+// shows as pending work against a thread.
 func (s *Store) ScheduleDigests() (map[string]ScheduleDigest, error) {
-	rows, err := s.db.Query(`SELECT thread_id, next_fire FROM schedules WHERE enabled = 1 AND thread_id != ''`)
+	rows, err := s.db.Query(`SELECT thread_id, next_fire FROM schedules WHERE state = ? AND thread_id != ''`, api.ScheduleActive)
 	if err != nil {
 		return nil, fmt.Errorf("store: schedule digests: %w", err)
 	}

@@ -561,6 +561,8 @@ var flagDocs = map[string][]flagDoc{
 	"schedule list": {
 		{"--all-machines", "include every reachable peer's schedules (a live fan-out; unreachable peers are named on stderr)"},
 		{"--thread", "only schedules targeting this thread id (or whose last spawn run made it)"},
+		{"--state", "comma-separated lifecycle states to show: active, paused, spent, broken, archived (default: active,paused,broken — the live set)"},
+		{"--all", "every state, including the inert ones (spent, archived); mutually exclusive with --state"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
@@ -583,8 +585,24 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "schedule id, unique prefix, or name (required)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"schedule archive": {
+		{"--id", "schedule id, unique prefix, or name (required)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"schedule unarchive": {
+		{"--id", "schedule id, unique prefix, or name (required)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"schedule remove": {
 		{"--id", "schedule id, unique prefix, or name (required)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"schedule prune": {
+		{"--state", "comma-separated states to delete (default: spent); archived and paused are allowed, active and broken are refused"},
+		{"--before", "only records that entered their state before this instant ('YYYY-MM-DD', 'YYYY-MM-DD HH:MM' or RFC3339)"},
+		{"--thread", "only schedules targeting this thread id (or whose last spawn run made it)"},
+		{"--dry-run", "list what would be removed and remove nothing"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"schedule edit": {

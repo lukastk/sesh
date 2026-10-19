@@ -96,8 +96,8 @@ func TestSchedulerCatchup(t *testing.T) {
 	now := time.Now()
 	stale := now.Add(-2 * time.Hour).Unix()
 	for _, sc := range []api.Schedule{
-		{ID: "skip", Name: "skip", Action: api.ScheduleActionMessage, Enabled: true, Spec: "every 10m0s", TZ: "UTC", Catchup: api.CatchupSkip, ThreadID: "gone", Text: "x", NextFireUnix: stale, CreatedAtUnix: stale - 60},
-		{ID: "once", Name: "once", Action: api.ScheduleActionMessage, Enabled: true, Spec: "every 10m0s", TZ: "UTC", Catchup: api.CatchupOnce, ThreadID: "gone", Text: "x", NextFireUnix: stale, CreatedAtUnix: stale - 60},
+		{ID: "skip", Name: "skip", Action: api.ScheduleActionMessage, State: api.ScheduleActive, Spec: "every 10m0s", TZ: "UTC", Catchup: api.CatchupSkip, ThreadID: "gone", Text: "x", NextFireUnix: stale, CreatedAtUnix: stale - 60},
+		{ID: "once", Name: "once", Action: api.ScheduleActionMessage, State: api.ScheduleActive, Spec: "every 10m0s", TZ: "UTC", Catchup: api.CatchupOnce, ThreadID: "gone", Text: "x", NextFireUnix: stale, CreatedAtUnix: stale - 60},
 	} {
 		if err := st.InsertSchedule(sc); err != nil {
 			t.Fatal(err)
@@ -126,7 +126,7 @@ func TestSchedulerCatchup(t *testing.T) {
 		t.Fatalf("counters evaluated=%d fired=%d failed=%d missed=%d — want exactly one catch-up run (which fails: its thread is gone)", ev, fired, failed, missed)
 	}
 	// The gone target disabled the schedule loudly.
-	if once, _ = st.GetSchedule("once"); once.Enabled || !strings.Contains(once.DisabledReason, "no longer exists") {
+	if once, _ = st.GetSchedule("once"); once.State != api.ScheduleBroken || !strings.Contains(once.StateReason, "no longer exists") {
 		t.Fatalf("a run against a deleted thread must disable the schedule: %+v", once)
 	}
 }
@@ -144,7 +144,7 @@ func TestSchedulerFiresIntoPane(t *testing.T) {
 	// The fixture's thread record is Machine "test" in the store; the daemon's
 	// machine must match for the snapshot path.
 	now := time.Now()
-	sc := api.Schedule{ID: "s1", Name: "nudge", Action: api.ScheduleActionMessage, Enabled: true, Spec: "every 1h0m0s", TZ: "UTC", Catchup: api.CatchupSkip,
+	sc := api.Schedule{ID: "s1", Name: "nudge", Action: api.ScheduleActionMessage, State: api.ScheduleActive, Spec: "every 1h0m0s", TZ: "UTC", Catchup: api.CatchupSkip,
 		ThreadID: f.th.ID, Text: "SCHED-NUDGE", NextFireUnix: now.Unix() - 5, CreatedAtUnix: now.Unix() - 3600}
 	if err := f.st.InsertSchedule(sc); err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestSchedulerFailureBreaker(t *testing.T) {
 	}
 	// A headless target with when_headless=turn needs the daemon's own
 	// send-headless endpoint — absent here, so every run fails loudly.
-	sc := api.Schedule{ID: "s1", Name: "broken", Action: api.ScheduleActionMessage, Enabled: true, Spec: "every 1h0m0s", TZ: "UTC", Catchup: api.CatchupSkip,
+	sc := api.Schedule{ID: "s1", Name: "broken", Action: api.ScheduleActionMessage, State: api.ScheduleActive, Spec: "every 1h0m0s", TZ: "UTC", Catchup: api.CatchupSkip,
 		ThreadID: "t1", Text: "x", NextFireUnix: time.Now().Add(time.Hour).Unix(), CreatedAtUnix: time.Now().Unix()}
 	if err := st.InsertSchedule(sc); err != nil {
 		t.Fatal(err)
@@ -217,12 +217,12 @@ func TestSchedulerFailureBreaker(t *testing.T) {
 		if got.FailStreak != i {
 			t.Fatalf("run %d: fail_streak = %d", i, got.FailStreak)
 		}
-		if i < 3 && !got.Enabled {
+		if i < 3 && got.State != api.ScheduleActive {
 			t.Fatalf("disabled before the breaker (%d)", i)
 		}
 	}
 	got, _ := st.GetSchedule("s1")
-	if got.Enabled || !strings.Contains(got.DisabledReason, "3 consecutive failures") {
+	if got.State != api.ScheduleBroken || !strings.Contains(got.StateReason, "3 consecutive failures") {
 		t.Fatalf("breaker did not disable: %+v", got)
 	}
 	runs, _ := st.ListScheduleRuns("s1", 0)
@@ -239,7 +239,7 @@ func TestBuildScheduleValidation(t *testing.T) {
 	}
 	now := time.Now()
 	ok := api.CreateScheduleRequest{Action: "message", Spec: "every 15m", ThreadID: "t1", Text: "hi", Rules: api.ScheduleRules{If: []string{"idle"}}}
-	sc, err := d.buildSchedule(ok, now, "")
+	sc, err := d.buildSchedule(ok, now, "", true)
 	if err != nil {
 		t.Fatalf("valid request refused: %v", err)
 	}
@@ -272,11 +272,11 @@ func TestBuildScheduleValidation(t *testing.T) {
 		{"spawn into_session headless", api.CreateScheduleRequest{Action: "spawn", Spec: "every 15m", Agent: "pi", Cwd: "/tmp", Prompt: "x", IntoSession: "s"}, "headed"},
 		{"duplicate name", api.CreateScheduleRequest{Name: "dup", Action: "message", Spec: "every 15m", ThreadID: "t1", Text: "x"}, "already exists"},
 	}
-	if err := st.InsertSchedule(api.Schedule{ID: "existing", Name: "dup", Action: "message", Enabled: true, Spec: "every 15m0s", TZ: "UTC", Catchup: "skip", ThreadID: "t1", Text: "x", CreatedAtUnix: 1}); err != nil {
+	if err := st.InsertSchedule(api.Schedule{ID: "existing", Name: "dup", Action: "message", State: api.ScheduleActive, Spec: "every 15m0s", TZ: "UTC", Catchup: "skip", ThreadID: "t1", Text: "x", CreatedAtUnix: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range bad {
-		_, err := d.buildSchedule(c.req, now, "")
+		_, err := d.buildSchedule(c.req, now, "", true)
 		if err == nil {
 			t.Errorf("%s: accepted", c.name)
 			continue
@@ -286,7 +286,7 @@ func TestBuildScheduleValidation(t *testing.T) {
 		}
 	}
 	// Editing the existing record keeps its own name without a self-collision.
-	if _, err := d.buildSchedule(api.CreateScheduleRequest{Name: "dup", Action: "message", Spec: "every 15m", ThreadID: "t1", Text: "x"}, now, "existing"); err != nil {
+	if _, err := d.buildSchedule(api.CreateScheduleRequest{Name: "dup", Action: "message", Spec: "every 15m", ThreadID: "t1", Text: "x"}, now, "existing", true); err != nil {
 		t.Fatalf("self-collision on edit: %v", err)
 	}
 	if _, err := d.resolveScheduleRef("dup"); err != nil {

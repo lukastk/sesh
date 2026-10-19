@@ -370,9 +370,9 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 		examples: []string{"sesh ticket create --name fix-login", "sesh ticket set-status --id t1 --status ready"},
 	},
 	"schedule": {
-		summary: "scheduled work (message | spawn | list | show | runs | pause | resume | remove | edit | run-now): a cron/interval/one-shot clock that delivers a message into an existing thread or spawns a new thread, with state-aware rules. A schedule lives on the machine that EXECUTES it (a message on its target's owner — `message` auto-routes there; a spawn where its cwd is) and is never replicated.",
-		usage:   "sesh schedule <message|spawn|list|show|runs|pause|resume|remove|edit|run-now>",
-		long:    "WHEN is one of --cron '<5 fields>' | --every <dur> | --at <instant>, in --tz (default: the owning machine's zone, recorded on the schedule and printed back). Occurrences missed while the daemon was down are never replayed: --catchup skip (default) rolls forward and counts them, --catchup once fires one catch-up run. --not-before/--not-after/--max-fires bound a schedule's life. Every run ends in a recorded outcome — fired, skipped: <why>, or failed: <err> (`schedule runs`) — and a schedule failing [schedules] disable_after_failures (10) times running is disabled loudly. A message run reads the target's live state first: on hold or archived ⇒ skipped (--ignore-hold/--allow-archived override), --if <words> must all hold, --if idle implies a 60s quiet dwell (--idle-for), a busy target is skipped unless --when-busy send, a headless target gets a headless turn (or --when-headless revive|skip), and a pane paste goes through the typing guard — a typing viewer SKIPS the run. A spawn run creates a thread (headless by default; --headed for a pane), gives it the prompt, and applies --on-turn-end (keep by default) at its first turn end; --if-previous skip (default) never overlaps a run that is still going; run threads have auto-flagging disabled unless --flag-on-end. `run-now` fires a schedule immediately (--force bypasses the guards) — the way to test one. [schedules] enabled = false in config.toml stops a machine firing anything.",
+		summary: "scheduled work (message | spawn | list | show | runs | pause | resume | archive | unarchive | remove | prune | edit | run-now): a cron/interval/one-shot clock that delivers a message into an existing thread or spawns a new thread, with state-aware rules. A schedule lives on the machine that EXECUTES it (a message on its target's owner — `message` auto-routes there; a spawn where its cwd is) and is never replicated.",
+		usage:   "sesh schedule <message|spawn|list|show|runs|pause|resume|archive|unarchive|remove|prune|edit|run-now>",
+		long:    "WHEN is one of --cron '<5 fields>' | --every <dur> | --at <instant>, in --tz (default: the owning machine's zone, recorded on the schedule and printed back). Occurrences missed while the daemon was down are never replayed: --catchup skip (default) rolls forward and counts them, --catchup once fires one catch-up run. --not-before/--not-after/--max-fires bound a schedule's life. Every run ends in a recorded outcome — fired, skipped: <why>, or failed: <err> (`schedule runs`) — and a schedule failing [schedules] disable_after_failures (10) times running is disabled loudly. A message run reads the target's live state first: on hold or archived ⇒ skipped (--ignore-hold/--allow-archived override), --if <words> must all hold, --if idle implies a 60s quiet dwell (--idle-for), a busy target is skipped unless --when-busy send, a headless target gets a headless turn (or --when-headless revive|skip), and a pane paste goes through the typing guard — a typing viewer SKIPS the run. A spawn run creates a thread (headless by default; --headed for a pane), gives it the prompt, and applies --on-turn-end (keep by default) at its first turn end; --if-previous skip (default) never overlaps a run that is still going; run threads have auto-flagging disabled unless --flag-on-end. `run-now` fires a schedule immediately (--force bypasses the guards) — the way to test one. [schedules] enabled = false in config.toml stops a machine firing anything. LIFECYCLE: every schedule is in exactly one state — active (will fire), paused (off by hand, resumable), spent (its clock is exhausted: a one-shot that fired, max_fires reached, not_after passed — nothing can make it fire again), broken (the failure breaker tripped; needs a human) or archived (set aside deliberately, or carried there by archiving its target thread). `list` shows active/paused/broken and names how many it held back; --all or --state <s> shows the rest. Only `prune` ever deletes a record and only when you run it: spent and archived schedules are kept as history, since each carries the text that was actually scheduled plus its runs.",
 		examples: []string{
 			"sesh schedule message --id 1a2b3c4d --every 20m --text 'Continue with the plan' --if idle --idle-for 10m --when-headless skip --max-fires 30",
 			"sesh schedule spawn --agent pi --cwd ~/dev/proj --cron '0 9 * * 1-5' --prompt 'Review the CI failures since yesterday' --parent 7f1dfe3a",
@@ -410,9 +410,9 @@ binary — prefer it to a bare ` + "`sesh`" + `, which from a login shell may be
 wrapper function or an older install.`,
 	},
 	"schedule list": {
-		summary:  "list schedules (this machine; --all-machines fans out to every reachable peer)",
-		usage:    "sesh schedule list [--all-machines] [--thread <id>] [--json] [--machine <m>]",
-		examples: []string{"sesh schedule list", "sesh schedule list --all-machines --json"},
+		summary:  "list schedules (this machine; --all-machines fans out to every reachable peer). Shows the LIVE states — active, paused, broken — and reports how many spent/archived records it held back",
+		usage:    "sesh schedule list [--all-machines] [--thread <id>] [--state <s>] [--all] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule list", "sesh schedule list --all", "sesh schedule list --state spent", "sesh schedule list --all-machines --json"},
 	},
 	"schedule show": {
 		summary:  "print one schedule in full: definition, rules, next/last fire, counters",
@@ -425,19 +425,34 @@ wrapper function or an older install.`,
 		examples: []string{"sesh schedule runs --id nightly --limit 5"},
 	},
 	"schedule pause": {
-		summary:  "stop a schedule firing until resumed (its backlog is never replayed)",
+		summary:  "stop a schedule firing until resumed, keeping it in the default listing (its backlog is never replayed). For one you are DONE with, `archive` instead",
 		usage:    "sesh schedule pause --id <id|prefix|name> [--machine <m>]",
 		examples: []string{"sesh schedule pause --id nightly"},
 	},
 	"schedule resume": {
-		summary:  "resume a paused (or breaker-disabled) schedule; next fire is recomputed from now",
+		summary:  "put a paused, archived or broken schedule back on the clock; next fire is recomputed from now. A record whose window closed meanwhile comes back `spent`, and says so",
 		usage:    "sesh schedule resume --id <id|prefix|name> [--machine <m>]",
 		examples: []string{"sesh schedule resume --id nightly"},
 	},
+	"schedule archive": {
+		summary:  "set a schedule aside: it stops firing and leaves the default listing, record and run history kept. The right verb for a schedule you are finished with — archiving its TARGET THREAD archives it too, and un-archiving the thread brings it back",
+		usage:    "sesh schedule archive --id <id|prefix|name> [--machine <m>]",
+		examples: []string{"sesh schedule archive --id backstop-0400"},
+	},
+	"schedule unarchive": {
+		summary:  "put an archived schedule back on the clock (next fire recomputed from now; a closed window lands in `spent`)",
+		usage:    "sesh schedule unarchive --id <id|prefix|name> [--machine <m>]",
+		examples: []string{"sesh schedule unarchive --id backstop-0400"},
+	},
 	"schedule remove": {
-		summary:  "delete a schedule and its run history",
+		summary:  "delete ONE schedule and its run history",
 		usage:    "sesh schedule remove --id <id|prefix|name> [--machine <m>]",
 		examples: []string{"sesh schedule remove --id nightly"},
+	},
+	"schedule prune": {
+		summary:  "delete the inert records in bulk — spent by default, optionally archived/paused, optionally older than --before. The ONLY sweep, and it never runs on its own; `active` and `broken` are refused (one is live work, the other a problem report). Use --dry-run first",
+		usage:    "sesh schedule prune [--state <s>] [--before <t>] [--thread <id>] [--dry-run] [--json] [--machine <m>]",
+		examples: []string{"sesh schedule prune --dry-run", "sesh schedule prune --state spent,archived --before 2026-09-01"},
 	},
 	"schedule edit": {
 		summary:  "change a schedule's clock, bounds, name, text or prompt (a changed clock recomputes the next fire)",

@@ -23,12 +23,41 @@ sesh schedule message --id <thread> --every 20m --text 'Continue with the plan. 
 sesh schedule message --id <thread> --cron '0 9 * * 1-5' --text 'Morning status?' --when-headless revive
 sesh schedule spawn --agent pi --cwd ~/dev/proj --cron '0 9 * * 1-5' --prompt 'Review the CI failures since yesterday' --parent <virtual-group>
 sesh schedule spawn --agent claude --cwd ~/dev/proj --every 6h --prompt-file ~/prompts/audit.md --on-turn-end stop+archive --max-runtime 30m
-sesh schedule list [--all-machines] [--thread <id>] [--json]
-sesh schedule show --id <id|prefix|name>          # definition, rules, next/last fire, counters
+sesh schedule list [--all-machines] [--thread <id>] [--state <s>] [--all] [--json]
+sesh schedule show --id <id|prefix|name>          # definition, rules, state, next/last fire, counters
 sesh schedule runs --id <ref> [--limit N]          # the run history: fired | skipped: <why> | failed: <err>
 sesh schedule run-now --id <ref> [--force]         # fire it NOW and print the outcome — the way to test one
-sesh schedule pause|resume|remove|edit --id <ref>  # resume recomputes next fire from now (no backlog)
+sesh schedule archive --id <ref>                   # DONE WITH IT: off the clock, out of the listing, record kept
+sesh schedule unarchive|resume --id <ref>          # back on the clock; next fire recomputed from now (no backlog)
+sesh schedule pause --id <ref>                     # off for now, still in the listing
+sesh schedule edit --id <ref> [--cron …|--every …|--at …] [--name …] [--text …]
+sesh schedule remove --id <ref>                    # DELETE one record and its runs
+sesh schedule prune [--state spent] [--before <t>] [--dry-run]   # bulk delete; never runs on its own
 ```
+
+**Archive a schedule you are finished with — do not leave it paused, and do not delete it.**
+`archive` is the verb for "this served its purpose": it stops firing, leaves the default
+listing, and keeps the record and its run history, which is the only account of what was
+scheduled and what it did. `pause` means "off for now, I am coming back" and deliberately
+STAYS in the listing, so a paused pile is noise that hides the live schedules. Deleting
+(`remove`/`prune`) throws the history away, so leave it for a record you are sure is junk.
+This matters most for the one-shot backstops and reminders an agent sets for itself: when the
+work lands early, **archive the backstop**.
+
+**States** (`list` shows the live ones and names what it held back):
+
+| state | meaning | in `list` by default |
+|---|---|---|
+| `active` | on the clock | yes |
+| `paused` | off by hand, coming back | yes |
+| `broken` | the failure breaker tripped — needs a human | **yes** |
+| `spent` | its clock is exhausted: a one-shot that fired, `--max-fires` reached, `--not-after` passed. Nothing can make it fire again, so there is nothing to resume | no |
+| `archived` | set aside deliberately, or carried there by archiving its TARGET THREAD; `unarchive` puts it back | no |
+
+`--state <s>` (comma-separated) or `--all` shows the rest; `--state spent` is how you find
+what finished. `spent` and `broken` are the daemon's own verdicts and cannot be set by hand.
+A one-shot that fires becomes **`spent`**, not `archived` — it leaves the listing either way,
+but `unarchive` on a passed instant would be a lie.
 
 **The clock.** Exactly one of `--cron '<min hour dom mon dow>'` (names, ranges, lists, `*/n`;
 a restricted day-of-month AND day-of-week match when either does), `--every <dur>`
@@ -39,9 +68,11 @@ spring-forward day is skipped; a repeated one on fall-back day fires once. Occur
 missed while the daemon was down are NEVER replayed: `--catchup skip` (default) rolls
 forward and counts them (`missed N` in the listing, loud in the daemon log); `--catchup
 once` fires exactly one catch-up run. `--not-after`, `--max-fires` (delivered runs only —
-skips do not count) and `pause` bound a schedule's life; a schedule that fails
-`[schedules] disable_after_failures` (10) times running is DISABLED with the reason
-(`schedule list` shows `DISABLED: …`; `sesh doctor` warns).
+skips do not count) and `pause` bound a schedule's life; each of those ends leaves the record
+`spent`, out of the default listing. A schedule that fails `[schedules]
+disable_after_failures` (10) times running becomes `broken` with the reason — which
+`schedule list` keeps showing and `sesh doctor` warns about, because it is a problem report,
+not a finished job.
 
 **Message rules — evaluated against the target's live state at fire time, every ending
 recorded.** On hold ⇒ `skipped: on hold` (`--ignore-hold` overrides); archived ⇒ skipped
@@ -77,11 +108,19 @@ the daemon's goroutine) and keeps watching a headed one. The effective `[spawn]`
 recorded and printed (`mode: yolo`) — an unattended recurring agent under yolo is a
 posture worth knowing.
 
-**Seeing them.** `schedule list` per machine (`--all-machines` fans out); the opt-in TUI
-column `sched` shows a thread's earliest next fire (`in 12m`, with a count when several);
-the `I` details popup has a `schedules` row; `sesh doctor` reports breaker-disabled
-schedules, an overdue enabled one (the loop is wedged), and the kill switch. Deleting a
-thread removes the message schedules targeting it in the same transaction (the delete
-says so). Hooks: `schedule_fired` / `schedule_failed` events with
+**Seeing them.** `schedule list` per machine (`--all-machines` fans out) shows the LIVE
+states and prints `+ N spent, M archived not shown`; the opt-in TUI column `sched` shows a
+thread's earliest next fire (`in 12m`, with a count when several) counting ACTIVE schedules
+only; the `I` details popup has a `schedules` row; `sesh doctor` reports `broken` schedules,
+an overdue active one (the loop is wedged), and the kill switch.
+
+**A thread's archive carries its schedules.** Archiving a thread archives the active message
+schedules aimed at it, and un-archiving restores exactly those (not ones you archived by hand,
+and not ones already paused) — the `thread archive` output says how many moved. A schedule
+created with `--allow-archived` is exempt, since it exists to fire into a parked thread. The
+per-run guard still skips delivery into an archived target regardless, so a schedule made
+after the thread was parked never fires into it either. Deleting a thread REMOVES the message
+schedules targeting it in the same transaction (the delete says so) — gone, not archived,
+because a schedule whose target no longer exists can never work. Hooks: `schedule_fired` / `schedule_failed` events with
 `SESH_SCHEDULE_ID/NAME/OUTCOME` (skips are not events). `[schedules] enabled = false`
 stops a machine firing anything (`run-now` still works).

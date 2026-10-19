@@ -183,13 +183,20 @@ func threadArchive(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
-	if err := c.ThreadArchive(context.Background(), *id, !*unarchive); err != nil {
+	resp, err := c.ThreadArchive(context.Background(), *id, !*unarchive)
+	if err != nil {
 		return err
 	}
 	if *unarchive {
 		fmt.Println("unarchived", *id)
-	} else {
-		fmt.Println("archived", *id)
+		if resp.SchedulesMoved > 0 {
+			fmt.Printf("also put %d message schedule(s) back on the clock\n", resp.SchedulesMoved)
+		}
+		return nil
+	}
+	fmt.Println("archived", *id)
+	if resp.SchedulesMoved > 0 {
+		fmt.Printf("also archived %d message schedule(s) that targeted it\n", resp.SchedulesMoved)
 	}
 	return nil
 }

@@ -141,10 +141,13 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().Unix()
 		enabled, breaker, overdue := 0, 0, 0
 		for _, sc := range all {
-			if !sc.Enabled {
-				if sc.DisabledReason != "" && sc.DisabledReason != "paused" && sc.DisabledReason != "one-shot fired" {
+			if sc.State != api.ScheduleActive {
+				// `broken` is the state that means a human must look; paused,
+				// spent and archived are all deliberate quiet (before schema 54
+				// this check had to compare reason STRINGS to tell them apart).
+				if sc.State == api.ScheduleBroken {
 					breaker++
-					add("schedule:"+sc.Name, "warn", "DISABLED: "+sc.DisabledReason)
+					add("schedule:"+sc.Name, "warn", "BROKEN: "+sc.StateReason)
 				}
 				continue
 			}

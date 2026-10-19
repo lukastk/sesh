@@ -405,6 +405,18 @@ type DeleteThreadResponse struct {
 	SchedulesRemoved int    `json:"schedules_removed,omitempty"`
 }
 
+// ArchiveThreadResponse is the body of POST /v1/threads/archive.
+// SchedulesMoved counts the message schedules the archive carried with it
+// (schema 54): archiving a thread archives the ACTIVE schedules aimed at it,
+// and un-archiving puts exactly those back on the clock. Without it a parked
+// thread's schedules went on waking the scheduler to record `skipped:
+// archived` at every occurrence, for as long as it stayed parked.
+type ArchiveThreadResponse struct {
+	Schema         int    `json:"schema"`
+	Thread         Thread `json:"thread"`
+	SchedulesMoved int    `json:"schedules_moved,omitempty"`
+}
+
 // RenameThreadRequest is the body of POST /v1/threads/rename.
 type RenameThreadRequest struct {
 	ID   string `json:"id"`

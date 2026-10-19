@@ -92,7 +92,7 @@ func runDelegate(cfg config.Config, args []string) error {
 		}
 		dctx, dcancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer dcancel()
-		if derr := c.ThreadArchive(dctx, id, true); derr != nil {
+		if _, derr := c.ThreadArchive(dctx, id, true); derr != nil {
 			fmt.Fprintf(os.Stderr, "delegate: WARNING: worker %s not archived: %v\n", id, derr)
 		}
 	}

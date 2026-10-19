@@ -36,7 +36,7 @@ new ones. Preserve tracking/privacy and original evidence when archiving.
 | Claude held sessions / unexpected backgrounding | H119 **actual-cause and correction sections first**: empty-prompt left-arrow gesture, not proof the user typed `/background`; no-agent-view pin, force-revive semantics |
 | Codex writer locks / resume / transcripts | H118 detached app-server pin; H102 title-helper session stamps; H93 reply extraction and duplicate formats |
 | Verified caller identity / provenance | H92 incident; H95 flag-specific remedies; H112 gate; H113 turn ancestry; H114 harness source and correction to “not a thread”; [IDENTITY](IDENTITY.md) |
-| Trust / agent defaults / scheduling | H110 Claude trust; H100 configured default; H111 scheduler + typing guard and follow-up model-test/details fixes |
+| Trust / agent defaults / scheduling | H110 Claude trust; H100 configured default; H111 scheduler + typing guard and follow-up model-test/details fixes; schedule lifecycle states and the thread-archive cascade in [SCHEDULING §9.4/§9.6](SCHEDULING.md) (2026-10-19, schema 54) |
 | Cockpit navigation / which-client law | H117 session-qualified targets; H116 latency and rejected mirror; H106 sidebar race; H98 including both follow-ups |
 | Sidebar view ring / phone quick key | H115 and both follow-ups; H116 follow-up pinned explicit view |
 | TUI scope / hold / glyphs / scrolling | H104 **two separate entries** (hold glyphs and CWD scope); H105 archive inheritance; H103 release; H107 clipboard; H97 head glyphs; H94 shell viewport; H91 goto |

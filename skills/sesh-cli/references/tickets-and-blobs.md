@@ -10,10 +10,15 @@ the measured builds, not current fleet deployment.
   its bound thread (or where it was created), and ticket commands act on the local daemon, or
   on `--machine <m>`. `SESH_TICKET_OWNER`, if set, instead routes every ticket command to one
   owner machine — it is **unset** on Lukas's fleet. To find a ticket whose machine you don't
-  know, use `ticket find`. CLI:
+  know, use `ticket find`.
+
+  **`create` is gated on an explicit request from Lukas** — agents create no tickets by
+  default, because every ticket becomes a vault note he consolidates by hand. Steer
+  sub-threads with `thread send`/`delegate`; record findings where the work lives. The
+  rest of the surface (read, report, route) is unrestricted. CLI:
 
   ```bash
-  sesh ticket create --name <name> [--prompt <text>]      # starts in triage
+  sesh ticket create --name <name> [--prompt <text>]      # ONLY when Lukas asked; starts in triage
   sesh ticket list [--thread <id>] [--current] [--all-machines] [--local]   # --current = calling pane's thread; --all-machines fans out across the mesh (emits machine + thread name per ticket)
   sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed|notes (raw)
   sesh ticket find --id <id> [--json]                     # MESH-WIDE lookup: fans out across peers; returns the

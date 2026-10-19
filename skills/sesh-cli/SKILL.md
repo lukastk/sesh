@@ -52,9 +52,12 @@ Read only the reference for the task, not the whole manual.
   `SESH_MASTER_SOCKET`, `SESH_CODEX_HOME`. Use absolute sandbox binary paths;
   myrig wrappers may point to production. No default live homes/sockets, broad
   process kills, or test viewers attached to user sessions (resize risk).
-- **Tickets:** read assigned prompts, keep active until ready, then finish with
-  `done` **and a markdown note** explaining changes and commit SHA. Abandoned work
-  is `dropped` with a reason, never silently closed. Verify routing/binding.
+- **Tickets:** **never create one unless Lukas explicitly asked.** An unasked-for
+  ticket lands in his vault as a note he must consolidate by hand; steer sub-threads
+  with `thread send`/`delegate` and record findings where the work lives. Read
+  assigned prompts, keep active until ready, then finish with `done` **and a markdown
+  note** explaining changes and commit SHA. Abandoned work is `dropped` with a reason,
+  never silently closed. Verify routing/binding.
 
 ## Common operations
 

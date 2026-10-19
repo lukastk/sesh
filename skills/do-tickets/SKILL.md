@@ -8,6 +8,25 @@ description: Use when you (an agent in a sesh thread) need to handle assigned wo
 A **ticket** is a unit of work in `sesh`. When one is bound to your thread it's assigned
 to you; its **prompt** is your instructions. Loop: **find → read → report**.
 
+## Do not create tickets
+
+**Never create a ticket unless Lukas explicitly asked for one.** Creating none is the
+default. A ticket is *his* tracking surface: each one becomes a note in his vault that
+he consolidates by hand, so an unasked-for ticket is work you have handed him, not work
+you have recorded. This holds however useful the ticket feels — "this deserves
+follow-up", a plan you wrote yourself, and a finding you want remembered are **not**
+requests. Instead:
+
+- **Steering a sub-thread?** Use `sesh thread send` / `sesh thread send-headless`, or
+  `sesh delegate` for a one-shot worker. Never mint a ticket per instruction.
+- **Recording something durable?** The commit message, the repo's `AGENTS.local.md`, or
+  a `_dev/` note — wherever the work already lives.
+- **Reporting to your parent?** Report in your turn; that is what reaches them.
+- **Sure one is warranted?** Say so in a sentence and let Lukas decide.
+
+`ticket create` is for when he asked. Tickets **assigned to you** are unaffected — read
+and report them exactly as below.
+
 Statuses: `triage` (draft) → `ready` (final, unattached) → `active` (assigned to a
 thread) → `done` / `dropped` (terminal). An `active` ticket on your thread = your work;
 mark it `done` when finished.

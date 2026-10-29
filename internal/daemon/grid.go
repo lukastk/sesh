@@ -115,30 +115,17 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 }
 
 // fanOutGrid asks each peer for its grid (status included) over its configured
-// transport. Peers the liveness cache already knows are down are skipped up front, so
-// one offline machine no longer costs the caller a full per-peer timeout.
+// transport, every peer CONCURRENTLY (peerFanOut). Peers the liveness cache already
+// knows are down are skipped up front, so one offline machine no longer costs the
+// caller a full per-peer timeout.
 func (d *Daemon) fanOutGrid(includeArchived bool) ([]api.ThreadRow, []string) {
 	d.noteMeshDemand() // all-machines demand — see fanOutThreads
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return nil, nil
 	}
-	down := d.knownOfflinePeers()
-	var rows []api.ThreadRow
-	var unreachable []string
-	for _, p := range reg.List() {
-		if down[p.Machine] {
-			unreachable = append(unreachable, p.Machine)
-			continue
-		}
-		pr, err := fetchPeerGrid(p, includeArchived)
-		if err != nil {
-			unreachable = append(unreachable, p.Machine)
-			continue
-		}
-		rows = append(rows, pr...)
-	}
-	return rows, unreachable
+	return peerFanOut(reg.List(), d.knownOfflinePeers(),
+		func(p peers.Peer) ([]api.ThreadRow, error) { return fetchPeerGrid(p, includeArchived) })
 }
 
 // fetchPeerGrid asks a peer's daemon for its live-status grid over the peer's

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/client"
@@ -25,6 +26,61 @@ func (d *Daemon) knownOfflinePeers() map[string]bool {
 	return d.view.knownOffline()
 }
 
+// peerFanOutConcurrency bounds how many peers are asked at once. Until 2026-10-29
+// every fan-out walked the registry SERIALLY, so the wall-clock cost was the SUM of
+// the per-peer latencies and one slow peer delayed every peer behind it: on a 4-peer
+// mesh a grid read cost ~300-550ms, and up to 4 x meshFetchTimeout when peers were
+// merely slow rather than cached-offline. Asking them concurrently makes the cost the
+// MAX of the per-peer latencies instead, so the ceiling is one meshFetchTimeout
+// however many machines are registered.
+const peerFanOutConcurrency = 8
+
+// peerFanOut asks every peer for its slice CONCURRENTLY and flattens the answers.
+//
+// A peer in `down` (the liveness cache's definitively-offline set) is reported
+// unreachable without a dial. Every other peer is attempted, and one whose fetch
+// fails is reported unreachable rather than failing the whole call — an offline peer
+// is an expected state here (read-replica/offline browsing), not an error.
+//
+// Output order is the REGISTRY's, not completion order: what a fan-out returns must
+// not depend on which peer happened to answer first.
+func peerFanOut[T any](list []peers.Peer, down map[string]bool, fetch func(peers.Peer) ([]T, error)) ([]T, []string) {
+	slices := make([][]T, len(list))
+	failed := make([]bool, len(list))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, peerFanOutConcurrency)
+	for i, p := range list {
+		if down[p.Machine] {
+			failed[i] = true
+			continue
+		}
+		wg.Add(1)
+		go func(i int, p peers.Peer) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			slice, err := fetch(p)
+			if err != nil {
+				failed[i] = true
+				return
+			}
+			slices[i] = slice
+		}(i, p)
+	}
+	wg.Wait()
+
+	var out []T
+	var unreachable []string
+	for i, p := range list {
+		if failed[i] {
+			unreachable = append(unreachable, p.Machine)
+			continue
+		}
+		out = append(out, slices[i]...)
+	}
+	return out, unreachable
+}
+
 // fanOutThreads is the mesh fan-out behind GET /v1/threads?all-machines: it
 // returns this machine's threads plus every reachable peer's threads (each
 // already stamped with its owning machine), and the list of peers it could not
@@ -41,22 +97,9 @@ func (d *Daemon) fanOutThreads(local []api.Thread, includeArchived bool) ([]api.
 	if err != nil {
 		return local, nil
 	}
-	down := d.knownOfflinePeers()
-	merged := append([]api.Thread{}, local...)
-	var unreachable []string
-	for _, p := range reg.List() {
-		if down[p.Machine] {
-			unreachable = append(unreachable, p.Machine)
-			continue
-		}
-		peerThreads, err := fetchPeerThreads(p, includeArchived)
-		if err != nil {
-			unreachable = append(unreachable, p.Machine)
-			continue
-		}
-		merged = append(merged, peerThreads...)
-	}
-	return merged, unreachable
+	peerThreads, unreachable := peerFanOut(reg.List(), d.knownOfflinePeers(),
+		func(p peers.Peer) ([]api.Thread, error) { return fetchPeerThreads(p, includeArchived) })
+	return append(append([]api.Thread{}, local...), peerThreads...), unreachable
 }
 
 // peerRemoteClient builds an HTTP client for a peer on the http transport. Loud if

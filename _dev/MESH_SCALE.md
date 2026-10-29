@@ -249,3 +249,43 @@ stand, and the view's O(total) RAM under C2 is still not a phone problem at any 
 archive size — BACKLOG #6 stays triggered by TUI poll cost and mesh size. What does not:
 "victim, not cause" — Termux was a ~1.9 GB cause, and the uid-wide Termux deaths were partly
 its own pressure. Nothing inside the uid can self-heal a uid kill either way (H108).
+
+## 9. The serial peer fan-out (2026-10-29)
+
+§2–§8 made the CACHED cross-machine view cheap. They left the LIVE fan-out — the
+`?all-machines=1` reads that bypass the cache on purpose — walking the peer registry
+one machine at a time, so its wall-clock cost was the SUM of the per-peer latencies
+and one slow peer delayed every peer queued behind it.
+
+Measured on mymain, 4 registered peers (one of them cached-offline), 2,912 rows:
+
+| read | cost |
+|---|---|
+| `GET /v1/threads/grid?all-machines=1&archived=1` | 299–556 ms |
+| the same grid, local machine only (no fan-out) | 60–78 ms |
+| `GET /v1/mesh` (cached view, the same threads) | 42–62 ms |
+
+The ceiling was worse than the average. `knownOfflinePeers` only removes the peers
+the liveness cache can PROVE are down; a peer that is merely slow, or one with no
+cached snapshot yet, costs a full `meshFetchTimeout` (8 s), and four of those cost
+32 s because nothing overlapped.
+
+Both fan-outs (`fanOutGrid`, `fanOutThreads`) now go through one helper, `peerFanOut`
+in `internal/daemon/fanout.go`, which asks every peer concurrently (bounded at
+`peerFanOutConcurrency` = 8) and flattens the answers in REGISTRY order, so what a
+fan-out returns never depends on which peer answered first. The cost becomes the MAX
+of the per-peer latencies: one `meshFetchTimeout` is the ceiling however many machines
+are registered. `internal/daemon/fanoutconcurrency_test.go` pins the three properties
+the callers rely on — concurrency (4 peers × 150 ms stays well under their sum),
+registry order under deliberately out-of-order completion, and that a known-offline
+peer is never dialled.
+
+Deliberately NOT changed: `ticketfind.go` and `schedulesapi.go` still walk peers
+serially. Their loops have different shapes (first-match, and per-machine maps rather
+than a flat concatenation) and were out of scope here.
+
+The consumer-side half of the same finding lives in mysystem, whose Obsidian thread
+cache was calling this grid just to list thread names and ids — a fan-out for data the
+cached view already holds. It now reads `GET /v1/mesh`
+(`mysystem-obsidian/src/sesh/thread-service.ts`), which also means an unreachable
+peer's threads stay listed instead of silently disappearing from every picker.

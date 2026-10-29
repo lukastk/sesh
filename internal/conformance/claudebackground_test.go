@@ -55,12 +55,41 @@ func init() {
 	}
 }
 
+// agentViewEnv is the switch sesh pins into every claude pane it launches. The cells
+// here assert that pin, so they must also be able to look at claude's real agent view
+// THEMSELVES — and claude refuses outright when the switch is set ("'claude agents
+// --json' is disabled by CLAUDE_CODE_DISABLE_AGENT_VIEW", "'--bg' is disabled by ...").
+const agentViewEnv = "CLAUDE_CODE_DISABLE_AGENT_VIEW"
+
+// claudeControlEnv is the environment for the test's OWN claude invocations: the
+// isolated config dir, and no inherited agentViewEnv.
+//
+// Stripping it is what makes these cells runnable from inside an agent harness that
+// exports it (Claude Code does). Without the strip, `claude agents --json` and `claude
+// --bg` fail for a reason that has nothing to do with sesh, and the four claude cells of
+// thread.claude-no-agent-view and thread.revive-held-session go red on a machine where
+// the behaviour they test is fine. Same discipline as sandboxEnv's SESH_* stripping.
+//
+// It does not weaken either cell: sesh pins the switch into the pane it launches, so the
+// pane-side assertions (the pane process's environ, claude's refusal to resume a held
+// conversation) are unaffected by what the test process itself carries.
+func claudeControlEnv(cfgDir string) []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, agentViewEnv+"=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "CLAUDE_CONFIG_DIR="+cfgDir)
+}
+
 // claudeCmd runs a claude verb against the isolated config dir, from cwd.
 func claudeCmd(t *testing.T, cfgDir, cwd string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfgDir)
+	cmd.Env = claudeControlEnv(cfgDir)
 	cmd.Stdin = nil
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -114,7 +143,7 @@ func (sb *Sandbox) holdLeafWith(t *testing.T, bin, cfgDir, cwd, threadID string)
 	leaf := sb.leafSession(t, threadID)
 	cmd := exec.Command(bin, "--bg", "--resume", leaf, "Reply with exactly: HELD")
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfgDir)
+	cmd.Env = claudeControlEnv(cfgDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s --bg --resume %s: %v\n%s", bin, leaf, err, out)
 	}

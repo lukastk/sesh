@@ -475,8 +475,12 @@ func testScheduleSpawn(t *testing.T, agent string, loc matrix.Locality) {
 	if !ok || !agentRunningUnder(pid, agent) {
 		t.Fatalf("headed run has no live %s pane", agent)
 	}
-	if !strings.Contains(sb.paneText(t, pane), nonce+"HEAD") {
-		t.Fatalf("headed run's prompt not in its pane:\n%s", sb.paneText(t, pane))
+	// The paste is asynchronous — tmux delivers it, then the agent renders it — so this
+	// waits like every other pane-text assertion here. A single read raced it on
+	// 2026-10-29 and failed with the prompt plainly visible in its own failure dump; a
+	// bounded wait still fails if the prompt never arrives.
+	if !waitUntil(60*time.Second, func() bool { return strings.Contains(sb.paneText(t, pane), nonce+"HEAD") }) {
+		t.Fatalf("headed run's prompt never reached its pane:\n%s", sb.paneText(t, pane))
 	}
 	if !waitUntil(180*time.Second, func() bool { _, _, ok := sb.markedPane(t, out.ThreadID); return !ok }) {
 		t.Fatalf("stop at turn end never removed the headed run's pane")

@@ -37,6 +37,17 @@ Do **not** weaken an assertion, shrink a feature's declared axes, stub-and-forge
   store at the default paths destroys his working state, and you are probably running
   *inside* one of those threads while you do it.
 
+- **The harness you run the suite FROM leaks into it.** `sandboxEnv` strips inherited
+  `SESH_*`, and the claude cells strip inherited `CLAUDE_CODE_DISABLE_AGENT_VIEW`
+  (`claudeControlEnv`). That second one matters because sesh pins the switch into every
+  claude pane it launches, so `thread.claude-no-agent-view` and
+  `thread.revive-held-session` have to read claude's real agent view themselves — and
+  `claude agents --json` / `claude --bg` refuse outright while the switch is set. An
+  agent harness that exports it (Claude Code does) turned all four of those cells red
+  on 2026-10-29, with claude's refusal as the only clue; they pass unchanged once the
+  test process no longer carries it. When a cell fails on something the test itself
+  shells out to, check the ambient environment before the product.
+
 - **Teardown cannot depend on the test process surviving — `TestMain` reaps the LAST
   run's leaks.** Each sandbox kills its own tmux server in `t.Cleanup`, which covers the
   ordinary path, but `t.Cleanup` never runs when the test BINARY dies: Ctrl-C on `go

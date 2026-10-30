@@ -34,6 +34,20 @@ Read only the reference for the task, not the whole manual.
   routed root is a cross-machine child. For ordinary `thread new`, **omit `--agent`
   unless the user requested a harness**; the owner applies `[defaults] agent
   (unset fails loudly; `--fork-from` inherits the source harness).
+- **Harnesses:** `claude`, `codex`, `pi` and `mypi`. **`mypi` is the patched pi
+  fork as its own harness:** same conversation format, session store, RPC steering
+  and native metadata CLIs as `pi`, launched from the `mypi` executable on the
+  OWNER daemon's PATH. It is a separate kind everywhere a launch happens
+  (`--agent mypi`, `[defaults] agent = "mypi"`, `[spawn.mypi]`, resume, headless
+  turns) and shares pi's behaviour everywhere a conversation is read or steered.
+  A missing `mypi` fails loudly; it never falls back to `pi`, and `sesh doctor`
+  warns (never fails) when the executable is absent. Pane detection depends on
+  the packaging: the frozen mypi copy presents comm/argv0/title `mypi` and is
+  detected as such, while the plain source fork keeps pi's `APP_NAME` and
+  presents `pi`, indistinguishable from vanilla pi. Sesh therefore matches a
+  pane's agent by FAMILY, which is correct either way, and an unmanaged
+  pi-presenting mypi pane is ADOPTED as `pi`. Pass `--agent mypi` to a headless
+  adopt when registering a not-running mypi conversation.
 - **Schedules:** **archive one you are finished with** (`schedule archive`), do not
   leave it paused — `paused` means "coming back" and stays in the default listing,
   so a paused pile buries the live schedules. Archiving keeps the record and its
@@ -86,10 +100,30 @@ Read only the reference for the task, not the whole manual.
   authenticated browsers batch-query only those IDs through the owner. Mapping state is monotonic;
   same-session runtime rotation may finish the original immutable artifact target, while an older
   session is refused. Current lifecycle operations never move one thread UUID between owners.
+- **Browser display and send:** browser thread pages advertise `browser.display-v1`
+  and `browser.send-v1`. `GET /v1/browser/threads/display?id=&cursor=&limit=` is
+  Sesh's OWN basic chat projection (`"source":"sesh-display-v1"`) over one resolved
+  native conversation file, for claude, codex, pi and mypi, live or stopped: ordered
+  items with stable ids, roles, text, flagged bounded thinking, tool summaries,
+  native timestamps, an explicit `coverage` object and a tail-derived `turn_status`.
+  It starts and signals nothing. `newer_cursor` is always the forward-poll token;
+  `older_cursor` appears only when older items exist; both are opaque and bound to
+  the thread's current native source file, so a rotated session refuses a stale
+  cursor instead of paging another file. For pi/mypi, `pi.session-history` stays the
+  authority for rich history — prefer it when you need branches. `POST
+  /v1/browser/threads/action` additionally takes `send` and `send_headless`, each
+  with a caller-minted `request_id` UUID: a replay inside the owner's bounded
+  window returns the RECORDED outcome instead of delivering twice. Outcomes are
+  explicit (`sent`, `deferred`, `skipped_typing`, `refused_busy`, `refused_dead`,
+  `uncertain`), `sent` is not completion, `on_typing` accepts only `defer`
+  (default) or `skip`, and the text is delivered verbatim — the browser send does
+  not expand `@blob()`.
 - **Delivery:** live Pi `thread send` is **literal RPC steering**, even `/compact`;
   it preserves drafts and waits for running tools. Commands use `thread command`.
   No paste fallback, automatic reload, or blind retry after uncertain ACKs.
   `sent`/resource `submitted` is not completion. Recover commands by request UUID.
+  Everything true of live Pi delivery is true of `mypi`: one RPC protocol, one
+  socket directory, no paste fallback for either.
   Claude/Codex/shell pastes use the viewer-typing guard (60s default): defer/wait/
   skip, bounded, never paste on expiry. `--respect-typing 0` intentionally bypasses
   it; do not casually disable it. Deferred queues are lost on daemon restart.

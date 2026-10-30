@@ -49,7 +49,72 @@ const (
 	Claude Kind = "claude"
 	Codex  Kind = "codex"
 	Pi     Kind = "pi"
+	// MyPi is the patched pi fork, shipped as its own executable. It is a
+	// SEPARATE harness kind because the executable sesh must launch differs; see
+	// Family for everything it shares with Pi and Executable for what it doesn't.
+	MyPi Kind = "mypi"
 )
+
+// AllKinds is the agent axis in a stable order. internal/config duplicates these
+// literals on purpose (agents imports config, so the dependency cannot be
+// inverted); this slice is the authority they are kept in step with.
+var AllKinds = []Kind{Claude, Codex, Pi, MyPi}
+
+// Family is the kind whose RUNTIME SHAPE k shares: its native conversation
+// format, its session store, and its RPC socket protocol. mypi → pi, everything
+// else → itself.
+//
+// This is not a convenience alias, it is the measured truth about the fork —
+// measured on BOTH packagings that exist, which differ in exactly one visible
+// way:
+//
+//   - the plain source fork (the HQ pi/ worktree) leaves package.json's
+//     `piConfig.name` unset, so pi's APP_NAME stays "pi" and the process sets
+//     process.title = "pi";
+//   - the frozen mypi copy SETS `piConfig.name = "mypi"` and its launcher sets
+//     argv[0] = "mypi", so comm/argv0/title read "mypi".
+//
+// Either way the conversation shape is pi's: the same JSONL v3 session records
+// in the same session store (the mypi launcher uses its own agent dir,
+// ~/.mypi/agent, but pins the SESSION dir back to ~/.pi/agent/sessions), and the
+// same <TMPDIR>/pi-rpc-sockets/<session>.sock protocol-2 and .live.sock sockets.
+// Only the executable name differs.
+//
+// So: anything that reads a conversation, dials a socket, or compares a pane's
+// live process goes through Family; anything that LAUNCHES the agent goes
+// through Executable. Routing on the family rather than on the process title is
+// what makes BOTH packagings work, including the one whose panes are
+// indistinguishable from pi's (see PaneKindMatches).
+//
+// Sesh never SETS a PI_*/MYPI_* variable for a launch — it only reads
+// $PI_CODING_AGENT_DIR for its own resolution (see ResolveHomes), so whatever
+// the mypi launcher exports is passed through untouched.
+func Family(k Kind) Kind {
+	if k == MyPi {
+		return Pi
+	}
+	return k
+}
+
+// Executable is the agent's executable name, resolved from the launching
+// daemon's PATH exactly as `pi`/`claude`/`codex` always have been. It is
+// deliberately a bare name and never a path: a missing mypi is a LOUD failure at
+// spawn (the pane's shell reports command not found) or at a native read
+// (exec.Error → native_unavailable), never a silent fall back to pi.
+func Executable(k Kind) string { return string(k) }
+
+// PaneKindMatches reports whether a pane's DETECTED agent process is the agent a
+// thread record claims. It compares families, which is load-bearing rather than
+// lax: a mypi pane reports process title "pi" under the plain fork packaging and
+// "mypi" under the frozen one (see Family), so a literal string comparison would
+// decide — on the first of those — that every live mypi thread had no running
+// agent and publish it as headless·idle: a live thread rendered dead. Comparing
+// families is correct for both packagings and needs no knowledge of which is
+// installed. The store stays authoritative for which executable a later launch
+// uses.
+func PaneKindMatches(recorded, detected Kind) bool {
+	return Family(recorded) == Family(detected)
+}
 
 // EnvThreadID is injected into every spawned agent's pane environment so the
 // agent can identify itself (e.g. `sesh ticket list --thread $SESH_THREAD_ID`).
@@ -75,25 +140,36 @@ const EnvPiTransferAPISocket = "SESH_PI_TRANSFER_API_SOCKET"
 
 // Valid reports whether k is a known agent kind.
 func Valid(k Kind) bool {
-	switch k {
-	case Claude, Codex, Pi:
-		return true
+	for _, known := range AllKinds {
+		if k == known {
+			return true
+		}
 	}
 	return false
+}
+
+// KindList renders the agent axis for a message or a flag description.
+func KindList() string {
+	parts := make([]string, 0, len(AllKinds))
+	for _, k := range AllKinds {
+		parts = append(parts, string(k))
+	}
+	return strings.Join(parts, "|")
 }
 
 // ParseKind validates and returns a Kind, or a loud error.
 func ParseKind(s string) (Kind, error) {
 	k := Kind(s)
 	if !Valid(k) {
-		return "", fmt.Errorf("unknown agent %q (want claude|codex|pi)", s)
+		return "", fmt.Errorf("unknown agent %q (want %s)", s, KindList())
 	}
 	return k, nil
 }
 
-// modeArgs maps a spawn mode to an agent's permission flags (E3). pi has no
-// permission system: yolo ≡ default (it IS full access); sandbox for pi is
-// refused upstream (config load / request validation), never silently dropped.
+// modeArgs maps a spawn mode to an agent's permission flags (E3). pi/mypi have
+// no permission system: yolo ≡ default (it IS full access); sandbox for the pi
+// family is refused upstream (config load / request validation), never silently
+// dropped.
 func modeArgs(k Kind, mode string) []string {
 	switch k {
 	case Claude:
@@ -150,21 +226,18 @@ func ShellEscape(s string) string {
 
 // HeadedCommand returns the shell command that launches the agent interactively
 // in a tmux pane, pinning the conversation to sessionID where the agent supports
-// it (pi/claude). codex cannot pre-assign its id, so it launches bare and its id
-// is discovered after the first turn (see DiscoverCodexSession) — which is what
-// lets a dead thread be resumed later. Working/waiting is still detected agent-
-// agnostically from pane content-diff. model (” = the agent default) pins the
-// model: claude/pi take it after the session flag, codex on its top-level command.
+// it (pi/mypi/claude). codex cannot pre-assign its id, so it launches bare and
+// its id is discovered after the first turn (see DiscoverCodexSession) — which is
+// what lets a dead thread be resumed later. Working/waiting is still detected
+// agent-agnostically from pane content-diff. model (” = the agent default) pins
+// the model: claude/pi take it after the session flag, codex on its top-level
+// command. The executable is always Executable(k) — mypi launches mypi.
 func HeadedCommand(k Kind, sessionID, model, mode string, extra []string) string {
-	base := string(k)
-	switch k {
-	case Pi:
+	base := Executable(k)
+	switch Family(k) {
+	case Pi, Claude:
 		if sessionID != "" {
-			base = "pi --session-id " + sessionID
-		}
-	case Claude:
-		if sessionID != "" {
-			base = "claude --session-id " + sessionID
+			base = Executable(k) + " --session-id " + sessionID
 		}
 	}
 	return base + modelFlag(model) + LaunchArgs(k, mode, extra)
@@ -174,14 +247,14 @@ func HeadedCommand(k Kind, sessionID, model, mode string, extra []string) string
 // existing conversation (for `resume`), continuing where it left off. model
 // (” = the agent default) re-pins the model on the resumed conversation.
 func ResumeCommand(k Kind, sessionID, model, mode string, extra []string) string {
-	base := string(k)
-	switch k {
+	base := Executable(k)
+	switch Family(k) {
 	case Pi:
-		base = "pi --session-id " + sessionID // --session-id resumes if it exists
+		base = Executable(k) + " --session-id " + sessionID // --session-id resumes if it exists
 	case Claude:
-		base = "claude --resume " + sessionID
+		base = Executable(k) + " --resume " + sessionID
 	case Codex:
-		base = "codex resume " + sessionID
+		base = Executable(k) + " resume " + sessionID
 	}
 	return base + modelFlag(model) + LaunchArgs(k, mode, extra)
 }

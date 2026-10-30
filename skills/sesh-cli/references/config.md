@@ -48,7 +48,7 @@ name = "flagged"
 filter = "flagged"
 
 [defaults]
-agent = "pi"                    # thread new may omit --agent; explicit --agent wins; unset = loud error
+agent = "pi"                    # claude | codex | pi | mypi; thread new may omit --agent; explicit --agent wins; unset = loud error
 notifications = true
 
 [mesh]
@@ -60,9 +60,13 @@ trusted_peers = ["mymain", "macbook"] # exact Sesh machine names; each must be a
 
 [browser_api]
 allowed_origins = ["app://obsidian.md"] # default []; exact desktop origin, no wildcard/unconfigured reflection
+                                        # the fixed CORS table covers the display read (GET) and the action POST
 
 [spawn]                          # default launch policy (yolo bypasses permission prompts)
 mode = "yolo"
+[spawn.mypi]                     # per-harness override table, one per kind (claude|codex|pi|mypi)
+mode = "default"                 # sandbox is refused for pi AND mypi: neither has a permission system
+args = ["--thinking", "high"]    # literal extra argv for this harness only
 
 [send]                           # the typing guard on every paste into a live pane
 respect_typing = "60s"           # hold a delivery until the pane has seen no viewer input this long ("0s" = off)
@@ -88,10 +92,40 @@ example ring resolvable without relying on the user's other config.
 
 `[defaults] agent` is resolved by the **owning daemon**, so routed creation with
 `thread new --machine <m>` uses machine `<m>`'s policy. Valid values are exactly
-`pi`, `claude`, and `codex`; an invalid value prevents the daemon from starting
-rather than silently choosing another harness. The daemon reads `[defaults]` at
-startup, so changing it requires a daemon restart through the machine's service
-manager. This is separate from `ui_config.toml`'s `default_agent`, which only
+`pi`, `mypi`, `claude`, and `codex`; an invalid value prevents the daemon from
+starting rather than silently choosing another harness.
+
+`mypi` is the patched pi fork as its own harness kind. Everything that LAUNCHES an
+agent uses the `mypi` executable from the owner daemon's `PATH` — spawn, resume,
+headless turns, and the native metadata CLIs behind the stored history/artifact/
+media routes — and a missing `mypi` fails loudly there rather than falling back to
+`pi`. Everything that READS or STEERS a conversation treats it as pi: the same
+JSONL format in pi's session store, the same `pi-rpc-sockets` protocol-2 and
+`.live.sock` sockets, the same transfer inbox environment. `[spawn.mypi]` is
+therefore an independent table (different extra args are plausible) with pi's
+mode space (`sandbox` refused for both).
+
+**Environment.** Sesh never sets a `PI_*` or `MYPI_*` variable for a launch; it
+only *reads* `$PI_CODING_AGENT_DIR` to resolve conversations itself, and injects
+only its own `SESH_*` carriers (plus `CODEX_HOME` for codex). The mypi launcher
+owns its own variables: the frozen packaging uses a separate agent dir
+(`~/.mypi/agent`, symlinked into `~/.pi/agent`) but pins
+`MYPI_CODING_AGENT_SESSION_DIR` to `~/.pi/agent/sessions`, which is where Sesh
+looks. **Precondition:** that match holds while the daemon's
+`PI_CODING_AGENT_DIR` is unset or points at `~/.pi/agent`. Point it elsewhere on
+a machine running mypi threads and the two stores diverge — Sesh then reports
+`session_not_found` / "no transcript on disk" for mypi reads, loudly and never
+against another conversation's file.
+
+**Harness presence.** `sesh doctor` checks `mypi` on the daemon's `$SHELL` PATH
+alongside the other harnesses. A missing harness is a `warn` on its own row only:
+it does not fail the run (so `sesh doctor`'s exit code stays zero), does not
+change any other harness's row, and says that only that harness's spawns,
+resumes and headless turns are affected. `tmux` and `ssh` remain the only `fail`
+rows in that group.
+
+The daemon reads `[defaults]` at startup, so changing it requires a daemon restart
+through the machine's service manager. This is separate from `ui_config.toml`'s `default_agent`, which only
 preselects a value in sesh-ui's New-thread modal.
 
 `[browser_hub]` is a security boundary, not a convenience fallback. When absent or

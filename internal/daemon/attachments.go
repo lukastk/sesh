@@ -364,8 +364,8 @@ func (d *Daemon) handleBrowserAttachmentPrepare(w http.ResponseWriter, r *http.R
 		writeTransferError(w, 404, "thread_not_found", "thread not found")
 		return
 	}
-	if thread.AgentKind != "pi" {
-		writeTransferError(w, 409, "unsupported_agent", "attachments require a Pi thread")
+	if !piFamily(thread.AgentKind) {
+		writeTransferError(w, 409, "unsupported_agent", "attachments require a pi/mypi thread")
 		return
 	}
 	if thread.AgentSessionID == "" || thread.AgentSessionID != req.Target.SessionID {
@@ -401,8 +401,8 @@ func (d *Daemon) handleRuntimeArtifactStart(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-	if thread.AgentKind != "pi" {
-		writeTransferError(w, 409, "unsupported_agent", "artifacts require a Pi thread")
+	if !piFamily(thread.AgentKind) {
+		writeTransferError(w, 409, "unsupported_agent", "artifacts require a pi/mypi thread")
 		return
 	}
 	target := targetFromAPI(req.Target)

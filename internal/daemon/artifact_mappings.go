@@ -149,8 +149,8 @@ func (d *Daemon) validateRuntimeArtifactMappingThread(w http.ResponseWriter, thr
 		writeTransferError(w, http.StatusConflict, "wrong_owner", "thread is not owned by this daemon")
 		return false
 	}
-	if thread.AgentKind != "pi" {
-		writeTransferError(w, http.StatusConflict, "unsupported_agent", "artifact mappings require a Pi thread")
+	if !piFamily(thread.AgentKind) {
+		writeTransferError(w, http.StatusConflict, "unsupported_agent", "artifact mappings require a pi/mypi thread")
 		return false
 	}
 	if thread.AgentSessionID == "" || thread.AgentSessionID != nativeSession || target.SessionID != nativeSession {
@@ -241,8 +241,8 @@ func (d *Daemon) handleBrowserArtifactMappingsQuery(w http.ResponseWriter, r *ht
 		writeTransferError(w, http.StatusConflict, "wrong_owner", "thread is not owned by this daemon")
 		return
 	}
-	if thread.AgentKind != "pi" {
-		writeTransferError(w, http.StatusConflict, "unsupported_agent", "artifact mappings require a Pi thread")
+	if !piFamily(thread.AgentKind) {
+		writeTransferError(w, http.StatusConflict, "unsupported_agent", "artifact mappings require a pi/mypi thread")
 		return
 	}
 	mappings, err := d.transfers.QueryArtifactMappings(req.ThreadID, req.NativeSession, req.PublicationIDs)

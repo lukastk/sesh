@@ -564,7 +564,7 @@ func (d *Daemon) waitPaneReady(th api.Thread, timeout time.Duration) (api.PaneLo
 	for time.Now().Before(deadline) {
 		loc, found, err := d.tmux.FindPaneByThreadID(th.ID)
 		if err == nil && found {
-			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && agent.Kind == th.AgentKind {
+			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && paneAgentMatches(th.AgentKind, agent.Kind) {
 				if cap, cerr := d.tmux.CapturePane(loc.Pane); cerr == nil {
 					last = cap
 					if nonBlank(cap) >= 3 {

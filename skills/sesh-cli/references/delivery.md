@@ -45,6 +45,60 @@ detached session (nobody viewing) is quiet by definition. Held deliveries live
 in daemon memory: a daemon restart drops them, loudly in its log. NB tmux counts
 ANY key as input — PgUp while reading holds the guard like typing does.
 
+**Browser send (`POST /v1/browser/threads/action`, capability `browser.send-v1`).**
+Two additional actions, both owner-routed through the same `[browser_hub]` policy as
+every other verb and both carrying a caller-minted `request_id` UUID:
+
+- `send` delivers into a LIVE pane through the per-kind path above — literal RPC
+  steering for pi and mypi, the guarded terminal paste for claude and codex. The
+  typing guard is not bypassable from a browser: `on_typing` accepts only `defer`
+  (the default, which queues exactly like a CLI deferred send) or `skip`. There is
+  no `wait` (it would hold a browser, and a hub→peer, request open for the whole
+  guard budget) and no force.
+- `send_headless` starts one headless turn on an IDLE thread; a live pane or an
+  in-flight turn is refused.
+
+Outcomes are explicit and never implicit: `sent`, `deferred`, `skipped_typing`,
+`refused_busy`, `refused_dead`, `uncertain`. **`sent` is submission, not
+completion** — observe the turn through live-v1, the display projection, or
+`headless-reply`. `uncertain` is only the PI_DELIVERY case: an RPC message whose
+ACK did not arrive, where submission may or may not have happened; do not retry it
+blindly. The owner records each `request_id` with its outcome in a bounded
+in-memory window, so a browser retry after a dropped connection REPLAYS the
+recorded outcome (`replayed: true`) instead of delivering a second copy; a
+concurrent duplicate waits for the first attempt rather than racing it. Reusing one
+`request_id` for a different thread, action or message text is a loud conflict, and
+a request refused before delivery does not burn its id. The window is in-memory and
+bounded: after eviction or a daemon restart a replay is a NEW delivery, and the
+response says `replayed: false`. Text is delivered verbatim — the browser send does
+not expand `@blob()`, because browser attachments belong to the bounded transfer
+subsystem below.
+
+**Browser display projection (`GET /v1/browser/threads/display`, capability
+`browser.display-v1`).** `?id=<uuid>&cursor=<opaque>&limit=<1-500>` returns Sesh's
+own basic chat view (`"source":"sesh-display-v1"`) of one resolved native
+conversation file, for claude, codex, pi and mypi, whether the thread is live,
+headless-idle or stopped. It reads the owner's disk only: no subprocess, no socket,
+no pane, and it never starts or signals an agent to serve a read. Items are one per
+native record, in file order, with a stable `id` (the harness's own record id, else
+`L<seq>`), a `role` (`user`/`assistant`/`system`/`tool`), the record's own
+`native_type`/`native_subtype`, `at_unix_ms` where the native record has a
+timestamp, bounded `text` and flagged bounded `thinking`, and `tools` summaries
+(name + bounded input, output + `is_error`); every bound sets an explicit
+`*_truncated` flag. `injected` marks a user-role record the HARNESS wrote (codex
+`<environment_context>`, claude `isMeta`); nothing is dropped for it. Records with
+no conversation content are counted in `coverage.skipped_records`, not rendered.
+`coverage` names the source file, format, line window, `total_lines`, `complete`
+(this page holds every projected item in the FILE — never a claim about an agent's
+complete logical branch history) and `byte_limited`. `turn_status` is derived from
+the file TAIL through each harness's own turn-status reader, so paging back still
+reports the conversation's current state. `newer_cursor` is always present and is
+the forward-poll token; `older_cursor` appears only when older items exist. Cursors
+are opaque and bound to the thread's current resolved source file, so a rotated
+native session (a claude compaction) refuses a stale cursor instead of paging a
+different file's line numbers. For pi/mypi this is deliberately the BASIC view:
+`pi.session-history` remains the authority for rich current-branch history.
+
 **Browser attachment delivery.** File bytes use bounded owner-routed HTTP chunks, never
 Pi RPC/WebSocket frames. Immediately before an explicit dispatch, Sesh prepares opaque
 15-minute leases for one immutable request and exact stream/session/epoch. The Pi socket
@@ -125,6 +179,11 @@ heuristic_agents = ["codex"]` in config.toml (default: none — reporter edges
 are exact, the heuristic can mistake your own typing-settle for a turn end).
 
 ### Headed Pi messages and explicit commands (API 53)
+
+Everything in this section applies to `mypi` exactly as to `pi`: the patched fork
+speaks the same RPC protocol on the same `pi-rpc-sockets` paths, so `thread send`,
+`thread command`, drafts, request-UUID recovery and the no-paste-fallback rule are
+identical. Only the executable a LAUNCH runs differs (see the config reference).
 
 Pi `thread send` is literal RPC input: even `/compact` is a MESSAGE, not a command.
 It preserves the editor draft, bypasses terminal typing guards, and steers after a

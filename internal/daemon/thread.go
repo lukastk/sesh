@@ -267,10 +267,10 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the agent session id at spawn for pi/claude (what resume needs);
-	// codex mints its own on the first turn and is discovered later.
+	// Capture the agent session id at spawn for the pi family and claude (what
+	// resume needs); codex mints its own on the first turn and is discovered later.
 	agentSessionID := ""
-	if kind == agents.Pi || kind == agents.Claude {
+	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString()
 	}
 
@@ -432,7 +432,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		return
 	}
 	agentSessionID := ""
-	if kind == agents.Pi || kind == agents.Claude {
+	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString()
 	}
 	mode, err := d.resolveSpawnMode(kind, req.Mode)
@@ -483,7 +483,7 @@ func (d *Daemon) sendWhenReady(th api.Thread, text string) {
 	for time.Now().Before(deadline) {
 		loc, found, err := d.tmux.FindPaneByThreadID(th.ID)
 		if err == nil && found {
-			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && agent.Kind == th.AgentKind {
+			if agent, running := tmux.AgentUnderPane(loc.PanePID); running && paneAgentMatches(th.AgentKind, agent.Kind) {
 				if cap, cerr := d.tmux.CapturePane(loc.Pane); cerr == nil && nonBlank(cap) >= 3 {
 					if serr := d.deliverHeaded(th, loc.Pane, text); serr != nil {
 						log.Printf("thread %s: --msg delivery failed: %v", th.ID, serr)
@@ -720,7 +720,7 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Activity axis.
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
-	resp.AgentRunning = running && agent.Kind == thread.AgentKind
+	resp.AgentRunning = running && paneAgentMatches(thread.AgentKind, agent.Kind)
 	if !resp.AgentRunning {
 		// A marked pane but no live agent of the right kind: no runtime —
 		// headless·idle (revivable).
@@ -759,7 +759,7 @@ func (d *Daemon) resolveState(thread api.Thread) (api.Head, api.Busy, error) {
 		return api.Headless, api.BusyIdle, nil
 	}
 	agent, running := tmux.AgentUnderPane(loc.PanePID)
-	if !(running && agent.Kind == thread.AgentKind) {
+	if !(running && paneAgentMatches(thread.AgentKind, agent.Kind)) {
 		return api.Headless, api.BusyIdle, nil
 	}
 	working, err := d.paneChanging(loc.Pane)
@@ -869,8 +869,8 @@ func (d *Daemon) resolveSpawnMode(kind agents.Kind, override string) (string, er
 	if !valid {
 		return "", fmt.Errorf("spawn: unknown mode %q (valid: %v)", mode, config.SpawnModes)
 	}
-	if kind == agents.Pi && mode == "sandbox" {
-		return "", fmt.Errorf("spawn: pi cannot be sandboxed (no permission system) — yolo/default only")
+	if agents.Family(kind) == agents.Pi && mode == "sandbox" {
+		return "", fmt.Errorf("spawn: %s cannot be sandboxed (no permission system) — yolo/default only", kind)
 	}
 	return mode, nil
 }

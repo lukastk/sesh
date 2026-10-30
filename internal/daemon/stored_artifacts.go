@@ -83,6 +83,12 @@ type nativeStoredArtifactEnvelope struct {
 type storedArtifactSource struct {
 	threadID  string
 	sessionID string
+	// agentKind and exe are recorded with the source so a read is pinned to the
+	// harness it resolved against: the native CLI is invoked as exe (pi or mypi,
+	// from the daemon's PATH), and a kind change under a read is a stale
+	// replacement rather than a silently re-pointed executable.
+	agentKind string
+	exe       string
 	path      string
 	info      os.FileInfo
 }
@@ -306,8 +312,8 @@ func (d *Daemon) resolveStoredArtifactSource(threadID string) (storedArtifactSou
 		}
 		return storedArtifactSource{}, "owner_internal_error", "owner thread lookup failed"
 	}
-	if thread.AgentKind != string(agents.Pi) {
-		return storedArtifactSource{}, "unsupported_agent", "stored artifacts are available only for Pi threads"
+	if !piFamily(thread.AgentKind) {
+		return storedArtifactSource{}, "unsupported_agent", "stored artifacts are available only for pi/mypi threads"
 	}
 	if !validCanonicalUUID(thread.AgentSessionID) {
 		return storedArtifactSource{}, "session_association_missing", "Pi thread has no canonical associated session id"
@@ -320,7 +326,7 @@ func (d *Daemon) resolveStoredArtifactSource(threadID string) (storedArtifactSou
 		return storedArtifactSource{}, "runtime_active", "stopped artifact access requires the Pi runtime to be stopped"
 	}
 	homes := agents.ResolveHomes(d.cfg.CodexHome)
-	path, found, err := agents.TranscriptPath(agents.Pi, thread.AgentSessionID, thread.Cwd, homes)
+	path, found, err := agents.TranscriptPath(agents.Kind(thread.AgentKind), thread.AgentSessionID, thread.Cwd, homes)
 	if err != nil {
 		return storedArtifactSource{}, "read_failed", "could not resolve the associated Pi session"
 	}
@@ -335,7 +341,11 @@ func (d *Daemon) resolveStoredArtifactSource(threadID string) (storedArtifactSou
 	if err != nil || !info.Mode().IsRegular() {
 		return storedArtifactSource{}, "read_failed", "associated Pi session file is unavailable"
 	}
-	return storedArtifactSource{threadID: threadID, sessionID: thread.AgentSessionID, path: path, info: info}, "", ""
+	return storedArtifactSource{
+		threadID: threadID, sessionID: thread.AgentSessionID,
+		agentKind: thread.AgentKind, exe: agentExecutable(thread.AgentKind),
+		path: path, info: info,
+	}, "", ""
 }
 
 func (d *Daemon) storedArtifactThreadStopped(threadID string) (bool, error) {
@@ -354,7 +364,7 @@ func (d *Daemon) storedArtifactThreadStopped(threadID string) (bool, error) {
 
 func (d *Daemon) storedArtifactSourceUnchanged(source storedArtifactSource) bool {
 	thread, err := d.store.GetThread(source.threadID)
-	if err != nil || thread.AgentKind != string(agents.Pi) || thread.AgentSessionID != source.sessionID {
+	if err != nil || thread.AgentKind != source.agentKind || thread.AgentSessionID != source.sessionID {
 		return false
 	}
 	stopped, err := d.storedArtifactThreadStopped(source.threadID)
@@ -376,7 +386,7 @@ func (d *Daemon) serveLocalStoredArtifacts(ctx context.Context, w http.ResponseW
 		return
 	}
 	defer releaseStoredArtifactSlot(storedArtifactProcessSlots)
-	envelope, code, message := runPiStoredArtifacts(ctx, source.path, query)
+	envelope, code, message := runPiStoredArtifacts(ctx, source.exe, source.path, query)
 	if code != "" {
 		writeStoredArtifactMetadataError(w, storedArtifactHTTPStatus(code), query.ID, owner, code, message)
 		return
@@ -407,7 +417,7 @@ func (d *Daemon) serveLocalStoredArtifactBytes(ctx context.Context, w http.Respo
 		return
 	}
 	defer releaseStoredArtifactSlot(storedArtifactProcessSlots)
-	body, digest, code, message := runPiStoredArtifactBytes(ctx, source.path, query.PublicationID)
+	body, digest, code, message := runPiStoredArtifactBytes(ctx, source.exe, source.path, query.PublicationID)
 	if code != "" {
 		writeStoredArtifactBytesError(w, storedArtifactHTTPStatus(code), query.ID, owner, code, message)
 		return
@@ -419,7 +429,7 @@ func (d *Daemon) serveLocalStoredArtifactBytes(ctx context.Context, w http.Respo
 	writeVerifiedStoredArtifactBytes(w, body, digest)
 }
 
-func runPiStoredArtifacts(parent context.Context, path string, query storedArtifactMetadataQuery) (nativeStoredArtifactEnvelope, string, string) {
+func runPiStoredArtifacts(parent context.Context, exe, path string, query storedArtifactMetadataQuery) (nativeStoredArtifactEnvelope, string, string) {
 	args := []string{"--session-artifacts-json", path}
 	if query.Cursor != "" {
 		args = append(args, "--session-artifact-cursor", query.Cursor)
@@ -432,7 +442,7 @@ func runPiStoredArtifacts(parent context.Context, path string, query storedArtif
 	}
 	ctx, cancel := context.WithTimeout(parent, storedArtifactMetadataTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout cappedBuffer
 	stdout.limit = storedArtifactMetadataMaxStdout + 1
 	var stderr cappedBuffer
@@ -484,7 +494,7 @@ func runPiStoredArtifacts(parent context.Context, path string, query storedArtif
 	}
 }
 
-func runPiStoredArtifactBytes(parent context.Context, path, publicationID string) ([]byte, string, string, string) {
+func runPiStoredArtifactBytes(parent context.Context, exe, path, publicationID string) ([]byte, string, string, string) {
 	args := []string{
 		"--session-artifact-bytes", path,
 		"--publication-id", publicationID,
@@ -494,7 +504,7 @@ func runPiStoredArtifactBytes(parent context.Context, path, publicationID string
 	}
 	ctx, cancel := context.WithTimeout(parent, storedArtifactBytesTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout cappedBuffer
 	stdout.limit = storedArtifactMaxBytes + 1
 	var stderr cappedBuffer

@@ -127,9 +127,12 @@ type Daemon struct {
 	// browserHub is the explicit, disabled-by-default cross-peer browser policy.
 	// browserAPI is the separate exact-origin CORS allowlist for fixed browser routes.
 	// wsTickets is the bounded in-memory registry for 30-second single-use WS grants.
+	// browserSends is the bounded in-memory idempotency registry for browser
+	// send/send_headless request_ids, held by the OWNER of each thread.
 	browserHub   config.BrowserHubConfig
 	browserAPI   config.BrowserAPIConfig
 	wsTickets    *wsTicketRegistry
+	browserSends *browserSendRegistry
 	transferStop chan struct{}
 	transferWG   sync.WaitGroup
 
@@ -269,6 +272,7 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.browserAPI = browserAPI
 	d.wsTickets = newWSTicketRegistry()
+	d.browserSends = newBrowserSendRegistry()
 	// [[hooks]] pin full cadence: the eventer diffs REMOTE snapshots for them
 	// continuously, and a slow sample would silently MISS a remote busy edge
 	// shorter than the idle interval (a notify hook that never fires).

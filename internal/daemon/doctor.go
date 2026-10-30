@@ -44,17 +44,22 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	// Agents on the DAEMON's shell PATH — resolved the SAME way a headless turn
 	// resolves its binary ($SHELL -c 'command -v'). This is the check that
 	// would have caught the missing-mise-shims deploy bug.
-	for _, agent := range []string{"claude", "codex", "pi", "tmux", "ssh"} {
+	// Each row is INDEPENDENT: a missing harness is a `warn` naming only its own
+	// threads, never a `fail` and never a verdict on the other harnesses. That
+	// matters most for mypi, which many machines legitimately do not have — its
+	// absence must not make `sesh doctor` exit non-zero or cast doubt on pi.
+	for _, agent := range []string{"claude", "codex", "pi", "mypi", "tmux", "ssh"} {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		out, err := exec.CommandContext(ctx, shell, "-lc", "command -v "+agent).Output()
 		cancel()
 		path := strings.TrimSpace(string(out))
 		if err != nil || path == "" {
-			st := "warn"
+			st, detail := "warn", "not on the daemon's $SHELL PATH — every "+agent+" spawn, resume and headless turn on this machine will fail (other harnesses are unaffected)"
 			if agent == "tmux" || agent == "ssh" {
-				st = "fail" // core deps; a missing agent is only a warn (maybe unused)
+				st = "fail" // core deps; a missing harness is only a warn (maybe unused)
+				detail = "not on the daemon's $SHELL PATH (tmux/ssh are core dependencies)"
 			}
-			add("agent:"+agent, st, "not on the daemon's $SHELL PATH (headless turns / tmux would fail)")
+			add("agent:"+agent, st, detail)
 		} else {
 			add("agent:"+agent, "ok", path)
 		}

@@ -312,7 +312,7 @@ func threadHeadful(cfg config.Config, args []string) error {
 func threadRealize(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("realize", flag.ContinueOnError)
 	id := fs.String("id", "", "virtual thread id/prefix (required)")
-	agent := fs.String("agent", "", "agent to realize as: claude|codex|pi (required)")
+	agent := fs.String("agent", "", "agent to realize as: claude|codex|pi|mypi (required)")
 	cwd := fs.String("cwd", "", "start directory (default: the cwd stored at creation; required if none was)")
 	model := fs.String("model", "", "agent model to pin to the thread (opaque pass-through; empty = the agent's default)")
 	asJSON := fs.Bool("json", false, "emit JSON")
@@ -671,7 +671,7 @@ func threadStatus(cfg config.Config, args []string) error {
 
 func threadNew(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
-	agent := fs.String("agent", "", "agent: claude|codex|pi (default: [defaults] agent; required when unset)")
+	agent := fs.String("agent", "", "agent: claude|codex|pi|mypi (default: [defaults] agent; required when unset)")
 	name := fs.String("name", "", "thread name (optional; empty = a nameless thread)")
 	cwd := fs.String("cwd", "", "start directory, relative or ~ ok (default: the current dir '.'; expanded against the invocation dir)")
 	headless := fs.Bool("headless", false, "spawn headless (no window)")

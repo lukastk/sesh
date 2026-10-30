@@ -230,7 +230,7 @@ func rewriteIDArg(args []string, full string) []string {
 // scheduleSpawn creates a spawn schedule on the local (or --machine) daemon.
 func scheduleSpawn(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("schedule spawn", flag.ContinueOnError)
-	agent := fs.String("agent", "", "agent kind: pi|claude|codex (default: [defaults] agent)")
+	agent := fs.String("agent", "", "agent kind: pi|mypi|claude|codex (default: [defaults] agent)")
 	cwd := fs.String("cwd", "", "working directory for each run (absolute or ~-relative; required)")
 	prompt := fs.String("prompt", "", "the prompt each run is given (may carry @blob() tokens)")
 	promptFile := fs.String("prompt-file", "", "read the prompt from this file instead of --prompt")

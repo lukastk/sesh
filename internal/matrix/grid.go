@@ -179,6 +179,8 @@ func agentAbbrev(a Agent) string {
 		return "co"
 	case Pi:
 		return "pi"
+	case MyPi:
+		return "my"
 	default:
 		return string(a)
 	}
@@ -219,6 +221,8 @@ func agentSortKey(a Agent) int {
 		return 2
 	case Pi:
 		return 3
+	case MyPi:
+		return 4
 	default:
 		return 9
 	}

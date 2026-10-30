@@ -259,9 +259,10 @@ func LoadDefaults(home string) (Defaults, error) {
 		return Defaults{}, nil
 	}
 	switch f.Defaults.Agent {
-	case "", "claude", "codex", "pi":
+	// Kept in step with agents.AllKinds by hand (internal/agents imports this package).
+	case "", "claude", "codex", "pi", "mypi":
 	default:
-		return Defaults{}, fmt.Errorf("config: [defaults] agent must be claude, codex, or pi (got %q)", f.Defaults.Agent)
+		return Defaults{}, fmt.Errorf("config: [defaults] agent must be claude, codex, pi or mypi (got %q)", f.Defaults.Agent)
 	}
 	return *f.Defaults, nil
 }
@@ -280,7 +281,7 @@ func (d Defaults) NotifyDefault() bool {
 // behavior for launching agents. Modes:
 //
 //	yolo    — bypass permissions (claude --dangerously-skip-permissions,
-//	          codex --dangerously-bypass-approvals-and-sandbox; pi is always
+//	          codex --dangerously-bypass-approvals-and-sandbox; pi/mypi are always
 //	          full-access, so yolo ≡ default for it)
 //	default — the agent's own defaults (prompts)
 //	sandbox — restricted (codex --sandbox read-only; claude headless default-
@@ -306,7 +307,9 @@ type Spawn struct {
 }
 
 // LoadSpawn reads [spawn] + [spawn.<agent>]. Missing = zero policy (mode
-// "default"). Unknown modes, or sandbox configured for pi, refuse LOUDLY.
+// "default"). Unknown modes, or sandbox configured for pi/mypi, refuse LOUDLY.
+// [spawn.mypi] is an independent table: the patched fork may want different
+// extra args from vanilla pi even though its mode space is identical.
 func LoadSpawn(home string) (Spawn, error) {
 	out := Spawn{agents: map[string]SpawnConfig{}}
 	raw, err := os.ReadFile(ConfigPath(home))
@@ -349,7 +352,7 @@ func LoadSpawn(home string) (Spawn, error) {
 			if err := decode(map[string]any{"args": v}, &out.global, ""); err != nil {
 				return out, err
 			}
-		case "claude", "codex", "pi":
+		case "claude", "codex", "pi", "mypi":
 			var sc SpawnConfig
 			if err := decode(v, &sc, "."+k); err != nil {
 				return out, err
@@ -359,7 +362,7 @@ func LoadSpawn(home string) (Spawn, error) {
 			return out, fmt.Errorf("config: [spawn] unknown key %q (mode, args, or an agent table)", k)
 		}
 	}
-	for agent := range map[string]bool{"": true, "claude": true, "codex": true, "pi": true} {
+	for agent := range map[string]bool{"": true, "claude": true, "codex": true, "pi": true, "mypi": true} {
 		mode := out.ModeFor(agent)
 		valid := mode == ""
 		for _, m := range SpawnModes {
@@ -371,8 +374,10 @@ func LoadSpawn(home string) (Spawn, error) {
 			return out, fmt.Errorf("config: [spawn] unknown mode %q (valid: %v)", mode, SpawnModes)
 		}
 	}
-	if out.ModeFor("pi") == "sandbox" {
-		return out, fmt.Errorf("config: [spawn] pi cannot be sandboxed (pi has no permission system) — yolo/default only")
+	for _, piKind := range []string{"pi", "mypi"} {
+		if out.ModeFor(piKind) == "sandbox" {
+			return out, fmt.Errorf("config: [spawn] %s cannot be sandboxed (the pi harness has no permission system) — yolo/default only", piKind)
+		}
 	}
 	return out, nil
 }

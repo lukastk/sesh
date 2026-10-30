@@ -542,7 +542,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		return
 	}
 	agent, running := procs.AgentUnderPane(loc.PanePID)
-	snap.AgentRunning = running && agent.Kind == th.AgentKind
+	snap.AgentRunning = running && paneAgentMatches(th.AgentKind, agent.Kind)
 	if !snap.AgentRunning {
 		// A marked pane whose agent exited: no live runtime — headless·idle.
 		m.d.clearAuthority(th.ID)

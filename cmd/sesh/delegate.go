@@ -25,7 +25,7 @@ import (
 
 func runDelegate(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("delegate", flag.ContinueOnError)
-	agent := fs.String("agent", "", "agent kind: pi|claude|codex (required)")
+	agent := fs.String("agent", "", "agent kind: pi|mypi|claude|codex (required)")
 	cwd := fs.String("cwd", "", "working directory (default: $PWD)")
 	name := fs.String("name", "", "thread name (mostly for --keep; default delegate-<ts>)")
 	keep := fs.Bool("keep", false, "leave the worker un-archived (active) instead of archiving it after the reply")

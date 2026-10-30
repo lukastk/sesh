@@ -22,7 +22,20 @@ type proc struct {
 
 // agentRe matches a coding-agent argv0 (optionally path-prefixed), anchored so
 // "pinta"/"claude-foo"/"codex-x" don't false-match.
-var agentRe = regexp.MustCompile(`^(?:\S*/)?(pi|claude|codex)(?:\s|$)`)
+//
+// mypi is listed because the patched pi fork ships as its own executable, and a
+// process whose argv0 really is mypi must resolve as kind mypi rather than as no
+// agent at all. The frozen mypi packaging does present that way: it sets pi's
+// APP_NAME to "mypi" and its launcher sets argv[0] = "mypi", so comm/argv0/title
+// all read mypi and this matcher names the kind exactly.
+//
+// Detection still cannot be RELIED on to tell the two pi executables apart: the
+// plain source fork leaves APP_NAME as "pi", so a pane running it prints "pi"
+// here and is indistinguishable from vanilla pi. That is why liveness compares
+// FAMILIES (agents.PaneKindMatches) rather than kind strings, and why pane adopt
+// records such a pane as pi — the honest limitation of the packaging it cannot
+// see, not a heuristic.
+var agentRe = regexp.MustCompile(`^(?:\S*/)?(mypi|pi|claude|codex)(?:\s|$)`)
 
 type procIndex struct {
 	byPID    map[int]proc

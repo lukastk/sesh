@@ -2987,7 +2987,7 @@ func (m Model) navRow(row api.ThreadRow) tea.Cmd {
 		// (Lukas's choice: a loud warning, not a fold toggle). Checked before
 		// anything shells out, so the refusal is instant.
 		if row.AgentKind == api.VirtualAgentKind {
-			return actionMsg{err: fmt.Errorf("%q is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id %s --agent claude|codex|pi", row.Name, row.ID)}
+			return actionMsg{err: fmt.Errorf("%q is a virtual thread (a grouping node — no agent); convert it first: sesh thread realize --id %s --agent claude|codex|pi|mypi", row.Name, row.ID)}
 		}
 		// DIVIDER: a visual separator — nothing to enter. Loud, before any shell-out.
 		if row.AgentKind == api.DividerAgentKind {

@@ -32,7 +32,62 @@ const (
 	browserMaxTranscriptWindowBytes = 8 << 20
 	browserMaxRequestBody           = 1 << 20
 	browserMaxForwardBody           = 16 << 20
+
+	// browserDisplaySource labels the Sesh-owned basic display projection in
+	// its own responses. It is deliberately not a harness protocol name: for
+	// pi/mypi, pi.session-history remains the authority for rich history.
+	browserDisplaySource = "sesh-display-v1"
 )
+
+// base64RawURL / decodeBase64RawURL wrap the one encoding every browser cursor
+// and opaque token here uses.
+func base64RawURL(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+func decodeBase64RawURL(raw string) ([]byte, error) {
+	return base64.RawURLEncoding.DecodeString(raw)
+}
+
+// displayFingerprint binds a display cursor to one thread, agent kind and
+// resolved native source file.
+func displayFingerprint(threadID, agentKind, path string) string {
+	sum := sha256.Sum256([]byte(threadID + "\x00" + agentKind + "\x00" + path))
+	return hex.EncodeToString(sum[:16])
+}
+
+// browserCapabilityNames are the schema-56 server capability tokens this daemon
+// publishes on GET /v1/browser/threads. They are negotiated through this list
+// rather than a wire-schema bump: a daemon without a token simply does not list
+// it and 404s or refuses the surface it names, so a mixed mesh stays honest in
+// both directions.
+//
+// LIST THEM IN ANY ORDER. browserCapabilityTokens sorts and de-duplicates, and
+// that is not tidiness: `sesh-input-media-contract.md` publishes `capabilities`
+// as "always present, sorted, and contains no duplicates", and a client's strict
+// adapter rejects the WHOLE thread page when the order is wrong — which is
+// exactly what happened when display-v1/send-v1 were appended to a hand-sorted
+// literal. The order is a wire contract, so it is enforced at the producer
+// instead of being maintained by hand at the one place that builds the page.
+var browserCapabilityNames = []string{
+	"browser.live-input-media-v1",
+	"browser.stored-input-media-v1",
+	"browser.stored-media-presentation-v2",
+	"browser.display-v1",
+	"browser.send-v1",
+}
+
+// browserCapabilityTokens returns the published list, sorted, de-duplicated, and
+// freshly allocated per response so no handler can mutate the shared source.
+func browserCapabilityTokens() []string {
+	out := append([]string(nil), browserCapabilityNames...)
+	sort.Strings(out)
+	deduped := out[:0]
+	for i, token := range out {
+		if i == 0 || token != out[i-1] {
+			deduped = append(deduped, token)
+		}
+	}
+	return deduped
+}
 
 func decodeBrowserJSON(w http.ResponseWriter, r *http.Request, value any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, browserMaxRequestBody)
@@ -71,6 +126,7 @@ func (d *Daemon) routesBrowser(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/browser/threads", d.handleBrowserThreadCreate)
 	mux.HandleFunc("POST /v1/browser/threads/action", d.handleBrowserThreadAction)
 	mux.HandleFunc("GET /v1/browser/threads/transcript", d.handleBrowserThreadTranscript)
+	mux.HandleFunc("GET /v1/browser/threads/display", d.handleBrowserThreadDisplay)
 	mux.HandleFunc("GET /v1/browser/threads/history", d.handleBrowserStoredHistory)
 	mux.HandleFunc("GET /v1/browser/threads/presentation", d.handleBrowserStoredPresentation)
 	mux.HandleFunc("GET /v1/browser/threads/media-presentation", d.handleBrowserStoredMediaPresentation)
@@ -295,7 +351,9 @@ func (d *Daemon) handleBrowserThreads(w http.ResponseWriter, r *http.Request) {
 	}
 	page := append([]api.BrowserThreadSummary(nil), filtered[start:end]...)
 	resp := api.BrowserThreadPage{
-		Schema: api.SchemaVersion, Capabilities: []string{"browser.live-input-media-v1", "browser.stored-input-media-v1", "browser.stored-media-presentation-v2"}, Threads: page,
+		Schema:       api.SchemaVersion,
+		Capabilities: browserCapabilityTokens(),
+		Threads:      page,
 	}
 	if end < len(filtered) && len(page) > 0 {
 		last := page[len(page)-1]
@@ -454,10 +512,19 @@ func (d *Daemon) handleBrowserThreadAction(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "browser action: thread_id must be a canonical UUID")
 		return
 	}
-	path, body, err := browserActionRoute(req)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	// send/send_headless are owner-side operations with their own outcome
+	// vocabulary and idempotency registry, so they resolve the owner through the
+	// same hub policy and then either run here or forward the UNCHANGED body to
+	// the owner's own browser action route.
+	isSend := req.Action == "send" || req.Action == "send_headless"
+	path, body := "", []byte(nil)
+	if !isSend {
+		routed, routedBody, err := browserActionRoute(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		path, body = routed, routedBody
 	}
 	owner, err := d.browserThreadOwner(req.ThreadID)
 	if err != nil {
@@ -466,6 +533,19 @@ func (d *Daemon) handleBrowserThreadAction(w http.ResponseWriter, r *http.Reques
 	}
 	if err := d.authorizeBrowserOwner(owner); err != nil {
 		writeError(w, browserOwnerStatus(err), err.Error())
+		return
+	}
+	if isSend {
+		if owner == d.cfg.Machine {
+			d.serveBrowserSend(w, r, req, owner)
+			return
+		}
+		forwarded, merr := json.Marshal(req)
+		if merr != nil {
+			writeError(w, http.StatusInternalServerError, "browser send could not be forwarded to its owner")
+			return
+		}
+		d.serveBrowserCanonical(w, r, owner, http.MethodPost, "/v1/browser/threads/action", nil, forwarded)
 		return
 	}
 	d.serveBrowserCanonical(w, r, owner, http.MethodPost, path, nil, body)
@@ -512,6 +592,12 @@ func browserActionRoute(req api.BrowserThreadActionRequest) (string, []byte, err
 		return "", nil, fmt.Errorf("browser action %q is not allowed", req.Action)
 	}
 }
+
+// browserActionSendVerbs documents the two verbs handled by browser_send.go
+// rather than by browserActionRoute's canonical-route table: they do not map
+// onto one canonical request body, because they carry an idempotency
+// request_id and answer with an explicit outcome.
+var browserActionSendVerbs = []string{"send", "send_headless"}
 
 func (d *Daemon) handleBrowserThreadTranscript(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

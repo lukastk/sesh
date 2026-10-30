@@ -206,3 +206,35 @@ func varyContains(header http.Header, want string) bool {
 	}
 	return false
 }
+
+// The display route is a browser read, so it needs its own exact entry in the
+// fixed CORS table — otherwise an app-origin client cannot call it at all. The
+// grant stays narrow: GET + Authorization, with no write method and no
+// unauthenticated actual request.
+func TestBrowserCORSCoversTheDisplayRouteNarrowly(t *testing.T) {
+	handler, calls := corsTestHandler(t, "app://obsidian.md")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, corsPreflight("/v1/browser/threads/display", "app://obsidian.md", http.MethodGet, "Authorization"))
+	if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != "app://obsidian.md" {
+		t.Fatalf("display preflight = %d headers=%#v", rec.Code, rec.Header())
+	}
+	if rec.Header().Get("Access-Control-Allow-Headers") != "Authorization" {
+		t.Fatalf("display preflight headers = %q", rec.Header().Get("Access-Control-Allow-Headers"))
+	}
+	if *calls != 0 {
+		t.Fatalf("preflight reached the handler %d times", *calls)
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, corsPreflight("/v1/browser/threads/display", "app://obsidian.md", http.MethodPost, "Authorization"))
+	if rec.Code == http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("display accepted a write preflight: %d %#v", rec.Code, rec.Header())
+	}
+	// The actual read is still bearer-authenticated.
+	req := httptest.NewRequest(http.MethodGet, "/v1/browser/threads/display?id=x", nil)
+	req.Header.Set("Origin", "app://obsidian.md")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated display read = %d", rec.Code)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/agents/claude"
 	codex "github.com/lukastk/sesh/internal/agents/codexfs"
 	"github.com/lukastk/sesh/internal/agents/pi"
@@ -151,6 +152,10 @@ func rewriteClaudeBranch(lines []string, newSessionID string) ([]string, error) 
 // whole transcript ("from latest"); otherwise it keeps the prefix through the
 // afterTurn-th assistant turn.
 func Branch(agent string, lines []string, oldID, newID string, afterTurn int) ([]string, error) {
+	// A fork rewrites one native FORMAT, so the kind is normalized to its family
+	// first: mypi writes pi's JSONL, so a mypi fork takes the pi arms. The forked
+	// thread's record keeps its own kind, so its later launches stay on mypi.
+	agent = string(agents.Family(agents.Kind(agent)))
 	if agent != "claude" && agent != "codex" && agent != "pi" {
 		return nil, fmt.Errorf("fork unsupported for agent %q", agent)
 	}
@@ -192,13 +197,15 @@ func Branch(agent string, lines []string, oldID, newID string, afterTurn int) ([
 // keyed by newID so the agent's resume locates it.
 func DestPath(agent, claudeHome, codexHome, piHome, cwd, newID string) (string, error) {
 	now := time.Now().UTC()
-	switch agent {
-	case "claude":
+	// mypi shares pi's session store, so a mypi fork is written where pi's
+	// resume will find it (see agents.Family).
+	switch agents.Family(agents.Kind(agent)) {
+	case agents.Claude:
 		return claude.TranscriptPath(claudeHome, cwd, newID), nil
-	case "pi":
+	case agents.Pi:
 		ts := now.Format("2006-01-02T15-04-05-000Z")
 		return filepath.Join(pi.SessionsRoot(piHome), pi.CwdDirName(cwd), ts+"_"+newID+".jsonl"), nil
-	case "codex":
+	case agents.Codex:
 		ts := now.Format("2006-01-02T15-04-05")
 		return filepath.Join(codex.SessionsRoot(codexHome),
 			now.Format("2006"), now.Format("01"), now.Format("02"),

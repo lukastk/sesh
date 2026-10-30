@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 
 	"github.com/coder/websocket"
-	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/store"
 )
 
@@ -74,8 +73,8 @@ func (d *Daemon) handleThreadRPC(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if th.AgentKind != string(agents.Pi) {
-		writeError(w, http.StatusBadRequest, "rpc: only pi threads expose an rpc socket (this thread is "+th.AgentKind+")")
+	if !piFamily(th.AgentKind) {
+		writeError(w, http.StatusBadRequest, "rpc: only pi/mypi threads expose an rpc socket (this thread is "+th.AgentKind+")")
 		return
 	}
 	if !validCanonicalUUID(th.AgentSessionID) {

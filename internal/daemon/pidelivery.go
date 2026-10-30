@@ -12,25 +12,29 @@ import (
 
 // openPi resolves the thread's recorded session and verifies its socket is inside
 // the marked pane. Never fall back to terminal input: that would submit the draft.
+//
+// Every failure here happens BEFORE any write, so each is a typed
+// deliveryRefused: nothing was pasted, and a caller may say so. The messages are
+// unchanged (deliveryRefused delegates Error()).
 func (d *Daemon) openPi(th api.Thread, pane string) (*pi.Client, error) {
 	path, ok := piRPCSocketPath(th.AgentSessionID)
 	if !ok {
-		return nil, fmt.Errorf("Pi RPC socket missing for thread %s; ensure pi-rpc-socket is loaded (run /reload in Pi); nothing pasted", th.ID)
+		return nil, deliveryRefused{fmt.Errorf("Pi RPC socket missing for thread %s; ensure pi-rpc-socket is loaded (run /reload in Pi); nothing pasted", th.ID)}
 	}
 	c, err := pi.Dial(path)
 	if err != nil {
-		return nil, fmt.Errorf("Pi RPC connect: %w; nothing pasted", err)
+		return nil, deliveryRefused{fmt.Errorf("Pi RPC connect: %w; nothing pasted", err)}
 	}
 	if err = c.CheckPane(pane, d.tmux.SocketPath()); err != nil {
 		c.Close()
-		return nil, err
+		return nil, deliveryRefused{err}
 	}
 	return c, nil
 }
 
 // deliverHeaded is the ONE transport selector, also used by initial --msg sends.
 func (d *Daemon) deliverHeaded(th api.Thread, pane, text string) error {
-	if th.AgentKind != "pi" {
+	if !piFamily(th.AgentKind) {
 		return d.tmux.SendText(pane, text, true)
 	}
 	c, err := d.openPi(th, pane)
@@ -39,7 +43,9 @@ func (d *Daemon) deliverHeaded(th api.Thread, pane, text string) error {
 	}
 	defer c.Close()
 	if err := c.Message(text); err != nil {
-		return fmt.Errorf("Pi RPC delivery: %w; delivery may be uncertain, do not automatically retry; nothing pasted", err)
+		// The ONE uncertain site: the request was written, so the message may or
+		// may not have been submitted. Typed, not merely worded that way.
+		return deliveryUncertain{fmt.Errorf("Pi RPC delivery: %w; delivery may be uncertain, do not automatically retry; nothing pasted", err)}
 	}
 	return nil
 }
@@ -78,8 +84,8 @@ func (d *Daemon) handlePiCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, err.Error())
 		return
 	}
-	if th.AgentKind != "pi" {
-		writeError(w, 400, "thread command is Pi-only; other agents use terminal input via thread send")
+	if !piFamily(th.AgentKind) {
+		writeError(w, 400, "thread command is pi/mypi-only; other agents use terminal input via thread send")
 		return
 	}
 	loc, found, err := d.tmux.FindPaneByThreadID(th.ID)

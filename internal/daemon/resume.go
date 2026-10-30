@@ -36,7 +36,7 @@ func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd, thre
 	delete(env, agents.EnvPiTransferThreadID)
 	delete(env, agents.EnvPiTransferInbox)
 	delete(env, agents.EnvPiTransferAPISocket)
-	if kind == agents.Pi {
+	if agents.Family(kind) == agents.Pi {
 		inbox, err := d.transfers.Inbox(threadID)
 		if err != nil {
 			return fmt.Errorf("prepare Pi transfer inbox: %w", err)

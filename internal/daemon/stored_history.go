@@ -199,8 +199,8 @@ func (d *Daemon) serveLocalStoredHistory(ctx context.Context, w http.ResponseWri
 		writeStoredHistoryError(w, http.StatusInternalServerError, query.ID, owner, "owner_internal_error", err.Error())
 		return
 	}
-	if thread.AgentKind != string(agents.Pi) {
-		writeStoredHistoryError(w, http.StatusConflict, query.ID, owner, "unsupported_agent", "stored canonical history is available only for Pi threads")
+	if !piFamily(thread.AgentKind) {
+		writeStoredHistoryError(w, http.StatusConflict, query.ID, owner, "unsupported_agent", "stored canonical history is available only for pi/mypi threads")
 		return
 	}
 	if !validCanonicalUUID(thread.AgentSessionID) {
@@ -208,7 +208,7 @@ func (d *Daemon) serveLocalStoredHistory(ctx context.Context, w http.ResponseWri
 		return
 	}
 	homes := agents.ResolveHomes(d.cfg.CodexHome)
-	path, found, err := agents.TranscriptPath(agents.Pi, thread.AgentSessionID, thread.Cwd, homes)
+	path, found, err := agents.TranscriptPath(agents.Kind(thread.AgentKind), thread.AgentSessionID, thread.Cwd, homes)
 	if err != nil {
 		writeStoredHistoryError(w, http.StatusInternalServerError, query.ID, owner, "read_failed", "resolve Pi session: "+err.Error())
 		return
@@ -222,7 +222,7 @@ func (d *Daemon) serveLocalStoredHistory(ctx context.Context, w http.ResponseWri
 		writeStoredHistoryError(w, http.StatusInternalServerError, query.ID, owner, "read_failed", "resolve absolute Pi session path: "+err.Error())
 		return
 	}
-	envelope, code, message := runPiStoredHistory(ctx, path, query)
+	envelope, code, message := runPiStoredHistory(ctx, agentExecutable(thread.AgentKind), path, query)
 	if code != "" {
 		writeStoredHistoryError(w, storedHistoryHTTPStatus(code), query.ID, owner, code, message)
 		return
@@ -238,7 +238,7 @@ func (d *Daemon) serveLocalStoredHistory(ctx context.Context, w http.ResponseWri
 	})
 }
 
-func runPiStoredHistory(parent context.Context, path string, query storedHistoryQuery) (nativeStoredHistoryEnvelope, string, string) {
+func runPiStoredHistory(parent context.Context, exe, path string, query storedHistoryQuery) (nativeStoredHistoryEnvelope, string, string) {
 	args := []string{"--session-history-json", path}
 	if query.Cursor != "" {
 		args = append(args, "--session-history-cursor", query.Cursor)
@@ -251,7 +251,7 @@ func runPiStoredHistory(parent context.Context, path string, query storedHistory
 	}
 	ctx, cancel := context.WithTimeout(parent, storedHistoryTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout cappedBuffer
 	stdout.limit = storedHistoryMaxStdout + 1
 	var stderr cappedBuffer

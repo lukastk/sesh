@@ -121,15 +121,18 @@ type pasteOutcome struct {
 
 // pasteNow is the "skip" policy: one guard read, then paste or refuse loudly.
 func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
+	// Resolution and the guard read both happen before any write, so their
+	// failures are typed refusals: nothing was delivered.
 	target, session, found, err := req.resolve()
 	if err != nil {
-		return pasteOutcome{}, err
+		return pasteOutcome{}, deliveryRefused{err}
 	}
 	if !found {
-		return pasteOutcome{}, errors.New("thread has no live pane (dead); cannot send")
+		return pasteOutcome{}, deliveryRefused{errors.New("thread has no live pane (dead); cannot send")}
 	}
-	// Pi uses no editor input: the terminal typing guard is inapplicable.
-	if req.thread.AgentKind == "pi" {
+	// Pi uses no editor input: the terminal typing guard is inapplicable. Same
+	// for mypi, which speaks the same RPC steering protocol.
+	if piFamily(req.thread.AgentKind) {
 		if err := d.deliverHeaded(req.thread, target, req.text); err != nil {
 			return pasteOutcome{}, err
 		}
@@ -138,7 +141,7 @@ func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
 	}
 	quiet, ago, err := d.paneQuiet(session, req.guard, time.Now())
 	if err != nil {
-		return pasteOutcome{}, err
+		return pasteOutcome{}, deliveryRefused{err}
 	}
 	if !quiet {
 		return pasteOutcome{InputAgo: ago}, errTyping{ago: ago}

@@ -48,10 +48,12 @@ func LoadFlags(home string) (FlagsConfig, error) {
 	}
 	for _, a := range f.Flags.HeuristicAgents {
 		switch a {
-		case "claude", "codex", "pi":
+		// Kept in step with agents.AllKinds by hand: internal/agents imports
+		// this package, so the list cannot be imported from there.
+		case "claude", "codex", "pi", "mypi":
 			out.HeuristicAgents[a] = true
 		default:
-			return out, fmt.Errorf("config: [flags] heuristic_agents: unknown agent %q (want claude|codex|pi)", a)
+			return out, fmt.Errorf("config: [flags] heuristic_agents: unknown agent %q (want claude|codex|pi|mypi)", a)
 		}
 	}
 	return out, nil

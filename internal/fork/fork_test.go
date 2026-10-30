@@ -3,6 +3,7 @@ package fork
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,41 @@ func TestClaudeBranchRekeysConversationGraph(t *testing.T) {
 	}
 	if decodeObject(t, other[0])["uuid"] == root["uuid"] {
 		t.Fatal("two intentional branches share a conversation root")
+	}
+}
+
+// A mypi fork rewrites pi's format and lands where pi's resume will find it:
+// the fork is about the on-disk FORMAT, and mypi shares pi's entirely. The
+// forked thread's own record keeps kind mypi, so its later launches still run
+// the mypi executable.
+func TestMyPiForksThroughThePiFormatAndStore(t *testing.T) {
+	oldID, newID := "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	lines := []string{
+		`{"type":"session","version":3,"id":"` + oldID + `","cwd":"/tmp/proj"}`,
+		`{"type":"message","id":"u1","message":{"role":"user","content":[{"type":"text","text":"one"}]}}`,
+		`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"text","text":"two"}]}}`,
+		`{"type":"message","id":"u2","message":{"role":"user","content":[{"type":"text","text":"three"}]}}`,
+	}
+	for _, agent := range []string{"pi", "mypi"} {
+		out, err := Branch(agent, lines, oldID, newID, 1)
+		if err != nil {
+			t.Fatalf("%s branch: %v", agent, err)
+		}
+		if len(out) != 3 {
+			t.Fatalf("%s branch kept %d lines, want the prefix through turn 1", agent, len(out))
+		}
+		if !strings.Contains(out[0], newID) || strings.Contains(out[0], oldID) {
+			t.Fatalf("%s session record was not re-keyed: %s", agent, out[0])
+		}
+		path, err := DestPath(agent, "/claude", "/codex", "/pi-home", "/tmp/proj", newID)
+		if err != nil {
+			t.Fatalf("%s dest path: %v", agent, err)
+		}
+		if !strings.HasPrefix(path, "/pi-home/sessions/--tmp-proj--/") || !strings.HasSuffix(path, "_"+newID+".jsonl") {
+			t.Fatalf("%s dest path = %q", agent, path)
+		}
+	}
+	if _, err := Branch("gemini", lines, oldID, newID, 1); err == nil {
+		t.Fatal("an unknown harness was accepted by fork")
 	}
 }

@@ -259,7 +259,7 @@ func TestStoredHistoryBoundsQueryTimeoutAndOutput(t *testing.T) {
 	t.Setenv("FAKE_PI_STDERR", "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
-	_, code, _ := runPiStoredHistory(ctx, "/owner/session.jsonl", storedHistoryQuery{})
+	_, code, _ := runPiStoredHistory(ctx, "pi", "/owner/session.jsonl", storedHistoryQuery{})
 	if code != "native_timeout" {
 		t.Fatalf("cancelled native read code = %q", code)
 	}

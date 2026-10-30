@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -568,6 +569,21 @@ func testBrowserHubHTTP(t *testing.T) {
 		peersBody, _ := io.ReadAll(peersResp.Body)
 		peersResp.Body.Close()
 		t.Fatalf("browser hub never listed replicated peer thread: %#v\nmesh: %s\npeers: %s", page, meshBody, peersBody)
+	}
+	// The schema-56 capability contract, on a page a REAL daemon returned over
+	// real authenticated HTTP: always present, sorted, no duplicates
+	// (sesh-input-media-contract.md). A strict client adapter rejects the whole
+	// page otherwise, so the order is part of what this cell proves.
+	if len(page.Capabilities) == 0 {
+		t.Fatalf("browser page carried no capabilities: %#v", page)
+	}
+	if !sort.StringsAreSorted(page.Capabilities) {
+		t.Fatalf("browser page capabilities are not sorted: %#v", page.Capabilities)
+	}
+	for i := 1; i < len(page.Capabilities); i++ {
+		if page.Capabilities[i] == page.Capabilities[i-1] {
+			t.Fatalf("browser page capabilities contain a duplicate: %#v", page.Capabilities)
+		}
 	}
 	transcriptResp := browserRequest(t, hub, http.MethodGet, "/v1/browser/threads/transcript?id="+url.QueryEscape(history.Thread.ID)+"&tail=2", nil)
 	if transcriptResp.StatusCode != http.StatusOK {

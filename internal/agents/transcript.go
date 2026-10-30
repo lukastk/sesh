@@ -23,7 +23,19 @@ import (
 	"github.com/lukastk/sesh/internal/agents/pi"
 )
 
-// Homes locates each agent's state dir.
+// Homes locates each agent's state dir. There is no separate mypi entry: a mypi
+// conversation lives in pi's SESSION store, so it is resolved under Homes.Pi.
+// Under the frozen packaging that is explicit — the mypi launcher has its own
+// agent dir (~/.mypi/agent) but pins MYPI_CODING_AGENT_SESSION_DIR back to
+// ~/.pi/agent/sessions, which is exactly SessionsRoot(Homes.Pi) when
+// PI_CODING_AGENT_DIR is unset or points at ~/.pi/agent.
+//
+// PRECONDITION, loud if broken: an operator who points the daemon's
+// PI_CODING_AGENT_DIR somewhere else while the mypi launcher keeps writing to
+// ~/.pi/agent/sessions makes the two stores diverge. Sesh then reports "no
+// transcript on disk" / session_not_found for mypi threads — a loud refusal, never
+// another conversation's file. Teaching ResolveHomes MYPI_CODING_AGENT_SESSION_DIR
+// is the fix if that configuration ever becomes real.
 type Homes struct {
 	Claude string
 	Pi     string
@@ -59,7 +71,7 @@ func ResolveHomes(codexHome string) Homes {
 // CURRENT one, following claude's compaction drift to the leaf session. Claude starts a
 // new session id + .jsonl on every compaction, so the stored id freezes the transcript
 // view + resume at the last compaction; this chases the lineage to the live session.
-// Returns storedID unchanged for codex/pi (codex tracks its late-minted id via
+// Returns storedID unchanged for codex/pi/mypi (codex tracks its late-minted id via
 // DiscoverCodexSession; pi's --session-id is stable across resume, so it does not drift)
 // and for claude when there is no compaction to chase.
 func ResolveCurrentSession(kind Kind, storedID, cwd string, homes Homes) (string, error) {
@@ -80,8 +92,8 @@ func ResolveCurrentSession(kind Kind, storedID, cwd string, homes Homes) (string
 //     its transcript path is a pure function of cwd — so the check is exact.
 //   - codex rollouts are indexed by session id ALONE (FindRolloutByID takes no
 //     cwd), so its on-disk layout carries no cwd signal to check against.
-//   - pi sessions are cwd-scoped, but pi has no background-session mode and its
-//     --session-id is stable across resume, so there is no drift to police.
+//   - pi/mypi sessions are cwd-scoped, but neither has a background-session mode
+//     and their --session-id is stable across resume, so there is no drift to police.
 //
 // Both are therefore unchecked here and rely on the reporter being in-pane.
 // If either grows a detached/background mode, it needs its own arm.
@@ -141,7 +153,7 @@ func TranscriptPath(kind Kind, agentSessionID, cwd string, homes Homes) (path st
 			return p, false, nil
 		}
 		return p, true, nil
-	case Pi:
+	case Pi, MyPi:
 		if cwd == "" {
 			return "", false, nil
 		}
@@ -177,7 +189,7 @@ func LastReplyPath(kind Kind, path string) (string, int, error) {
 	switch kind {
 	case Claude:
 		return claude.LastReply(path)
-	case Pi:
+	case Pi, MyPi:
 		return pi.LastReply(path)
 	case Codex:
 		return codex.LastReply(path)
@@ -322,7 +334,7 @@ func NativePath(kind Kind, agentSessionID, cwd string, homes Homes) (string, err
 			return "", fmt.Errorf("claude native path needs a cwd + session id")
 		}
 		return claude.TranscriptPath(homes.Claude, cwd, agentSessionID), nil
-	case Pi, Codex:
+	case Pi, MyPi, Codex:
 		return "", fmt.Errorf("native path for %s is not deterministic (filename embeds a timestamp)", kind)
 	default:
 		return "", fmt.Errorf("unknown agent %q", kind)

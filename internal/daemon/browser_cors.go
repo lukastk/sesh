@@ -36,6 +36,9 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/threads/transcript": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},
+	"/v1/browser/threads/display": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
 	"/v1/browser/threads/history": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},

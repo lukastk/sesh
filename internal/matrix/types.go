@@ -15,13 +15,21 @@ import "fmt"
 type Agent string
 
 const (
-	Claude        Agent = "claude"
-	Codex         Agent = "codex"
-	Pi            Agent = "pi"
+	Claude Agent = "claude"
+	Codex  Agent = "codex"
+	Pi     Agent = "pi"
+	// MyPi is the patched pi fork as its own harness. It is declarable but is
+	// deliberately NOT in AllAgents: adding it there would mint two new expected
+	// cells on every agentic feature at once, i.e. ~80 cells that no test has
+	// ever exercised, and a matrix that grows by assertion rather than by work
+	// measures effort instead of truth. Features declare MyPi as they are
+	// actually proved for it.
+	MyPi          Agent = "mypi"
 	AgentAgnostic Agent = "-"
 )
 
-// AllAgents is the real agent axis (excludes the agnostic sentinel).
+// AllAgents is the real agent axis (excludes the agnostic sentinel and mypi; see
+// MyPi).
 var AllAgents = []Agent{Claude, Codex, Pi}
 
 // Locality is where the exercised code path runs.

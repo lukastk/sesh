@@ -246,10 +246,10 @@ func TestStoredArtifactNativeProcessCancellationIsTimeout(t *testing.T) {
 	installFakeStoredArtifactPi(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, code, _ := runPiStoredArtifacts(ctx, "/owner/session.jsonl", storedArtifactMetadataQuery{}); code != "native_timeout" {
+	if _, code, _ := runPiStoredArtifacts(ctx, "pi", "/owner/session.jsonl", storedArtifactMetadataQuery{}); code != "native_timeout" {
 		t.Fatalf("metadata cancellation code = %q", code)
 	}
-	if _, _, code, _ := runPiStoredArtifactBytes(ctx, "/owner/session.jsonl", uuid.NewString()); code != "native_timeout" {
+	if _, _, code, _ := runPiStoredArtifactBytes(ctx, "pi", "/owner/session.jsonl", uuid.NewString()); code != "native_timeout" {
 		t.Fatalf("byte cancellation code = %q", code)
 	}
 }

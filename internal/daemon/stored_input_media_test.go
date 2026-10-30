@@ -568,7 +568,12 @@ func TestStoredInputMediaCapabilityAndCORS(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(page.Capabilities, []string{"browser.live-input-media-v1", "browser.stored-input-media-v1", "browser.stored-media-presentation-v2"}) {
+	// Sorted, per the published contract (see browser_capabilities_test.go, which
+	// asserts the PROPERTY; this one pins the exact expected content).
+	if !reflect.DeepEqual(page.Capabilities, []string{
+		"browser.display-v1", "browser.live-input-media-v1", "browser.send-v1",
+		"browser.stored-input-media-v1", "browser.stored-media-presentation-v2",
+	}) {
 		t.Fatalf("browser capabilities = %#v", page.Capabilities)
 	}
 

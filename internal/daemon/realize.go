@@ -180,7 +180,7 @@ func (d *Daemon) handleThreadRealize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentSessionID := ""
-	if kind == agents.Pi || kind == agents.Claude {
+	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString() // sesh pre-assigns; codex cannot
 	}
 	if err := d.store.RealizeThread(req.ID, string(kind), agentSessionID, cwd, "headless-"+req.ID, req.Model); err != nil {

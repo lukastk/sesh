@@ -388,6 +388,24 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "harness.mypi",
+		Description: "mypi is a first-class harness: `--agent mypi` / `[defaults] agent = \"mypi\"` spawn, resume and run headless turns from the `mypi` executable on the owner daemon's PATH, with pi's conversation format, session store, RPC steering and native metadata CLIs, a live pane that stays headful under family-matched liveness, and a loud failure (never a fall back to pi) when the executable is absent",
+		Agents:      []Agent{MyPi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-display",
+		Description: "the Sesh-owned basic display projection reads one owner-side native conversation file per harness into a common bounded item schema (stable ids, roles, text, flagged thinking, tool summaries, native timestamps) with an opaque two-direction cursor, source-file-bound cursor refusal, explicit coverage and a tail-derived turn status, for live, headless-idle and stopped threads, and never starts or signals an agent to serve the read",
+		Agents:      []Agent{Claude, Codex, Pi, MyPi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-send",
+		Description: "owner-routed browser send and send_headless reuse the existing per-kind delivery paths (pi/mypi literal RPC steering; claude/codex guarded terminal paste with the typing guard never bypassed), answer with explicit sent/deferred/skipped_typing/refused_busy/refused_dead/uncertain outcomes, make a caller request_id replay return the recorded outcome instead of delivering twice, and refuse a live pane for a headless turn",
+		Agents:      []Agent{Claude, Codex, Pi, MyPi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.resolve-pane",
 		Description: "runtime pane resolution via the @sesh-thread-id pane user-option",
 		Agents:      agentic,

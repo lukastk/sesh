@@ -58,7 +58,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 	// branch and forgotten in another is how a worker ends up with an identity
 	// on two agents and none on the third.
 	env := TurnEnv(os.Environ(), spec.ThreadID, spec.SeshBin, spec.CodexHome)
-	if spec.Kind == Pi {
+	if Family(spec.Kind) == Pi {
 		transferThreadID := ""
 		if spec.TransferInbox != "" || spec.TransferAPISocket != "" {
 			transferThreadID = spec.ThreadID
@@ -70,12 +70,13 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 		}
 	}
 
-	switch spec.Kind {
+	switch Family(spec.Kind) {
 	case Pi:
-		// pi --session-id creates-if-missing and resumes uniformly.
+		// pi --session-id creates-if-missing and resumes uniformly. mypi shares the
+		// flag; only the executable differs.
 		args := append([]string{"--print", "--session-id", spec.SessionID}, modelArgs(spec.Model)...)
 		args = append(args, spec.Prompt)
-		out, err := runHeadless(spec, env, "pi", args...)
+		out, err := runHeadless(spec, env, Executable(spec.Kind), args...)
 		return strings.TrimSpace(out), spec.SessionID, err
 
 	case Claude:
@@ -87,7 +88,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 		}
 		args = append(args, modelArgs(spec.Model)...)
 		args = append(args, spec.Prompt)
-		out, err := runHeadless(spec, env, "claude", args...)
+		out, err := runHeadless(spec, env, Executable(spec.Kind), args...)
 		return strings.TrimSpace(out), spec.SessionID, err
 
 	case Codex:
@@ -99,7 +100,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 		}
 		args = append(args, modeArgs(Codex, spec.Mode)...)
 		args = append(args, "--json", "--skip-git-repo-check", spec.Prompt)
-		out, err := runHeadless(spec, env, "codex", args...)
+		out, err := runHeadless(spec, env, Executable(spec.Kind), args...)
 		if err != nil {
 			// codex writes its error events to STDOUT (the --json stream), not
 			// stderr, so the bare exit-status error is useless on its own. Surface

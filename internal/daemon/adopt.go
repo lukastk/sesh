@@ -83,7 +83,12 @@ func (d *Daemon) handleThreadAdopt(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			sessionID = m[1]
-		case agents.Pi:
+		case agents.Pi, agents.MyPi:
+			// Identity stays socket-authoritative for both pi executables: the
+			// socket reports its own pane, and the patched fork writes into the
+			// same pi-rpc-sockets dir. Detection only decides the KIND (and a
+			// fork that masks its process title as "pi" is adopted as pi — see
+			// agents.Family); the conversation id always comes from the socket.
 			id, err := pi.ResolveUUIDByPane(pi.DefaultSocketsDir(), info.Pane, d.tmux.SocketPath())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())

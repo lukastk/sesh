@@ -423,8 +423,8 @@ func (d *Daemon) resolveStoredInputSource(threadID, nativeSession string) (store
 		}
 		return storedArtifactSource{}, "owner_internal_error", "owner thread lookup failed"
 	}
-	if thread.AgentKind != string(agents.Pi) {
-		return storedArtifactSource{}, "unsupported_agent", "stopped input media is available only for Pi threads"
+	if !piFamily(thread.AgentKind) {
+		return storedArtifactSource{}, "unsupported_agent", "stopped input media is available only for pi/mypi threads"
 	}
 	if !validCanonicalUUID(thread.AgentSessionID) {
 		return storedArtifactSource{}, "session_association_missing", "Pi thread has no canonical associated session id"
@@ -440,7 +440,7 @@ func (d *Daemon) resolveStoredInputSource(threadID, nativeSession string) (store
 		return storedArtifactSource{}, "runtime_active", "stopped input-media access requires the Pi runtime to be stopped"
 	}
 	homes := agents.ResolveHomes(d.cfg.CodexHome)
-	path, found, err := agents.TranscriptPath(agents.Pi, thread.AgentSessionID, thread.Cwd, homes)
+	path, found, err := agents.TranscriptPath(agents.Kind(thread.AgentKind), thread.AgentSessionID, thread.Cwd, homes)
 	if err != nil {
 		return storedArtifactSource{}, "read_failed", "could not resolve the associated Pi session"
 	}
@@ -455,7 +455,11 @@ func (d *Daemon) resolveStoredInputSource(threadID, nativeSession string) (store
 	if err != nil || !info.Mode().IsRegular() {
 		return storedArtifactSource{}, "read_failed", "associated Pi session file is unavailable"
 	}
-	return storedArtifactSource{threadID: threadID, sessionID: thread.AgentSessionID, path: path, info: info}, "", ""
+	return storedArtifactSource{
+		threadID: threadID, sessionID: thread.AgentSessionID,
+		agentKind: thread.AgentKind, exe: agentExecutable(thread.AgentKind),
+		path: path, info: info,
+	}, "", ""
 }
 
 func (d *Daemon) serveLocalStoredInputPage(ctx context.Context, w http.ResponseWriter, query storedInputPageQuery, owner string, kind storedInputPageKind) {
@@ -469,7 +473,7 @@ func (d *Daemon) serveLocalStoredInputPage(ctx context.Context, w http.ResponseW
 		return
 	}
 	defer releaseStoredInputSlot(storedInputProcessSlots)
-	envelope, code, message := runPiStoredInputPage(ctx, source.path, query, kind)
+	envelope, code, message := runPiStoredInputPage(ctx, source.exe, source.path, query, kind)
 	if code != "" {
 		writeStoredInputError(w, storedInputHTTPStatus(code), kind, query.ThreadID, owner, query.NativeSession, code, message)
 		return
@@ -511,12 +515,12 @@ func (d *Daemon) serveLocalStoredInputBytes(ctx context.Context, w http.Response
 	}
 	defer releaseStoredInputSlot(storedInputProcessSlots)
 
-	metadata, code, message := findStoredInputImageMetadata(ctx, source.path, source.sessionID, query.InputImageID)
+	metadata, code, message := findStoredInputImageMetadata(ctx, source.exe, source.path, source.sessionID, query.InputImageID)
 	if code != "" {
 		writeStoredInputError(w, storedInputHTTPStatus(code), storedInputBytesKind, query.ThreadID, owner, query.NativeSession, code, message)
 		return
 	}
-	body, digest, code, message := runPiStoredInputImageBytes(ctx, source.path, query.InputImageID)
+	body, digest, code, message := runPiStoredInputImageBytes(ctx, source.exe, source.path, query.InputImageID)
 	if code != "" {
 		writeStoredInputError(w, storedInputHTTPStatus(code), storedInputBytesKind, query.ThreadID, owner, query.NativeSession, code, message)
 		return
@@ -540,7 +544,7 @@ func (d *Daemon) serveLocalStoredInputBytes(ctx context.Context, w http.Response
 	writeVerifiedStoredInputImage(w, method, body, metadata.MediaType, digest, digestStatus)
 }
 
-func runPiStoredInputPage(parent context.Context, path string, query storedInputPageQuery, kind storedInputPageKind) (nativeStoredInputEnvelope, string, string) {
+func runPiStoredInputPage(parent context.Context, exe, path string, query storedInputPageQuery, kind storedInputPageKind) (nativeStoredInputEnvelope, string, string) {
 	args := []string{kind.command, path}
 	args = append(args, kind.fixedArgs...)
 	if query.Cursor != "" {
@@ -554,7 +558,7 @@ func runPiStoredInputPage(parent context.Context, path string, query storedInput
 	}
 	ctx, cancel := context.WithTimeout(parent, storedInputPageTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout cappedBuffer
 	stdout.limit = kind.maxStdout + 1
 	var stderr cappedBuffer
@@ -804,13 +808,13 @@ func validLowerSHA256(value string) bool {
 	return err == nil
 }
 
-func findStoredInputImageMetadata(parent context.Context, path, sessionID, inputImageID string) (storedInputImageMetadata, string, string) {
+func findStoredInputImageMetadata(parent context.Context, exe, path, sessionID, inputImageID string) (storedInputImageMetadata, string, string) {
 	ctx, cancel := context.WithTimeout(parent, storedInputPageTimeout)
 	defer cancel()
 	cursor := ""
 	for pageNumber := 0; pageNumber < storedInputMetadataScanPages; pageNumber++ {
 		query := storedInputPageQuery{Cursor: cursor, MaxItems: 500, MaxBytes: 524288}
-		envelope, code, message := runPiStoredInputPage(ctx, path, query, storedInputMetadataKind)
+		envelope, code, message := runPiStoredInputPage(ctx, exe, path, query, storedInputMetadataKind)
 		if code != "" {
 			return storedInputImageMetadata{}, code, message
 		}
@@ -849,7 +853,7 @@ func findStoredInputImageMetadata(parent context.Context, path, sessionID, input
 	return storedInputImageMetadata{}, "native_output_too_large", "input-image metadata scan exceeded its bounded page count"
 }
 
-func runPiStoredInputImageBytes(parent context.Context, path, inputImageID string) ([]byte, string, string, string) {
+func runPiStoredInputImageBytes(parent context.Context, exe, path, inputImageID string) ([]byte, string, string, string) {
 	args := []string{
 		"--session-input-image-bytes", path,
 		"--input-image-id", inputImageID,
@@ -859,7 +863,7 @@ func runPiStoredInputImageBytes(parent context.Context, path, inputImageID strin
 	}
 	ctx, cancel := context.WithTimeout(parent, storedInputBytesTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout cappedBuffer
 	stdout.limit = storedInputMaxBytes + 1
 	var stderr cappedBuffer

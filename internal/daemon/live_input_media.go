@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/transfers"
 )
@@ -88,8 +87,8 @@ func (d *Daemon) inputMediaRuntimeActive(threadID, nativeSession string) (bool, 
 		}
 		return false, "owner_internal_error", "owner thread lookup failed"
 	}
-	if thread.AgentKind != string(agents.Pi) {
-		return false, "unsupported_agent", "input media is available only for Pi threads"
+	if !piFamily(thread.AgentKind) {
+		return false, "unsupported_agent", "input media is available only for pi/mypi threads"
 	}
 	if !validCanonicalUUID(thread.AgentSessionID) {
 		return false, "session_association_missing", "Pi thread has no canonical associated session id"

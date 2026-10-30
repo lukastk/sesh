@@ -29,7 +29,7 @@ func (d *Daemon) routesHeadless(mux *http.ServeMux) {
 func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req api.NewThreadRequest) {
 	id := uuid.NewString()
 	agentSessionID := ""
-	if kind == agents.Pi || kind == agents.Claude {
+	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString() // sesh pre-assigns; codex cannot
 	}
 	thread := api.Thread{
@@ -79,43 +79,61 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if conversationGate(w, thread, "send-headless") {
-		return
-	}
-	// Unified model: a headless turn is valid on any IDLE thread — including one
-	// that previously ran headed (its conversation resumes per-turn). A LIVE pane
-	// owns the conversation, so a concurrent headless turn would fork it: loud 409.
-	if _, found, err := d.tmux.FindPaneByThreadID(req.ID); err == nil && found {
-		writeError(w, http.StatusConflict, "thread has a live pane — send into the pane (thread send), or stop it first")
-		return
-	}
-
 	// Expand @blob(…) references before the turn; an unknown blob is a loud 400 here
 	// (before claiming the in-flight slot), never a dangling token sent to the agent.
+	// The browser send path deliberately does NOT expand: see startHeadlessTurn.
 	text, err := d.expandPrompt(req.Text)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if status, err := d.startHeadlessTurn(thread, text, req.Mode, req.Model); err != nil {
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "started": req.ID})
+}
+
+// startHeadlessTurn runs every gate a headless turn needs, claims the thread's
+// single in-flight slot, and launches the turn in the background. It returns an
+// HTTP status with a loud error and claims NOTHING on refusal.
+//
+// It is the shared core of `thread send-headless` and the browser send_headless
+// action. text is used VERBATIM: each caller decides whether @blob() expansion
+// applies first (the CLI/agent path expands; the browser path does not, because
+// the browser attachment subsystem is a separate bounded transfer and must not
+// gain a second path-shaped surface through prompt text).
+func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelOverride string) (int, error) {
+	threadID := thread.ID
+	if !api.HasConversation(thread.AgentKind) {
+		return http.StatusConflict, errors.New(nodeRefusal(thread, "send-headless"))
+	}
+	// Unified model: a headless turn is valid on any IDLE thread — including one
+	// that previously ran headed (its conversation resumes per-turn). A LIVE pane
+	// owns the conversation, so a concurrent headless turn would fork it: loud 409.
+	if _, found, err := d.tmux.FindPaneByThreadID(threadID); err == nil && found {
+		return http.StatusConflict, errors.New("thread has a live pane — send into the pane (thread send), or stop it first")
+	}
 
 	// Refuse to overlap turns (two concurrent resumes of one session fork the
 	// conversation) — a loud conflict, not a silent race.
 	d.hlMu.Lock()
-	if d.hlInFlight[req.ID] {
+	if d.hlInFlight[threadID] {
 		d.hlMu.Unlock()
-		writeError(w, http.StatusConflict, "a turn is already in flight for this thread")
-		return
+		return http.StatusConflict, errors.New("a turn is already in flight for this thread")
 	}
-	d.hlInFlight[req.ID] = true
+	d.hlInFlight[threadID] = true
 	d.hlMu.Unlock()
-
-	turnMode, err := d.resolveSpawnMode(agents.Kind(thread.AgentKind), req.Mode)
-	if err != nil {
+	releaseSlot := func() {
 		d.hlMu.Lock()
-		delete(d.hlInFlight, req.ID)
+		delete(d.hlInFlight, threadID)
 		d.hlMu.Unlock()
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	}
+
+	turnMode, err := d.resolveSpawnMode(agents.Kind(thread.AgentKind), modeOverride)
+	if err != nil {
+		releaseSlot()
+		return http.StatusBadRequest, err
 	}
 
 	codexHome := ""
@@ -124,11 +142,8 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		// `codex exec` does not start the shared daemon itself, but it must not find
 		// one a hand-started codex left enabled either (sesh#15).
 		if err := d.ensureCodexNoDaemon(codexHome, "headless turn"); err != nil {
-			d.hlMu.Lock()
-			delete(d.hlInFlight, req.ID)
-			d.hlMu.Unlock()
-			writeError(w, http.StatusInternalServerError, "send-headless: "+err.Error())
-			return
+			releaseSlot()
+			return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", err)
 		}
 	}
 
@@ -140,31 +155,23 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 	// loud N/A. Sessions claimed by OTHER threads are never discovered.
 	sessionID, started := thread.AgentSessionID, thread.HeadlessStarted
 	if thread.AgentKind == string(agents.Codex) && started && sessionID == "" {
-		releaseSlot := func() {
-			d.hlMu.Lock()
-			delete(d.hlInFlight, req.ID)
-			d.hlMu.Unlock()
-		}
-		claimed, err := d.claimedAgentSessions(req.ID)
+		claimed, err := d.claimedAgentSessions(threadID)
 		if err != nil {
 			releaseSlot()
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+			return http.StatusInternalServerError, err
 		}
 		discovered, found, err := agents.DiscoverCodexSession(codexHome, thread.Cwd, thread.CreatedAtUnix, claimed)
 		if err != nil {
 			releaseSlot()
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+			return http.StatusInternalServerError, err
 		}
 		if !found {
 			releaseSlot()
-			writeError(w, http.StatusUnprocessableEntity,
-				"send-headless: codex thread has no session id (no turn has ever run) — nothing to continue (N/A)")
-			return
+			return http.StatusUnprocessableEntity,
+				errors.New("send-headless: codex thread has no session id (no turn has ever run) — nothing to continue (N/A)")
 		}
 		sessionID = discovered
-		d.store.SetThreadAgentSession(req.ID, sessionID) //nolint:errcheck
+		d.store.SetThreadAgentSession(threadID, sessionID) //nolint:errcheck
 	}
 
 	// A claude conversation that compacted between turns lives in a NEW <id>.jsonl;
@@ -174,40 +181,34 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		homes := agents.ResolveHomes(d.cfg.CodexHome)
 		resolved, rerr := agents.ResolveCurrentSession(agents.Claude, sessionID, thread.Cwd, homes)
 		if rerr != nil {
-			d.hlMu.Lock()
-			delete(d.hlInFlight, req.ID)
-			d.hlMu.Unlock()
-			writeError(w, http.StatusInternalServerError, "send-headless: resolve current session: "+rerr.Error())
-			return
+			releaseSlot()
+			return http.StatusInternalServerError, fmt.Errorf("send-headless: resolve current session: %w", rerr)
 		}
 		sessionID = resolved
 	}
 
 	// The per-turn model override (send-headless --model) wins for THIS turn only;
 	// otherwise the thread's pinned model applies (both '' = the agent default).
-	turnModel := req.Model
+	turnModel := modelOverride
 	if turnModel == "" {
 		turnModel = thread.Model
 	}
 
 	transferInbox := ""
 	transferSocket := ""
-	if thread.AgentKind == string(agents.Pi) {
+	if piFamily(thread.AgentKind) {
 		var transferErr error
-		transferInbox, transferErr = d.transfers.Inbox(req.ID)
+		transferInbox, transferErr = d.transfers.Inbox(threadID)
 		if transferErr != nil {
-			d.hlMu.Lock()
-			delete(d.hlInFlight, req.ID)
-			d.hlMu.Unlock()
-			writeError(w, http.StatusInternalServerError, "send-headless: prepare Pi transfer inbox: "+transferErr.Error())
-			return
+			releaseSlot()
+			return http.StatusInternalServerError, fmt.Errorf("send-headless: prepare Pi transfer inbox: %w", transferErr)
 		}
 		transferSocket = d.cfg.SocketPath()
 	}
 
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
-			Kind: agents.Kind(thread.AgentKind), ThreadID: req.ID, SessionID: sessionID,
+			Kind: agents.Kind(thread.AgentKind), ThreadID: threadID, SessionID: sessionID,
 			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
 			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(),
 			TransferInbox: transferInbox, TransferAPISocket: transferSocket,
@@ -218,7 +219,7 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 			// long as the turn is.
 			OnStart: func(pid int) {
 				d.hlMu.Lock()
-				d.turnPID[req.ID] = pid
+				d.turnPID[threadID] = pid
 				d.hlMu.Unlock()
 			},
 		})
@@ -229,26 +230,26 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		// identity that outlived its turn would be the stale-id bug in a new
 		// costume. Keep these two lines adjacent — a separate cleanup elsewhere is
 		// exactly how they would drift apart.
-		delete(d.hlInFlight, req.ID)
-		delete(d.turnPID, req.ID)
+		delete(d.hlInFlight, threadID)
+		delete(d.turnPID, threadID)
 		if runErr == nil {
-			d.hlReply[req.ID] = reply
+			d.hlReply[threadID] = reply
 		} else {
-			d.hlReply[req.ID] = "ERROR: " + runErr.Error()
+			d.hlReply[threadID] = "ERROR: " + runErr.Error()
 		}
 		d.hlMu.Unlock()
 
 		if runErr == nil {
 			// Persist the (possibly newly discovered) session id + started flag.
-			d.store.SetHeadlessSession(req.ID, newSessionID) //nolint:errcheck
+			d.store.SetHeadlessSession(threadID, newSessionID) //nolint:errcheck
 			// Deterministic subscription delivery: the daemon RAN this turn, so
 			// it knows precisely when it completed — trigger delivery directly
 			// instead of waiting for the eventer to (maybe) catch the busy→idle
 			// edge between its polling ticks. The Tracker dedups on the reply
 			// count, so the eventer path firing too is harmless. (Pane turns,
 			// which the daemon does NOT run, still rely on the eventer.)
-			if th, gerr := d.store.GetThread(req.ID); gerr == nil {
-				if sn, ok := d.maint.stateOf(req.ID); ok {
+			if th, gerr := d.store.GetThread(threadID); gerr == nil {
+				if sn, ok := d.maint.stateOf(threadID); ok {
 					d.deliverSubscriptions(sn)
 				} else {
 					d.deliverSubscriptions(api.ThreadSnapshot{Thread: th, Head: api.Headless, Busy: api.BusyIdle})
@@ -256,12 +257,12 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 			}
 			// A scheduled spawn's headless run ends here, deterministically.
 			if d.sched != nil {
-				d.sched.onHeadlessDone(req.ID)
+				d.sched.onHeadlessDone(threadID)
 			}
 		}
 	}()
 
-	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "started": req.ID})
+	return http.StatusOK, nil
 }
 
 func (d *Daemon) handleThreadHeadlessReply(w http.ResponseWriter, r *http.Request) {

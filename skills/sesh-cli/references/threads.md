@@ -150,6 +150,10 @@ sesh thread adopt --name here --session-id <conversation-uuid> # explicit id
 # so --agent and --session-id are REQUIRED (nothing to detect them from); --cwd
 # defaults to '.'. A later `send-headless` RESUMES that conversation:
 sesh thread adopt --name corkboard --agent claude --session-id <conversation-uuid> --cwd ~/dev/corkboard
+# --agent accepts mypi here. PANE adopt depends on the packaging: the frozen mypi
+# copy presents comm/argv0 `mypi` and is detected as mypi, but the plain source
+# fork presents `pi`, so such a pane is recorded as `pi` and a later resume
+# launches `pi`. Re-create the thread with --agent mypi if that matters.
 
 # Spawn on another machine (real cross-machine spawn over the mesh):
 sesh thread new --agent claude --name x --cwd '~/proj' --machine macbook

@@ -332,13 +332,144 @@ type BrowserThreadCreateRequest struct {
 
 // BrowserThreadActionRequest is a narrow tagged union over existing Sesh verbs.
 // Fields not used by Action are rejected by the daemon.
+//
+// Text/RequestID/OnTyping belong to the `send` and `send_headless` actions:
+// RequestID is a caller-minted UUID that makes a retry idempotent within the
+// owner's bounded recovery window, and OnTyping selects the live-pane typing
+// policy ("defer", the default, or "skip"). The guard is never bypassed.
 type BrowserThreadActionRequest struct {
-	ThreadID string   `json:"thread_id"`
-	Action   string   `json:"action"`
-	Name     *string  `json:"name,omitempty"`
-	Add      []string `json:"add,omitempty"`
-	Remove   []string `json:"remove,omitempty"`
-	Parent   *string  `json:"parent,omitempty"`
-	Archived *bool    `json:"archived,omitempty"`
-	Force    *bool    `json:"force,omitempty"`
+	ThreadID  string   `json:"thread_id"`
+	Action    string   `json:"action"`
+	Name      *string  `json:"name,omitempty"`
+	Add       []string `json:"add,omitempty"`
+	Remove    []string `json:"remove,omitempty"`
+	Parent    *string  `json:"parent,omitempty"`
+	Archived  *bool    `json:"archived,omitempty"`
+	Force     *bool    `json:"force,omitempty"`
+	Text      *string  `json:"text,omitempty"`
+	RequestID string   `json:"request_id,omitempty"`
+	OnTyping  string   `json:"on_typing,omitempty"`
+	Model     string   `json:"model,omitempty"`
+}
+
+// --- Sesh-owned basic display projection (capability browser.display-v1) ---
+
+// BrowserDisplayTool is one bounded tool interaction inside a display item. A
+// call carries Name/Input, a result carries Output/IsError, and CallID is the
+// harness's own correlation id where it has one.
+type BrowserDisplayTool struct {
+	CallID          string `json:"call_id,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Input           string `json:"input,omitempty"`
+	InputTruncated  bool   `json:"input_truncated,omitempty"`
+	Output          string `json:"output,omitempty"`
+	OutputTruncated bool   `json:"output_truncated,omitempty"`
+	IsError         bool   `json:"is_error,omitempty"`
+}
+
+// BrowserDisplayItem is one projected native conversation record.
+//
+// ID is stable for an append-only session file: the harness's own record id
+// where it has one, else "L<seq>". Seq is the zero-based source line index and
+// the ordering key. NativeType/NativeSubtype are the record's own type words, so
+// a client can label a system record without the daemon synthesizing prose.
+// AtUnixMS is omitted when the native record carries no timestamp. Injected
+// marks a user-role record the HARNESS authored (codex context messages, claude
+// isMeta records); nothing is hidden on its account.
+type BrowserDisplayItem struct {
+	ID                string               `json:"id"`
+	Seq               int                  `json:"seq"`
+	Role              string               `json:"role"`
+	NativeType        string               `json:"native_type,omitempty"`
+	NativeSubtype     string               `json:"native_subtype,omitempty"`
+	AtUnixMS          int64                `json:"at_unix_ms,omitempty"`
+	Text              string               `json:"text,omitempty"`
+	TextTruncated     bool                 `json:"text_truncated,omitempty"`
+	Thinking          string               `json:"thinking,omitempty"`
+	ThinkingTruncated bool                 `json:"thinking_truncated,omitempty"`
+	Tools             []BrowserDisplayTool `json:"tools,omitempty"`
+	ToolsDropped      int                  `json:"tools_dropped,omitempty"`
+	Injected          bool                 `json:"injected,omitempty"`
+}
+
+// BrowserDisplayCoverage states exactly what produced a display page.
+//
+// Source is always one resolved native session file; Format names that file's
+// native format. StartLine is the first item's source line and EndLine the last
+// one's plus one (both 0 on an empty page). Complete means every projected item
+// in the FILE is in this page — never a claim that the file holds an agent's
+// complete logical branch history. ByteLimited means the retained-byte budget,
+// not the item limit, bounded the page. SkippedRecords counts parsed records
+// with no conversation content (claude attachment/api-request lines, codex's
+// duplicate item_completed events, pi model_change); UnparsedLines counts lines
+// the decoder could not read at all, including a partial final write.
+type BrowserDisplayCoverage struct {
+	Source         string `json:"source"`
+	Format         string `json:"format"`
+	Path           string `json:"path"`
+	RequestedLimit int    `json:"requested_limit"`
+	Direction      string `json:"direction"`
+	StartLine      int    `json:"start_line"`
+	EndLine        int    `json:"end_line"`
+	TotalLines     int    `json:"total_lines"`
+	Complete       bool   `json:"complete"`
+	ByteLimited    bool   `json:"byte_limited"`
+	SkippedRecords int    `json:"skipped_records"`
+	UnparsedLines  int    `json:"unparsed_lines"`
+}
+
+// BrowserDisplayResponse is one bounded page of the Sesh-owned basic display
+// projection over a thread's own conversation file.
+//
+// Source is the literal "sesh-display-v1": this is Sesh's own projection, not a
+// harness-owned history contract. For pi/mypi, Pi's pi.session-history remains
+// the authority for rich history; this route is the common basic view that also
+// covers claude and codex, live, headless-idle and stopped.
+//
+// NewerCursor is ALWAYS present and is the forward-poll token. OlderCursor is
+// present only when projected items exist before the returned window. Cursors
+// are opaque and bound to this thread's current resolved source file: a rotated
+// native session (claude compaction) refuses the old cursor loudly rather than
+// paging a different file.
+type BrowserDisplayResponse struct {
+	Schema       int                    `json:"schema"`
+	ID           string                 `json:"id"`
+	OwnerMachine string                 `json:"owner_machine"`
+	Source       string                 `json:"source"`
+	Agent        string                 `json:"agent"`
+	TurnStatus   string                 `json:"turn_status"`
+	Items        []BrowserDisplayItem   `json:"items"`
+	Coverage     BrowserDisplayCoverage `json:"coverage"`
+	NewerCursor  string                 `json:"newer_cursor"`
+	OlderCursor  string                 `json:"older_cursor,omitempty"`
+}
+
+// --- Browser send actions (capability browser.send-v1) ---
+
+// The explicit outcomes of a browser send. `sent` means the delivery left Sesh,
+// NOT that the agent finished (or even started) a turn.
+const (
+	BrowserSendSent          = "sent"
+	BrowserSendDeferred      = "deferred"
+	BrowserSendSkippedTyping = "skipped_typing"
+	BrowserSendRefusedBusy   = "refused_busy"
+	BrowserSendRefusedDead   = "refused_dead"
+	BrowserSendUncertain     = "uncertain"
+)
+
+// BrowserSendResponse is the outcome of a `send` or `send_headless` browser
+// action. Replayed reports that RequestID was already recorded and this is the
+// stored outcome rather than a second delivery. Detail carries the daemon's own
+// reason, so an explicit refusal keeps its exact cause.
+type BrowserSendResponse struct {
+	Schema       int    `json:"schema"`
+	ThreadID     string `json:"thread_id"`
+	OwnerMachine string `json:"owner_machine"`
+	Action       string `json:"action"`
+	RequestID    string `json:"request_id"`
+	Outcome      string `json:"outcome"`
+	Detail       string `json:"detail,omitempty"`
+	Replayed     bool   `json:"replayed"`
+	InputAgoSec  int64  `json:"input_ago_sec,omitempty"`
+	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
 }

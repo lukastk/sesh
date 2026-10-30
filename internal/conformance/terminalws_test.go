@@ -57,11 +57,11 @@ func TestThreadTerminalWebSocket(t *testing.T) {
 	}
 
 	// Loud errors (cheap).
-	if got := dialStatus(wsURL + "?id=deadbeef-nope"); got != http.StatusNotFound {
+	if got := dialStatus(wsURL + "?id=00000000-0000-4000-8000-000000000099"); got != http.StatusNotFound {
 		t.Errorf("unknown id: status %d, want 404", got)
 	}
 
-	// Query-token auth (the WebView/browser path; a WS handshake can't set headers).
+	// Legacy query-token auth remains for compatibility; new browser clients use tickets.
 	// Dial with NO Authorization header — auth must come from ?token= alone.
 	noHdrDial := func(url, tok string) int {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -80,7 +80,7 @@ func TestThreadTerminalWebSocket(t *testing.T) {
 		}
 		return resp.StatusCode
 	}
-	if got := noHdrDial(wsURL+"?id=deadbeef-nope&token="+token, ""); got != http.StatusNotFound {
+	if got := noHdrDial(wsURL+"?id=00000000-0000-4000-8000-000000000099&token="+token, ""); got != http.StatusNotFound {
 		t.Errorf("query token (good): status %d, want 404 (authenticated, unknown id)", got)
 	}
 	if got := noHdrDial(wsURL+"?id=anything&token=wrong-query-token", ""); got != http.StatusUnauthorized {

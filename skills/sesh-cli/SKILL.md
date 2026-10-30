@@ -42,8 +42,50 @@ Read only the reference for the task, not the whole manual.
   backstop. Archiving a THREAD archives the active message schedules aimed at it.
 - **Route for real:** `--machine <m>` uses SSH or peer HTTP, not a cosmetic field;
   HTTP routing needs the local daemon. Check owner/reachability with `mesh`/`info`.
-  Quote owner-home paths: `--cwd '~/proj'` reaches the remote home; unquoted `~`
-  expands in the caller's shell. Relative paths expand locally.
+  The TCP API never exposes generic `/v1/route`. Cross-peer browser operations require
+  explicit `[browser_hub]` opt-in plus a trusted HTTP-peer allowlist; otherwise browser
+  endpoints are local-owner-only. Browser Fetch access additionally requires an exact
+  `[browser_api].allowed_origins` entry; it defaults empty and grants CORS only to fixed
+  browser/ticket routes. Preflight does not weaken bearer authentication; generic, Unix-only,
+  and runtime routes never receive CORS headers. Quote owner-home paths: `--cwd '~/proj'` reaches
+  the remote home; unquoted `~` expands in the caller's shell. Relative paths expand locally.
+  Browser terminal tickets are exact URLs: do not append dimensions. Open at 120×32 and
+  send the authenticated terminal-v1 resize control frame immediately after connection.
+  Stopped Pi semantic history is owner-routed through Pi's metadata-only history protocol;
+  browser callers never provide session paths, and older Pi fails explicitly with no raw fallback.
+  Stopped Pi artifact metadata and inline bytes use separate owner-routed native artifact
+  CLIs: metadata remains distinct from history v1, and whole bytes are buffered and verified
+  before HTTP success. Browser callers provide only thread/publication IDs, never paths.
+- Canonical stopped input media is separate again: browser thread pages advertise
+	`browser.stored-input-media-v1`, presentation and metadata preserve Pi's own protocols and
+	cursors, and stopped GET/HEAD bytes use only the native session-file CLI. The distinct
+	`browser.stored-media-presentation-v2` token gates `GET /v1/browser/threads/media-presentation`,
+	which invokes only `pi.session-presentation` version 2 with the fixed native version flag and
+	returns canonical input plus direct tool-result output references. The input-only presentation
+	route remains version 1. Unsupported or malformed v2 owners fail explicitly; Sesh never retries
+	v1, revives the agent, or switches to a live source. Output bytes remain on the existing verified
+	artifact metadata/byte and managed-download routes. The additive `browser.live-input-media-v1`
+	token means the input-image byte URL can route an active Pi runtime only through its native-owned
+	`.input.sock` bridge. Sesh resolves the exact atomic marker target plus `input_image_reader`
+	listener generation, sends neither to the browser, buffers and independently verifies the whole
+	private response, and revalidates owner/session/runtime/target/generation before success. Active
+	reads never fall back to stopped files; stopped reads never use the bridge. All media responses
+	are private/no-store; input bytes reject ranges and preserve legacy computed-only digest semantics.
+	`pi.session-history` v1 remains unchanged, and socket image submission stays disabled until joined activation.
+  Browser attachments use bounded owner-routed HTTP chunks and exact-target opaque Pi leases;
+  attachment names are UTF-8 basenames and reject literal `.` and `..`. Transfer-capable Sesh
+  launches replace the all-or-none `SESH_PI_TRANSFER_THREAD_ID`, `SESH_PI_TRANSFER_INBOX`, and
+  `SESH_PI_TRANSFER_API_SOCKET` triple from one authoritative thread UUID rather than inherited
+  `SESH_THREAD_ID`. They never reuse legacy blob/stage semantics, browser paths, or WebSocket
+  binary frames. Managed output downloads require explicit Unix-local artifact publication,
+  never path scraping.
+  Owner and hub GET/HEAD/range responses impose exact `Cache-Control: private, no-store`; this
+  download policy does not depend on an `Origin` header and never trusts a peer cache directive.
+  Native output publications use a separate Sesh-owned durable mapping: Unix-local producers
+  resolve one authoritative `(thread, native session, publication)` key, upload or fail it, and
+  authenticated browsers batch-query only those IDs through the owner. Mapping state is monotonic;
+  same-session runtime rotation may finish the original immutable artifact target, while an older
+  session is refused. Current lifecycle operations never move one thread UUID between owners.
 - **Delivery:** live Pi `thread send` is **literal RPC steering**, even `/compact`;
   it preserves drafts and waits for running tools. Commands use `thread command`.
   No paste fallback, automatic reload, or blind retry after uncertain ACKs.

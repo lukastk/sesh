@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -149,11 +151,10 @@ func noAPIWarning(apiAddr, threadID string) string {
 }
 
 // startAPI starts the optional TCP API listener — the network surface for remote
-// clients (mobile / Obsidian) and direct cross-machine access. It serves the
-// IDENTICAL full router as the unix socket, wrapped in bearer-token auth, so the
-// network API has complete parity with the local one BY CONSTRUCTION (every
-// endpoint is exposed; there is no second, partial surface to drift). It refuses to
-// expose an unauthenticated API. No-op unless SESH_API_ADDR is set.
+// clients (mobile / Obsidian) and direct cross-machine access. It serves the regular
+// daemon router behind bearer-token auth. The generic /v1/route proxy is deliberately
+// added only by unixRoutes; browser-hub endpoints expose only their fixed allowlist.
+// It refuses to expose an unauthenticated API. No-op unless SESH_API_ADDR is set.
 //
 // A missing token is a MISCONFIGURATION → fatal. But the bind itself is retried in
 // the background (serveAPIWithRetry), because the common failure is TRANSIENT: at
@@ -171,7 +172,7 @@ func (d *Daemon) startAPI() error {
 	if d.cfg.APIToken == "" {
 		return fmt.Errorf("daemon: SESH_API_ADDR=%q is set but no SESH_API_TOKEN — refusing to expose an unauthenticated network API", d.cfg.APIAddr)
 	}
-	d.apiSrv = &http.Server{Handler: tokenAuth(d.cfg.APIToken, d.routes())}
+	d.apiSrv = &http.Server{Handler: d.browserCORS(d.tokenAuth(d.cfg.APIToken, d.routes()))}
 	d.apiStop = make(chan struct{})
 	go d.serveAPIWithRetry()
 	return nil
@@ -221,49 +222,44 @@ func (d *Daemon) stopAPI(ctx context.Context) {
 	}
 }
 
-// wsTokenRoutes are the WebSocket upgrade endpoints that ALSO accept the bearer
-// token via a `?token=` query param (see tokenAuth). A browser/WebView WebSocket
-// cannot set request headers on the handshake, so the query param is the standard
-// way to authenticate it. Kept to exactly the two streaming routes — the rest of the
-// API is header-only.
+// wsTokenRoutes are the WebSocket upgrade endpoints that retain legacy bearer-token
+// query authentication. New browser clients mint a scoped ?ticket= instead.
 var wsTokenRoutes = map[string]bool{
 	"/v1/threads/rpc":      true,
 	"/v1/threads/terminal": true,
 }
 
-// tokenAuth requires a valid bearer token on every request, compared in constant
-// time (no length/timing oracle). The token is normally supplied as
-// `Authorization: Bearer <token>`. For the two WebSocket routes in wsTokenRoutes it
-// MAY ALSO be supplied as a `?token=<token>` query param, because a browser/WebView
-// WebSocket handshake cannot carry custom headers (the only way the Android app and
-// any browser client can authenticate the rpc/terminal sockets).
-//
-// SECURITY TRADE-OFF: a token in the query string can leak where a header does not —
-// access logs, proxy logs, browser history. We accept this NARROWLY: it is enabled
-// only for the two WS upgrade routes (never the general HTTP API), and the TCP API is
-// designed to live behind Tailscale (a private, authenticated network) where the only
-// thing that could log the URL is the daemon itself. This is the same trade-off every
-// browser-WebSocket-with-auth deployment makes; the header path is unchanged and
-// preferred wherever headers are possible.
-//
-// The unix socket is exempt from auth entirely (local trust); only the TCP listener
-// is wrapped.
-func tokenAuth(token string, next http.Handler) http.Handler {
+// tokenAuth protects the TCP listener. Ordinary HTTP remains header-only. The two
+// legacy WS routes still accept ?token= for compatibility; a scoped ?ticket= is
+// independently consumed and bound to its exact path/thread/protocol/owner.
+type browserAuthorityContextKey struct{}
+
+func (d *Daemon) tokenAuth(token string, next http.Handler) http.Handler {
 	want := []byte("Bearer " + token)
 	wantQuery := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := []byte(r.Header.Get("Authorization"))
 		ok := subtle.ConstantTimeEq(int32(len(got)), int32(len(want))) == 1 &&
 			subtle.ConstantTimeCompare(got, want) == 1
-		// WS upgrade routes additionally accept ?token= (constant-time, same as the header).
+		headerOK := ok
 		if !ok && wsTokenRoutes[r.URL.Path] {
 			q := []byte(r.URL.Query().Get("token"))
 			ok = subtle.ConstantTimeEq(int32(len(q)), int32(len(wantQuery))) == 1 &&
 				subtle.ConstantTimeCompare(q, wantQuery) == 1
 		}
+		if !ok && wsTokenRoutes[r.URL.Path] && len(r.URL.Query()["ticket"]) > 0 {
+			if owner, accepted := d.authenticateWSTicket(r, time.Now()); accepted {
+				r = r.WithContext(context.WithValue(r.Context(), wsOwnerContextKey{}, owner))
+				ok = true
+			}
+		}
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized: a valid bearer token is required")
+			writeError(w, http.StatusUnauthorized, "unauthorized: a valid bearer token or websocket ticket is required")
 			return
+		}
+		if headerOK {
+			sum := sha256.Sum256([]byte(token))
+			r = r.WithContext(context.WithValue(r.Context(), browserAuthorityContextKey{}, "bearer:"+hex.EncodeToString(sum[:16])))
 		}
 		next.ServeHTTP(w, r)
 	})

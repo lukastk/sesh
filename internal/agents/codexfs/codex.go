@@ -118,13 +118,22 @@ func DeriveTurnStatus(lines []Line) TurnStatus {
 // response_item form covers 512/513 files; the one file it misses contains no
 // agent reply at all (an aborted turn), where 0 is the right answer.
 func LastReply(path string) (text string, count int, err error) {
-	r := NewOffsetReader(path)
-	lines, err := r.ReadNew()
+	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", 0, nil
+		}
 		return "", 0, err
 	}
-	for _, l := range lines {
-		if l.Type != "response_item" || l.Payload.Type != "message" || l.Payload.Role != "assistant" {
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		l, ok, perr := ParseLine(sc.Bytes())
+		if perr != nil {
+			break // partial trailing write; preserve the replies parsed before it
+		}
+		if !ok || l.Type != "response_item" || l.Payload.Type != "message" || l.Payload.Role != "assistant" {
 			continue
 		}
 		var b strings.Builder
@@ -137,7 +146,7 @@ func LastReply(path string) (text string, count int, err error) {
 		count++
 		text = b.String()
 	}
-	return text, count, nil
+	return text, count, sc.Err()
 }
 
 // SessionMeta is the {type:"session_meta"} payload subset.

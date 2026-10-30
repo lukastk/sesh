@@ -260,6 +260,14 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	if cascaded > 0 {
 		log.Printf("delete: thread %s took %d message schedule(s) with it", req.ID, cascaded)
 	}
+	if d.transfers != nil {
+		if removed, cleanupErr := d.transfers.DeleteArtifactMappings(req.ID); cleanupErr != nil {
+			writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but managed artifact cleanup failed")
+			return
+		} else if removed > 0 {
+			log.Printf("delete: thread %s took %d durable artifact mapping(s) with it", req.ID, removed)
+		}
+	}
 	writeJSON(w, http.StatusOK, api.DeleteThreadResponse{Schema: api.SchemaVersion, Deleted: req.ID, SchedulesRemoved: int(cascaded)})
 }
 

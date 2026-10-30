@@ -1,8 +1,10 @@
 package claude
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 )
 
@@ -51,16 +53,28 @@ func (l Line) AssistantText() string {
 // landed after `tmux send-keys` (exp14, the attached path) — distinguishing a
 // fresh turn's answer from the previous turn's last message.
 func LastReply(path string) (text string, count int, err error) {
-	r := NewOffsetReader(path)
-	lines, err := r.ReadNew()
+	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", 0, nil
+		}
 		return "", 0, err
 	}
-	for _, l := range lines {
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		l, ok, perr := ParseLine(sc.Bytes())
+		if perr != nil {
+			break // partial trailing write; preserve the replies parsed before it
+		}
+		if !ok {
+			continue
+		}
 		if t := l.AssistantText(); t != "" {
 			count++
 			text = t
 		}
 	}
-	return text, count, nil
+	return text, count, sc.Err()
 }

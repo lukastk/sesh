@@ -190,11 +190,27 @@ func (d *Daemon) handleThreadSendHeadless(w http.ResponseWriter, r *http.Request
 		turnModel = thread.Model
 	}
 
+	transferInbox := ""
+	transferSocket := ""
+	if thread.AgentKind == string(agents.Pi) {
+		var transferErr error
+		transferInbox, transferErr = d.transfers.Inbox(req.ID)
+		if transferErr != nil {
+			d.hlMu.Lock()
+			delete(d.hlInFlight, req.ID)
+			d.hlMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "send-headless: prepare Pi transfer inbox: "+transferErr.Error())
+			return
+		}
+		transferSocket = d.cfg.SocketPath()
+	}
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
 			Kind: agents.Kind(thread.AgentKind), ThreadID: req.ID, SessionID: sessionID,
 			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
 			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(),
+			TransferInbox: transferInbox, TransferAPISocket: transferSocket,
 			// The turn's root pid is this daemon's evidence that a process asking
 			// "who am I?" really is the worker it launched — the only verified
 			// identity a pane-less turn can have. Registered under the same lock as

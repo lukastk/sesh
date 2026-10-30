@@ -107,3 +107,56 @@ func TestTurnEnvCodexHome(t *testing.T) {
 		t.Errorf("CODEX_HOME = %q, want the inherited value untouched", v)
 	}
 }
+
+func TestPiTransferEnvReplacesHostileInheritedTripleFromAuthoritativeThread(t *testing.T) {
+	threadID := "11111111-1111-4111-8111-111111111111"
+	base := []string{
+		EnvThreadID + "=hostile-stale-general-thread",
+		EnvPiTransferThreadID + "=22222222-2222-4222-8222-222222222222",
+		EnvPiTransferInbox + "=/hostile/stale/inbox",
+		EnvPiTransferAPISocket + "=/hostile/stale/socket",
+	}
+	env, err := piTransferEnv(base, threadID, "/authoritative/inbox/"+threadID, "/authoritative/sesh.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		EnvPiTransferThreadID:  threadID,
+		EnvPiTransferInbox:     "/authoritative/inbox/" + threadID,
+		EnvPiTransferAPISocket: "/authoritative/sesh.sock",
+	}
+	for key, value := range want {
+		if countVar(env, key) != 1 {
+			t.Fatalf("%s was not replaced exactly once: %#v", key, env)
+		}
+		if got, _ := valueOf(env, key); got != value {
+			t.Fatalf("%s = %q, want %q", key, got, value)
+		}
+	}
+	if got, _ := valueOf(env, EnvThreadID); got != "hostile-stale-general-thread" {
+		t.Fatalf("test did not retain hostile general identity: %q", got)
+	}
+}
+
+func TestPiTransferEnvIsAllPresentOrAllAbsent(t *testing.T) {
+	stale := []string{
+		EnvPiTransferThreadID + "=22222222-2222-4222-8222-222222222222",
+		EnvPiTransferInbox + "=/hostile/stale/inbox",
+		EnvPiTransferAPISocket + "=/hostile/stale/socket",
+	}
+	env, err := piTransferEnv(stale, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{EnvPiTransferThreadID, EnvPiTransferInbox, EnvPiTransferAPISocket} {
+		if _, ok := valueOf(env, key); ok {
+			t.Fatalf("absent transfer configuration retained inherited %s: %#v", key, env)
+		}
+	}
+	if _, err := piTransferEnv(nil, "11111111-1111-4111-8111-111111111111", "/inbox", ""); err == nil {
+		t.Fatal("partial Pi transfer environment was accepted")
+	}
+	if _, err := piTransferEnv(nil, "not-a-uuid", "/inbox", "/socket"); err == nil {
+		t.Fatal("noncanonical Pi transfer thread identity was accepted")
+	}
+}

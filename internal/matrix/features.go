@@ -328,8 +328,64 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "api.tcp-parity",
-		Description: "the TCP API has FULL parity with the local one (same router): a remote client drives every layer — thread, ticket, tmux, mesh, snapshot — over TCP+token",
+		Description: "the TCP API has parity with the regular local router: a remote client drives every ordinary layer — thread, ticket, tmux, mesh, snapshot — over TCP+token; the generic /v1/route proxy remains Unix-only",
 		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "api.browser-cors",
+		Description: "the TCP listener defaults to no browser origins and grants exact-origin CORS only to a fixed browser/ticket route-method-header table; preflight alone is unauthenticated, actual operations remain bearer-authenticated, and generic route/runtime/legacy surfaces receive no grant",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "api.browser-ws",
+		Description: "header-only minting of bounded 30-second single-use browser WebSocket tickets, strict query/thread/protocol/owner binding with use-time owner revalidation, plus live-v1 Pi RPC bridging to the owner-only .live.sock without legacy auto-subscribe",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
+		ID:          "api.browser-hub.http",
+		Description: "an explicitly enabled browser hub lists trusted HTTP-peer records, reads bounded owner-side native transcript windows for stopped threads, and routes only allowlisted canonical verbs/terminal WebSockets; peer credentials stay server-side and /v1/route remains Unix-only",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
+		ID:          "api.browser-output-mappings",
+		Description: "Sesh durably maps authoritative thread/native-session/publication keys to immutable managed artifacts with write-ahead crash repair, same-session target rotation, durable unavailable/expired tombstones, Unix-only producer mutations, and bounded authenticated owner-routed browser batch queries",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-stored-history",
+		Description: "owner-routed canonical stopped-Pi current-branch history invokes Pi's metadata-only session-history protocol with authoritative Sesh association, bounded argv/process/output, session-id verification, explicit old-Pi refusal, and no raw-history fallback",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-stored-artifacts",
+		Description: "owner-routed canonical stopped-Pi artifact metadata and explicit inline-byte access invoke Pi's separate metadata-only artifact CLIs with authoritative thread/session/file association, whole-byte exit/count/digest validation, bounded subprocess/peer buffering, and no history-v1 change or arbitrary path surface",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-stored-input-media",
+		Description: "owner-routed canonical stopped-Pi presentation, independent input-image metadata, and verified whole-byte reads require exact thread/native-session/image identity, preserve history v1, reject ranges, compute transport digests for legacy images, and perform no runtime initialization or retained-byte writes",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-stored-media-presentation-v2",
+		Description: "owner-routed stopped-Pi media presentation invokes only pi.session-presentation version 2 with exact thread/native-session/file authority, preserves the input-only version-1 route, rejects unsupported or malformed owners distinctly, and never retries v1 or revives the runtime",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-live-input-media",
+		Description: "the existing authenticated browser input-image GET/HEAD route selects only the native-owned HTTP-over-Unix bridge for active Pi runtimes, resolves exact marker target and listener generation server-side, independently buffers and verifies whole bytes, revalidates owner/session/runtime/marker authority, and never falls back to stopped files",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "api.browser-transfers",
+		Description: "bounded owner-routed durable attachment chunks, exact session/request leases through a Sesh-injected Pi inbox, Unix-only typed artifact publication, authenticated managed downloads, global durable-storage quotas, expiry cleanup, and no binary WebSocket or arbitrary path surface",
+		Agents:      []Agent{Pi},
+		Localities:  bothLoc,
 	})
 	Register(Feature{
 		ID:          "thread.resolve-pane",

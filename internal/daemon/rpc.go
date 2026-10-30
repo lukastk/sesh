@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 
 	"github.com/coder/websocket"
-
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/store"
 )
@@ -20,13 +19,16 @@ func (d *Daemon) routesRPC(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/threads/rpc", d.handleThreadRPC)
 }
 
-// piRPCSocketPath resolves the unix socket a pi thread's `rpc-socket` extension
-// opened for its session. The extension creates it under the first of $TMPDIR,
-// /tmp, /var/tmp whose path fits the sun_path limit; we look in the same order and
-// return the first that actually exists as a socket. Empty sessionID (codex before
-// its first turn, or a thread that never started) resolves to nothing — loudly.
+// piRPCSocketPath preserves the protocol-2 lookup used by headed Pi delivery.
 func piRPCSocketPath(sessionID string) (string, bool) {
-	if sessionID == "" {
+	return piRPCSocketPathWithSuffix(sessionID, ".sock")
+}
+
+// piRPCSocketPathWithSuffix resolves a protocol-specific Pi socket. Both the
+// thread's Pi session id and its filename are UUID-derived; no caller text is
+// joined into a socket path without validation.
+func piRPCSocketPathWithSuffix(sessionID, suffix string) (string, bool) {
+	if !validCanonicalUUID(sessionID) {
 		return "", false
 	}
 	var dirs []string
@@ -35,7 +37,7 @@ func piRPCSocketPath(sessionID string) (string, bool) {
 	}
 	dirs = append(dirs, "/tmp", "/var/tmp")
 	for _, dir := range dirs {
-		p := filepath.Join(dir, "pi-rpc-sockets", sessionID+".sock")
+		p := filepath.Join(dir, "pi-rpc-sockets", sessionID+suffix)
 		if fi, err := os.Stat(p); err == nil && fi.Mode()&os.ModeSocket != 0 {
 			return p, true
 		}
@@ -43,21 +45,24 @@ func piRPCSocketPath(sessionID string) (string, bool) {
 	return "", false
 }
 
-// handleThreadRPC bridges a pi thread's live `rpc-socket` to a WebSocket: the client
-// gets the structured, token-streaming pi protocol (subscribe -> text_delta/tool/
-// agent_end; {"message":…} injects a steer into the LIVE conversation), so a GUI can
-// render a streaming chat for a pi thread — headful OR headless — over the daemon API,
-// cross-machine, with no tmux attach. This is the daemon-native version of the relay
-// prototyped in _dev/experiments/05_rpc_relay.
-//
-// pi-only by construction (claude/codex expose no equivalent live interface); a non-pi
-// thread, an unknown id, or a thread with no live socket is a LOUD HTTP error before any
-// upgrade — never a silent empty stream. On the TCP API this route inherits the daemon's
-// bearer-token auth (the wrapping handler); the unix socket is local-trust as everywhere.
+// handleThreadRPC preserves the legacy protocol-2 bridge and adds live-v1.
+// Empty protocol (the historical URL) and protocol2 route to <session>.sock and
+// auto-subscribe exactly as before. live-v1 routes to <session>.live.sock and
+// writes nothing implicitly: the browser speaks the published JSONL protocol.
 func (d *Daemon) handleThreadRPC(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "rpc: id is required")
+	if !validCanonicalUUID(id) {
+		writeError(w, http.StatusBadRequest, "rpc: id must be a canonical UUID")
+		return
+	}
+	protocol := r.URL.Query().Get("protocol")
+	legacy := protocol == "" || protocol == "protocol2"
+	if !legacy && protocol != "live-v1" {
+		writeError(w, http.StatusBadRequest, "rpc: unknown protocol "+protocol+" (want protocol2 or live-v1)")
+		return
+	}
+	if owner := wsOwnerFromContext(r.Context()); owner != "" && owner != d.cfg.Machine {
+		d.proxyBrowserWebSocket(w, r, owner)
 		return
 	}
 	th, err := d.store.GetThread(id)
@@ -73,22 +78,26 @@ func (d *Daemon) handleThreadRPC(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "rpc: only pi threads expose an rpc socket (this thread is "+th.AgentKind+")")
 		return
 	}
-	sockPath, ok := piRPCSocketPath(th.AgentSessionID)
+	if !validCanonicalUUID(th.AgentSessionID) {
+		writeError(w, http.StatusConflict, "rpc: thread has no valid canonical Pi session UUID")
+		return
+	}
+	suffix := ".sock"
+	if protocol == "live-v1" {
+		suffix = ".live.sock"
+	}
+	sockPath, ok := piRPCSocketPathWithSuffix(th.AgentSessionID, suffix)
 	if !ok {
-		writeError(w, http.StatusConflict, "rpc: no live pi rpc socket for thread "+id+" (not running, or the rpc-socket extension is not loaded)")
+		writeError(w, http.StatusConflict, "rpc: no live Pi "+protocolName(protocol)+" socket for thread "+id)
 		return
 	}
 
-	// Auth (on TCP) is already enforced by the wrapping tokenAuth handler. Origin is
-	// NOT a trust signal here — the bearer token is — so skip the origin check (a browser
-	// connecting from the app's origin would otherwise be rejected on host mismatch).
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		return // Accept already wrote the failure response.
+		return
 	}
-	defer c.CloseNow() //nolint:errcheck — best-effort
-	c.SetReadLimit(1 << 20)
-
+	defer c.CloseNow() //nolint:errcheck
+	c.SetReadLimit(liveRPCMaxRecord)
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		c.Close(websocket.StatusInternalError, "pi rpc socket dial failed") //nolint:errcheck
@@ -96,16 +105,29 @@ func (d *Daemon) handleThreadRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close() //nolint:errcheck
 
-	// Auto-subscribe so the client receives the event stream without a round-trip.
+	if protocol == "live-v1" {
+		bridgeLiveJSONL(r.Context(), c, conn)
+		return
+	}
+	bridgeLegacyPiRPC(r.Context(), c, conn)
+}
+
+func protocolName(protocol string) string {
+	if protocol == "live-v1" {
+		return "live-v1"
+	}
+	return "protocol2"
+}
+
+// bridgeLegacyPiRPC is the pre-schema-55 bridge kept byte-for-byte in semantics:
+// subscribe once, one Unix JSONL line per WS text frame, one WS message per line.
+func bridgeLegacyPiRPC(parent context.Context, c *websocket.Conn, conn net.Conn) {
 	if _, err := conn.Write([]byte(`{"subscribe":true}` + "\n")); err != nil {
 		c.Close(websocket.StatusInternalError, "pi rpc subscribe failed") //nolint:errcheck
 		return
 	}
-
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-
-	// pi socket -> WebSocket: one JSONL line per text frame.
 	go func() {
 		defer cancel()
 		br := bufio.NewReader(conn)
@@ -121,9 +143,6 @@ func (d *Daemon) handleThreadRPC(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-
-	// WebSocket -> pi socket: each client message ({"message":…}/{"abort":true}/…)
-	// becomes one JSONL line. Returning here ends the handler and tears both sides down.
 	for {
 		_, data, rerr := c.Read(ctx)
 		if rerr != nil {

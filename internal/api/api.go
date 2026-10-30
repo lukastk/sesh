@@ -339,7 +339,15 @@ package api
 // ThreadResponse it expects.
 // 53: headed Pi sends use literal RPC messages; /v1/threads/command starts/polls
 // explicit Pi commands. No store migration. Other agents retain terminal delivery.
-const SchemaVersion = 54
+// 54: schedule lifecycle states replace the enabled firing gate.
+// 55: browser API: bounded single-use WebSocket tickets, live-v1 Pi RPC routing,
+// paginated browser thread summaries and the explicit browser-hub operation seam.
+// 56: canonical stopped Pi input-media presentation, metadata and verified-byte
+// browser routes; additive browser.stored-input-media-v1 and browser.live-input-media-v1
+// capability tokens distinguish stopped surfaces from active native-bridge routing.
+// The schema-56 capability list also negotiates additive stopped media-presentation v2
+// without changing the global envelope schema or the input-only version-1 route.
+const SchemaVersion = 56
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

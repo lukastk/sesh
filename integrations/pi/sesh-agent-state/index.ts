@@ -11,9 +11,10 @@
  * Transport: each report shells out to `sesh thread report-state` (argv-only,
  * nothing interpolated into a shell string) — the CLI resolves the daemon
  * socket from the inherited environment, so this works identically for the
- * live daemon and for isolated conformance-test daemons. Reports SERIALIZE
- * (one in flight, latest state queued behind it) so the CLI's
- * clock-at-invocation default seq is strictly increasing per thread.
+ * live daemon and for isolated conformance-test daemons. Every report carries
+ * the session id captured from that lifecycle callback's current context.
+ * Reports serialize (one in flight, latest payload queued behind it), so a
+ * replacement session can never be retargeted through a stale context closure.
  *
  * Event mapping (see pi's docs/extensions.md lifecycle):
  * - agent_start            -> turn_started
@@ -38,97 +39,141 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-const THREAD_ID = process.env.SESH_THREAD_ID;
+const DEFAULT_THREAD_ID = process.env.SESH_THREAD_ID;
 // The spawning daemon's own binary (SESH_BIN): pane login shells re-prepend
 // their profile dirs, so a bare PATH `sesh` can resolve to an OLDER installed
 // binary than the daemon that spawned us. Fall back to PATH only when absent
 // (adopted/pre-43 spawns) — a failure there stays visible as the thread
 // remaining state_authority=heuristic.
-const SESH_BIN = process.env.SESH_BIN || "sesh";
+const DEFAULT_SESH_BIN = process.env.SESH_BIN || "sesh";
 const SOURCE = "sesh:pi-ext";
 
 type ReportEvent = "turn_started" | "turn_ended" | "release";
 
-let inFlight = false;
-let queued: ReportEvent | undefined;
-let lastEnqueued: ReportEvent | undefined;
+interface ReportPayload {
+	event: ReportEvent;
+	agentSessionID: string;
+}
 
-function send(ev: ReportEvent): Promise<void> {
+export interface SeshAgentStateDependencies {
+	threadID?: string;
+	seshBin?: string;
+	/** Test seam: argv after the binary, executed without a shell. */
+	runCommand?: (argv: readonly string[]) => Promise<void>;
+}
+
+function runSeshCommand(seshBin: string, argv: readonly string[]): Promise<void> {
 	return new Promise((resolve) => {
 		execFile(
-			SESH_BIN,
-			[
-				"thread",
-				"report-state",
-				"--id",
-				THREAD_ID as string,
-				"--source",
-				SOURCE,
-				"--event",
-				ev,
-			],
+			seshBin,
+			[...argv],
 			{ timeout: 5000 },
 			() => resolve(), // fail-silent: never break pi over a report
 		);
 	});
 }
 
-async function drain(): Promise<void> {
-	if (inFlight) return;
-	inFlight = true;
-	try {
-		while (queued !== undefined) {
-			const ev = queued;
-			queued = undefined;
-			await send(ev);
-		}
-	} finally {
-		inFlight = false;
-		if (queued !== undefined) void drain();
-	}
-}
+/** Build one isolated extension runtime. Exported only for source-level tests. */
+export function createSeshAgentStateExtension(
+	dependencies: SeshAgentStateDependencies = {},
+): (pi: ExtensionAPI) => void {
+	const threadID = dependencies.threadID ?? DEFAULT_THREAD_ID;
+	const seshBin = dependencies.seshBin ?? DEFAULT_SESH_BIN;
+	const runCommand = dependencies.runCommand ?? ((argv) => runSeshCommand(seshBin, argv));
+	let queued: ReportPayload | undefined;
+	let inFlight: Promise<void> | undefined;
+	let lastEnqueuedKey: string | undefined;
 
-/** Queue the CURRENT desired state (latest wins; duplicate states dedupe). */
-function report(ev: ReportEvent): void {
-	if (!THREAD_ID) return;
-	if (ev === lastEnqueued) return;
-	lastEnqueued = ev;
-	queued = ev;
-	void drain();
+	async function send(payload: ReportPayload): Promise<void> {
+		const argv = [
+			"thread",
+			"report-state",
+			"--id",
+			threadID as string,
+			"--source",
+			SOURCE,
+			"--event",
+			payload.event,
+			"--agent-session",
+			payload.agentSessionID,
+		];
+		try {
+			await runCommand(argv);
+		} catch {
+			// An injected/test runner may reject. Production execFile failures resolve
+			// through the callback. Either way, reporting never breaks native Pi.
+		}
+	}
+
+	async function drain(): Promise<void> {
+		while (queued !== undefined) {
+			const payload = queued;
+			queued = undefined;
+			await send(payload);
+		}
+	}
+
+	function ensureDrain(): Promise<void> {
+		if (inFlight === undefined) {
+			inFlight = drain().finally(() => {
+				inFlight = undefined;
+				if (queued !== undefined) void ensureDrain();
+			});
+		}
+		return inFlight;
+	}
+
+	/** Queue the current desired state and its callback-captured session identity. */
+	function report(ev: ReportEvent, ctx: ExtensionContext): Promise<void> {
+		if (!threadID) return Promise.resolve();
+		const payload: ReportPayload = {
+			event: ev,
+			agentSessionID: ctx.sessionManager.getSessionId(),
+		};
+		const key = `${payload.event}\u0000${payload.agentSessionID}`;
+		if (key === lastEnqueuedKey) return inFlight ?? Promise.resolve();
+		lastEnqueuedKey = key;
+		queued = payload;
+		return ensureDrain();
+	}
+
+	return function register(pi: ExtensionAPI) {
+		if (!threadID) return; // not a sesh thread — stay inert
+
+		// Only the root interactive session reports: nested/headless pi runs have
+		// no UI, and a sesh HEADLESS turn's busy already comes from the daemon's
+		// own turn registry (reports there would just be cleared every tick).
+		let rootSession = false;
+
+		pi.on("session_start", async (_event, ctx: ExtensionContext) => {
+			if (ctx?.hasUI !== true) return;
+			rootSession = true;
+			// Session replacement rotates Pi's session-owned sockets. Await this local,
+			// bounded, fail-silent binding so Sesh records the exact current identity
+			// before session startup is considered complete.
+			await report(ctx.isIdle?.() === false ? "turn_started" : "turn_ended", ctx);
+		});
+
+		pi.on("agent_start", async (_event, ctx: ExtensionContext) => {
+			if (!rootSession) return;
+			// Re-capture on every run: Pi may replace stale saved session references.
+			await report("turn_started", ctx);
+		});
+
+		pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {
+			if (!rootSession || ctx?.isIdle?.() !== true) return;
+			await report("turn_ended", ctx);
+		});
+
+		pi.on("session_shutdown", async (event: { reason?: string }, ctx: ExtensionContext) => {
+			if (!rootSession || event?.reason !== "quit") return;
+			// Queue + await release behind any in-flight state report. This preserves
+			// report ordering while process teardown is waiting on the handler.
+			await report("release", ctx);
+		});
+	};
 }
 
 export default function (pi: ExtensionAPI) {
-	if (!THREAD_ID) return; // not a sesh thread — stay inert
-
-	// Only the root interactive session reports: nested/headless pi runs have
-	// no UI, and a sesh HEADLESS turn's busy already comes from the daemon's
-	// own turn registry (reports there would just be cleared every tick).
-	let rootSession = false;
-
-	pi.on("session_start", async (_event, ctx: ExtensionContext) => {
-		if (ctx?.hasUI !== true) return;
-		rootSession = true;
-		// Re-derive rather than assume idle: a runtime reload mid-turn emits
-		// session_start with the agent still running and no agent_start after.
-		report(ctx.isIdle?.() === false ? "turn_started" : "turn_ended");
-	});
-
-	pi.on("agent_start", async () => {
-		if (!rootSession) return;
-		report("turn_started");
-	});
-
-	pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {
-		if (!rootSession || ctx?.isIdle?.() !== true) return;
-		report("turn_ended");
-	});
-
-	pi.on("session_shutdown", async (event: { reason?: string }) => {
-		if (!rootSession || event?.reason !== "quit") return;
-		// Await directly (not via the queue): pi is exiting and a queued
-		// fire-and-forget would race process teardown. The pane-liveness bound
-		// clears authority anyway when the pane dies; this is belt-and-braces.
-		queued = undefined;
-		await send("release");
-	});
+	createSeshAgentStateExtension()(pi);
 }

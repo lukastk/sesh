@@ -45,6 +45,33 @@ detached session (nobody viewing) is quiet by definition. Held deliveries live
 in daemon memory: a daemon restart drops them, loudly in its log. NB tmux counts
 ANY key as input — PgUp while reading holds the guard like typing does.
 
+**Browser attachment delivery.** File bytes use bounded owner-routed HTTP chunks, never
+Pi RPC/WebSocket frames. Immediately before an explicit dispatch, Sesh prepares opaque
+15-minute leases for one immutable request and exact stream/session/epoch. The Pi socket
+may resolve them only under the all-present transfer triple
+`SESH_PI_TRANSFER_THREAD_ID`/`SESH_PI_TRANSFER_INBOX`/`SESH_PI_TRANSFER_API_SOCKET`,
+which Sesh replaces from one authoritative thread UUID rather than deriving from inherited
+`SESH_THREAD_ID` or a basename. An absent or stale consumer marker means unsupported
+transfer. Upload/lease retries do not authorize replaying a possibly admitted agent
+mutation—reconcile that request against its original target.
+
+**Stopped native artifact reads.** Metadata paging uses Pi's separate artifact protocol,
+not transcript/history parsing. Explicit stopped inline bytes are complete-object reads:
+Sesh buffers bounded subprocess/peer output, validates child success, byte count and SHA-256,
+then rechecks the canonical stopped session before responding. Nonzero child exit discards
+any partial stdout. Direct reads do not create retained artifacts; durable copies still enter
+through the typed Unix-local managed-artifact publication seam.
+
+**Durable native-output mapping.** Native output references are reconciled by the exact
+`(thread UUID, native session UUID, publication UUID)` key, not by parsing transcript text or
+inventing an input-reference CLI. The producer's current transfer target resolves the key through
+the Unix socket before bytes are copied into the existing managed-artifact store. Sesh persists
+the pending mapping first, repairs either expected half of an interrupted resolve, accepts a
+newer transfer target only when it names the same native session, and never retargets the
+artifact's immutable original stream/session/epoch. Browser clients batch-query publication IDs
+through the authenticated owner route. `unavailable` and `expired` are durable terminal answers;
+artifact cleanup does not turn them back into `unmapped`.
+
 **State authority.** A headful thread's busy/idle normally comes from a pane
 content-diff heuristic, but pi and claude threads carry an in-agent reporter
 (a pi extension / claude hooks, installed via myagent/myrig) that reports turn
@@ -53,9 +80,12 @@ mechanism decided (`reported` or `heuristic`; absent for headless threads).
 Reporters use `sesh thread report-state` — a mechanism verb you normally never
 type: stale `--seq` values are refused, and authority is dropped automatically
 when the thread's pane dies. The reporter also passes the agent's live
-`--agent-session` id every turn, which the daemon stamps onto the thread record
-(schema 46) — so `resume`/reopen lands on the session claude/codex is ACTUALLY
-in even after a compaction/rewind fork mints a new id, instead of relying on the
+`--agent-session` id on every lifecycle report, which the daemon stamps onto the
+thread record (schema 46). Pi captures it from the current callback's session
+manager, dedupes `(event, session)` rather than event alone, and awaits the
+session-start binding: `/new`, `/resume`, `/fork`, and reload can rotate the
+session-owned live socket even when busy/idle stays unchanged. Thus `resume`/reopen
+lands on the session the agent is ACTUALLY in instead of relying on the
 fragile leaf resolver. (**Background agents** — claude's `agents` feature — run
 OUTSIDE the sesh pane, under claude's machine-global daemon, so sesh can't
 resume a conversation while one holds it: `resume` surfaces claude's own

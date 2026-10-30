@@ -28,7 +28,23 @@ func (d *Daemon) routesResume(mux *http.ServeMux) {
 //
 // Headless turns (`--print`/`exec`) are non-interactive and never show either
 // dialog, so they do not come through here. pi has no trust prompt.
-func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd string) error {
+func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd, threadID string) error {
+	// Replace every identity carrier from the authoritative argument. In particular,
+	// never derive the transfer consumer identity from an inherited SESH_THREAD_ID or
+	// from the inbox basename.
+	env[agents.EnvThreadID] = threadID
+	delete(env, agents.EnvPiTransferThreadID)
+	delete(env, agents.EnvPiTransferInbox)
+	delete(env, agents.EnvPiTransferAPISocket)
+	if kind == agents.Pi {
+		inbox, err := d.transfers.Inbox(threadID)
+		if err != nil {
+			return fmt.Errorf("prepare Pi transfer inbox: %w", err)
+		}
+		env[agents.EnvPiTransferThreadID] = threadID
+		env[agents.EnvPiTransferInbox] = inbox
+		env[agents.EnvPiTransferAPISocket] = d.cfg.SocketPath()
+	}
 	switch kind {
 	case agents.Claude:
 		cfgPath, err := claude.GlobalConfigPath()
@@ -281,7 +297,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 	}
 
 	env := d.spawnEnv(id)
-	if err := d.prepAgentEnv(kind, env, thread.Cwd); err != nil {
+	if err := d.prepAgentEnv(kind, env, thread.Cwd, id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

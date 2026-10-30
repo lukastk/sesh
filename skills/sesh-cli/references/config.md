@@ -54,6 +54,13 @@ notifications = true
 [mesh]
 idle_interval = "60s"            # peer-sync pace while nothing reads the mesh view ("0s" = never idle)
 
+[browser_hub]                       # opt-in cross-peer API for trusted browser clients
+enabled = true                      # default false; local-thread browser operations still work
+trusted_peers = ["mymain", "macbook"] # exact Sesh machine names; each must be an HTTP peer
+
+[browser_api]
+allowed_origins = ["app://obsidian.md"] # default []; exact desktop origin, no wildcard/unconfigured reflection
+
 [spawn]                          # default launch policy (yolo bypasses permission prompts)
 mode = "yolo"
 
@@ -86,6 +93,129 @@ rather than silently choosing another harness. The daemon reads `[defaults]` at
 startup, so changing it requires a daemon restart through the machine's service
 manager. This is separate from `ui_config.toml`'s `default_agent`, which only
 preselects a value in sesh-ui's New-thread modal.
+
+`[browser_hub]` is a security boundary, not a convenience fallback. When absent or
+`enabled = false`, browser endpoints may address only this daemon's own threads. When
+enabled, they may list cached rows and route a fixed allowlist of thread operations only
+to `trusted_peers` that are registered with `api_addr` + API token. The caller cannot
+supply a peer URL, API path, or credential. `/v1/route` remains Unix-socket-only, so an
+existing TCP bearer token does not become a generic cross-peer relay token. Changes are
+read at daemon startup and require an authorized service-manager restart.
+
+`[browser_api] allowed_origins` is a separate exact-origin CORS allowlist for the fixed
+browser routes documented below plus `POST /v1/ws-ticket`; route names are matched exactly,
+not by `/v1/browser/*` prefix. It defaults empty and accepts at most 32 unique origins of
+512 bytes each. Values use `app`, `http`, or `https` with scheme and host only; wildcard,
+`null`, userinfo, path, query, and fragment values prevent startup. Only route/method-specific
+unauthenticated preflights are admitted; actual operations remain bearer authenticated.
+Request headers are limited to `Authorization`, body-route `Content-Type`, chunk-upload
+`X-Sesh-Chunk-SHA256`, and managed-artifact `Range`. Artifact reads expose only bounded
+standard file metadata plus `X-Sesh-Artifact-SHA256`. `/v1/route`, `/v1/runtime/*`, WebSocket
+upgrades, and generic/legacy API routes receive no CORS grant. Responses use `Vary` and
+`Cache-Control: no-store`; they
+never allow credentials/cookies or private-network access. The evidenced desktop origin is
+`app://obsidian.md`; Android behavior is not established. Changes require an authorized
+daemon restart.
+
+### Browser/plugin API
+
+The browser seam is deliberately narrower than the daemon's general API:
+
+- `GET /v1/browser/threads` provides bounded filtering and cursor pagination over local
+  rows plus cached rows from trusted peers. Each row exposes both `runtime_available` and
+  `terminal_available`: the latter is true only for a fresh, reachable canonical
+  `headful` snapshot. In particular, a busy headless turn has runtime work but no terminal.
+- `POST /v1/browser/threads` and `POST /v1/browser/threads/action` dispatch fixed schemas
+  through canonical owner-side Sesh handlers; they are not arbitrary peer proxies.
+- `GET /v1/browser/threads/history?id=<uuid>[&cursor=...&max_items=...&max_bytes=...]`
+  is the canonical stopped-Pi history seam. The owner resolves the session file only from
+  the authoritative Sesh thread association, then directly execs metadata-only
+  `pi --session-history-json <absolute-path>` with separate optional cursor/item/byte argv.
+  Browser paths/IDs/argv are never accepted. Limits match Pi (1–500 items, 2–786432 bytes),
+  with a 10s process deadline, 8 MiB stdout and 64 KiB stderr caps. Success wraps Pi's
+  unchanged `pi.session-history` v1 session/page under Sesh `schema`, `thread_id`, and
+  `owner_machine`; Sesh rejects a returned session ID that differs from the thread record.
+  Native error codes remain stable. Older Pi without the protocol returns explicit HTTP 501
+  `unsupported_native_capability`; there is no raw-transcript or second-agent fallback.
+- `GET /v1/browser/threads/artifacts?id=<uuid>[&cursor=...&max_items=...&max_bytes=...]`
+  is the separate owner-routed stopped-Pi artifact metadata seam. It invokes only
+  `pi --session-artifacts-json` against the server-resolved canonical session file;
+  `pi.session-history` v1 is unchanged. Metadata pages are limited to 500 items/512 KiB,
+  validated against the authoritative session before and after the subprocess, and may
+  truthfully omit SHA-256 for legacy inline images until explicit byte inspection.
+- `GET /v1/browser/threads/artifact-bytes?id=<uuid>&publication_id=<native-id>`
+  performs one stopped session-inline whole-object read through `pi --session-artifact-bytes`.
+  It accepts no paths or ranges, buffers at most 32 MiB, requires successful child exit,
+  validates whole length and SHA-256, then rechecks the stopped thread/session/source file
+  before writing HTTP success. Runtime-source files remain unavailable. This direct read
+  does not publish a durable copy; the existing Unix-local managed artifact API remains
+  authoritative for retained publication and `/v1/browser/artifacts` downloads.
+- `GET /v1/browser/threads/transcript?id=<uuid>&tail=<n>` performs a bounded owner-side
+  stored transcript read even when the thread is stopped. `tail` defaults to 1,000 native
+  JSONL lines and is limited to 10,000; retained raw line content is limited to 8 MiB and
+  the encoded response to 16 MiB. The response format is `native-jsonl` with raw `lines`,
+  whole-resolved-file `last_reply`/`reply_count`, and explicit zero-based line coverage:
+  `source=resolved-current-session-file`, `requested_tail`, `start_line`, `end_line`
+  (exclusive), `total_lines`, `complete`, and `byte_limited`. This is coverage of the
+  resolved native source file only, not a promise of complete logical branch history.
+- `/v1/browser/attachments/*` is a separate raw-HTTP chunk transfer surface: 16 MiB
+  per attachment, 256 KiB sequential chunks, exact chunk and whole-file SHA-256,
+  idempotent client initialization/last-chunk retry, fixed owner routing, and a 512 MiB
+  owner-wide durable transfer ceiling. Attachment names are validated UTF-8 basenames of
+  at most 255 bytes; literal `.` and `..` are rejected. `prepare` binds up to 8 ready
+  files/32 MiB to one immutable request plus exact Pi stream/session/epoch and returns only
+  15-minute opaque leases. No paths or binary WebSocket records are accepted.
+- Sesh-launched Pi receives an all-present/all-absent transfer triple:
+  `SESH_PI_TRANSFER_THREAD_ID`, `SESH_PI_TRANSFER_INBOX`, and
+  `SESH_PI_TRANSFER_API_SOCKET`. The dedicated identity and inbox come from the same
+  authoritative thread UUID and replace hostile inherited values on headed, revived,
+  into-pane, and headless launches; neither `SESH_THREAD_ID` nor the inbox basename is
+  an identity source. Missing/stale consumer registration—including an adopted
+  already-running or older runtime—makes transfer explicitly unsupported; Sesh never
+  guesses a runtime path. Output artifacts are published only through the Unix-only
+  typed `/v1/runtime/artifacts/*` seam and downloaded through fixed owner-routed
+  `/v1/browser/artifacts`; arbitrary host paths are never downloadable.
+  Successful GET, HEAD, and range responses always carry exact `Cache-Control: private, no-store`
+  on both owner and hub paths, independently of CORS; a hub imposes this policy rather than copying
+  an upstream peer cache header.
+- Durable native-output mapping is separate from stopped-native reads and direct artifact
+  publication. A producer with the exact current transfer target uses Unix-only
+  `POST /v1/runtime/artifact-mappings/resolve`,
+  `PUT /v1/runtime/artifact-mappings/content?thread_id=<uuid>&mapping_id=<uuid>`, or
+  `POST /v1/runtime/artifact-mappings/fail`. Resolve creates the pending mapping before the
+  deterministic mapping/client identity and its reserved managed artifact; retries repair an
+  interrupted pair. Content is one complete bounded object with exact target headers; only current
+  targets for the same native session may
+  finish the immutable original target. Mapping states advance only from `pending` to `ready`,
+  `unavailable`, or `expired`; terminal tombstones remain durable through artifact cleanup.
+  Startup idempotently removes mapping/payload pairs left behind by a crash after authoritative
+  thread deletion, while malformed mapping metadata refuses startup.
+- `POST /v1/browser/artifact-mappings/query` accepts one canonical thread UUID, its exact native
+  session UUID, and 1–64 unique native publication IDs (canonical UUIDs, or the legacy inline-image
+  64-lowercase-hex identity). It returns results in request order as
+  `unmapped`, `pending`, `ready`, `unavailable`, or `expired`, routes only through the configured
+  owner allowlist, never exposes the internal mapping/client UUID, and is the only mapping route
+  granted exact-origin CORS (`Authorization, Content-Type`). Current Sesh lifecycle operations do
+  not move one thread UUID between owners: adopt/fork/import continuations create a new UUID or a
+  local conflict, and reparenting changes hierarchy only.
+- `POST /v1/ws-ticket` requires `Authorization: Bearer ...` in the header and returns a
+  30-second, single-use ticket bound to one canonical thread UUID, owner, route and
+  protocol. Ticket URLs permit exactly one `id`, `protocol`, and `ticket` parameter;
+  duplicates or extras consume and refuse the ticket. Owner identity is resolved again
+  at use time, so a grant cannot follow a moved/re-associated thread. Browser WebSockets
+  use the returned URL instead of storing the daemon bearer token in a WebSocket URL.
+- `GET /v1/threads/rpc?...&protocol=live-v1` bridges newline-delimited JSON records to
+  the Pi session's `.live.sock` without injecting the legacy protocol-2 subscribe command.
+  `protocol=terminal-v1` is the ticket protocol for `/v1/threads/terminal`. A ticket URL
+  has no `cols`/`rows`: the terminal initially opens at 120×32, then the authenticated
+  client sends the text control frame
+  `{"type":"resize","cols":<positive uint16>,"rows":<positive uint16>}`. Terminal
+  input/output remains binary WebSocket frames.
+
+All browser request bodies, pages, attachment chunks/storage, artifact streams,
+stored-history subprocess output, transcript tails, WebSocket records and outgoing queues
+are bounded. A slow browser viewer is disconnected without stopping or replacing the
+owned agent runtime.
 
 A hook command runs through `$SHELL -c` with the event described in env vars:
 `SESH_EVENT` (+`SESH_EVENT_FROM`/`SESH_EVENT_TO` on edges), `SESH_THREAD_ID`,

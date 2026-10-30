@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/lukastk/sesh/internal/store"
 	"github.com/lukastk/sesh/internal/subscribe"
 	"github.com/lukastk/sesh/internal/tmux"
+	"github.com/lukastk/sesh/internal/transfers"
 )
 
 // Version is the daemon/binary version string.
@@ -28,13 +30,14 @@ const Version = "0.1.0-dev"
 
 // Daemon is a running per-machine daemon.
 type Daemon struct {
-	cfg     config.Config
-	store   *store.Store
-	blobs   *blobs.Store
-	tmux    *tmux.Server
-	srv     *http.Server
-	ln      net.Listener
-	started time.Time
+	cfg       config.Config
+	store     *store.Store
+	blobs     *blobs.Store
+	tmux      *tmux.Server
+	transfers *transfers.Store
+	srv       *http.Server
+	ln        net.Listener
+	started   time.Time
 
 	// headless turn tracking: a stateless-per-turn headless thread is "working"
 	// exactly while a turn process is in flight (this daemon spawned it). The last
@@ -121,6 +124,14 @@ type Daemon struct {
 	apiBound     atomic.Bool
 	apiBindErr   atomic.Value // string: the most recent bind error
 	apiBoundAddr atomic.Value // string: the address actually bound (the `tailnet` sentinel resolves to a concrete IP)
+	// browserHub is the explicit, disabled-by-default cross-peer browser policy.
+	// browserAPI is the separate exact-origin CORS allowlist for fixed browser routes.
+	// wsTickets is the bounded in-memory registry for 30-second single-use WS grants.
+	browserHub   config.BrowserHubConfig
+	browserAPI   config.BrowserAPIConfig
+	wsTickets    *wsTicketRegistry
+	transferStop chan struct{}
+	transferWG   sync.WaitGroup
 
 	// codexDaemonNote is the most recent loud event from pinning codex's
 	// daemon_auto_start=false (codexdaemon.go): an override of the user's explicit
@@ -175,14 +186,33 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		cfg:        cfg,
-		naming:     naming,
-		store:      st,
-		blobs:      blobs.New(cfg.Home),
-		tmux:       tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
-		hlInFlight: map[string]bool{},
-		hlReply:    map[string]string{},
-		turnPID:    map[string]int{},
+		cfg:          cfg,
+		naming:       naming,
+		store:        st,
+		blobs:        blobs.New(cfg.Home),
+		tmux:         tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
+		transfers:    transfers.New(cfg.Home, cfg.Machine),
+		transferStop: make(chan struct{}),
+		hlInFlight:   map[string]bool{},
+		hlReply:      map[string]string{},
+		turnPID:      map[string]int{},
+	}
+	threads, err := st.ListThreads(true)
+	if err != nil {
+		st.Close() //nolint:errcheck
+		return nil, fmt.Errorf("daemon: list threads for artifact mapping repair: %w", err)
+	}
+	existingThreadIDs := make(map[string]bool, len(threads))
+	for _, thread := range threads {
+		existingThreadIDs[thread.ID] = true
+	}
+	removedMappings, err := d.transfers.DeleteOrphanArtifactMappings(existingThreadIDs)
+	if err != nil {
+		st.Close() //nolint:errcheck
+		return nil, fmt.Errorf("daemon: repair artifact mappings after interrupted thread deletion: %w", err)
+	}
+	if removedMappings > 0 {
+		log.Printf("daemon: repaired %d orphaned durable artifact mapping(s) after interrupted thread deletion", removedMappings)
 	}
 	d.maint = newMaintainer(d)
 	d.mesh = newMeshSync(d)
@@ -228,6 +258,17 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err // a broken [mesh] refuses the daemon loudly
 	}
 	d.mesh.idleInterval = meshCfg.IdleInterval
+	browserHub, err := config.LoadBrowserHub(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [browser_hub] refuses the daemon loudly
+	}
+	d.browserHub = browserHub
+	browserAPI, err := config.LoadBrowserAPI(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [browser_api] CORS boundary refuses the daemon loudly
+	}
+	d.browserAPI = browserAPI
+	d.wsTickets = newWSTicketRegistry()
 	// [[hooks]] pin full cadence: the eventer diffs REMOTE snapshots for them
 	// continuously, and a slow sample would silently MISS a remote busy edge
 	// shorter than the idle interval (a notify hook that never fires).
@@ -306,6 +347,7 @@ func (d *Daemon) Serve() error {
 		ln.Close()
 		return fmt.Errorf("daemon: write pid: %w", err)
 	}
+	d.startTransferSweeper()
 	// Clean up the on-disk markers in the foreground, after Serve returns. Doing
 	// this here (rather than in the async Shutdown goroutine) makes removal
 	// deterministic: the process cannot exit before these run. The listener
@@ -326,6 +368,7 @@ func (d *Daemon) Serve() error {
 // once. On-disk markers (pid/socket) are removed by Serve's deferred cleanup, in
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	d.stopTransferSweeper()
 	d.stopPastes()
 	d.stopAPI(ctx)
 	if d.sched != nil {

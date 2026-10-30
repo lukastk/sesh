@@ -15,7 +15,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
-
 	"github.com/lukastk/sesh/internal/store"
 )
 
@@ -67,8 +66,17 @@ func atoiDefault(s string, def int) int {
 // Loud refusals: unknown id -> 404; a thread with no live pane (headless/dead) -> 409.
 func (d *Daemon) handleThreadTerminal(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "terminal: id is required")
+	if !validCanonicalUUID(id) {
+		writeError(w, http.StatusBadRequest, "terminal: id must be a canonical UUID")
+		return
+	}
+	protocol := r.URL.Query().Get("protocol")
+	if protocol != "" && protocol != "terminal-v1" {
+		writeError(w, http.StatusBadRequest, "terminal: unknown protocol "+protocol+" (want terminal-v1)")
+		return
+	}
+	if owner := wsOwnerFromContext(r.Context()); owner != "" && owner != d.cfg.Machine {
+		d.proxyBrowserWebSocket(w, r, owner)
 		return
 	}
 	// GetThread first so an unknown id is a clean 404 (FindPaneByThreadID alone would

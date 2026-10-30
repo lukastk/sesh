@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // TurnSpec is one headless turn: which conversation to run, what to say, and how
@@ -31,7 +33,9 @@ type TurnSpec struct {
 	Model string
 	// SeshBin is the LAUNCHING daemon's own executable, injected as $SESH_BIN so
 	// the worker can call sesh unambiguously. See TurnEnv.
-	SeshBin string
+	SeshBin           string
+	TransferInbox     string
+	TransferAPISocket string
 	// OnStart is called with the pid of the turn's ROOT process (the $SHELL -c
 	// wrapper) once it has started, before the turn is waited on. The daemon
 	// records it so it can later answer "is this process running inside a turn I
@@ -54,6 +58,17 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 	// branch and forgotten in another is how a worker ends up with an identity
 	// on two agents and none on the third.
 	env := TurnEnv(os.Environ(), spec.ThreadID, spec.SeshBin, spec.CodexHome)
+	if spec.Kind == Pi {
+		transferThreadID := ""
+		if spec.TransferInbox != "" || spec.TransferAPISocket != "" {
+			transferThreadID = spec.ThreadID
+		}
+		var transferErr error
+		env, transferErr = piTransferEnv(env, transferThreadID, spec.TransferInbox, spec.TransferAPISocket)
+		if transferErr != nil {
+			return "", "", transferErr
+		}
+	}
 
 	switch spec.Kind {
 	case Pi:
@@ -141,8 +156,11 @@ func TurnEnv(base []string, threadID, seshBin, codexHome string) []string {
 		// practice, but an environment with two SESH_THREAD_IDs is a thing no
 		// reader of `tr '\0' '\n' < /proc/<pid>/environ` should have to reason
 		// about.
-		EnvThreadID: true,
-		EnvSeshBin:  true,
+		EnvThreadID:            true,
+		EnvSeshBin:             true,
+		EnvPiTransferInbox:     true,
+		EnvPiTransferThreadID:  true,
+		EnvPiTransferAPISocket: true,
 	}
 	if codexHome != "" {
 		drop["CODEX_HOME"] = true
@@ -163,6 +181,47 @@ func TurnEnv(base []string, threadID, seshBin, codexHome string) []string {
 		out = append(out, "CODEX_HOME="+codexHome)
 	}
 	return out
+}
+
+// piTransferEnv installs the transfer triple atomically from one authoritative
+// thread UUID. It always removes inherited values first; a partial requested triple
+// is a launch bug, never permission to infer identity from SESH_THREAD_ID or the
+// inbox basename.
+func piTransferEnv(base []string, threadID, inbox, apiSocket string) ([]string, error) {
+	drop := map[string]bool{
+		EnvPiTransferThreadID:  true,
+		EnvPiTransferInbox:     true,
+		EnvPiTransferAPISocket: true,
+	}
+	out := make([]string, 0, len(base)+3)
+	for _, e := range base {
+		name, _, _ := strings.Cut(e, "=")
+		if !drop[name] {
+			out = append(out, e)
+		}
+	}
+	present := 0
+	for _, value := range []string{threadID, inbox, apiSocket} {
+		if value != "" {
+			present++
+		}
+	}
+	if present == 0 {
+		return out, nil
+	}
+	if present != 3 {
+		return nil, fmt.Errorf("headless: Pi transfer environment must be all present or all absent")
+	}
+	parsed, err := uuid.Parse(threadID)
+	if err != nil || parsed.String() != threadID {
+		return nil, fmt.Errorf("headless: Pi transfer thread id must be a canonical UUID")
+	}
+	out = append(out,
+		EnvPiTransferThreadID+"="+threadID,
+		EnvPiTransferInbox+"="+inbox,
+		EnvPiTransferAPISocket+"="+apiSocket,
+	)
+	return out, nil
 }
 
 // runHeadless runs an agent command in spec.Cwd with no stdin (so codex/others

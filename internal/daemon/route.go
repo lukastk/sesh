@@ -52,6 +52,7 @@ const routeProxyTimeout = 15 * time.Second
 func (d *Daemon) unixRoutes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/route/{machine}/{path...}", d.handleRoute)
+	d.routesRuntimeTransfers(mux)
 	mux.Handle("/", d.routes())
 	return mux
 }

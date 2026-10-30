@@ -66,6 +66,13 @@ const EnvThreadID = "SESH_THREAD_ID"
 // state_authority=heuristic.
 const EnvSeshBin = "SESH_BIN"
 
+// Pi transfer identity is deliberately separate from EnvThreadID: EnvThreadID is
+// historically inheritable and remains only a general agent hint, while the transfer
+// consumer must bind leases to the exact authoritative thread that owns its inbox.
+const EnvPiTransferThreadID = "SESH_PI_TRANSFER_THREAD_ID"
+const EnvPiTransferInbox = "SESH_PI_TRANSFER_INBOX"
+const EnvPiTransferAPISocket = "SESH_PI_TRANSFER_API_SOCKET"
+
 // Valid reports whether k is a known agent kind.
 func Valid(k Kind) bool {
 	switch k {
@@ -146,7 +153,7 @@ func ShellEscape(s string) string {
 // it (pi/claude). codex cannot pre-assign its id, so it launches bare and its id
 // is discovered after the first turn (see DiscoverCodexSession) — which is what
 // lets a dead thread be resumed later. Working/waiting is still detected agent-
-// agnostically from pane content-diff. model ('' = the agent default) pins the
+// agnostically from pane content-diff. model (” = the agent default) pins the
 // model: claude/pi take it after the session flag, codex on its top-level command.
 func HeadedCommand(k Kind, sessionID, model, mode string, extra []string) string {
 	base := string(k)
@@ -165,7 +172,7 @@ func HeadedCommand(k Kind, sessionID, model, mode string, extra []string) string
 
 // ResumeCommand returns the shell command that RELAUNCHES the agent on an
 // existing conversation (for `resume`), continuing where it left off. model
-// ('' = the agent default) re-pins the model on the resumed conversation.
+// (” = the agent default) re-pins the model on the resumed conversation.
 func ResumeCommand(k Kind, sessionID, model, mode string, extra []string) string {
 	base := string(k)
 	switch k {

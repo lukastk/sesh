@@ -95,15 +95,15 @@ func TestThreadRPCWebSocket(t *testing.T) {
 		t.Errorf("no token: status %d, want 401", got)
 	}
 	// Unknown id -> 404.
-	if got := dialStatus(t, wsURL+"?id=deadbeef-no-such-thread", token); got != http.StatusNotFound {
+	if got := dialStatus(t, wsURL+"?id=00000000-0000-4000-8000-000000000099", token); got != http.StatusNotFound {
 		t.Errorf("unknown id: status %d, want 404", got)
 	}
 
-	// --- Query-token auth (the WebView/browser path; header can't be set on a WS) ---
-	// A WebSocket handshake cannot carry the Authorization header, so the rpc/terminal
-	// routes also accept ?token=. No header is set here; auth comes from the query alone.
+	// --- Legacy query-token auth (new browser clients use scoped WS tickets) ---
+	// The rpc/terminal routes retain ?token= for compatibility. No header is set here;
+	// auth comes from the query alone.
 	// Correct query token authenticates -> falls through to the 404 (unknown id).
-	if got := dialStatus(t, wsURL+"?id=deadbeef-no-such-thread&token="+token, ""); got != http.StatusNotFound {
+	if got := dialStatus(t, wsURL+"?id=00000000-0000-4000-8000-000000000099&token="+token, ""); got != http.StatusNotFound {
 		t.Errorf("query token (good): status %d, want 404 (authenticated, unknown id)", got)
 	}
 	// Wrong query token -> 401 (same as a wrong header).

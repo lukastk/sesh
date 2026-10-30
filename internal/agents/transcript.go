@@ -167,6 +167,13 @@ func LastReply(kind Kind, agentSessionID, cwd string, homes Homes) (string, int,
 	if !found {
 		return "", 0, fmt.Errorf("no transcript on disk for this %s conversation (session %s)", kind, agentSessionID)
 	}
+	return LastReplyPath(kind, path)
+}
+
+// LastReplyPath reads reply metadata from one already-resolved transcript path.
+// Callers that also return raw lines use this to keep both views pinned to the
+// same source file across a concurrent native session transition.
+func LastReplyPath(kind Kind, path string) (string, int, error) {
 	switch kind {
 	case Claude:
 		return claude.LastReply(path)
@@ -207,6 +214,85 @@ func ReadTranscript(kind Kind, agentSessionID, cwd string, homes Homes, tailN in
 		lines = lines[len(lines)-maxTranscriptLines:]
 	}
 	return lines, nil
+}
+
+// TranscriptWindow is a bounded contiguous suffix of one resolved native JSONL
+// transcript file. Line offsets are zero-based and EndLine is exclusive. It
+// deliberately describes file coverage only; it does not claim that one native
+// file is the agent's complete logical branch history.
+type TranscriptWindow struct {
+	Path        string
+	Lines       []string
+	StartLine   int
+	EndLine     int
+	TotalLines  int
+	ByteLimited bool
+}
+
+// ReadTranscriptWindow resolves the same owner-side native transcript as
+// ReadTranscript, but retains at most tailN complete lines and maxBytes of raw
+// line content. If the requested suffix exceeds the byte budget, it returns the
+// largest contiguous suffix that fits and marks ByteLimited; it never truncates
+// an individual line or labels partial coverage complete.
+func ReadTranscriptWindow(kind Kind, agentSessionID, cwd string, homes Homes, tailN, maxBytes int) (TranscriptWindow, error) {
+	if tailN < 0 {
+		return TranscriptWindow{}, fmt.Errorf("transcript window tail must be non-negative")
+	}
+	if maxBytes < 1 {
+		return TranscriptWindow{}, fmt.Errorf("transcript window byte limit must be positive")
+	}
+	path, found, err := TranscriptPath(kind, agentSessionID, cwd, homes)
+	if err != nil {
+		return TranscriptWindow{}, err
+	}
+	if !found {
+		return TranscriptWindow{}, fmt.Errorf("no transcript on disk for this %s conversation (session %s)", kind, agentSessionID)
+	}
+	window, err := readTranscriptWindow(path, tailN, maxBytes)
+	window.Path = path
+	return window, err
+}
+
+func readTranscriptWindow(path string, tailN, maxBytes int) (TranscriptWindow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return TranscriptWindow{}, err
+	}
+	defer f.Close()
+
+	lines := make([]string, 0, tailN)
+	retainedBytes := 0
+	total := 0
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+	for sc.Scan() {
+		total++
+		if tailN == 0 {
+			continue
+		}
+		line := sc.Text()
+		lines = append(lines, line)
+		retainedBytes += len(line)
+		for len(lines) > tailN || retainedBytes > maxBytes {
+			retainedBytes -= len(lines[0])
+			lines = lines[1:]
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return TranscriptWindow{}, err
+	}
+	start := total - len(lines)
+	requestedStart := total - tailN
+	if requestedStart < 0 {
+		requestedStart = 0
+	}
+	return TranscriptWindow{
+		Lines:       lines,
+		StartLine:   start,
+		EndLine:     total,
+		TotalLines:  total,
+		ByteLimited: start > requestedStart,
+	}, nil
 }
 
 func readTranscriptLines(path string) ([]string, error) {

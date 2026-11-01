@@ -25,6 +25,19 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
 - **Deploy (H70/H112):** sidebars keep old binaries/config; installed skill copies
   may stay stale after a repo pull. Verify actual artifacts, not just checkout SHA.
   Termux requires plain native `go build` (CGO=1); see OPERATIONS before deploying.
+- **`--machine` is two mechanisms (#17):** ssh re-execs on the peer; **http keeps the
+  command in this process** and only redirects daemonClient through the local daemon's
+  route proxy. So client-side FILESYSTEM work must sit in `httpRoutable`'s carve-out
+  (`backup`/`restore`/`copy`/`import` do now) or it resolves the target's paths on the
+  caller. `blob put` / `schedule --prompt-file` belong on http on purpose: they send
+  local BYTES to the peer's daemon. Every peer with an `api_addr` takes the http path,
+  so an ssh-only-era test proves nothing about today.
+- **Archive gate (schema 57):** `thread archive` refuses a thread that is still
+  flagged or still running, naming every unmet condition; `--force` overrides, and
+  the by-contract archivers (a schedule's `--on-turn-end`, `delegate`'s worker) pass
+  it. Un-archiving is ungated. Archived-but-headful (H40) still exists through those
+  paths, so the default view's flagged/running/headful exception stays load-bearing.
+  The gate lives in the daemon: it arrives with a restart, not with a new client.
 
 Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run

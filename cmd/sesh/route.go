@@ -140,14 +140,35 @@ func extractAllowUnverifiedFlag(args []string) (allow bool, rest []string) {
 // peer's HTTP API (when the peer has one). The carve-outs need remote EXECUTION and
 // stay on ssh regardless of the peer's transport: daemon lifecycle (you cannot start
 // a not-yet-running daemon via its own API), tmux nav (outer + inner switch-client),
-// tmux stage-file (pipes local bytes). Everything else is a client-only call the
-// peer's daemon serves identically over its TCP API.
+// tmux stage-file (pipes local bytes), and the transcript-file verbs (below).
+// Everything else is a client-only call the peer's daemon serves identically over its
+// TCP API.
+//
+// The http path does NOT move the command to the peer: it redirects daemonClient
+// through the local daemon's route proxy and keeps running HERE (see main.go). So any
+// command whose real work is client-side filesystem work must stay on ssh, or it
+// resolves the target machine's paths against the CALLER's disk.
 func httpRoutable(rest []string) bool {
 	if len(rest) == 0 {
 		return false
 	}
 	switch rest[0] {
 	case "daemon":
+		return false
+	// The transcript-file verbs work on the filesystem of the machine they run on:
+	// `backup` reads that machine's transcripts and writes --to, `restore` opens
+	// --from and writes --to-dir/--native, `copy` composes the two, `import` reads a
+	// v1 SESH_HOME. Routed over http they ran in this process against the peer's
+	// paths — how `copy --to <peer>` always failed once peers carried an api_addr:
+	// the staged backup had arrived on the peer and the restore looked for it here
+	// ("no such backup file"), writing nothing on either machine.
+	//
+	// NOT carved out, deliberately: `blob put <file>` and `schedule --prompt-file`
+	// also read a local file, but they SEND those bytes to the peer's daemon, which
+	// is what http routing does correctly and ssh would break (the peer would resolve
+	// the caller's path). The discriminator is which machine's disk holds the inputs
+	// and outputs, not whether a path is read.
+	case "backup", "restore", "copy", "import":
 		return false
 	case "tmux":
 		if len(rest) >= 2 && (rest[1] == "nav" || rest[1] == "stage-file") {

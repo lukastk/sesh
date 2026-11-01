@@ -112,6 +112,14 @@ across the mesh.
   if it is down you get "routing to <m> goes through the LOCAL sesh daemon, which did not
   answer"; and right after a sesh upgrade, "the LOCAL sesh daemon has no /v1/route" means
   the daemon was not restarted yet. ssh peers need no local daemon.
+  The two transports are not interchangeable for every verb: http keeps the command in
+  your process and only redirects its daemon calls, so the verbs whose work is **file**
+  work — `backup`, `restore`, `copy`, `import`, plus `daemon` and `tmux nav`/`stage-file` —
+  always take the **ssh** hop and therefore resolve their paths on the TARGET machine
+  (`restore --from <path on the peer> --machine <peer>` reads the peer's file; that is
+  also what makes `copy <id> --to <peer>` finish). `blob put <file>` and
+  `schedule --prompt-file` are the other way round on purpose: they read YOUR file and
+  send the bytes to the peer's daemon.
 - `--all-machines` — fan a read out across the mesh.
 - `SESH_HOME` (default `~/.sesh`), `SESH_MACHINE` (this machine's identity — the daemon
   refuses to run without it), `SESH_THREAD_ID` (the current thread, for inference),

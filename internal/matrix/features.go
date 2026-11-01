@@ -672,6 +672,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.backup-http",
+		Description: "sesh#17: the transcript-file verbs (backup/restore/copy/import) are REMOTE-EXECUTION routed — `--machine` runs them ON the target over ssh even when the peer's transport is http, so --from/--to-dir/--native resolve on the target's filesystem and `copy --to <http peer>` completes; proved with an http peer whose ssh dest is deliberately broken: the routed restore must fail at the ssh hop carrying none of the local-execution fingerprints, while a client-only read over the same peer still succeeds over http",
+		Localities:  []Locality{Remote},
+	})
+	Register(Feature{
 		ID:          "thread.subscribe",
 		Description: "subscriptions: a subscribee's completed turns become submitted user turns in subscriber threads (owner-side engine on the eventer; dedup on the monotone reply count; cycle guard + --allow-cycle breaker); remote = cross-machine delivery via the routed send",
 		Localities:  bothLoc,

@@ -223,6 +223,10 @@ headful·idle thread — i.e. it needs your input).
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue, CWD
 green, and the `ticket_input` `!` red by default (tunable via `[[tui.column_color]]`).
 
+The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**
+rail (**`└─ `** for the last one), a deeper level continues past it on **`│  `**, and a
+thread with children carries the `▸`/`▾` fold marker ahead of its name.
+
 Each column is **capped at a max width by default** (full-width NAME/CWD/TKT-NAME at
 40/40/30, fixed columns at their built-in width) so one long name/cwd can't blow out
 the layout — a clipped cell ends in `…`. Press **`w`** to toggle the cap off and let

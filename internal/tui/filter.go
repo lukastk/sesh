@@ -106,7 +106,7 @@ func (m *Model) matchRow(row api.ThreadRow) (rowMatch, bool) {
 // list ranked best-first (v1). No query = the parent/child TREE: children nest
 // under their VISIBLE parent (a child whose parent is filtered out or on
 // another view promotes to a root), collapsed parents hide their subtree,
-// prefixes carry the ▾/▸ fold marker and ├/└/│ rails.
+// prefixes carry the ▾/▸ fold marker and ├─/└─/│ rails.
 func (m *Model) visibleMatches() []treeRow {
 	matched := make([]rowMatch, 0, len(m.rows))
 	for _, r := range m.rows {
@@ -206,10 +206,13 @@ func (m *Model) visibleMatches() []treeRow {
 	walk = func(id, indent string, isLast, isRoot bool) {
 		prefix := indent
 		if !isRoot {
+			// The rail carries a ── stem (not a bare ├/└): at a glance the eye
+			// reads the horizontal run into the name, which is what separates a
+			// child row from a root. Its width must match childIndent's below.
 			if isLast {
-				prefix += "└ "
+				prefix += "└─ "
 			} else {
-				prefix += "├ "
+				prefix += "├─ "
 			}
 		}
 		kids := children[id]
@@ -223,10 +226,12 @@ func (m *Model) visibleMatches() []treeRow {
 		out = append(out, treeRow{rowMatch: inSet[id], prefix: prefix})
 		childIndent := indent
 		if !isRoot {
+			// 3 columns, the rail's width: a grandchild's │ must land under its
+			// parent's ├ (a last child continues as blank).
 			if isLast {
-				childIndent += "  "
+				childIndent += "   "
 			} else {
-				childIndent += "│ "
+				childIndent += "│  "
 			}
 		}
 		if len(kids) > 0 && m.isExpanded(id) {
@@ -240,9 +245,9 @@ func (m *Model) visibleMatches() []treeRow {
 			// unflagged ancestry elided; the ▸ marker says more is hidden).
 			pierced := flaggedUnder(id)
 			for i, k := range pierced {
-				rail := "├ "
+				rail := "├─ "
 				if i == len(pierced)-1 {
-					rail = "└ "
+					rail = "└─ "
 				}
 				out = append(out, treeRow{rowMatch: inSet[k], prefix: childIndent + rail})
 			}

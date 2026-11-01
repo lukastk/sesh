@@ -41,8 +41,13 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
 
 Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
-failures, and a development SDK bundled audit finding. H121's five-machine deploy
-left pocket4 pending **then**; re-check rather than repeating that status.
+failures, and a development SDK bundled audit finding.
+
+Fleet on **2026-11-01**: mymain, macbook, macstudio, ideapad and termux run `2bcc60f`
+(wire schema 57, store schema 27) with their installed `sesh-cli`/`do-tickets` skill
+copies refreshed; **pocket4 has been offline since 2026-10-31 ~17:10 and still runs
+`73e3ad7`** — pull, rebuild and restart it when it returns. Re-check the fleet rather
+than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

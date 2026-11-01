@@ -8,6 +8,10 @@ package daemon
 // "would fork" guard protects against ACCIDENTAL forks; this is the
 // deliberate verb). Owner-side by construction: the source transcript lives
 // on this machine's disk.
+//
+// Headless-born is the whole shape of the verb: no agent is launched, so the
+// spawn-shaped request fields (msg, placement, spawn mode) cannot apply and are
+// refused at the seam instead of being dropped.
 
 import (
 	"net/http"
@@ -23,6 +27,26 @@ import (
 )
 
 func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req api.NewThreadRequest) {
+	// A fork is HEADLESS-BORN and spawns NOTHING: it writes the branched transcript
+	// and records a thread whose next turn RESUMES it. The spawn-shaped fields have
+	// nowhere to go here, so refuse them loudly rather than record a thread that
+	// quietly dropped them — sesh#18, where `thread new --fork-from … --msg` returned
+	// a created thread with headless_started true and never ran the prompt. Each
+	// refusal names the two-verb form that does the work.
+	switch {
+	case req.Msg != "":
+		writeError(w, http.StatusBadRequest,
+			"fork: --msg is not delivered to a fork (a fork is HEADLESS-born: the branched conversation already exists and nothing is spawned to receive a prompt) — run its first turn with `thread send-headless --id <fork>`, or `thread headful --id <fork>` and then `thread send`")
+		return
+	case req.IntoSession != "" || req.IntoWindow != "" || req.IntoPane != "":
+		writeError(w, http.StatusBadRequest,
+			"fork: placement (--into-session/--into-window/--into-pane) is for headed spawns; a fork is HEADLESS-born and creates no pane — fork first, then `thread headful --id <fork>`")
+		return
+	case req.Mode != "":
+		writeError(w, http.StatusBadRequest,
+			"fork: --yolo/--sandbox is a spawn-time mode and a fork spawns nothing (it is HEADLESS-born); its turns take the mode from [spawn] mode in config.toml, applied when the turn runs or when `thread headful` gives it a pane")
+		return
+	}
 	src, err := d.store.GetThread(req.ForkFrom)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "fork: source thread "+req.ForkFrom+" not found on this machine")

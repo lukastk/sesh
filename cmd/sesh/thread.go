@@ -677,10 +677,10 @@ func threadNew(cfg config.Config, args []string) error {
 	headless := fs.Bool("headless", false, "spawn headless (no window)")
 	model := fs.String("model", "", "agent model to pin to the thread (opaque pass-through, e.g. haiku | anthropic/claude-opus-4-8 | gpt-5.5; empty = the agent's default)")
 	parent := fs.String("parent", "", "parent thread id/prefix (default: the CURRENT thread when run inside one)")
-	forkFrom := fs.String("fork-from", "", "branch this thread's conversation (default source: the current thread when only --fork is meaningful); agent/cwd default to the source's")
+	forkFrom := fs.String("fork-from", "", "branch this thread's conversation into a new HEADLESS thread (nothing is spawned; promote it with `thread headful`); agent/cwd default to the source's")
 	yolo := fs.Bool("yolo", false, "launch with permissions bypassed (overrides [spawn] config)")
 	sandboxF := fs.Bool("sandbox", false, "launch restricted (codex read-only; claude default-deny headless; pi: refused)")
-	msg := fs.String("msg", "", "send this initial prompt once the agent is ready (headed spawns)")
+	msg := fs.String("msg", "", "send this initial prompt once the agent is ready (headed spawns only; refused with --headless and --fork-from)")
 	messageID := fs.Int("message-id", 0, "fork after the Nth assistant turn (0 = the whole conversation)")
 	noParent := fs.Bool("no-parent", false, "force a root thread (suppress parent inference)")
 	intoSession := fs.String("into-session", "", "place the thread as a new WINDOW of an existing session (shared session)")
@@ -712,6 +712,20 @@ func threadNew(cfg config.Config, args []string) error {
 	}
 	if *virtual && *agent != "" {
 		return errors.New("thread new: --virtual takes no --agent (a virtual thread has none; realize it later)")
+	}
+	// A fork is HEADLESS-BORN (the branched conversation already exists; the next
+	// turn resumes it), so the spawn-shaped flags have nothing to act on. Refuse
+	// them here — before the source is resolved — with the two-verb way out; the
+	// daemon refuses them at its own seam for every other client (sesh#18).
+	if *forkFrom != "" {
+		switch {
+		case *msg != "":
+			return errors.New("thread new: --msg is not delivered to a --fork-from thread (a fork is HEADLESS-born: nothing is spawned to receive a prompt) — fork, then `thread send-headless --id <fork>`, or `thread headful --id <fork>` and `thread send`")
+		case *intoSession != "" || *intoWindow != "" || *intoPane != "":
+			return errors.New("thread new: --into-session/--into-window/--into-pane are for headed spawns; a fork is HEADLESS-born and creates no pane — fork, then `thread headful --id <fork>`")
+		case *yolo || *sandboxF:
+			return errors.New("thread new: --yolo/--sandbox is a spawn-time mode and a fork spawns nothing (it is HEADLESS-born); its turns take the mode from [spawn] mode in config.toml")
+		}
 	}
 	var forkID string
 	if *forkFrom != "" {

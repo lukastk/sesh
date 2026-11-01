@@ -108,4 +108,26 @@ func testFork(t *testing.T, agent string, loc matrix.Locality) {
 	if _, _, err := sb.Runner.Run(t, "thread", "new", "--fork-from", bare.ID, "--name", "y"); err == nil {
 		t.Errorf("forking a turn-less thread succeeded silently")
 	}
+
+	// A fork is HEADLESS-born, so the spawn-shaped flags cannot be honored and must
+	// be refused (sesh#18: --msg was accepted, the thread came back created, and the
+	// prompt never ran). The CLI refuses before the daemon is called; the daemon
+	// refuses at its own seam for other clients (TestForkRefusesSpawnShapedFields).
+	for _, extra := range [][]string{
+		{"--msg", "run the tests"},
+		{"--into-session", "sesh_whatever"},
+		{"--into-window", "sesh_whatever:0"},
+		{"--yolo"},
+		{"--sandbox"},
+	} {
+		args := append([]string{"thread", "new", "--fork-from", src.ID, "--name", "refused"}, extra...)
+		out, stderr, err := sb.Runner.Run(t, args...)
+		if err == nil {
+			t.Errorf("fork %v succeeded: a headless-born fork cannot honor it\n%s", extra, out)
+			continue
+		}
+		if !strings.Contains(out+stderr, "HEADLESS-born") {
+			t.Errorf("fork %v refused without explaining why: %s%s", extra, out, stderr)
+		}
+	}
 }

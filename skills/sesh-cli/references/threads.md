@@ -69,6 +69,11 @@ sesh thread new --agent pi --name notes --cwd . --headless           # headless;
 sesh thread new --agent codex --name sub --cwd ./src --parent <id>   # a child of a specific thread
 sesh thread new --agent claude --name solo --cwd ~/p --no-parent     # a ROOT thread (standalone; suppress inference)
 sesh thread new --agent claude --name try --cwd ~/p --fork-from <id> # branch a conversation (agent inherits from source if omitted)
+#   A fork is HEADLESS-born: the branched transcript already exists, so the new thread
+#   has no pane and its next turn RESUMES the branch. --msg, placement and
+#   --yolo/--sandbox are refused on a fork (nothing is spawned to receive them): run the
+#   first turn with `thread send-headless --id <fork>`, or give it a pane first with
+#   `thread headful --id <fork>` and then `thread send`.
 sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5  # pin an agent model
 
 # --model pins an OPAQUE agent model on the thread (no curated list — a bad model fails

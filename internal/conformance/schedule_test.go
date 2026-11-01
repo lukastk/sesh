@@ -363,8 +363,10 @@ func testScheduleGuards(t *testing.T, loc matrix.Locality) {
 	}
 	waitUntil(180*time.Second, func() bool { return sb.threadStatus(t, th.ID).Busy == api.BusyIdle })
 
-	// Archived: skipped unless --allow-archived.
-	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+	// Archived: skipped unless --allow-archived. --force because this target is a
+	// LIVE headful thread that has been flagged by its turns, which the archive gate
+	// (schema 57) refuses; what the guard under test needs is the archived record.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID, "--force"); err != nil {
 		t.Fatalf("archive: %v\n%s", err, stderr)
 	}
 	if !waitUntil(10*time.Second, func() bool { return sb.threadRecord(t, th.ID).Archived }) {

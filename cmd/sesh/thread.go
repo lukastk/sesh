@@ -174,6 +174,7 @@ func threadArchive(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
 	unarchive := fs.Bool("unarchive", false, "unarchive instead")
+	force := fs.Bool("force", false, "archive even while the thread is flagged or still running (the gate parks FINISHED threads)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -183,7 +184,7 @@ func threadArchive(cfg config.Config, args []string) error {
 	}
 	*id = rid
 	c := daemonClient(cfg)
-	resp, err := c.ThreadArchive(context.Background(), *id, !*unarchive)
+	resp, err := c.ThreadArchiveForce(context.Background(), *id, !*unarchive, *force)
 	if err != nil {
 		return err
 	}

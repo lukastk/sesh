@@ -95,7 +95,10 @@ func testStatusOptions(t *testing.T, loc matrix.Locality) {
 	run("thread", "rename", "--id", th.ID, "--name", "renamed")
 	run("thread", "tag", "--id", th.ID, "--add", "urgent")
 	run("thread", "flag", "--on", "--id", th.ID)
-	run("thread", "archive", "--id", th.ID) // archived-but-headful stays live (H40)
+	// --force: this thread is deliberately flagged AND headful, which is exactly
+	// what the archive gate (schema 57) refuses — and the state H40 is about, so
+	// the test still has to reach it. The pane options must carry both.
+	run("thread", "archive", "--id", th.ID, "--force") // archived-but-headful stays live (H40)
 	want := "sesh: renamed [" + id8 + "] · pi · [urgent]  🗄 archived  #[fg=red,bold]⚑ FLAGGED"
 	if !waitUntil(5*time.Second, func() bool { return render() == want }) {
 		t.Fatalf("after rename+tag+flag+archive the rendered row is %q, want %q; options:\n%s", render(), want, listing())

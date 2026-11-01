@@ -114,7 +114,8 @@ S            SHELLS view — every live tmux session on every reachable machine,
              shell thread, x kills it (confirmed), R refreshes, esc closes (an
              active filter first). This is where sessions sesh did NOT create
              become visible.
-x            stop      a  archive/unarchive (INSTANT)
+x            stop      a  archive/unarchive (INSTANT; archiving refuses a flagged
+                            or running thread — unflag and stop it first)
 U            undo the last archive (LIFO across this session's archives)
 ?            the keymap popup
 q / esc      quit (in SIDEBAR mode: dismiss the ✗ error / note lines instead)

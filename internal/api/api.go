@@ -347,7 +347,18 @@ package api
 // capability tokens distinguish stopped surfaces from active native-bridge routing.
 // The schema-56 capability list also negotiates additive stopped media-presentation v2
 // without changing the global envelope schema or the input-only version-1 route.
-const SchemaVersion = 56
+// 57: the ARCHIVE GATE. POST /v1/threads/archive {archived: true} now refuses a thread
+// that is still FLAGGED or still RUNNING (409), because archiving parks a FINISHED
+// thread and those are the two states that say it is not finished; the refusal names
+// every unmet condition at once and the remedy. ArchiveThreadRequest.Force overrides it
+// for the callers that archive by contract (a schedule's --on-turn-end policy,
+// `delegate`'s worker) and for an explicit `thread archive --force`. Un-archiving is
+// never gated, and no store migration is involved. Mixed-deploy direction: a pre-57
+// daemon ignores the unknown `force` field and archives unconditionally — the OLD
+// behaviour, which is exactly what force asks for, so a forcing client is safe either
+// way; a client that relies on the GATE gets no gate from a pre-57 daemon, so the
+// protection arrives with the daemon, not the caller.
+const SchemaVersion = 57
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

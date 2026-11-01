@@ -327,9 +327,9 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 		examples: []string{"sesh thread tag --id 1a2b3c4d --add wip --add urgent", "sesh thread tag --id 1a2b3c4d --remove wip"},
 	},
 	"thread archive": {
-		summary:  "archive (park) a thread, or --unarchive to restore it",
-		usage:    "sesh thread archive --id <id> [--unarchive] [--machine <m>]",
-		examples: []string{"sesh thread archive --id 1a2b3c4d", "sesh thread archive --id 1a2b3c4d --unarchive"},
+		summary:  "archive (park) a FINISHED thread, or --unarchive to restore it. Archiving refuses a thread that is still flagged or still running, naming every unmet condition and its remedy — clear the flag and stop it, or pass --force to park it as it is. Un-archiving is never gated",
+		usage:    "sesh thread archive --id <id> [--unarchive] [--force] [--machine <m>]",
+		examples: []string{"sesh thread archive --id 1a2b3c4d", "sesh thread archive --id 1a2b3c4d --unarchive", "sesh thread archive --id 1a2b3c4d --force"},
 	},
 	"thread delete": {
 		summary:  "delete a thread's record (refuses a live thread unless --force, which orphans the agent); never infers the id",

@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/store"
+	"github.com/lukastk/sesh/internal/tmux"
 )
 
 func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
@@ -167,10 +168,20 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 	// A divider can't be archived (archive clears pin_order, which a divider must
 	// keep — a divider only exists in the pinned block). Delete it instead.
 	if req.Archived {
-		if th, err := d.store.GetThread(req.ID); err == nil && th.AgentKind == api.DividerAgentKind {
+		th, terr := d.store.GetThread(req.ID)
+		if terr == nil && th.AgentKind == api.DividerAgentKind {
 			writeError(w, http.StatusConflict,
 				"archive: "+req.ID+" is a divider — delete it instead (sesh thread delete --id "+req.ID+")")
 			return
+		}
+		if terr == nil && !req.Force {
+			if refusal, gerr := d.archiveGate(th); gerr != nil {
+				writeError(w, http.StatusInternalServerError, "archive: "+gerr.Error())
+				return
+			} else if refusal != "" {
+				writeError(w, http.StatusConflict, refusal)
+				return
+			}
 		}
 	}
 	if err := d.store.SetThreadArchived(req.ID, req.Archived, time.Now().Unix()); err != nil {
@@ -193,6 +204,75 @@ func (d *Daemon) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.ArchiveThreadResponse{Schema: api.SchemaVersion, Thread: thread, SchedulesMoved: moved})
+}
+
+// archiveGate is the condition on archiving (schema 57): a thread may be parked
+// only once it is FINISHED — not flagged, and not running. It returns the refusal
+// to send, or "" when the thread may be archived.
+//
+// Both conditions describe unfinished work, from the two directions a thread can be
+// unfinished in: a FLAG is output nobody has read yet (auto-flagged at turn end, or
+// raised by hand), and a RUNTIME is a turn that may still be producing some. Parking
+// either one hides it from the active list, which is where it would have been looked
+// at — the flag survives in the record, the live agent keeps running in a pane the
+// list no longer shows.
+//
+// Every unmet condition is reported at once, with its remedy, so clearing them is one
+// pass rather than a guessing game. `--force` (ArchiveThreadRequest.Force) parks the
+// thread as it is; the callers that archive BY CONTRACT always set it.
+func (d *Daemon) archiveGate(thread api.Thread) (string, error) {
+	var unmet []string
+	if thread.Flagged {
+		reason := "flagged"
+		if thread.FlagReason != "" {
+			reason += " (" + thread.FlagReason + ")"
+		}
+		unmet = append(unmet, reason+" — clear it with `sesh thread flag --off --id "+thread.ID+"`")
+	}
+	live, why, err := d.threadRuntimeLive(thread)
+	if err != nil {
+		return "", err
+	}
+	if live {
+		unmet = append(unmet, why+" — end it with `sesh thread stop --id "+thread.ID+"`")
+	}
+	if len(unmet) == 0 {
+		return "", nil
+	}
+	return "archive: " + thread.ID + " is not finished: " + strings.Join(unmet, "; ") +
+		". Archiving parks a finished thread — or pass --force to park it as it is", nil
+}
+
+// threadRuntimeLive reports whether a thread still HAS a runtime, and how to say so.
+// It is the cheap half of resolveState: the archive gate needs "is it still running",
+// not the busy/working distinction, and resolveState pays up to ~3s of pane sampling
+// to draw that one. A marked pane whose agent has exited is NOT live (the same reading
+// `thread status` reports as headless), so a thread whose agent died is archivable.
+func (d *Daemon) threadRuntimeLive(thread api.Thread) (bool, string, error) {
+	if d.turnInFlight(thread.ID) {
+		return true, "a headless turn is in flight", nil
+	}
+	if thread.AgentKind == api.ShellAgentKind {
+		_, live, err := d.tmux.FindSessionByShellID(thread.ID)
+		if err != nil {
+			return false, "", err
+		}
+		if live {
+			return true, "its shell session " + thread.SessionName + " is live", nil
+		}
+		return false, "", nil
+	}
+	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
+	if err != nil {
+		return false, "", err
+	}
+	if !found {
+		return false, "", nil
+	}
+	if agent, running := tmux.AgentUnderPane(loc.PanePID); running && paneAgentMatches(thread.AgentKind, agent.Kind) {
+		return true, "its " + thread.AgentKind + " is still live in pane " + loc.Pane, nil
+	}
+	return false, "", nil
 }
 
 // handleThreadDelete drops the record only — the runtime (agent + tmux session)

@@ -44,7 +44,7 @@ func assertBoundedAttachmentStartRejection(t *testing.T, rec *httptest.ResponseR
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode attachment rejection: %v body=%s", err, rec.Body.String())
 	}
-	if rec.Code != http.StatusBadRequest || out.Schema != 56 || out.Error.Code != "invalid_request" || out.Error.Message == "" || len(out.Error.Message) > 512 || strings.ContainsAny(out.Error.Message, "\r\n") {
+	if rec.Code != http.StatusBadRequest || out.Schema != api.SchemaVersion || out.Error.Code != "invalid_request" || out.Error.Message == "" || len(out.Error.Message) > 512 || strings.ContainsAny(out.Error.Message, "\r\n") {
 		t.Fatalf("attachment rejection = %d %#v body=%s", rec.Code, out, rec.Body.String())
 	}
 	for _, value := range forbidden {
@@ -85,7 +85,7 @@ func TestBrowserAttachmentLifecyclePrepareAndArtifactPublication(t *testing.T) {
 	rec := httptest.NewRecorder()
 	d.handleBrowserAttachmentStart(rec, httptest.NewRequest(http.MethodPost, "/v1/browser/attachments/start", bytes.NewReader(body)))
 	resp := decodeAttachmentResponse(t, rec)
-	if rec.Code != 200 || resp.Schema != 56 || resp.Attachment.NextOffset != 0 || resp.Attachment.OwnerMachine != "owner" || resp.Attachment.Name != attachmentName || resp.Attachment.MediaType != attachmentMediaType {
+	if rec.Code != 200 || resp.Schema != api.SchemaVersion || resp.Attachment.NextOffset != 0 || resp.Attachment.OwnerMachine != "owner" || resp.Attachment.Name != attachmentName || resp.Attachment.MediaType != attachmentMediaType {
 		t.Fatalf("start = %d %#v %s", rec.Code, resp, rec.Body.String())
 	}
 	id := resp.Attachment.ID
@@ -280,7 +280,7 @@ func TestBrowserAttachmentRealHTTPPeerRouting(t *testing.T) {
 	rec = httptest.NewRecorder()
 	hub.handleBrowserAttachmentStart(rec, httptest.NewRequest(http.MethodPost, "/v1/browser/attachments/start", bytes.NewReader(body)))
 	resp := decodeAttachmentResponse(t, rec)
-	if rec.Code != 200 || resp.Schema != 56 || resp.Attachment.OwnerMachine != "peer" || resp.Attachment.Name != attachmentName || resp.Attachment.MediaType != attachmentMediaType || strings.Contains(rec.Body.String(), "peer-secret") {
+	if rec.Code != 200 || resp.Schema != api.SchemaVersion || resp.Attachment.OwnerMachine != "peer" || resp.Attachment.Name != attachmentName || resp.Attachment.MediaType != attachmentMediaType || strings.Contains(rec.Body.String(), "peer-secret") {
 		t.Fatalf("remote start = %d %#v %s", rec.Code, resp, rec.Body.String())
 	}
 	chunkURL := "/v1/browser/attachments/chunk?thread_id=" + thread.ID + "&id=" + resp.Attachment.ID + "&offset=0"

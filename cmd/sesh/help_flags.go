@@ -227,6 +227,7 @@ var flagDocs = map[string][]flagDoc{
 	"thread archive": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--unarchive", "unarchive (restore) the thread instead of archiving it"},
+		{"--force", "archive even while the thread is flagged or still running (the gate parks FINISHED threads); ignored with --unarchive"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread capture": {

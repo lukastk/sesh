@@ -244,11 +244,16 @@ func (s *scheduler) reap(threadID, why string, ok bool) {
 	case "keep":
 	case "stop":
 		perr = c.ThreadStopForce(ctx, threadID, true)
+	// --on-turn-end is policy the user set when configuring the schedule, so it
+	// parks the run whatever state the turn left it in — past the archive gate
+	// (schema 57), which is there for an interactive archive of unread or still-
+	// running work. `archive` keeps a headed run's pane alive on purpose; the run
+	// is flagged whenever the schedule asked for flag-on-end.
 	case "archive":
-		_, perr = c.ThreadArchive(ctx, threadID, true)
+		_, perr = c.ThreadArchiveForce(ctx, threadID, true, true)
 	case "stop+archive":
 		if perr = c.ThreadStopForce(ctx, threadID, true); perr == nil {
-			_, perr = c.ThreadArchive(ctx, threadID, true)
+			_, perr = c.ThreadArchiveForce(ctx, threadID, true, true)
 		}
 	case "delete":
 		if perr = c.ThreadStopForce(ctx, threadID, true); perr == nil {

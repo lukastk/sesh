@@ -44,7 +44,6 @@ var skipReasons = map[string]string{
 	"thread.send-wait":           "send --wait releases only when the REAL turn settles (reply present on return); an unmet wait --until times out LOUDLY naming the state (stall guard pinned by a cmd unit test — a wedged pane can't be honestly staged: tmux SIGCONTs stopped children)",
 	"thread.rename":              "rename a thread record",
 	"thread.tag":                 "add/remove tags",
-	"thread.archive":             "park a thread (hidden from active list, record kept)",
 	"thread.delete":              "drop a record without touching the runtime; accepts an id PREFIX (resolved like every verb), unknown prefix loud, live thread refused without --force",
 	"thread.headful":             "revive a never-paned idle thread into a pane (== resume, unified model); codex-before-any-turn is N/A (separate test)",
 	"thread.headful-busy":        "reviving a thread mid-turn (headless turn in flight) is rejected with a conflict",

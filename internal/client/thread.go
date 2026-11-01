@@ -98,10 +98,19 @@ func (c *Client) ThreadTag(ctx context.Context, id string, add, remove []string)
 }
 
 // ThreadArchive posts POST /v1/threads/archive, reporting how many of the
-// thread's message schedules the archive carried with it.
+// thread's message schedules the archive carried with it. Archiving goes through
+// the archive gate (schema 57): a flagged or still-running thread is refused.
 func (c *Client) ThreadArchive(ctx context.Context, id string, archived bool) (api.ArchiveThreadResponse, error) {
+	return c.ThreadArchiveForce(ctx, id, archived, false)
+}
+
+// ThreadArchiveForce is ThreadArchive with the gate overridden — for the callers
+// that archive BY CONTRACT whatever state the thread is in (a schedule's
+// --on-turn-end policy, `delegate`'s ephemeral worker) and for an explicit
+// `thread archive --force`. force is ignored when archiving is false.
+func (c *Client) ThreadArchiveForce(ctx context.Context, id string, archived, force bool) (api.ArchiveThreadResponse, error) {
 	var out api.ArchiveThreadResponse
-	err := c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived}, &out)
+	err := c.postJSON(ctx, "http://unix/v1/threads/archive", api.ArchiveThreadRequest{ID: id, Archived: archived, Force: force}, &out)
 	return out, err
 }
 

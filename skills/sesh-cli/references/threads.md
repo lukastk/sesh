@@ -125,7 +125,16 @@ sesh thread headful --id <id> --force   # do both: stop the holder, then a REAL 
 # running right now, so neither the TUI's revive nor a scheduled one ever forces.
 # NB measured NOT to cause it: `sesh thread stop` / the TUI's `x` (kills the pane — even
 # mid-tool), Ctrl-C, Ctrl-B, /quit, /clear, a claude auto-update.
-sesh thread archive --id <id>        # park it; --unarchive to restore
+sesh thread archive --id <id>        # park a FINISHED thread; --unarchive to restore
+#
+# Archiving is gated: a thread that is still FLAGGED or still RUNNING is refused, naming
+# every unmet condition and its remedy (`thread flag --off`, `thread stop`). Both states
+# mean unfinished — a flag is output nobody has read, a runtime is a turn that may still
+# be producing some — and parking either hides it from the list where it would have been
+# looked at. `--force` parks it as it is. Un-archiving is never gated, and a thread whose
+# agent has exited counts as finished (the same reading `thread status` calls headless).
+# The archivers that run on their own keep working: a schedule's `--on-turn-end
+# archive|stop+archive` and `delegate`'s worker archive by contract and force past it.
 sesh thread hold --id <id> --until 2026-07-01          # park until a date (hidden from the default view); auto-expires
 sesh thread hold --id <id> --release                   # release it (+ its subtree) from an ANCESTOR's hold, until tomorrow
 sesh thread hold --id <id> --clear                     # clear both; it inherits from its ancestors again

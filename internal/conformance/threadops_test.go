@@ -1,9 +1,11 @@
 package conformance
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
@@ -88,6 +90,67 @@ func testThreadArchive(t *testing.T, loc matrix.Locality) {
 	}
 	if !hasThread(sb.listThreads(t), th.ID) {
 		t.Errorf("unarchived thread not back in the active list")
+	}
+
+	// THE GATE (schema 57): archiving parks a FINISHED thread, so a live runtime is
+	// refused BY NAME — a real pi in a real pane, not a record field. Archiving it
+	// would have hidden a working agent from the list where it would be looked at.
+	live := sb.newThread(t, "pi", "stillgoing", "/tmp")
+	sb.waitThreadReady(t, live.ID, "pi")
+	out, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", live.ID)
+	if err == nil {
+		t.Fatalf("archived a LIVE thread: %s", out)
+	}
+	if !strings.Contains(out+stderr, "still live") || !strings.Contains(out+stderr, "thread stop") {
+		t.Errorf("the live refusal must name the runtime and the remedy: %s%s", out, stderr)
+	}
+	if sb.threadFromList(t, live.ID).Archived {
+		t.Errorf("the refused thread was archived anyway")
+	}
+
+	// --force parks it as it is — the override a schedule's --on-turn-end policy and
+	// `delegate`'s worker archive rely on, and the only way to the archived-but-live
+	// state the default view keeps visible.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", live.ID, "--force"); err != nil {
+		t.Fatalf("archive --force on a live thread: %v\n%s", err, stderr)
+	}
+	if !sb.threadFromList(t, live.ID).Archived {
+		t.Errorf("--force did not park the live thread")
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", live.ID, "--unarchive"); err != nil {
+		t.Fatalf("unarchive the forced one: %v\n%s", err, stderr)
+	}
+
+	// The remedy really is the remedy: once its runtime is gone, the SAME plain
+	// archive goes through.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "stop", "--id", live.ID); err != nil {
+		t.Fatalf("stop: %v\n%s", err, stderr)
+	}
+	if !waitUntil(20*time.Second, func() bool { return sb.threadStatus(t, live.ID).Head == api.Headless }) {
+		t.Fatalf("stopped thread never lost its runtime")
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", live.ID); err != nil {
+		t.Fatalf("archive after stop: %v\n%s", err, stderr)
+	}
+
+	// A FLAG alone refuses as well: it is output nobody has read, and archiving
+	// would hide it. Clearing it makes the same command succeed.
+	flagged := sb.newHeadlessThread(t, "pi", "flagged-park")
+	if _, stderr, err := sb.Runner.Run(t, "thread", "flag", "--on", "--id", flagged.ID); err != nil {
+		t.Fatalf("flag --on: %v\n%s", err, stderr)
+	}
+	out, stderr, err = sb.Runner.Run(t, "thread", "archive", "--id", flagged.ID)
+	if err == nil {
+		t.Fatalf("archived a FLAGGED thread: %s", out)
+	}
+	if !strings.Contains(out+stderr, "flagged") || !strings.Contains(out+stderr, "thread flag --off") {
+		t.Errorf("the flag refusal must name the flag and the remedy: %s%s", out, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "flag", "--off", "--id", flagged.ID); err != nil {
+		t.Fatalf("flag --off: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", flagged.ID); err != nil {
+		t.Fatalf("archive after clearing the flag: %v\n%s", err, stderr)
 	}
 }
 

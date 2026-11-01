@@ -79,7 +79,7 @@ var commands = []Command{
 	{ID: "new-divider", Desc: "new divider"},
 	{ID: "fork", Desc: "fork the thread (headless copy)"},
 	{ID: "stop", Desc: "stop the runtime (keep the record)", Keys: []string{"x"}},
-	{ID: "archive", Desc: "archive / unarchive (instant)", Keys: []string{"a"}},
+	{ID: "archive", Desc: "archive / unarchive (instant; archiving refuses a flagged or running thread)", Keys: []string{"a"}},
 	{ID: "undo-archive", Desc: "undo the last archive", Keys: []string{"U"}},
 	{ID: "delete", Desc: "delete (y/n confirm)"},
 

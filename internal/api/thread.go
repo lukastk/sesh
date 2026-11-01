@@ -434,6 +434,14 @@ type TagThreadRequest struct {
 type ArchiveThreadRequest struct {
 	ID       string `json:"id"`
 	Archived bool   `json:"archived"`
+	// Force parks a thread that the archive gate would refuse — one still
+	// FLAGGED or still RUNNING (schema 57). Archiving is for a finished thread,
+	// so the gate protects the two states that mean "not finished": unread
+	// output, and a live runtime. Force is for the callers whose whole contract
+	// is to archive regardless (a schedule's --on-turn-end policy, `delegate`'s
+	// ephemeral worker) and for a user who has decided to park it as it is.
+	// Ignored when Archived is false: un-archiving is never gated.
+	Force bool `json:"force,omitempty"`
 }
 
 // StopThreadRequest is the body of POST /v1/threads/stop (end the runtime —

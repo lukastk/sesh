@@ -461,7 +461,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.archive",
-		Description: "archive/unarchive — park a thread, hidden from the active list, record kept",
+		Description: "archive/unarchive — park a thread, hidden from the active list, record kept; the gate (schema 57) refuses a thread that is still FLAGGED or still RUNNING, naming the unmet condition and its remedy (proved against a REAL live agent, and against the flag), stopping or unflagging it lets the same command through, and --force parks it as it is; un-archiving is never gated",
 		Localities:  bothLoc,
 	})
 	Register(Feature{

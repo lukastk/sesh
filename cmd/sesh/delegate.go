@@ -85,14 +85,16 @@ func runDelegate(cfg config.Config, args []string) error {
 	id := resp.Thread.ID
 	// The ephemeral contract: a worker is archived (not active) after it answers
 	// or fails — its record + transcript are retained, just hidden from the
-	// default view. --keep leaves it active.
+	// default view. --keep leaves it active. The contract holds unconditionally, so
+	// this archive is FORCED past the gate (schema 57): a worker that just finished
+	// a turn is normally flagged, and a timed-out one may still be running.
 	cleanup := func() {
 		if *keep {
 			return
 		}
 		dctx, dcancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer dcancel()
-		if _, derr := c.ThreadArchive(dctx, id, true); derr != nil {
+		if _, derr := c.ThreadArchiveForce(dctx, id, true, true); derr != nil {
 			fmt.Fprintf(os.Stderr, "delegate: WARNING: worker %s not archived: %v\n", id, derr)
 		}
 	}

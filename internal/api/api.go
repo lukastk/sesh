@@ -369,7 +369,10 @@ package api
 // cached by the daemon for 5 minutes. ThreadSnapshot/ThreadRow/ThreadStatusResponse
 // gain observed_model: the model the thread's transcript says it last ran on, read
 // by the owner from the harness's records (an omitted field from a pre-58 peer reads
-// as "nothing observed"). No store migration.
+// as "nothing observed"). POST /v1/threads/model sets a thread's registered model
+// (`thread set-model`) and, with apply, switches its live agent session-only
+// (`thread switch-model`): claude's pane restarts in place on the new model, codex
+// gets `/model`, pi/mypi switch over pi-rpc-socket. No store migration.
 // Mixed-deploy direction: a pre-58 daemon 404s the new routes (a loud client error)
 // and spawns unpinned threads on the harness's own default, as before.
 const SchemaVersion = 58

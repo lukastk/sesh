@@ -68,6 +68,30 @@ func (s *Server) CreateWindowCmd(session, dir string, env map[string]string, com
 	return strings.TrimSpace(out), nil
 }
 
+// RespawnPaneCmd kills the process running in pane and starts command in the
+// SAME pane (`respawn-pane -k`): the pane id, its place in the layout and its
+// user options — the @sesh-thread-id marker among them — all survive, which is
+// what makes an in-place agent restart indistinguishable from the outside
+// except for the new process. env is injected into the new process.
+func (s *Server) RespawnPaneCmd(pane, dir string, env map[string]string, command string) error {
+	if pane == "" {
+		return fmt.Errorf("tmux: respawn-pane: empty pane")
+	}
+	if command == "" {
+		return fmt.Errorf("tmux: respawn-pane: empty command")
+	}
+	args := []string{"respawn-pane", "-k", "-t", pane}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	for _, k := range sortedKeys(env) {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	args = append(args, command)
+	_, err := s.run(args...)
+	return err
+}
+
 // SplitWindowCmd splits target (a pane or window) running command in the new
 // pane, and returns the new pane's id. Used to place a thread as a SPLIT beside
 // an existing pane (`thread new --into-window`). env is injected into the new

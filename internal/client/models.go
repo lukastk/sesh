@@ -30,3 +30,10 @@ func (c *Client) ModelList(ctx context.Context, agent string, refresh bool) (api
 	}
 	return out, c.getJSON(ctx, u, &out)
 }
+
+// ThreadModel posts POST /v1/threads/model — change a thread's registered model
+// and, with req.Apply, its live agent's.
+func (c *Client) ThreadModel(ctx context.Context, req api.SetThreadModelRequest) (api.SetThreadModelResponse, error) {
+	var out api.SetThreadModelResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/model", req, &out)
+}

@@ -75,6 +75,18 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.set-model",
+		Description: "`thread set-model --model|--clear`: change only the REGISTERED model — the live agent keeps its process and launch model, the next resume launches on the new one; --clear removes it; a thread that runs no agent refuses; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.switch-model",
+		Description: "`thread switch-model --id --model`: registered AND live model, session-only per harness — claude's pane restarts IN PLACE (same pane, new process on --model, conversation remembered, next turn on the new model), codex switches by /model (same process, its confirmation, next turn_context), pi over pi-rpc-socket (same process, live model + model_change); mid-turn refused without --force; no live agent = record only; --id never inferred; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.observed-model",
 		Description: "the OWNER reads the model a thread's transcript says it last ran on (claude assistant message.model, codex turn_context, pi model_change/assistant) and carries it as observed_model on status, grid rows (the TUI MODEL column) and info; derived from the harness's records, not the thread record (a one-turn --model override moves it, not Thread.Model); nothing before the first turn; routed",
 		Agents:      agentic,

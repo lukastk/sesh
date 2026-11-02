@@ -25,6 +25,8 @@ var skipReasons = map[string]string{
 	"tmux.send-text":             "paste/send text into a pane",
 	"thread.new.headed":          "spawn headed thread in a real tmux pane",
 	"thread.default-agent":       "[defaults] agent spawns a real harness when --agent is omitted; explicit override wins; unset refuses; remote uses the owner daemon's config",
+	"thread.set-model":           "registered model changes, the live agent keeps its process and launch model, the next resume runs the new one; --clear; no-agent threads refuse; remote routed",
+	"thread.switch-model":        "live switch per harness with the agent's own evidence (claude in-place restart that remembers, codex /model, pi rpc set_model) and the next turn's model; busy refused; headless = record only; remote routed",
 	"thread.observed-model":      "after a real headless turn the owner's status, grid row and info report the transcript's model; a one-turn --model override moves it while the registered model stays; nothing before a turn; remote routed",
 	"model.list":                 "the real harness's own model list on the owner (claude handshake / codex debug models / pi --list-models): known models present, codex/pi counts match the harness CLI, cache until --refresh, unknown agent loud; remote routed",
 	"model.default":              "set/unset a harness's default model in a symlinked owner config.toml (comments kept); a thread without --model records it and the real agent runs with it; --model wins; hand edits apply without restart; remote routed",

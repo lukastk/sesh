@@ -53,3 +53,38 @@ type ModelListResponse struct {
 	// answer unless the request says refresh=1.
 	FetchedAtUnix int64 `json:"fetched_at_unix"`
 }
+
+// SetThreadModelRequest is POST /v1/threads/model: change a thread's registered
+// model and, with Apply, the model its live agent is running.
+type SetThreadModelRequest struct {
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// Clear removes the registered model (the harness's default from then on).
+	// Exclusive with Model and with Apply.
+	Clear bool `json:"clear,omitempty"`
+	// Apply also switches the live agent, if there is one: claude's pane is
+	// restarted in place on the new model (its conversation resumes); codex is
+	// sent `/model <m>` (session-only); pi/mypi switch over pi-rpc-socket
+	// (session-only). With no live agent the record alone changes.
+	Apply bool `json:"apply,omitempty"`
+	// Force lets Apply act on a thread that is mid-turn. For claude that kills
+	// the turn in flight.
+	Force bool `json:"force,omitempty"`
+}
+
+// Outcomes of POST /v1/threads/model.
+const (
+	ModelRecorded  = "recorded"  // record only (no Apply)
+	ModelNextTurn  = "next-turn" // Apply, but no live agent: the next spawn/resume/turn uses it
+	ModelSwitched  = "switched"  // the live agent switched in-session (codex, pi)
+	ModelRestarted = "restarted" // the live claude pane was restarted on the new model
+)
+
+type SetThreadModelResponse struct {
+	Schema  int    `json:"schema"`
+	Thread  Thread `json:"thread"`
+	Outcome string `json:"outcome"`
+	// Detail says what happened in words (what the agent confirmed, or why only
+	// the record changed).
+	Detail string `json:"detail"`
+}

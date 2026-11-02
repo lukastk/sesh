@@ -321,6 +321,20 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
+	"thread set-model": {
+		{"--model", "the model, in the harness's own spelling (opaque, like `thread new --model`)"},
+		{"--clear", "remove the registered model: the harness's own default from then on (exclusive with --model)"},
+		{"--id", "thread id or unique prefix (default: the current thread)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"thread switch-model": {
+		{"--id", "thread id or unique prefix (required: never inferred, since a claude pane restarts)"},
+		{"--model", "the model, in the harness's own spelling (required)"},
+		{"--force", "switch a thread that is mid-turn anyway (for claude the restart KILLS the turn in flight)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"thread notify": {
 		{"--on", "enable the thread's notification gate (mutually exclusive with --off)"},
 		{"--off", "disable the thread's notification gate (mutually exclusive with --on)"},

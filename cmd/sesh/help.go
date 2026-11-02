@@ -287,6 +287,16 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 		usage:    "sesh thread notify (--on|--off) [--id <id>] [--machine <m>]",
 		examples: []string{"sesh thread notify --on --id 1a2b3c4d", "sesh thread notify --off"},
 	},
+	"thread set-model": {
+		summary:  "change a thread's REGISTERED model (what spawn, resume and every headless turn launch it with); a live agent keeps its current model — use switch-model for that",
+		usage:    "sesh thread set-model (--model <m>|--clear) [--id <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh thread set-model --model opus --id 1a2b3c4d", "sesh thread set-model --clear"},
+	},
+	"thread switch-model": {
+		summary:  "change the registered model AND the live agent's, session-only: claude's pane restarts in place on the new model (the conversation resumes; the process and any turn in flight do not), codex gets `/model <m>`, pi/mypi switch over pi-rpc-socket; no live agent = record only. Refuses a mid-turn thread without --force",
+		usage:    "sesh thread switch-model --id <id> --model <m> [--force] [--json] [--machine <m>]",
+		examples: []string{"sesh thread switch-model --id 1a2b3c4d --model sonnet", "sesh thread switch-model --id 1a2b --model openai-codex/gpt-6-astra --machine macstudio"},
+	},
 	"thread hold": {
 		summary: "park a thread until a date (hidden from the default active view), release it from an ancestor's hold, or clear both",
 		usage:   "sesh thread hold (--until <YYYY-MM-DD>|--until-unix <n>|--release|--clear) [--id <id>] [--machine <m>]",

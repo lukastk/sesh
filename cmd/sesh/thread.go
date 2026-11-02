@@ -79,6 +79,10 @@ func runThread(args []string) error {
 		return threadTranscript(cfg, rest)
 	case "notify":
 		return threadNotify(cfg, rest)
+	case "set-model":
+		return threadSetModel(cfg, rest)
+	case "switch-model":
+		return threadSwitchModel(cfg, rest)
 	case "report-state":
 		return threadReportState(cfg, rest)
 	case "wait":

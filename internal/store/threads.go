@@ -343,6 +343,19 @@ func (s *Store) SetThreadNotify(id string, on bool) error {
 	return nil
 }
 
+// SetThreadModel writes a thread's registered model (empty clears it: the harness's
+// own default from then on).
+func (s *Store) SetThreadModel(id, model string) error {
+	res, err := s.db.Exec(`UPDATE threads SET model = ? WHERE id = ?`, model, id)
+	if err != nil {
+		return fmt.Errorf("store: set model: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
 func metaJSON(m map[string]string) string {
 	if len(m) == 0 {
 		return "{}"

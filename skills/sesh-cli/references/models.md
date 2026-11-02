@@ -21,6 +21,36 @@ sesh info --json <id>             # thread.model + observed_model
 sesh thread grid --json           # observed_model on every row (the TUI MODEL column)
 ```
 
+## Changing a thread's model
+
+```sh
+sesh thread set-model --model opus [--id <id>]        # registered model only
+sesh thread set-model --clear [--id <id>]             # back to the harness default
+sesh thread switch-model --id <id> --model sonnet     # registered AND live
+sesh thread switch-model --id <id> --model gpt-6-astra --force   # even mid-turn
+```
+
+`set-model` changes what sesh launches the thread with from now on (spawn,
+resume, headless turns). A live agent keeps running the model it has.
+
+`switch-model` also switches the live agent. Every route is **session-only**:
+no harness's own global default is written.
+
+| live agent | what happens | outcome |
+|---|---|---|
+| claude | the pane is **restarted in place** (same pane, layout and marker) on `claude --resume <session> --model <m>`: the conversation continues, but the claude process — and any turn in flight — does not survive | `restarted` |
+| codex | `/model <m>` is typed into the pane (through the typing guard) and must be confirmed by codex's "Model changed to …" | `switched` |
+| pi / mypi | pi-rpc-socket `set_model` (a `:thinking` suffix is refused live) | `switched` |
+| none (headless, idle) | the record changes; the next spawn, resume or turn uses it | `next-turn` |
+
+Claude is restarted because there is no outside way to switch it for one
+session: a typed `/model <m>` also saves `<m>` as claude's global default in
+`~/.claude/settings.json`, which would change every new claude session.
+
+A thread that is mid-turn is refused unless `--force` (for claude that kills the
+turn). `switch-model` needs an explicit `--id`, like `stop`: it is never inferred
+from the current thread, since restarting your own claude pane ends your process.
+
 ## Which models a harness can use
 
 ```sh

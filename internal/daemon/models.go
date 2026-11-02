@@ -30,6 +30,7 @@ func (d *Daemon) routesModels(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/models/defaults", d.handleModelDefaults)
 	mux.HandleFunc("POST /v1/models/default", d.handleSetModelDefault)
 	mux.HandleFunc("GET /v1/models", d.handleModelList)
+	mux.HandleFunc("POST /v1/threads/model", d.handleThreadModel)
 }
 
 // defaultModelFor is kind's configured default model, read fresh from

@@ -752,8 +752,12 @@ func claimViewActiveArchivedLive(t *testing.T) {
 	sb.waitThreadReady(t, live.ID, "pi")
 	// A headless record → not headful; archive it too (it must drop out of the view).
 	parked := sb.newHeadlessThread(t, "pi", "parkedarch")
+	// --force: the archive gate (schema 57) refuses a thread that is still
+	// running, and a live pane is exactly that. Archived-but-headful still arises
+	// through the by-contract archivers that force (a schedule's --on-turn-end,
+	// delegate's worker), which is why the view exception under test exists.
 	for _, th := range []api.Thread{live, parked} {
-		if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID); err != nil {
+		if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID, "--force"); err != nil {
 			t.Fatalf("archive %s: %v\n%s", th.Name, err, stderr)
 		}
 	}

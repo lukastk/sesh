@@ -132,6 +132,13 @@ tag-add          add a tag                tag-remove   remove a tag (picker)
 set-parent       set parent by PICKING one from a list — see below
 set-parent-uuid  set parent by pasting a uuid/prefix (empty = root; self/cycle/unknown
                  are refused with a persistent on-screen warning)
+switch-model     switch the thread's model, LIVE — a picker over the models the
+                 thread's harness reports on its machine (see below); a live claude
+                 pane asks y/n first because it RESTARTS
+set-model        register the thread's model only (the same picker; the live agent
+                 keeps its model)
+set-default-model  set the selected row's HARNESS default model on that row's
+                 machine (the same picker; `(none)` removes the default)
 new-virtual      new VIRTUAL group (name prompt; empty cancels). Creates a root
                  grouping thread on the SELECTED row's machine (virtual parents only
                  group same-machine threads) and lands the cursor on it — then
@@ -173,6 +180,20 @@ not exist), never the thread itself or any of its **descendants** (a cycle), nev
 divider, and not its current parent. A thread that already has a parent also gets a
 **`(root — no parent)`** entry at the top, which detaches it. `set-parent-uuid` is the
 original paste-a-uuid form and is unchanged.
+
+**Picking a model (`switch-model`, `set-model`, `set-default-model`).** The picker
+asks the selected thread's harness ON THE THREAD'S MACHINE which models it can use
+(`sesh model list`) and lists them with their labels; `[registered]` and `[running]`
+mark the thread's registered and observed models (`[default]` in the default picker).
+Type to filter (fuzzy, by id or label), `↑/↓` move, **enter applies**, esc cancels, a
+mouse click applies directly. **Tab** flips between switching the live agent and
+registering only. A query that is not an exact entry is also offered **as typed** —
+claude's list is shorter than what its `--model` accepts. Register and default mode
+start with a **`(none)`** entry that clears the registration / removes the default.
+Switching a live **claude** pane stops at a y/n: the pane restarts in place on the new
+model (the claude process ends; the conversation resumes). A thread that is mid-turn
+is refused (the CLI's `--force` overrides). All three are palette-only; bind one with
+`[[tui.key]]` (e.g. `command = "switch-model"`, `key = "M"`).
 
 **Rebinding keys (`[[tui.key]]`).** Any command's key can be changed, added to, or
 removed in `~/.sesh/config.toml`:

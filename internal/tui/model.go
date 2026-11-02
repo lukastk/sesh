@@ -304,6 +304,9 @@ type confirmKind int
 const (
 	confirmNone   confirmKind = iota
 	confirmDelete             // `d` — drop the record (archive is instant + undoable since H54)
+	// confirmSwitchModel: switching a LIVE claude pane's model restarts the pane
+	// (its process ends; the conversation resumes), so the picker asks first.
+	confirmSwitchModel
 )
 
 type Model struct {
@@ -526,6 +529,20 @@ type Model struct {
 	parentPickQuery  []rune
 	parentPickCursor int
 	parentPickOffset int
+	// modelPick: the model picker (modelpick.go) — switch / register a thread's
+	// model, or set a harness default, from the list the owner's harness reports.
+	// modelPickList is nil while it loads; modelPickErr holds a failed fetch.
+	modelPick         bool
+	modelPickMode     modelPickMode
+	modelPickRow      api.ThreadRow
+	modelPickQuery    []rune
+	modelPickCursor   int
+	modelPickOffset   int
+	modelPickList     *api.ModelListResponse
+	modelPickDefaults map[string]string
+	modelPickErr      error
+	// confirmModel is the model a confirmSwitchModel popup would switch to.
+	confirmModel string
 	// archiveUndo is the U key's LIFO stack of this session's archives.
 	archiveUndo []archiveUndoEntry
 	// detailsPopup: `I` opens a full-screen takeover showing ALL of the selected
@@ -1318,6 +1335,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// While the MODEL PICKER is up: the wheel moves its selection, a click picks.
+		if m.modelPick {
+			return m.handleModelPickMouse(msg)
+		}
 		// While the REPARENT PICKER is up: the wheel moves its selection, a left
 		// click on a candidate sets that parent.
 		if m.parentPick {
@@ -1528,6 +1549,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ensureCursorVisible()
 			}
 		}
+		if msg.err == nil && msg.note != "" {
+			m.note = msg.note
+		}
 		if msg.err == nil && msg.preselect != "" {
 			m.preselectID = msg.preselect // land the cursor on the moved node once the refetch lands
 		}
@@ -1545,6 +1569,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.fetch(), reconcileAfter(postActionReconcileDelay))
 		}
 		return m, m.fetch() // reconcile against the daemon
+	case modelListMsg:
+		return m.applyModelList(msg), nil
 	case clipboardDoneMsg:
 		// An action error, not lastErr: lastErr reads "daemon unreachable" and the
 		// next fetch clears it, which would both mislabel and erase the failure.
@@ -1709,6 +1735,8 @@ type actionMsg struct {
 	// stack) — attached on success only, so a failed archive never yields a
 	// bogus undo target.
 	undoArchive *archiveUndoEntry
+	// note is shown on success (e.g. what a model switch did, in the daemon's words).
+	note string
 }
 
 // archiveUndoEntry is one undoable archive. Archiving is instant (no confirm)
@@ -2321,26 +2349,29 @@ func (m Model) machineReachable(machine string) bool {
 func requiresReachableOwner(cmdID string) bool {
 	switch cmdID {
 	case "enter", // navSelected (resume/nav on the owner)
-		"archive",         // archive/unarchive
-		"delete",          // delete
-		"stop",            // stop
-		"flag",            // flag toggle (owner-routed setter)
-		"fork",            // fork (thread new --fork-from on the owner)
-		"flag-gate",       // flag-gate toggle (owner-routed setter)
-		"rename",          // rename
-		"tag-add",         // tag add
-		"tag-remove",      // tag remove
-		"set-parent",      // reparent (pick a parent from a list)
-		"set-parent-uuid", // reparent (paste a uuid)
-		"hold",            // hold toggle
-		"hold-until",      // hold until date
-		"notify",          // notify on/off
-		"new-virtual",     // new virtual group (created on the selected row's machine)
-		"pin",             // pin to top (routed pin on the owner)
-		"unpin",           // unpin (routed pin --clear on the owner)
-		"move-mode",       // enter move mode (auto-pins on the owner)
-		"new-divider",     // new divider (created on the selected row's machine)
-		"tickets":         // tickets view (loadTickets routes to the owner)
+		"archive",           // archive/unarchive
+		"delete",            // delete
+		"stop",              // stop
+		"flag",              // flag toggle (owner-routed setter)
+		"fork",              // fork (thread new --fork-from on the owner)
+		"flag-gate",         // flag-gate toggle (owner-routed setter)
+		"rename",            // rename
+		"tag-add",           // tag add
+		"tag-remove",        // tag remove
+		"set-parent",        // reparent (pick a parent from a list)
+		"set-parent-uuid",   // reparent (paste a uuid)
+		"switch-model",      // model list + switch-model on the owner
+		"set-model",         // model list + set-model on the owner
+		"set-default-model", // model list + set-default on the row's machine
+		"hold",              // hold toggle
+		"hold-until",        // hold until date
+		"notify",            // notify on/off
+		"new-virtual",       // new virtual group (created on the selected row's machine)
+		"pin",               // pin to top (routed pin on the owner)
+		"unpin",             // unpin (routed pin --clear on the owner)
+		"move-mode",         // enter move mode (auto-pins on the owner)
+		"new-divider",       // new divider (created on the selected row's machine)
+		"tickets":           // tickets view (loadTickets routes to the owner)
 		return true
 	}
 	// NB `shells` is deliberately NOT here. It enumerates every REACHABLE machine
@@ -2384,6 +2415,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.parentPick {
 		return m.handleParentPickKey(msg)
+	}
+	if m.modelPick {
+		return m.handleModelPickKey(msg)
 	}
 	if m.viewPicker {
 		return m.handleViewPickerKey(msg)
@@ -2577,6 +2611,12 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		// Interactive reparent: pick the new parent from a list of this machine's
 		// threads instead of pasting a uuid. See parentpick.go.
 		return m.openParentPick()
+	case "switch-model":
+		return m.openModelPick(pickSwitch)
+	case "set-model":
+		return m.openModelPick(pickRegister)
+	case "set-default-model":
+		return m.openModelPick(pickDefault)
 	case "set-parent-uuid":
 		if row, ok := m.Selected(); ok {
 			m.prompting, m.promptRow, m.promptInput, m.promptCursor = promptReparent, row, nil, 0
@@ -2683,6 +2723,8 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case confirmDelete:
 			cmd := m.deleteRow(row)
 			return m, cmd
+		case confirmSwitchModel:
+			return m, m.switchModel(row, m.confirmModel)
 		}
 	}
 	return m, nil
@@ -3733,6 +3775,9 @@ func (m Model) LastErr() error { return m.lastErr }
 // which persists across reconcile fetches (for tests).
 func (m Model) ActionErr() error { return m.actionErr }
 
+// Note is the transient message line (tests).
+func (m Model) Note() string { return m.note }
+
 // Confirming reports whether a y/n destructive-action popup is open (for tests).
 func (m Model) Confirming() bool { return m.confirming != confirmNone }
 
@@ -4294,6 +4339,9 @@ func (m Model) viewFrame() string {
 	if m.parentPick {
 		return m.parentPickView() // full-screen takeover: pick a new parent thread
 	}
+	if m.modelPick {
+		return m.modelPickView() // full-screen takeover: pick a model
+	}
 	if m.viewPicker {
 		return m.viewPickerView() // full-screen takeover: pick a view (Tab)
 	}
@@ -4310,9 +4358,13 @@ func (m Model) viewFrame() string {
 	if m.note != "" {
 		b.WriteString(styleDim.Render(m.note) + "\n")
 	}
-	if m.confirming != confirmNone {
+	switch m.confirming {
+	case confirmDelete:
 		b.WriteString(styleHeader.Render(fmt.Sprintf("┃ delete %q? ┃", m.confirmRow.Name)) + "\n")
 		b.WriteString(styleDim.Render("  y to confirm · any other key to cancel") + "\n")
+	case confirmSwitchModel:
+		b.WriteString(styleHeader.Render(fmt.Sprintf("┃ restart %q's claude pane on %s? ┃", m.confirmRow.Name, m.confirmModel)) + "\n")
+		b.WriteString(styleDim.Render("  the claude process ends (a turn in flight is refused, not killed); the conversation resumes in the same pane · y to confirm · any other key to cancel") + "\n")
 	}
 	if m.uuidPopup {
 		if row, ok := m.Selected(); ok {

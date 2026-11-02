@@ -51,6 +51,10 @@ A thread that is mid-turn is refused unless `--force` (for claude that kills the
 turn). `switch-model` needs an explicit `--id`, like `stop`: it is never inferred
 from the current thread, since restarting your own claude pane ends your process.
 
+In the TUI the palette commands **`switch-model`**, **`set-model`** and
+**`set-default-model`** open a fuzzy picker over the owning machine's model list —
+see [TUI](tui.md).
+
 ## Which models a harness can use
 
 ```sh

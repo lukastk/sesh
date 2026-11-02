@@ -47,7 +47,8 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	// Commands that shell out `sesh <verb> --machine <owner>` (mutate or enter a thread).
 	routed := []string{"enter", "archive", "delete", "stop", "flag", "fork", "flag-gate",
 		"rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid", "new-virtual",
-		"pin", "unpin", "move-mode", "new-divider", "hold", "hold-until", "notify", "tickets"}
+		"pin", "unpin", "move-mode", "new-divider", "hold", "hold-until", "notify", "tickets",
+		"switch-model", "set-model", "set-default-model"}
 	for _, id := range routed {
 		if _, ok := commandByID(id); !ok {
 			t.Fatalf("routed command %q is not in the registry", id)
@@ -98,6 +99,7 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 // ownerRoutedCommands is the routed set, for the offline-gate tests below.
 var ownerRoutedCommands = []string{"enter", "archive", "delete", "stop", "flag", "fork",
 	"flag-gate", "rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid",
+	"switch-model", "set-model", "set-default-model",
 	"new-virtual", "pin", "unpin", "move-mode", "new-divider", "hold", "hold-until",
 	"notify", "tickets"}
 

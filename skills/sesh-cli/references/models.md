@@ -7,6 +7,23 @@ names are opaque and spelled the harness's own way — claude `opus` / `haiku` /
 `anthropic/claude-haiku-4-5`). Sesh keeps no list of valid names; a bad one fails
 loudly at the agent.
 
+## Which models a harness can use
+
+```sh
+sesh model list --agent claude                 # ids --model accepts, with labels
+sesh model list --agent pi --machine macstudio --json
+sesh model list --agent codex --refresh        # ask again instead of the 5-minute cache
+```
+
+The answer comes from the harness on the **owning** machine — its credentials and
+config decide what it can use — never from a list sesh keeps:
+
+| harness | source | notes |
+|---|---|---|
+| claude | its SDK `initialize` handshake (`claude -p --input-format stream-json`) | no model turn runs and no session is saved. Its "default" entry is reported as `harness_default` (the model claude runs given no `--model`), not offered as a model. This list is shorter than claude's interactive `/model` picker; any id claude accepts still works with `--model`. |
+| codex | `codex debug models` | entries with `visibility: list` only. It is a `debug` command, so a format change is a loud error. |
+| pi / mypi | `--list-models` | every model of every provider you have credentials for; ids are `provider/id`. |
+
 ## Default model per harness
 
 Each harness may have a default model: the `model` key of its `[spawn.<agent>]`

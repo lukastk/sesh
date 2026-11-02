@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
@@ -26,6 +29,7 @@ var configWriteMu sync.Mutex
 func (d *Daemon) routesModels(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/models/defaults", d.handleModelDefaults)
 	mux.HandleFunc("POST /v1/models/default", d.handleSetModelDefault)
+	mux.HandleFunc("GET /v1/models", d.handleModelList)
 }
 
 // defaultModelFor is kind's configured default model, read fresh from
@@ -103,5 +107,69 @@ func (d *Daemon) handleSetModelDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.WrotePath = wrote
+	writeJSON(w, http.StatusOK, out)
+}
+
+// modelListTTL is how long a harness's model list is reused. Asking claude costs
+// a process start and a round trip to its backend (seconds), and the answer
+// changes when the account's model access does — rarely. A picker opened twice
+// in a row should not pay twice; `refresh=1` asks again.
+const modelListTTL = 5 * time.Minute
+
+var modelListCache = struct {
+	sync.Mutex
+	byAgent map[agents.Kind]api.ModelListResponse
+}{byAgent: map[agents.Kind]api.ModelListResponse{}}
+
+// handleModelList answers GET /v1/models?agent=<a>[&refresh=1] by asking the
+// harness on THIS machine (see agents.ListModels): which models a harness can
+// use is per-machine state (its credentials and config), so a picker for a
+// thread asks that thread's owner.
+func (d *Daemon) handleModelList(w http.ResponseWriter, r *http.Request) {
+	kind, err := agents.ParseKind(r.URL.Query().Get("agent"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "models: "+err.Error())
+		return
+	}
+	refresh := r.URL.Query().Get("refresh") == "1"
+	modelListCache.Lock()
+	cached, ok := modelListCache.byAgent[kind]
+	modelListCache.Unlock()
+	if ok && !refresh && time.Since(time.Unix(cached.FetchedAtUnix, 0)) < modelListTTL {
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
+	env := os.Environ()
+	if kind == agents.Codex {
+		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		env = append(env, "CODEX_HOME="+codexHome)
+	}
+	// Under the 15 s client/route-proxy timeout, so a hung harness is reported by
+	// the daemon (naming the command) rather than as a bare client timeout.
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	list, err := agents.ListModels(ctx, kind, env, d.cfg.Home)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	out := api.ModelListResponse{
+		Schema:         api.SchemaVersion,
+		Machine:        d.cfg.Machine,
+		Agent:          string(kind),
+		HarnessDefault: list.HarnessDefault,
+		Models:         make([]api.ModelOption, 0, len(list.Models)),
+		FetchedAtUnix:  time.Now().Unix(),
+	}
+	for _, m := range list.Models {
+		out.Models = append(out.Models, api.ModelOption{ID: m.ID, Label: m.Label, Description: m.Description, Resolved: m.Resolved})
+	}
+	modelListCache.Lock()
+	modelListCache.byAgent[kind] = out
+	modelListCache.Unlock()
 	writeJSON(w, http.StatusOK, out)
 }

@@ -28,6 +28,8 @@ func runModel(cfg config.Config, args []string) error {
 		return modelSetDefault(cfg, rest)
 	case "unset-default":
 		return modelUnsetDefault(cfg, rest)
+	case "list":
+		return modelList(cfg, rest)
 	default:
 		return fmt.Errorf("unknown model subcommand %q", sub)
 	}
@@ -111,4 +113,55 @@ func printModelDefaults(out api.ModelDefaultsResponse, asJSON bool) error {
 	}
 	fmt.Printf("\n%s: %s\n", out.Machine, strings.TrimSpace(out.ConfigPath))
 	return nil
+}
+
+// modelList prints the models the target machine's harness reports it can use.
+func modelList(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("model list", flag.ContinueOnError)
+	agent := fs.String("agent", "", "claude | codex | pi | mypi (required)")
+	refresh := fs.Bool("refresh", false, "ask the harness again instead of reusing the daemon's recent answer")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("model list: unexpected argument %q", fs.Arg(0))
+	}
+	if *agent == "" {
+		return errors.New("model list: --agent is required")
+	}
+	out, err := daemonClient(cfg).ModelList(context.Background(), *agent, *refresh)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(out)
+	}
+	w := 0
+	for _, m := range out.Models {
+		if len(m.ID) > w {
+			w = len(m.ID)
+		}
+	}
+	for _, m := range out.Models {
+		detail := strings.TrimSpace(strings.Join(nonEmpty(m.Label, m.Description), " · "))
+		if m.Resolved != "" {
+			detail = strings.TrimSpace(detail + " (= " + m.Resolved + ")")
+		}
+		fmt.Printf("%-*s  %s\n", w, m.ID, detail)
+	}
+	if out.HarnessDefault != "" {
+		fmt.Printf("\nwith no --model, %s runs %s\n", out.Agent, out.HarnessDefault)
+	}
+	return nil
+}
+
+func nonEmpty(ss ...string) []string {
+	var out []string
+	for _, s := range ss {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

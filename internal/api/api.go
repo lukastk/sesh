@@ -363,7 +363,10 @@ package api
 // daemon's config.toml (a key-level text edit that keeps comments and writes through
 // a symlinked file), and a thread created, forked or realized without --model is
 // given that default and records it as Thread.Model. The daemon reads the default
-// fresh at each creation, so an edit needs no restart. No store migration.
+// fresh at each creation, so an edit needs no restart. GET /v1/models?agent=<a>
+// [&refresh=1] lists the models the harness on the owning machine reports it can
+// use (claude's SDK initialize handshake, `codex debug models`, `pi --list-models`),
+// cached by the daemon for 5 minutes. No store migration.
 // Mixed-deploy direction: a pre-58 daemon 404s the new routes (a loud client error)
 // and spawns unpinned threads on the harness's own default, as before.
 const SchemaVersion = 58

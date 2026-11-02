@@ -75,6 +75,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "model.list",
+		Description: "`model list --agent <a>`: the models the REAL harness on the owning machine reports it can use (claude's SDK initialize handshake, `codex debug models` visibility=list, `pi --list-models`), never a sesh-kept list; claude's \"default\" pseudo-entry becomes harness_default; reused for 5 min until --refresh; unknown agent loud; routed = the peer's harness",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "model.default",
 		Description: "per-harness DEFAULT model ([spawn.<agent>] model in the OWNER daemon's config.toml): `model set-default`/`unset-default` edit only that key, keep comments and write THROUGH a symlinked config.toml; a thread created without --model records the default and the real agent runs with it; explicit --model wins; a hand edit applies with no restart; routed = the peer's config",
 		Agents:      agentic,

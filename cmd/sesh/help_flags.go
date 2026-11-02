@@ -154,6 +154,12 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit the full MeshSnapshot as JSON instead of the text form"},
 	},
+	"model list": {
+		{"--agent", "the harness to ask: claude | codex | pi | mypi (required)"},
+		{"--refresh", "ask the harness again instead of reusing the daemon's answer from the last 5 minutes"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"model defaults": {
 		{"--json", "emit machine-readable JSON instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},

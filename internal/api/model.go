@@ -26,3 +26,30 @@ type SetModelDefaultRequest struct {
 	Agent string `json:"agent"`
 	Model string `json:"model"`
 }
+
+// ModelOption is one model a harness reports it can use on the owning machine.
+type ModelOption struct {
+	// ID is what --model accepts, in the harness's own spelling.
+	ID          string `json:"id"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Resolved is the concrete model an alias stands for (claude `opus` ->
+	// `claude-opus-5-5`); empty when ID is already concrete.
+	Resolved string `json:"resolved,omitempty"`
+}
+
+// ModelListResponse is GET /v1/models?agent=<a>: the models the harness itself
+// reports on this machine (claude's SDK initialize handshake, `codex debug
+// models`, `pi --list-models`). Sesh curates nothing.
+type ModelListResponse struct {
+	Schema  int    `json:"schema"`
+	Machine string `json:"machine"`
+	Agent   string `json:"agent"`
+	// HarnessDefault is the model the harness runs given no --model, when it says
+	// (claude does; codex and pi do not report one).
+	HarnessDefault string        `json:"harness_default,omitempty"`
+	Models         []ModelOption `json:"models"`
+	// FetchedAtUnix is when the harness was asked; the daemon reuses a recent
+	// answer unless the request says refresh=1.
+	FetchedAtUnix int64 `json:"fetched_at_unix"`
+}

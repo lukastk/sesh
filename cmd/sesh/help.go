@@ -796,8 +796,13 @@ OWN pane and environment and answer confidently about a different machine.`,
 
 	"model": {
 		summary:  "per-harness DEFAULT models: the `model` key of [spawn.<agent>] in the daemon's config.toml, given to (and recorded on) a thread created without --model",
-		usage:    "sesh model <defaults|set-default|unset-default>",
-		examples: []string{"sesh model defaults", "sesh model set-default --agent claude --model opus"},
+		usage:    "sesh model <list|defaults|set-default|unset-default>",
+		examples: []string{"sesh model list --agent claude", "sesh model defaults", "sesh model set-default --agent claude --model opus"},
+	},
+	"model list": {
+		summary:  "list the models a harness reports it can use on the target machine (claude: its SDK initialize handshake; codex: `codex debug models`; pi/mypi: `--list-models`); the daemon reuses an answer for 5 minutes",
+		usage:    "sesh model list --agent <a> [--refresh] [--json] [--machine <m>]",
+		examples: []string{"sesh model list --agent claude", "sesh model list --agent pi --machine macstudio --json"},
 	},
 	"model defaults": {
 		summary:  "print every agent's configured default model ('-' = none: the harness picks its own) and the config.toml it lives in",

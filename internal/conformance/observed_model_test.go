@@ -6,7 +6,8 @@ package conformance
 // derived from the harness's own records, never from the thread record: a
 // headless turn with a one-turn --model override (which leaves the registered
 // model alone) moves observed_model and not Thread.Model. Before any turn there
-// is nothing observed. Remote = the same reads routed with --machine.
+// is nothing observed, and a settled archived thread is not observed at all.
+// Remote = the same reads routed with --machine.
 
 import (
 	"encoding/json"
@@ -112,5 +113,15 @@ func testObservedModel(t *testing.T, agent string, loc matrix.Locality) {
 	waitObserved(t, sb, agent, th.ID, override)
 	if got := gridRow(t, sb, false, th.ID).Model; got != registered {
 		t.Errorf("the override changed the registered model to %q (want %q)", got, registered)
+	}
+
+	// A settled ARCHIVED thread is not observed (its model cannot move, and a
+	// machine holds thousands of them). --force: the turn-end flag would
+	// otherwise hold the archive gate.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "archive", "--id", th.ID, "--force"); err != nil {
+		t.Fatalf("archive: %v\n%s", err, stderr)
+	}
+	if !waitUntil(15*time.Second, func() bool { return sb.threadStatus(t, th.ID).ObservedModel == "" }) {
+		t.Errorf("a settled archived thread is still observed: %q", sb.threadStatus(t, th.ID).ObservedModel)
 	}
 }

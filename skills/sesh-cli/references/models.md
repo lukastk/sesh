@@ -11,7 +11,9 @@ Its **observed model** is what the thread's own transcript says it last ran on,
 read by the owning daemon from the harness's records (claude assistant entries,
 codex `turn_context`, pi `model_change` / assistant messages) — never stored, never
 guessed. It moves when the agent is switched in-session or a turn runs with a
-one-turn `send-headless --model`, and it is empty until the first turn. Claude does
+one-turn `send-headless --model`, and it is empty until the first turn. A settled
+**archived** thread is not observed (its model cannot change, and a machine holds
+thousands); it is again once it runs. Claude does
 not record the context-window suffix, so `opus` and `opus[1m]` both observe as
 `claude-opus-5-5`.
 

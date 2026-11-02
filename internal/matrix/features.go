@@ -88,7 +88,7 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.observed-model",
-		Description: "the OWNER reads the model a thread's transcript says it last ran on (claude assistant message.model, codex turn_context, pi model_change/assistant) and carries it as observed_model on status, grid rows (the TUI MODEL column) and info; derived from the harness's records, not the thread record (a one-turn --model override moves it, not Thread.Model); nothing before the first turn; routed",
+		Description: "the OWNER reads the model a thread's transcript says it last ran on (claude assistant message.model, codex turn_context, pi model_change/assistant) and carries it as observed_model on status, grid rows (the TUI MODEL column) and info; derived from the harness's records, not the thread record (a one-turn --model override moves it, not Thread.Model); nothing before the first turn; a settled archived thread is not observed; routed",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

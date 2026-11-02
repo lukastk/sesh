@@ -111,6 +111,14 @@ func (o *modelObserver) sweep() {
 		if !observable(th.AgentKind) || th.AgentSessionID == "" {
 			continue
 		}
+		// A settled ARCHIVED thread is not observed: its model cannot change, and a
+		// long-lived machine holds thousands of them (mymain: ~2,700 records), whose
+		// first resolve alone — claude's leaf walk lists and reads its project dir,
+		// codex walks the whole rollout tree — pinned the daemon above 100% CPU.
+		// An archived thread that is live again (a pane, a turn) is observed.
+		if th.Archived && !o.d.liveForObservation(th.ID) {
+			continue
+		}
 		seen[th.ID] = true
 		f := o.files[th.ID]
 		if f == nil || f.sessionID != th.AgentSessionID || f.cwd != th.Cwd {
@@ -176,4 +184,11 @@ func (o *modelObserver) refresh(th api.Thread, f *observedFile, homes agents.Hom
 		f.model = "" // a whole-file read that found none: there is no observed model
 	}
 	f.size, f.mtime, f.scanned = fi.Size(), fi.ModTime(), scan.Scanned
+}
+
+// liveForObservation reports whether the maintainer last saw the thread with a
+// runtime (headful or busy) — the archived threads whose model can still move.
+func (d *Daemon) liveForObservation(id string) bool {
+	snap, ok := d.maint.stateOf(id)
+	return ok && (snap.Head == api.Headful || snap.Busy == api.BusyBusy)
 }

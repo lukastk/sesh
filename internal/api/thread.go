@@ -651,7 +651,8 @@ type ThreadSnapshot struct {
 	// assistant entries, codex turn_context, pi model_change/assistant messages —
 	// never stored and never guessed. It differs from Thread.Model (the
 	// registered model sesh launches with) when the agent was switched in-session
-	// or no model was registered. Empty until the conversation has taken a turn.
+	// or no model was registered. Empty until the conversation has taken a turn,
+	// and for a settled archived thread (not observed: its model cannot move).
 	ObservedModel string `json:"observed_model,omitempty"`
 }
 

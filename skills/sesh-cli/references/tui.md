@@ -250,7 +250,8 @@ on, read by the owning daemon. Before the thread's first turn it shows the
 trailing **`*`** marks an observed model that disagrees with the registered one (the
 agent was switched in-session). Claude's family aliases agree with their family
 (`opus` with `claude-opus-5-5`), and pi models drop their provider prefix for width;
-`I` shows both models in full. Blank = no model registered and no turn yet.
+`I` shows both models in full. Blank = no model registered and no turn yet (or a
+settled archived thread, which is not observed).
 
 The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**
 rail (**`└─ `** for the last one), a deeper level continues past it on **`│  `**, and a

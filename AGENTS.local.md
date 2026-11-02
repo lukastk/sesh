@@ -43,19 +43,26 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   Never `/model` a live claude pane: Claude Code's typed `/model <m>` writes `"model"`
   into the GLOBAL `~/.claude/settings.json` — `switch-model` restarts the pane in place
   instead. Defaults live in `[spawn.<agent>] model`, written by a key-level text edit
-  that goes THROUGH a symlinked config.toml (myrig will symlink it; see BACKLOG 9). Pi
+  that goes THROUGH the symlinked config.toml (see the config bullet below). Pi
   cannot run `anthropic/*` turns on this account ("Third-party apps now draw from your
   extra usage"), so tests drive pi on `openai-codex/*`.
+- **Config layout (schema 59, 2026-11-02):** `~/.sesh/config.toml` is a SYMLINK to myrig's
+  plain `home/.sesh/config.toml` (shared by the fleet); `~/.sesh/config.local.toml` is
+  rendered per machine from `config.local.toml.jinja` and OVERLAYS it (tables merge key
+  by key; arrays and arrays of tables REPLACE). Never put a shared list's entries in the
+  overlay — it would drop the shared ones. Apply with install-home `--only-source` for
+  each file (termux has no uv: run `python3 scripts/install-home.py`), install a sesh
+  that reads the overlay FIRST, then restart the daemon.
 
 Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-02**: mymain, macbook, macstudio, ideapad and termux run `926121f`
-(wire schema 58, store schema 27) with refreshed `sesh-cli` skill copies; **pocket4 has
-been offline since 2026-10-31 ~17:10 and still runs `73e3ad7`** — pull, rebuild and
-restart it when it returns. macbook's `pi` shim has no mise Node version (`pi` itself
-fails there; `model list --agent pi` reports it). Re-check the fleet rather
+Fleet on **2026-11-02 22:20Z**: mymain, macbook, macstudio, ideapad and termux run `c780a7f`
+(wire schema 59, store schema 27) on the split config (myrig `63558f2`) with refreshed
+`sesh-cli` skill copies; **pocket4 has been offline since 2026-10-31 ~17:10 and still runs
+`73e3ad7` on the old rendered config** — pull sesh AND myrig, rebuild, apply both config
+files, restart. macbook's `pi` shim has no mise Node version (`pi` itself fails there). Re-check the fleet rather
 than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,

@@ -103,3 +103,6 @@ sesh model unset-default --agent codex                   # remove it
 - `mypi` has its own `[spawn.mypi]` default; it does not inherit pi's.
 - A global `[spawn] model` is refused: one name cannot mean the same model in
   every harness.
+- A default set in this machine's `config.local.toml` overlay wins over
+  `config.toml`'s; `set-default` writes to `config.toml` and refuses an agent the
+  overlay sets (see [config](config.md)).

@@ -210,16 +210,16 @@ type tuiConfigFile struct {
 // broken file is a LOUD error (parity with LoadNaming: a misconfiguration must
 // never silently fall back).
 func LoadTUI(home string) (*TUIConfig, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return nil, err
 	}
 	var f tuiConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return nil, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.TUI != nil {
 		if f.TUI.MouseScrollV < 0 || f.TUI.MouseScrollH < 0 {
@@ -245,16 +245,16 @@ type defaultsFile struct {
 
 // LoadDefaults reads the [defaults] table. Missing file/table = all defaults.
 func LoadDefaults(home string) (Defaults, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Defaults{}, nil
 		}
-		return Defaults{}, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return Defaults{}, err
 	}
 	var f defaultsFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return Defaults{}, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return Defaults{}, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.Defaults == nil {
 		return Defaults{}, nil
@@ -321,16 +321,16 @@ type Spawn struct {
 // extra args from vanilla pi even though its mode space is identical.
 func LoadSpawn(home string) (Spawn, error) {
 	out := Spawn{agents: map[string]SpawnConfig{}}
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return out, err
 	}
 	var f spawnFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return out, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	decode := func(v any, into *SpawnConfig, name string) error {
 		m, ok := v.(map[string]any)

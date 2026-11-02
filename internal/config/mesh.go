@@ -46,16 +46,16 @@ type meshConfigFile struct {
 // a mistyped interval must refuse the daemon, not silently poll at the default.
 func LoadMesh(home string) (MeshConfig, error) {
 	out := MeshConfig{IdleInterval: DefaultMeshIdleInterval}
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return out, err
 	}
 	var f meshConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return out, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.Mesh == nil || f.Mesh.IdleInterval == nil {
 		return out, nil

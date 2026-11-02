@@ -152,6 +152,26 @@ never allow credentials/cookies or private-network access. The evidenced desktop
 `app://obsidian.md`; Android behavior is not established. Changes require an authorized
 daemon restart.
 
+### `config.local.toml` — this machine's overlay
+
+`~/.sesh/config.local.toml`, next to `config.toml`, holds what differs on THIS
+machine; `config.toml` can then be one file shared by every machine (for example a
+symlink into a synced dotfiles checkout). sesh reads the two as one document:
+
+- a **table** in the local file merges into the shared one **key by key**, at any
+  depth — `[spawn.claude] model` locally leaves the shared `[spawn.claude] args`;
+- **any other value replaces** the shared one wholesale — strings, numbers,
+  arrays, and arrays of tables such as `[[hooks]]`, `[[cwd_label]]` or
+  `[[tui.views]]`: a local `[[hooks]]` list is this machine's whole hook list, not
+  an addition to the shared one.
+
+Either file may be absent. A syntax error names the file it is in; `sesh doctor`
+lists the overlay when it exists. The daemon reads both at start like any config
+change (restart it after an edit), except per-harness default models, which are
+read fresh at each thread creation. `sesh model set-default` writes to the shared
+`config.toml` and refuses an agent whose default `config.local.toml` sets, since
+the overlay would win on this machine; `model defaults` names the overlay.
+
 ### Browser/plugin API
 
 The browser seam is deliberately narrower than the daemon's general API:

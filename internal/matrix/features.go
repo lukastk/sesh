@@ -93,6 +93,11 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "config.local",
+		Description: "<SESH_HOME>/config.local.toml overlays config.toml on the OWNER daemon (tables merge key by key; any other value, arrays included, is replaced): start-time policy ([defaults] agent), per-creation policy ([spawn.<agent>] model, merged) and set-default refusing a key the overlay shadows, config.toml untouched; routed",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "model.list",
 		Description: "`model list --agent <a>`: the models the REAL harness on the owning machine reports it can use (claude's SDK initialize handshake, `codex debug models` visibility=list, `pi --list-models`), never a sesh-kept list; claude's \"default\" pseudo-entry becomes harness_default; reused for 5 min until --refresh; unknown agent loud; routed = the peer's harness",
 		Agents:      agentic,

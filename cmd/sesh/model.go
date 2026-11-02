@@ -112,6 +112,9 @@ func printModelDefaults(out api.ModelDefaultsResponse, asJSON bool) error {
 		fmt.Printf("%-7s %s\n", a, v)
 	}
 	fmt.Printf("\n%s: %s\n", out.Machine, strings.TrimSpace(out.ConfigPath))
+	if out.LocalConfigPath != "" {
+		fmt.Printf("overlaid by %s\n", out.LocalConfigPath)
+	}
 	return nil
 }
 

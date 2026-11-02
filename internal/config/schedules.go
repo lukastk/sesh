@@ -42,16 +42,16 @@ type schedulesConfigFile struct {
 // built-in breaker; a broken value is a loud error.
 func LoadSchedules(home string) (SchedulesConfig, error) {
 	out := SchedulesConfig{Enabled: true, DisableAfterFailures: DefaultScheduleFailureBreaker}
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return out, err
 	}
 	var f schedulesConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return out, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.Schedules == nil {
 		return out, nil

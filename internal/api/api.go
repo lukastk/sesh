@@ -375,7 +375,12 @@ package api
 // gets `/model`, pi/mypi switch over pi-rpc-socket. No store migration.
 // Mixed-deploy direction: a pre-58 daemon 404s the new routes (a loud client error)
 // and spawns unpinned threads on the harness's own default, as before.
-const SchemaVersion = 58
+// 59: CONFIG.LOCAL. <SESH_HOME>/config.local.toml overlays config.toml (tables merge
+// key by key; any other value, arrays included, is replaced). The only wire change:
+// ModelDefaultsResponse.local_config_path names the overlay when it exists, and
+// POST /v1/models/default refuses an agent whose default the overlay sets. Additive;
+// a pre-59 daemon simply has no overlay and omits the field.
+const SchemaVersion = 59
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

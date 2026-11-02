@@ -32,6 +32,9 @@ var SpawnModelAgents = []string{"claude", "codex", "pi", "mypi"}
 // file and silently detach this machine. So the link is resolved first and the
 // temp file is created next to the TARGET.
 //
+// It refuses when this machine's config.local.toml sets the same key: that
+// overlay would win, so the shared write would not take effect here.
+//
 // Forms it cannot edit surgically are refused, never guessed at: an agent table
 // written as an inline table (`claude = { … }` under [spawn]) or as dotted keys
 // (`claude.model = …`). After writing, the file is re-read through LoadSpawn and
@@ -55,6 +58,15 @@ func SetSpawnModel(home, agent, model string) (string, error) {
 				return "", fmt.Errorf("config: model %q contains a control character", model)
 			}
 		}
+	}
+
+	// The write goes to the SHARED file; a value for the same key in this
+	// machine's config.local.toml would override it here, so the write would
+	// report a default that does not take effect. Refuse instead.
+	if shadowed, err := localSetsSpawnModel(home, agent); err != nil {
+		return "", err
+	} else if shadowed {
+		return "", fmt.Errorf("config: %s sets [spawn.%s] model on this machine, which overrides config.toml — change or remove it there", LocalConfigPath(home), agent)
 	}
 
 	linkPath := ConfigPath(home)

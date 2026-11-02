@@ -33,16 +33,16 @@ type browserAPIConfigFile struct {
 // opaque/null origins are refused rather than normalized or reflected.
 func LoadBrowserAPI(home string) (BrowserAPIConfig, error) {
 	out := BrowserAPIConfig{AllowedOrigins: map[string]bool{}}
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return out, err
 	}
 	var f browserAPIConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return out, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.BrowserAPI == nil {
 		return out, nil

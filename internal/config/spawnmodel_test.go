@@ -26,7 +26,7 @@ func writeSpawnConfig(t *testing.T, home, text string) {
 	}
 }
 
-func readConfig(t *testing.T, path string) string {
+func readText(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestSetSpawnModelInsertsReplacesAndRemoves(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := strings.Replace(commentedConfig, "[spawn.claude]\n", "[spawn.claude]\nmodel = \"opus\"\n", 1)
-	if got := readConfig(t, ConfigPath(home)); got != want {
+	if got := readText(t, ConfigPath(home)); got != want {
 		t.Fatalf("insert:\n%s\nwant:\n%s", got, want)
 	}
 
@@ -53,7 +53,7 @@ func TestSetSpawnModelInsertsReplacesAndRemoves(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = strings.Replace(commentedConfig, "[spawn.claude]\n", "[spawn.claude]\nmodel = \"claude-fable-5-1[1m]\"\n", 1)
-	if got := readConfig(t, ConfigPath(home)); got != want {
+	if got := readText(t, ConfigPath(home)); got != want {
 		t.Fatalf("replace:\n%s\nwant:\n%s", got, want)
 	}
 
@@ -64,7 +64,7 @@ func TestSetSpawnModelInsertsReplacesAndRemoves(t *testing.T) {
 	}
 	piBlock := "\n[spawn.pi]\nmodel = \"anthropic/claude-haiku-4-5\"\n"
 	want = strings.Replace(want, "args = [\"--verbose\"]\n", "args = [\"--verbose\"]\n"+piBlock, 1)
-	got := readConfig(t, ConfigPath(home))
+	got := readText(t, ConfigPath(home))
 	if got != want {
 		t.Fatalf("new table:\n%s\nwant:\n%s", got, want)
 	}
@@ -87,7 +87,7 @@ func TestSetSpawnModelInsertsReplacesAndRemoves(t *testing.T) {
 	if _, err := SetSpawnModel(home, "pi", ""); err != nil {
 		t.Fatal(err)
 	}
-	if got = readConfig(t, ConfigPath(home)); got != commentedConfig {
+	if got = readText(t, ConfigPath(home)); got != commentedConfig {
 		t.Fatalf("remove did not restore the original text:\n%s", got)
 	}
 	// Removing an absent key is a no-op, not an error.
@@ -119,8 +119,8 @@ func TestSetSpawnModelWritesThroughASymlink(t *testing.T) {
 	if fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("config.toml is no longer a symlink: %v", fi.Mode())
 	}
-	if !strings.Contains(readConfig(t, synced), "[spawn.codex]\nmodel = \"gpt-6-astra\"\n") {
-		t.Fatalf("the target did not get the default:\n%s", readConfig(t, synced))
+	if !strings.Contains(readText(t, synced), "[spawn.codex]\nmodel = \"gpt-6-astra\"\n") {
+		t.Fatalf("the target did not get the default:\n%s", readText(t, synced))
 	}
 	tfi, _ := os.Stat(synced)
 	if tfi.Mode().Perm() != 0o640 {
@@ -149,7 +149,7 @@ func TestSetSpawnModelRefusals(t *testing.T) {
 	if _, err := SetSpawnModel(home, "claude", "opus"); err != nil {
 		t.Fatal(err)
 	}
-	if got := readConfig(t, ConfigPath(home)); got != "\n[spawn.claude]\nmodel = \"opus\"\n" {
+	if got := readText(t, ConfigPath(home)); got != "\n[spawn.claude]\nmodel = \"opus\"\n" {
 		t.Fatalf("fresh file: %q", got)
 	}
 
@@ -161,7 +161,7 @@ func TestSetSpawnModelRefusals(t *testing.T) {
 		if _, err := SetSpawnModel(home, "claude", "opus"); err == nil || !strings.Contains(err.Error(), "cannot edit in place") {
 			t.Errorf("%q: err=%v", form, err)
 		}
-		if got := readConfig(t, ConfigPath(home)); got != form {
+		if got := readText(t, ConfigPath(home)); got != form {
 			t.Errorf("%q was modified by a refused write: %q", form, got)
 		}
 	}

@@ -64,16 +64,16 @@ type hooksFile struct {
 // unknown event, duplicate name) is a LOUD error — the daemon refuses to start
 // on a misconfigured hook rather than silently never firing it.
 func LoadHooks(home string) ([]Hook, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return nil, err
 	}
 	var f hooksFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return nil, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	seen := map[string]bool{}
 	for i, h := range f.Hooks {

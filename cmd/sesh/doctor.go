@@ -101,4 +101,7 @@ func checkConfig(home string, add func(name, status, detail string)) {
 	if _, err := os.Stat(config.ConfigPath(home)); err == nil {
 		add("config", "ok", config.ConfigPath(home))
 	}
+	if _, err := os.Stat(config.LocalConfigPath(home)); err == nil {
+		add("config:local", "ok", config.LocalConfigPath(home)+" (this machine's overlay on config.toml)")
+	}
 }

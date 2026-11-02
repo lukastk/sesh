@@ -14,6 +14,10 @@ type ModelDefaultsResponse struct {
 	Machine string `json:"machine"`
 	// ConfigPath is the config.toml path the daemon reads (possibly a symlink).
 	ConfigPath string `json:"config_path"`
+	// LocalConfigPath is this machine's config.local.toml overlay, when present.
+	// A default it sets wins over config.toml's (and set-default refuses to write
+	// one it would shadow).
+	LocalConfigPath string `json:"local_config_path,omitempty"`
 	// WrotePath is the file a write actually changed — the symlink's target when
 	// config.toml is a link. Set only on the POST reply.
 	WrotePath string            `json:"wrote_path,omitempty"`

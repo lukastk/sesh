@@ -51,16 +51,16 @@ func ConfigPath(home string) string { return filepath.Join(home, "config.toml") 
 // file (bad TOML, bad regex, empty fields) is a LOUD error — the daemon refuses to
 // start on a misconfigured naming policy rather than silently falling back.
 func LoadNaming(home string) (*Naming, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return nil, err
 	}
 	var f seshConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return nil, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	for i := range f.SessionName {
 		r := &f.SessionName[i]

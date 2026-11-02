@@ -187,7 +187,7 @@ work from `active`. Offline rows are hidden by default, not deleted.
 | Cron/interval/one-shot messages or spawns, guards, run history, lifecycle | [scheduling](references/scheduling.md) |
 | Mesh, peers, cockpit/daemon recovery, environment | [fleet](references/fleet.md) |
 | Agent models: registered vs observed, set/switch a thread's model, the MODEL column, listing, per-harness defaults | [models](references/models.md) |
-| Daemon/TUI config, hooks, separate sesh-ui preferences | [config](references/config.md) |
+| Daemon/TUI config, the per-machine config.local.toml overlay, hooks, separate sesh-ui preferences | [config](references/config.md) |
 | Remote directory listing or plugins (bundled manifest example) | [integrations](references/integrations.md) |
 
 Detailed examples retain their versioned incident context; check installed help

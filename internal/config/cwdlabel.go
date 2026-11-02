@@ -45,16 +45,16 @@ type cwdLabelFile struct {
 // <home>/config.toml. Missing file or no rules = (nil, nil); a broken rule is
 // a LOUD error (parity with LoadNaming).
 func LoadCwdLabels(home string) (*Labeling, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return nil, err
 	}
 	var f cwdLabelFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return nil, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	for i := range f.CwdLabel {
 		r := &f.CwdLabel[i]

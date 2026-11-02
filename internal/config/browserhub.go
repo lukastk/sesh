@@ -32,16 +32,16 @@ type browserHubConfigFile struct {
 // security boundary must never silently fall back to a broader policy.
 func LoadBrowserHub(home string) (BrowserHubConfig, error) {
 	out := BrowserHubConfig{TrustedPeers: map[string]bool{}}
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return out, err
 	}
 	var f browserHubConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return out, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return out, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.BrowserHub == nil {
 		return out, nil

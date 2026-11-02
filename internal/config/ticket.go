@@ -24,16 +24,16 @@ type ticketConfigFile struct {
 // LoadTicket reads the [ticket] table. Missing file/table = all defaults. A
 // present-but-broken file is a LOUD error (parity with the other config loaders).
 func LoadTicket(home string) (TicketConfig, error) {
-	raw, err := os.ReadFile(ConfigPath(home))
+	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return TicketConfig{}, nil
 		}
-		return TicketConfig{}, fmt.Errorf("config: read %s: %w", ConfigPath(home), err)
+		return TicketConfig{}, err
 	}
 	var f ticketConfigFile
 	if err := toml.Unmarshal(raw, &f); err != nil {
-		return TicketConfig{}, fmt.Errorf("config: parse %s: %w", ConfigPath(home), err)
+		return TicketConfig{}, fmt.Errorf("config: parse %s: %w", ConfigDesc(home), err)
 	}
 	if f.Ticket == nil {
 		return TicketConfig{}, nil

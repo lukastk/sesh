@@ -70,6 +70,9 @@ func (d *Daemon) modelDefaults() (api.ModelDefaultsResponse, error) {
 		ConfigPath: config.ConfigPath(d.cfg.Home),
 		Defaults:   map[string]string{},
 	}
+	if _, err := os.Stat(config.LocalConfigPath(d.cfg.Home)); err == nil {
+		out.LocalConfigPath = config.LocalConfigPath(d.cfg.Home)
+	}
 	for _, a := range config.SpawnModelAgents {
 		out.Defaults[a] = sp.ModelFor(a)
 	}

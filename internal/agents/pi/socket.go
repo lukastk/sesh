@@ -108,6 +108,54 @@ func (c *Client) GetState() (State, error) {
 	return s, err
 }
 
+// ModelRef is a Pi model as provider + id (the canonical `provider/id`).
+type ModelRef struct {
+	Provider string `json:"provider"`
+	ID       string `json:"id"`
+}
+
+// String is the canonical `provider/id` spelling --model accepts.
+func (m ModelRef) String() string { return m.Provider + "/" + m.ID }
+
+// CurrentModel is the live session's model, read from {getState:true}'s
+// state.config (pi-rpc-socket). A session with no model configured is a loud
+// error, never an empty success.
+func (c *Client) CurrentModel() (ModelRef, error) {
+	var resp struct {
+		State struct {
+			Config struct {
+				Provider *string `json:"provider"`
+				Model    *string `json:"model"`
+			} `json:"config"`
+		} `json:"state"`
+	}
+	if err := c.roundTrip(map[string]any{"getState": true}, &resp); err != nil {
+		return ModelRef{}, err
+	}
+	cfg := resp.State.Config
+	if cfg.Provider == nil || cfg.Model == nil || *cfg.Provider == "" || *cfg.Model == "" {
+		return ModelRef{}, fmt.Errorf("pi RPC: the session reports no model")
+	}
+	return ModelRef{Provider: *cfg.Provider, ID: *cfg.Model}, nil
+}
+
+// SetModel switches the LIVE session's model ({"set_model":"<pattern>"},
+// pi-rpc-socket): the pattern resolves the way Pi's own --model does, and the
+// switch is session-only — Pi's extension setModel never persists a default.
+// Returns the model it resolved to.
+func (c *Client) SetModel(pattern string) (ModelRef, error) {
+	var resp struct {
+		Model ModelRef `json:"model"`
+	}
+	if err := c.roundTrip(map[string]any{"set_model": pattern}, &resp); err != nil {
+		return ModelRef{}, err
+	}
+	if resp.Model.Provider == "" || resp.Model.ID == "" {
+		return ModelRef{}, fmt.Errorf("pi RPC: set_model acknowledged without naming the model it chose")
+	}
+	return resp.Model, nil
+}
+
 func (c *Client) GetTmuxInfo() (TmuxInfo, error) {
 	var resp struct {
 		OK   bool     `json:"ok"`

@@ -48,6 +48,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesFs(mux)
 	d.routesPlugins(mux)
 	d.routesUIConfig(mux)
+	d.routesModels(mux)
 	d.routesSubscriptions(mux)
 	d.routesPeers(mux)
 	d.routesAdopt(mux)

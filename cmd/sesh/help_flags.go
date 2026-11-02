@@ -154,6 +154,21 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit the full MeshSnapshot as JSON instead of the text form"},
 	},
+	"model defaults": {
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"model set-default": {
+		{"--agent", "the harness whose default to set: claude | codex | pi | mypi (required)"},
+		{"--model", "the model in the harness's own spelling, e.g. claude `opus`, codex `gpt-6-astra`, pi `anthropic/claude-haiku-4-5` (required; opaque, like `thread new --model`)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"model unset-default": {
+		{"--agent", "the harness whose default to remove: claude | codex | pi | mypi (required)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"meta": {
 		{"--id", "thread id/prefix to target (default: the current thread)"},
 	},

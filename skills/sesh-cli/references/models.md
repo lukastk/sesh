@@ -1,0 +1,38 @@
+# Agent models
+
+A thread's **registered model** is the `model` on its record: what sesh passes as
+`--model` when it spawns, resumes or runs a headless turn on that thread. Model
+names are opaque and spelled the harness's own way — claude `opus` / `haiku` /
+`claude-fable-5-1[1m]`, codex `gpt-6-astra`, pi `provider/id[:thinking]` (e.g.
+`anthropic/claude-haiku-4-5`). Sesh keeps no list of valid names; a bad one fails
+loudly at the agent.
+
+## Default model per harness
+
+Each harness may have a default model: the `model` key of its `[spawn.<agent>]`
+table in the **owning** daemon's `config.toml`. A thread created without
+`--model` (by `thread new`, a fork whose source has none, `thread realize`, a
+schedule's spawn, `delegate`) gets the default and **records it**, so changing the
+default later never moves an existing thread to another model. With no default
+configured the thread records no model and the harness picks its own.
+
+```sh
+sesh model defaults                                      # every harness's default ('-' = none)
+sesh model set-default --agent claude --model opus       # write [spawn.claude] model
+sesh model set-default --agent pi --model anthropic/claude-haiku-4-5 --machine macstudio
+sesh model unset-default --agent codex                   # remove it
+```
+
+- The daemon reads the default **fresh at every thread creation**, so a change —
+  through these commands, a hand edit, or a synced copy of the file — applies to
+  the next thread with no restart. (The rest of `[spawn]` is still read at start.)
+- `set-default` edits **only that key**: every other line and comment is kept, a
+  missing table is added next to `[spawn]`, and `unset-default` removes a table it
+  leaves empty. A `[spawn.<agent>]` written as an inline table or dotted keys is
+  refused (rewrite it as a header table).
+- If `config.toml` is a **symlink** (a shared dotfiles copy), the write goes
+  through it to the target; the link stays a link. A dangling link is refused.
+- `--machine <m>` reads and writes machine `<m>`'s config, like every routed call.
+- `mypi` has its own `[spawn.mypi]` default; it does not inherit pi's.
+- A global `[spawn] model` is refused: one name cannot mean the same model in
+  every harness.

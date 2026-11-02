@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -288,9 +289,17 @@ func (d Defaults) NotifyDefault() bool {
 //	          deny; pi: IMPOSSIBLE — loud)
 //
 // Args is a literal extra-argv escape hatch for agent-specific settings.
+//
+// Model is the agent's DEFAULT model ([spawn.<agent>] only — model names are
+// harness-specific, so there is no global one): a thread created without
+// --model gets it, recorded as the thread's registered model. Unlike Mode and
+// Args, which the daemon reads once at start, the default is read FRESH at each
+// thread creation (see LoadSpawn's callers), so an edit made by `sesh model
+// set-default`, by hand, or by a synced copy of the file applies at once.
 type SpawnConfig struct {
-	Mode string   `toml:"mode"`
-	Args []string `toml:"args"`
+	Mode  string   `toml:"mode"`
+	Args  []string `toml:"args"`
+	Model string   `toml:"model"`
 }
 
 type spawnFile struct {
@@ -331,6 +340,13 @@ func LoadSpawn(home string) (Spawn, error) {
 		if mode, ok := m["mode"].(string); ok {
 			into.Mode = mode
 		}
+		if v, present := m["model"]; present {
+			model, ok := v.(string)
+			if !ok || strings.TrimSpace(model) == "" {
+				return fmt.Errorf("config: [spawn%s] model must be a non-empty string", name)
+			}
+			into.Model = model
+		}
 		if args, ok := m["args"].([]any); ok {
 			for _, a := range args {
 				s, ok := a.(string)
@@ -352,6 +368,10 @@ func LoadSpawn(home string) (Spawn, error) {
 			if err := decode(map[string]any{"args": v}, &out.global, ""); err != nil {
 				return out, err
 			}
+		case "model":
+			// Model names are harness-specific ("opus" means nothing to codex), so a
+			// fleet-wide default would be wrong for every harness but one.
+			return out, fmt.Errorf("config: [spawn] model is per-agent: set it under [spawn.<agent>] (claude, codex, pi, mypi)")
 		case "claude", "codex", "pi", "mypi":
 			var sc SpawnConfig
 			if err := decode(v, &sc, "."+k); err != nil {
@@ -389,6 +409,12 @@ func (s Spawn) ModeFor(agent string) string {
 		return a.Mode
 	}
 	return s.global.Mode
+}
+
+// ModelFor is an agent's configured default model (empty = none configured: the
+// harness picks its own default). Per-agent only; mypi has its own table.
+func (s Spawn) ModelFor(agent string) string {
+	return s.agents[agent].Model
 }
 
 // ArgsFor resolves an agent's extra args (global + per-agent, in that order).

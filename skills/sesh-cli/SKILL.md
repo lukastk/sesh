@@ -186,6 +186,7 @@ work from `active`. Offline rows are hidden by default, not deleted.
 | Hold/release inheritance, pin/divider, archive/offline views | [views and holds](references/views-and-holds.md) |
 | Cron/interval/one-shot messages or spawns, guards, run history, lifecycle | [scheduling](references/scheduling.md) |
 | Mesh, peers, cockpit/daemon recovery, environment | [fleet](references/fleet.md) |
+| Agent models: per-harness defaults | [models](references/models.md) |
 | Daemon/TUI config, hooks, separate sesh-ui preferences | [config](references/config.md) |
 | Remote directory listing or plugins (bundled manifest example) | [integrations](references/integrations.md) |
 

@@ -75,6 +75,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "model.default",
+		Description: "per-harness DEFAULT model ([spawn.<agent>] model in the OWNER daemon's config.toml): `model set-default`/`unset-default` edit only that key, keep comments and write THROUGH a symlinked config.toml; a thread created without --model records the default and the real agent runs with it; explicit --model wins; a hand edit applies with no restart; routed = the peer's config",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.new.headless",
 		Description: "spawn a thread with NO pane (a durable conversation, idle until revived or sent a turn) — no tmux session exists, state is the unified idle",
 		Agents:      agentic,

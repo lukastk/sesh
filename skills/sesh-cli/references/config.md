@@ -67,6 +67,7 @@ mode = "yolo"
 [spawn.mypi]                     # per-harness override table, one per kind (claude|codex|pi|mypi)
 mode = "default"                 # sandbox is refused for pi AND mypi: neither has a permission system
 args = ["--thinking", "high"]    # literal extra argv for this harness only
+model = "anthropic/claude-haiku-4-5" # this harness's DEFAULT model (see models.md); `sesh model set-default` writes it
 
 [send]                           # the typing guard on every paste into a live pane
 respect_typing = "60s"           # hold a delivery until the pane has seen no viewer input this long ("0s" = off)

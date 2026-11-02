@@ -233,6 +233,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		d.newForkedThread(w, kind, req)
 		return
 	}
+	// No --model: the harness's configured default, recorded on the thread (a
+	// fork instead inherits its source's model first — see newForkedThread).
+	var ok bool
+	if req.Model, ok = d.withDefaultModel(w, kind, req.Model); !ok {
+		return
+	}
 	if req.Headless {
 		d.newHeadlessThread(w, kind, req)
 		return

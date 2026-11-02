@@ -358,7 +358,15 @@ package api
 // behaviour, which is exactly what force asks for, so a forcing client is safe either
 // way; a client that relies on the GATE gets no gate from a pre-57 daemon, so the
 // protection arrives with the daemon, not the caller.
-const SchemaVersion = 57
+// 58: AGENT MODELS. Per-harness DEFAULT models: GET /v1/models/defaults and
+// POST /v1/models/default read and write the `model` key of [spawn.<agent>] in the
+// daemon's config.toml (a key-level text edit that keeps comments and writes through
+// a symlinked file), and a thread created, forked or realized without --model is
+// given that default and records it as Thread.Model. The daemon reads the default
+// fresh at each creation, so an edit needs no restart. No store migration.
+// Mixed-deploy direction: a pre-58 daemon 404s the new routes (a loud client error)
+// and spawns unpinned threads on the harness's own default, as before.
+const SchemaVersion = 58
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

@@ -183,7 +183,11 @@ func (d *Daemon) handleThreadRealize(w http.ResponseWriter, r *http.Request) {
 	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString() // sesh pre-assigns; codex cannot
 	}
-	if err := d.store.RealizeThread(req.ID, string(kind), agentSessionID, cwd, "headless-"+req.ID, req.Model); err != nil {
+	model, ok := d.withDefaultModel(w, kind, req.Model)
+	if !ok {
+		return
+	}
+	if err := d.store.RealizeThread(req.ID, string(kind), agentSessionID, cwd, "headless-"+req.ID, model); err != nil {
 		if errors.Is(err, store.ErrThreadNotFound) {
 			// The guarded UPDATE lost: re-read to report what the row is NOW
 			// (a concurrent realize converted it first).

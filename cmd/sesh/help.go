@@ -794,6 +794,27 @@ OWN pane and environment and answer confidently about a different machine.`,
 		examples: []string{"sesh meta list", "sesh meta list --id 1a2b3c4d"},
 	},
 
+	"model": {
+		summary:  "per-harness DEFAULT models: the `model` key of [spawn.<agent>] in the daemon's config.toml, given to (and recorded on) a thread created without --model",
+		usage:    "sesh model <defaults|set-default|unset-default>",
+		examples: []string{"sesh model defaults", "sesh model set-default --agent claude --model opus"},
+	},
+	"model defaults": {
+		summary:  "print every agent's configured default model ('-' = none: the harness picks its own) and the config.toml it lives in",
+		usage:    "sesh model defaults [--json] [--machine <m>]",
+		examples: []string{"sesh model defaults", "sesh model defaults --machine macstudio --json"},
+	},
+	"model set-default": {
+		summary:  "set an agent's default model in config.toml: edits only that key, keeps every comment, and writes THROUGH a symlinked config.toml; applies to the next thread created, no daemon restart",
+		usage:    "sesh model set-default --agent <a> --model <m> [--json] [--machine <m>]",
+		examples: []string{"sesh model set-default --agent claude --model opus", "sesh model set-default --agent pi --model anthropic/claude-haiku-4-5"},
+	},
+	"model unset-default": {
+		summary:  "remove an agent's default model from config.toml (new threads then get the harness's own default and record none)",
+		usage:    "sesh model unset-default --agent <a> [--json] [--machine <m>]",
+		examples: []string{"sesh model unset-default --agent codex"},
+	},
+
 	"hooks": {
 		summary:  "manage the [[hooks]] event hooks (list | enable | disable | test); definitions live in config.toml",
 		usage:    "sesh hooks <list|enable|disable|test>",
@@ -904,7 +925,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
-	"whoami", "delegate", "meta", "backup", "restore", "copy", "tail", "transcript",
+	"whoami", "delegate", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }

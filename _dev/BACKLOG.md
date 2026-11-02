@@ -258,3 +258,91 @@ actions, message first; `--idle-for 60s` implied by `--if idle`; `respect-typing
 hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`; closed guard keyword
 list; the two TUI snapshot fields in phase 3; spawn-mode disclosure only; no broadcast. **Fully
 decided — ready to build** in the `SCHEDULING.md` §14 order.
+
+## 9. Thread models — show, set, apply, and per-harness defaults (designed 2026-11-02, NOT built)
+
+**Goal.** The TUI shows each thread's model by default; one command sets a thread's
+**registered** model, another sets it **and** switches the live agent; the TUI does
+both through an fzf-style picker over the models the harness can actually use; and
+each harness gets a default model, settable from the CLI and the TUI.
+
+**Two values, never conflated.**
+- *Registered* = `threads.model` (store migration 16). Sesh must store it: it is what
+  spawn, resume and every headless turn pass as `--model`. Today it is set only by
+  `thread new --model`; on mymain 80 of 106 threads have it empty.
+- *Actual* = what the agent last ran, read from the harness's own session file —
+  derived, never stored, never guessed:
+  - claude: `message.model` on assistant entries (resolved id; the `[1m]` suffix is
+    lost, so `opus` and `opus[1m]` look alike). A typed `/model` also leaves a
+    `<command-name>/model</command-name>` entry.
+  - codex: `turn_context.model` per turn. The rollout is written lazily, so a switch
+    shows only after the next turn and a turnless thread has no file.
+  - pi: a `model_change` entry at the moment of the switch, plus `provider`/`model`
+    on assistant messages.
+  A thread with no turns has no actual model: show nothing, not a default. The
+  column shows the actual model and marks a mismatch with the registered one.
+
+**Listing usable models (the picker's source).**
+- claude: no CLI listing. Pipe one
+  `{"type":"control_request","request_id":"r1","request":{"subtype":"initialize"}}`
+  into `claude -p --input-format stream-json --output-format stream-json --verbose
+  --no-session-persistence`; the `control_response` carries `models[]` with
+  `value` (what `--model` takes), `resolvedModel`, `displayName`, `description`,
+  `supportedEffortLevels`. No model turn runs. Caveat: this headless list had 5
+  entries (default = Sonnet 5.5) while the interactive `/model` picker showed 13
+  (default = Fable 5.1) on the same account, so the picker must also accept a typed id.
+- codex: `codex debug models` → `{"models":[{slug, visibility, …}]}`; offer
+  `visibility == "list"`. It refreshes from the server (`--bundled` = offline
+  catalog). It sits under `debug`, so treat its shape as unstable and fail loudly.
+- pi: `pi --list-models [search]` (text table, only authenticated providers; ids are
+  `provider/id`), or RPC `get_available_models` on a live session.
+
+**Commands.**
+- `thread set-model --id <id> --model <m>`: record only; takes effect at the next
+  spawn, resume or headless turn.
+- `thread set-model --id <id> --model <m> --apply`: record, then switch the live agent:
+  - headless (all harnesses): nothing further.
+  - codex pane: type `/model <m>`. Verified session-only on codex-cli 0.165.0
+    ("Model changed to … for this session only"; config.toml gained no model).
+  - pi pane: RPC `set_model {provider, modelId}` over sesh's existing per-session
+    socket bridge (`internal/daemon/rpc.go`). Pi 1.4.0's RPC path calls
+    `session.setModel(model)` without `persist`, so no global default is written
+    (read in code, not yet run live).
+  - claude pane: **restart the pane** on the new `--model`, resuming the transcript.
+    It kills the claude process and any in-flight turn (the conversation survives),
+    so refuse a busy thread without `--force` and say so plainly. Do NOT type
+    `/model <m>`: on Claude Code 2.1.316 it always writes `"model"` into the global
+    `~/.claude/settings.json` ("…and saved as your default for new sessions"). Only
+    the interactive picker's `s` key is session-only, and driving it is keystroke
+    automation that breaks as the list changes.
+- TUI: both actions behind one key, model chosen from the picker above.
+
+**Per-harness defaults.** A `model` key under `[spawn.<agent>]` in
+`~/.sesh/config.toml` (per machine today; fleet-wide once myrig symlinks the
+file, below), applied at thread
+creation when no `--model` is given and recorded as the thread's registered model, so
+new threads never have an empty one. Settable by a CLI command and from the TUI
+picker. Not via `[spawn.<agent>] args`: that would pass `--model` twice next to a pin.
+Sesh never edits the harnesses' own config files. The writer must edit that one key
+in place: config.toml is heavily commented, and re-encoding it with the TOML library
+(as `ui_config.toml`'s writer does) would strip the comments. It must also write
+THROUGH a symlink, never replace it: resolve `~/.sesh/config.toml` to its target and
+do the temp-file + rename in the target's directory. A rename onto the link path
+would turn the link into a plain file and silently detach this machine (see below).
+
+**Follow-up in myrig, after this ships.** `~/.sesh/config.toml` is currently rendered
+from `~/mysetup/myrig/home/.sesh/config.toml.jinja` by `scripts/install-home.py`, so a
+provisioning run overwrites a default set from sesh. The plan is to make myrig manage
+the file by symlink instead of rendering it, so a default set on one machine reaches
+the others when myrig syncs. Today's template has machine-specific parts (e.g.
+`[browser_api]` is rendered on mymain only), which the symlinked layout has to
+accommodate.
+
+Proposed shape for those machine-specific parts (a separate feature, after this one):
+a `config.local.toml` that overrides `config.toml`. myrig RENDERS the local file per
+machine and SYMLINKS the shared one. To decide when building it: the merge rule
+(key-by-key within tables is the natural default; arrays of tables such as
+`[[cwd_label]]` need an explicit replace-or-append rule), and what the default-model
+writer does when `config.local.toml` sets the same key — it writes to the shared file,
+so it must refuse or say loudly that the local file shadows it on this machine, never
+report a setting that does not take effect.

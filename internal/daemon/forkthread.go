@@ -118,10 +118,15 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 	_ = srcPath // documented: never written
 
 	// A fork stays the same conversation, so it inherits the source's pinned model
-	// by default; an explicit --model on the fork overrides it.
+	// by default; an explicit --model on the fork overrides it, and a source with
+	// no registered model leaves the harness's configured default.
 	model := req.Model
 	if model == "" {
 		model = src.Model
+	}
+	model, ok := d.withDefaultModel(w, kind, model)
+	if !ok {
+		return
 	}
 	id := uuid.NewString()
 	thread := api.Thread{

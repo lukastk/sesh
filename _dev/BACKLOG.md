@@ -259,7 +259,7 @@ hand-rolled cron parser; spawn defaults headless + `--on-turn-end keep`; closed 
 list; the two TUI snapshot fields in phase 3; spawn-mode disclosure only; no broadcast. **Fully
 decided — ready to build** in the `SCHEDULING.md` §14 order.
 
-## 9. Thread models — show, set, apply, and per-harness defaults (designed 2026-11-02, NOT built)
+## 9. ✅ DONE — Thread models — show, set, apply, and per-harness defaults (designed and BUILT 2026-11-02, wire schemas 58–59; config.local.toml and the myrig split landed the same day)
 
 **Goal.** The TUI shows each thread's model by default; one command sets a thread's
 **registered** model, another sets it **and** switches the live agent; the TUI does
@@ -330,7 +330,7 @@ THROUGH a symlink, never replace it: resolve `~/.sesh/config.toml` to its target
 do the temp-file + rename in the target's directory. A rename onto the link path
 would turn the link into a plain file and silently detach this machine (see below).
 
-**Follow-up in myrig, after this ships.** `~/.sesh/config.toml` is currently rendered
+**Follow-up in myrig — DONE 2026-11-02** (sesh `06c1e18`, myrig split): ~/.sesh/config.toml is now a symlink to myrig's plain home/.sesh/config.toml and the per-machine parts render into ~/.sesh/config.local.toml. Arrays REPLACE (the rule chosen), so mymain's volume [[session_name]]/[[cwd_label]] rules moved into the shared file, where they are inert off mymain. The original note follows. `~/.sesh/config.toml` is currently rendered
 from `~/mysetup/myrig/home/.sesh/config.toml.jinja` by `scripts/install-home.py`, so a
 provisioning run overwrites a default set from sesh. The plan is to make myrig manage
 the file by symlink instead of rendering it, so a default set on one machine reaches

@@ -38,6 +38,14 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   it. Un-archiving is ungated. Archived-but-headful (H40) still exists through those
   paths, so the default view's flagged/running/headful exception stays load-bearing.
   The gate lives in the daemon: it arrives with a restart, not with a new client.
+- **Models (schema 58):** a thread has a REGISTERED model (`Thread.Model`, what sesh
+  launches with) and an OBSERVED one (owner-read from the transcript, never stored).
+  Never `/model` a live claude pane: Claude Code's typed `/model <m>` writes `"model"`
+  into the GLOBAL `~/.claude/settings.json` — `switch-model` restarts the pane in place
+  instead. Defaults live in `[spawn.<agent>] model`, written by a key-level text edit
+  that goes THROUGH a symlinked config.toml (myrig will symlink it; see BACKLOG 9). Pi
+  cannot run `anthropic/*` turns on this account ("Third-party apps now draw from your
+  extra usage"), so tests drive pi on `openai-codex/*`.
 
 Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run

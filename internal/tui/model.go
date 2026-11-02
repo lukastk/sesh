@@ -1132,7 +1132,7 @@ func (m Model) fetch() tea.Cmd {
 // different view than the one the grid actually renders the thread in.
 func meshRow(t api.ThreadSnapshot) api.ThreadRow {
 	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority,
-		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix}
+		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix, ObservedModel: t.ObservedModel}
 }
 
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
@@ -4545,6 +4545,8 @@ func (m Model) detailsFields() []detailField {
 		{"machine", r.Machine},
 		{"agent", detailAgent(r)},
 		{"model", orDash(r.Model)},
+		// What the transcript says the agent last ran on ('-' before any turn).
+		{"observed model", orDash(r.ObservedModel)},
 		{"state", fmt.Sprintf("%s %s  (head=%s busy=%s attach=%s)",
 			HeadGlyph(r), BusyGlyph(r), orUnknown(string(r.Head)), orUnknown(string(r.Busy)), orUnknown(string(r.Attachment)))},
 		{"session", orDash(r.SessionName)},

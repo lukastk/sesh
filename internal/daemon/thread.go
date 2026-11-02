@@ -659,7 +659,7 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id}
+	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id, ObservedModel: d.models.observed(id)}
 
 	// SHELL THREAD: its runtime is a tmux SESSION, so head comes from the session
 	// marker, never the pane index — a pane lookup would find nothing and report

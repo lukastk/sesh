@@ -101,7 +101,7 @@ u            unpin (remove the manual ordering; the thread rejoins the auto bloc
 m            MOVE MODE: reposition the selected pinned row — ↑/↓ move it within the
              block, enter/esc commit-and-exit (an unpinned top-level row is pinned first)
 I            thread details: a read-only popup of ALL of the selected thread's
-             fields (id, agent, model, state axes, cwd, parent, tags, hold,
+             fields (id, agent, model, observed model, state axes, cwd, parent, tags, hold,
              tickets, schedules, session id, meta…); scrolls when the list is
              taller than the pane (↑/↓, j/k, ^j/^k half-page, or the wheel);
              esc/q closes
@@ -222,6 +222,14 @@ headful·idle thread — i.e. it needs your input).
 
 Columns are configurable (`--columns a,b,c` or `[tui] columns`); NAME is blue, CWD
 green, and the `ticket_input` `!` red by default (tunable via `[[tui.column_color]]`).
+
+The default **MODEL** column shows the model the thread's transcript says it last ran
+on, read by the owning daemon. Before the thread's first turn it shows the
+**registered** model in parentheses — `(opus)`, what sesh will launch it with — and a
+trailing **`*`** marks an observed model that disagrees with the registered one (the
+agent was switched in-session). Claude's family aliases agree with their family
+(`opus` with `claude-opus-5-5`), and pi models drop their provider prefix for width;
+`I` shows both models in full. Blank = no model registered and no turn yet.
 
 The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**
 rail (**`└─ `** for the last one), a deeper level continues past it on **`│  `**, and a

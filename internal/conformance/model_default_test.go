@@ -34,11 +34,14 @@ func init() {
 }
 
 // testModels are real, cheap models each harness accepts on this rig: one
-// default and one explicit override, in the harness's own spelling.
+// default and one explicit override, in the harness's own spelling. pi uses its
+// openai-codex provider: Anthropic answers pi (a third-party app on a Claude
+// subscription) with "Third-party apps now draw from your extra usage, not your
+// plan limits", so an anthropic/* model cannot run a pi turn here.
 var testModels = map[string][2]string{
 	"claude": {"haiku", "sonnet"},
 	"codex":  {"gpt-6-luna", "gpt-6-astra"},
-	"pi":     {"anthropic/claude-haiku-4-5", "anthropic/claude-haiku-5-5"},
+	"pi":     {"openai-codex/gpt-6-luna", "openai-codex/gpt-6-astra"},
 }
 
 func testModelDefault(t *testing.T, agent string, loc matrix.Locality) {

@@ -366,7 +366,10 @@ package api
 // fresh at each creation, so an edit needs no restart. GET /v1/models?agent=<a>
 // [&refresh=1] lists the models the harness on the owning machine reports it can
 // use (claude's SDK initialize handshake, `codex debug models`, `pi --list-models`),
-// cached by the daemon for 5 minutes. No store migration.
+// cached by the daemon for 5 minutes. ThreadSnapshot/ThreadRow/ThreadStatusResponse
+// gain observed_model: the model the thread's transcript says it last ran on, read
+// by the owner from the harness's records (an omitted field from a pre-58 peer reads
+// as "nothing observed"). No store migration.
 // Mixed-deploy direction: a pre-58 daemon 404s the new routes (a loud client error)
 // and spawns unpinned threads on the harness's own default, as before.
 const SchemaVersion = 58

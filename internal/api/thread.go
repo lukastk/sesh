@@ -536,6 +536,9 @@ type ThreadStatusResponse struct {
 	AgentRunning bool       `json:"agent_running"`
 	Clients      int        `json:"clients"`
 	Pane         string     `json:"pane,omitempty"`
+	// ObservedModel is the model the transcript says the thread last ran on
+	// (schema 58; see ThreadSnapshot.ObservedModel).
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // NeedsInput is the derived "the human is blocking the agent" view: a live pane
@@ -583,6 +586,8 @@ type ThreadRow struct {
 	// owner-local — and "finished while you weren't looking" became the
 	// stored, manually-cleared Flagged field on the record.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// ObservedModel mirrors ThreadSnapshot's (schema 58).
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -641,6 +646,13 @@ type ThreadSnapshot struct {
 	// blocked/done snapshot overlays were replaced by the stored Flagged
 	// record field in 44 — see Thread.Flagged.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// ObservedModel is the model the thread's own transcript says it last ran on
+	// (schema 58), read by the OWNING daemon from the harness's records — claude
+	// assistant entries, codex turn_context, pi model_change/assistant messages —
+	// never stored and never guessed. It differs from Thread.Model (the
+	// registered model sesh launches with) when the agent was switched in-session
+	// or no model was registered. Empty until the conversation has taken a turn.
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // MachineSnapshot is one machine's live thread state, returned by

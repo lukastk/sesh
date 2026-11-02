@@ -72,13 +72,17 @@ func runInfo(cfg config.Config, args []string) error {
 			"attachment": st.Attachment,
 			"clients":    st.Clients,
 			"pane":       st.Pane,
-			"tickets":    tickets,
+			// The registered model is thread.model; this is what the transcript
+			// says the agent last ran on ('' = no turn yet).
+			"observed_model": st.ObservedModel,
+			"tickets":        tickets,
 		})
 	}
 	fmt.Printf("id:         %s\n", th.ID)
 	fmt.Printf("source:     %s\n", describeSource(src))
 	fmt.Printf("name:       %s\n", th.Name)
 	fmt.Printf("agent:      %s\n", th.AgentKind)
+	fmt.Printf("model:      %s\n", modelLine(th.Model, st.ObservedModel))
 	fmt.Printf("machine:    %s\n", th.Machine)
 	fmt.Printf("cwd:        %s\n", th.Cwd)
 	fmt.Printf("head:       %s\n", st.Head)
@@ -123,4 +127,18 @@ func describeSource(src idSource) string {
 		return "env (UNVERIFIED — $" + agents.EnvThreadID + ", no tmux pane to confirm it)"
 	}
 	return string(src)
+}
+
+// modelLine renders a thread's registered model with what its transcript says
+// it last ran on, when that differs: "opus · last ran claude-opus-5-5",
+// "- (harness default) · last ran claude-sonnet-5-5", or just "opus".
+func modelLine(registered, observed string) string {
+	out := registered
+	if out == "" {
+		out = "- (harness default)"
+	}
+	if observed != "" && observed != registered {
+		out += " · last ran " + observed
+	}
+	return out
 }

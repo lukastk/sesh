@@ -67,6 +67,8 @@ type Daemon struct {
 	// maint is the L1 state maintainer: it keeps every local thread's live state
 	// continuously fresh so reads are O(1) (see _dev/MESH.md).
 	maint *maintainer
+	// models keeps each local agent thread's observed model (observedmodel.go).
+	models *modelObserver
 	// mesh is the L2 sync: it keeps a local cache of every peer's snapshot fresh so
 	// the cross-machine view (GET /v1/mesh) is a local read.
 	mesh *meshSync
@@ -218,6 +220,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		log.Printf("daemon: repaired %d orphaned durable artifact mapping(s) after interrupted thread deletion", removedMappings)
 	}
 	d.maint = newMaintainer(d)
+	d.models = newModelObserver(d)
 	d.mesh = newMeshSync(d)
 	d.view = newMeshView(st)
 	defaults, err := config.LoadDefaults(cfg.Home)
@@ -326,6 +329,7 @@ func (d *Daemon) Serve() error {
 	d.ln = ln
 	d.started = time.Now()
 	d.maint.start()     // begin keeping local thread state fresh in the background
+	d.models.start()    // and each agent thread's observed model
 	d.mesh.start()      // begin syncing peers' snapshots into the local cache
 	go d.checkPeerDNS() // loudly warn if http peers' hostnames don't resolve (e.g. a CGO=0 termux build)
 	if d.mmaint != nil {
@@ -343,6 +347,7 @@ func (d *Daemon) Serve() error {
 		}
 		d.mesh.stopAndWait()
 		d.maint.stopAndWait()
+		d.models.stopAndWait()
 		ln.Close()
 		return err
 	}
@@ -383,6 +388,7 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	}
 	d.mesh.stopAndWait()
 	d.maint.stopAndWait()
+	d.models.stopAndWait()
 	srvErr := d.srv.Shutdown(ctx)
 	storeErr := d.store.Close()
 	if srvErr != nil {

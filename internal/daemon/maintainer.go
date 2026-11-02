@@ -446,8 +446,11 @@ func (m *maintainer) unsettled(threads []api.Thread, panes map[string]api.PaneLo
 		}
 		m.mu.RLock()
 		st := m.st[th.ID]
+		// A settled thread whose observed model moved (the observer read a turn
+		// that ended after the thread settled) must be re-published once.
 		live := st == nil || st.snap.Thread.ID == "" ||
-			st.snap.Head == api.Headful || st.snap.Busy == api.BusyBusy || st.snap.AgentRunning
+			st.snap.Head == api.Headful || st.snap.Busy == api.BusyBusy || st.snap.AgentRunning ||
+			st.snap.ObservedModel != m.d.models.observed(th.ID)
 		m.mu.RUnlock()
 		if live {
 			out = append(out, th)
@@ -495,7 +498,8 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		// can apply their cwd_label rules — they cannot know this machine's home.
 		CwdRel: config.TildeRelative(th.Cwd, m.home),
 		// The effective (inherited) hold deadline; publish() turns it into OnHold.
-		OnHoldEffectiveUnix: effHoldUntil}
+		OnHoldEffectiveUnix: effHoldUntil,
+		ObservedModel:       m.d.models.observed(th.ID)}
 
 	// SHELL THREAD: its runtime is a tmux SESSION, so head comes from the session
 	// index, never the pane index — it has no marked pane of its own. Busy does

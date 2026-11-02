@@ -27,6 +27,7 @@ const (
 	ColID          = "id"
 	ColMachine     = "machine"
 	ColAgent       = "agent"
+	ColModel       = "model"
 	ColHead        = "head"
 	ColBusy        = "busy"
 	ColName        = "name"
@@ -50,6 +51,7 @@ const (
 	defaultNameMaxW       = 40
 	defaultCwdMaxW        = 40
 	defaultTicketNameMaxW = 30
+	defaultModelMaxW      = 22
 )
 
 // colSpec is a column's static metadata. fullWidth columns size to the longest
@@ -81,6 +83,8 @@ var colOrder = []colSpec{
 		cell: func(m *Model, r api.ThreadRow) string { return m.cwdDisplay(r) }},
 	{name: ColAgent, header: "AGENT", fixedW: 7,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.AgentKind }},
+	{name: ColModel, header: "MODEL", fullWidth: true, maxW: defaultModelMaxW,
+		cell: func(_ *Model, r api.ThreadRow) string { return modelCell(r) }},
 	{name: ColMachine, header: "MACHINE", fixedW: 12,
 		cell: func(_ *Model, r api.ThreadRow) string { return r.Machine }},
 	{name: ColHead, header: "HEAD", fixedW: 8,
@@ -174,7 +178,7 @@ var colOrder = []colSpec{
 
 // DefaultColumns is the built-in visible set (HEAD/BUSY deliberately off — the
 // glyph gutter carries the state; ID off — `i` toggles it).
-var DefaultColumns = []string{ColMachine, ColAgent, ColName, ColCwd, ColTags, ColNotify}
+var DefaultColumns = []string{ColMachine, ColAgent, ColModel, ColName, ColCwd, ColTags, ColNotify}
 
 // SidebarColumns is the `tui --sidebar` preset: NAME only — the pane is ~35
 // cols and the state gutter (head/busy/flag/attachment glyphs) already carries

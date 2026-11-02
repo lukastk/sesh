@@ -75,6 +75,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.observed-model",
+		Description: "the OWNER reads the model a thread's transcript says it last ran on (claude assistant message.model, codex turn_context, pi model_change/assistant) and carries it as observed_model on status, grid rows (the TUI MODEL column) and info; derived from the harness's records, not the thread record (a one-turn --model override moves it, not Thread.Model); nothing before the first turn; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "model.list",
 		Description: "`model list --agent <a>`: the models the REAL harness on the owning machine reports it can use (claude's SDK initialize handshake, `codex debug models` visibility=list, `pi --list-models`), never a sesh-kept list; claude's \"default\" pseudo-entry becomes harness_default; reused for 5 min until --refresh; unknown agent loud; routed = the peer's harness",
 		Agents:      agentic,

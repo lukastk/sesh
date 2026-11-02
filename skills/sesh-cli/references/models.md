@@ -1,11 +1,25 @@
 # Agent models
 
-A thread's **registered model** is the `model` on its record: what sesh passes as
+A thread has two models. Its **registered model** is the `model` on its record: what sesh passes as
 `--model` when it spawns, resumes or runs a headless turn on that thread. Model
 names are opaque and spelled the harness's own way — claude `opus` / `haiku` /
 `claude-fable-5-1[1m]`, codex `gpt-6-astra`, pi `provider/id[:thinking]` (e.g.
 `anthropic/claude-haiku-4-5`). Sesh keeps no list of valid names; a bad one fails
 loudly at the agent.
+
+Its **observed model** is what the thread's own transcript says it last ran on,
+read by the owning daemon from the harness's records (claude assistant entries,
+codex `turn_context`, pi `model_change` / assistant messages) — never stored, never
+guessed. It moves when the agent is switched in-session or a turn runs with a
+one-turn `send-headless --model`, and it is empty until the first turn. Claude does
+not record the context-window suffix, so `opus` and `opus[1m]` both observe as
+`claude-opus-5-5`.
+
+```sh
+sesh info <id>                    # model:  opus · last ran claude-sonnet-5-5
+sesh info --json <id>             # thread.model + observed_model
+sesh thread grid --json           # observed_model on every row (the TUI MODEL column)
+```
 
 ## Which models a harness can use
 

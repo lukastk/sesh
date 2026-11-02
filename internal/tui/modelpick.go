@@ -23,9 +23,12 @@ import (
 //   - REGISTER (`set-model`, or Tab inside the picker): `thread set-model` — the
 //     registered model only; a live agent keeps what it runs. Offers "(none)" to
 //     clear it.
-//   - DEFAULT (`set-default-model`): `model set-default` — the harness's default
-//     model on the selected row's machine, for threads created from now on.
-//     Offers "(none)" to remove it.
+//   - DEFAULT (`set-default-model`): `model set-default` — a harness's default
+//     model for threads created from now on, on the machine the TUI runs on. It
+//     does not depend on the selection: it opens on a HARNESS stage (every
+//     harness, with its current default, as the local daemon reports them), and
+//     picking one moves on to that harness's model list. So a harness with no
+//     thread open still gets a default. Offers "(none)" to remove it.
 //
 // The list is the harness's, which can be shorter than what it accepts (claude's
 // handshake list omits older models its --model still takes), so a query that is
@@ -45,6 +48,13 @@ const (
 	modelPickRowsTop = 4
 	modelPickChrome  = 6
 )
+
+// modelDefaultsMsg delivers the local daemon's per-harness defaults for the
+// DEFAULT picker's harness stage.
+type modelDefaultsMsg struct {
+	defaults map[string]string
+	err      error
+}
 
 // modelListMsg delivers the asynchronously fetched model list (and, for the
 // DEFAULT picker, the current defaults) for the row the picker was opened on.
@@ -75,6 +85,14 @@ func agentRow(row api.ThreadRow) bool {
 // openModelPick opens the picker on the selected row and starts fetching the
 // list from the row's owner.
 func (m Model) openModelPick(mode modelPickMode) (tea.Model, tea.Cmd) {
+	if mode == pickDefault {
+		// No selection involved: start on the harness stage, on this machine.
+		m.modelPick, m.modelPickMode, m.modelPickHarness = true, pickDefault, true
+		m.modelPickRow = api.ThreadRow{Thread: api.Thread{Machine: m.machine}}
+		m.modelPickQuery, m.modelPickCursor, m.modelPickOffset = nil, 0, 0
+		m.modelPickList, m.modelPickDefaults, m.modelPickErr = nil, nil, nil
+		return m, m.fetchModelDefaults()
+	}
 	row, ok := m.Selected()
 	if !ok {
 		m.note = "no thread selected"
@@ -91,14 +109,15 @@ func (m Model) openModelPick(mode modelPickMode) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) closeModelPick() {
-	m.modelPick = false
+	m.modelPick, m.modelPickHarness = false, false
 	m.modelPickQuery, m.modelPickCursor, m.modelPickOffset = nil, 0, 0
 	m.modelPickList, m.modelPickDefaults, m.modelPickErr = nil, nil, nil
 }
 
-// routeArgs appends --machine for a row another machine owns.
+// routeArgs appends --machine for a row another machine owns ("" = the local
+// daemon, the default pick's machine when the TUI's own is unknown).
 func (m Model) routeArgs(args []string, machine string) []string {
-	if m.machine == "" || machine != m.machine {
+	if machine != "" && (m.machine == "" || machine != m.machine) {
 		args = append(args, "--machine", machine)
 	}
 	return args
@@ -115,6 +134,67 @@ func (m Model) runJSON(args []string, out any) error {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return json.Unmarshal(stdout, out)
+}
+
+func (m Model) fetchModelDefaults() tea.Cmd {
+	return func() tea.Msg {
+		var d api.ModelDefaultsResponse
+		if err := m.runJSON([]string{"model", "defaults", "--json"}, &d); err != nil {
+			return modelDefaultsMsg{err: fmt.Errorf("read the default models: %w", err)}
+		}
+		if len(d.Defaults) == 0 {
+			return modelDefaultsMsg{err: fmt.Errorf("the daemon reported no harnesses")}
+		}
+		return modelDefaultsMsg{defaults: d.Defaults}
+	}
+}
+
+// applyModelDefaults stores the harness stage's defaults (dropped if the picker
+// has moved on or closed).
+func (m Model) applyModelDefaults(msg modelDefaultsMsg) Model {
+	if !m.modelPick || !m.modelPickHarness {
+		return m
+	}
+	if msg.err != nil {
+		m.modelPickErr = msg.err
+		return m
+	}
+	m.modelPickDefaults = msg.defaults
+	return m
+}
+
+// harnessCandidates are the DEFAULT picker's first stage: every harness the
+// daemon reports, alphabetical, each labelled with its current default.
+func (m Model) harnessCandidates() []modelCandidate {
+	if m.modelPickDefaults == nil {
+		return nil
+	}
+	names := make([]string, 0, len(m.modelPickDefaults))
+	for a := range m.modelPickDefaults {
+		names = append(names, a)
+	}
+	sort.Strings(names)
+	q := strings.TrimSpace(string(m.modelPickQuery))
+	var out []modelCandidate
+	for _, a := range names {
+		label := "default: none (the harness's own)"
+		if d := m.modelPickDefaults[a]; d != "" {
+			label = "default: " + d
+		}
+		c := modelCandidate{id: a, label: label}
+		if q != "" {
+			r := fuzzyScore(q, a)
+			if !r.ok {
+				continue
+			}
+			c.pos, c.score = r.pos, r.score
+		}
+		out = append(out, c)
+	}
+	if q != "" {
+		sort.SliceStable(out, func(i, j int) bool { return out[i].score > out[j].score })
+	}
+	return out
 }
 
 func (m Model) fetchModelList(row api.ThreadRow, withDefaults bool) tea.Cmd {
@@ -154,6 +234,9 @@ func (m Model) applyModelList(msg modelListMsg) Model {
 // modelCandidates lists the picker's entries, filtered by the query and ranked
 // best-first; an empty query keeps the harness's own order.
 func (m Model) modelCandidates() []modelCandidate {
+	if m.modelPickHarness {
+		return m.harnessCandidates()
+	}
 	if m.modelPickList == nil {
 		return nil
 	}
@@ -239,6 +322,16 @@ func (m Model) modelMarks(c modelCandidate) string {
 
 // pickModel acts on the chosen candidate.
 func (m Model) pickModel(c modelCandidate) (tea.Model, tea.Cmd) {
+	if m.modelPickHarness {
+		// Harness chosen: move on to its model list, on the same machine. The
+		// synthetic row id keeps applyModelList's late-answer check meaningful.
+		machine := m.modelPickRow.Machine
+		m.modelPickHarness = false
+		m.modelPickRow = api.ThreadRow{Thread: api.Thread{ID: "default:" + c.id, AgentKind: c.id, Machine: machine}}
+		m.modelPickQuery, m.modelPickCursor, m.modelPickOffset = nil, 0, 0
+		m.modelPickList, m.modelPickErr = nil, nil
+		return m, m.fetchModelList(m.modelPickRow, true)
+	}
 	row, mode := m.modelPickRow, m.modelPickMode
 	m.closeModelPick()
 	switch mode {
@@ -320,6 +413,9 @@ func (m Model) handleModelPickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "tab":
+		if m.modelPickHarness {
+			return m, nil
+		}
 		switch m.modelPickMode {
 		case pickSwitch:
 			m.modelPickMode = pickRegister
@@ -394,8 +490,20 @@ func (m Model) modelPickRowAtY(y int) (int, bool) {
 	return i, true
 }
 
+// machineLabel names the picker's machine ("" = the TUI's own, unnamed).
+func machineLabel(machine string) string {
+	if machine == "" {
+		return "this machine"
+	}
+	return machine
+}
+
 func (m Model) modelPickTitle() (string, string) {
 	row := m.modelPickRow
+	if m.modelPickHarness {
+		return "set a harness's default model on " + machineLabel(row.Machine),
+			"pick the harness; its model list comes next · applies to threads created from now on"
+	}
 	name := rowDisplayName(row)
 	current := row.Model
 	if current == "" {
@@ -410,7 +518,7 @@ func (m Model) modelPickTitle() (string, string) {
 		if d == "" {
 			d = "none"
 		}
-		return fmt.Sprintf("default %s model on %s", row.AgentKind, row.Machine),
+		return fmt.Sprintf("default %s model on %s", row.AgentKind, machineLabel(row.Machine)),
 			"current default: " + d + " · applies to threads created from now on"
 	}
 	sub := "registered: " + current + " · switches the live agent for this session"
@@ -433,8 +541,12 @@ func (m Model) modelPickView() string {
 		b.WriteString("\n" + styleErr.Render("  ✗ "+m.modelPickErr.Error()) + "\n\n")
 		b.WriteString(styleDim.Render("esc close") + "\n")
 		return b.String()
-	case m.modelPickList == nil:
-		b.WriteString("\n" + styleDim.Render(fmt.Sprintf("  asking %s on %s which models it can use…", m.modelPickRow.AgentKind, m.modelPickRow.Machine)) + "\n\n")
+	case m.modelPickHarness && m.modelPickDefaults == nil:
+		b.WriteString("\n" + styleDim.Render("  reading the harnesses and their defaults…") + "\n\n")
+		b.WriteString(styleDim.Render("esc cancel") + "\n")
+		return b.String()
+	case !m.modelPickHarness && m.modelPickList == nil:
+		b.WriteString("\n" + styleDim.Render(fmt.Sprintf("  asking %s on %s which models it can use…", m.modelPickRow.AgentKind, machineLabel(m.modelPickRow.Machine))) + "\n\n")
 		b.WriteString(styleDim.Render("esc cancel") + "\n")
 		return b.String()
 	}
@@ -477,11 +589,16 @@ func (m Model) modelPickView() string {
 		b.WriteString("\n")
 	}
 	footer := "type to filter · ↑/↓ move · enter pick · esc cancel"
-	switch m.modelPickMode {
-	case pickSwitch:
-		footer = "type to filter · ↑/↓ move · enter SWITCH · tab: register only · esc cancel"
-	case pickRegister:
-		footer = "type to filter · ↑/↓ move · enter REGISTER · tab: switch live · esc cancel"
+	switch {
+	case m.modelPickHarness:
+		footer = "type to filter · ↑/↓ move · enter choose harness · esc cancel"
+	default:
+		switch m.modelPickMode {
+		case pickSwitch:
+			footer = "type to filter · ↑/↓ move · enter SWITCH · tab: register only · esc cancel"
+		case pickRegister:
+			footer = "type to filter · ↑/↓ move · enter REGISTER · tab: switch live · esc cancel"
+		}
 	}
 	b.WriteString(styleDim.Render(footer) + "\n")
 	return b.String()
@@ -496,4 +613,9 @@ func (m Model) ModelPickCandidates() []string {
 	}
 	return out
 }
-func (m Model) ModelPickLoaded() bool { return m.modelPickList != nil || m.modelPickErr != nil }
+func (m Model) ModelPickLoaded() bool {
+	if m.modelPickHarness {
+		return m.modelPickDefaults != nil || m.modelPickErr != nil
+	}
+	return m.modelPickList != nil || m.modelPickErr != nil
+}

@@ -541,6 +541,8 @@ type Model struct {
 	modelPickList     *api.ModelListResponse
 	modelPickDefaults map[string]string
 	modelPickErr      error
+	// modelPickHarness: the DEFAULT picker's first stage (choose the harness).
+	modelPickHarness bool
 	// confirmModel is the model a confirmSwitchModel popup would switch to.
 	confirmModel string
 	// archiveUndo is the U key's LIFO stack of this session's archives.
@@ -1571,6 +1573,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetch() // reconcile against the daemon
 	case modelListMsg:
 		return m.applyModelList(msg), nil
+	case modelDefaultsMsg:
+		return m.applyModelDefaults(msg), nil
 	case clipboardDoneMsg:
 		// An action error, not lastErr: lastErr reads "daemon unreachable" and the
 		// next fetch clears it, which would both mislabel and erase the failure.
@@ -2349,29 +2353,28 @@ func (m Model) machineReachable(machine string) bool {
 func requiresReachableOwner(cmdID string) bool {
 	switch cmdID {
 	case "enter", // navSelected (resume/nav on the owner)
-		"archive",           // archive/unarchive
-		"delete",            // delete
-		"stop",              // stop
-		"flag",              // flag toggle (owner-routed setter)
-		"fork",              // fork (thread new --fork-from on the owner)
-		"flag-gate",         // flag-gate toggle (owner-routed setter)
-		"rename",            // rename
-		"tag-add",           // tag add
-		"tag-remove",        // tag remove
-		"set-parent",        // reparent (pick a parent from a list)
-		"set-parent-uuid",   // reparent (paste a uuid)
-		"switch-model",      // model list + switch-model on the owner
-		"set-model",         // model list + set-model on the owner
-		"set-default-model", // model list + set-default on the row's machine
-		"hold",              // hold toggle
-		"hold-until",        // hold until date
-		"notify",            // notify on/off
-		"new-virtual",       // new virtual group (created on the selected row's machine)
-		"pin",               // pin to top (routed pin on the owner)
-		"unpin",             // unpin (routed pin --clear on the owner)
-		"move-mode",         // enter move mode (auto-pins on the owner)
-		"new-divider",       // new divider (created on the selected row's machine)
-		"tickets":           // tickets view (loadTickets routes to the owner)
+		"archive",         // archive/unarchive
+		"delete",          // delete
+		"stop",            // stop
+		"flag",            // flag toggle (owner-routed setter)
+		"fork",            // fork (thread new --fork-from on the owner)
+		"flag-gate",       // flag-gate toggle (owner-routed setter)
+		"rename",          // rename
+		"tag-add",         // tag add
+		"tag-remove",      // tag remove
+		"set-parent",      // reparent (pick a parent from a list)
+		"set-parent-uuid", // reparent (paste a uuid)
+		"switch-model",    // model list + switch-model on the owner
+		"set-model",       // model list + set-model on the owner
+		"hold",            // hold toggle
+		"hold-until",      // hold until date
+		"notify",          // notify on/off
+		"new-virtual",     // new virtual group (created on the selected row's machine)
+		"pin",             // pin to top (routed pin on the owner)
+		"unpin",           // unpin (routed pin --clear on the owner)
+		"move-mode",       // enter move mode (auto-pins on the owner)
+		"new-divider",     // new divider (created on the selected row's machine)
+		"tickets":         // tickets view (loadTickets routes to the owner)
 		return true
 	}
 	// NB `shells` is deliberately NOT here. It enumerates every REACHABLE machine

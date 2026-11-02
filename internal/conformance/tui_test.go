@@ -53,7 +53,7 @@ var declaredTUIClaims = []string{
 	"uuid-popup-copy",           // y shows the full real uuid in a popup; c pipes it through the real clipboard exec path
 	"sched-column",              // the opt-in sched column renders a real schedule's next fire from the owner-stamped digest; blank once removed
 	"model-column",              // the DEFAULT MODEL column: (registered) before a turn, then the transcript's model with * when it disagrees, after a real turn; blank with neither
-	"model-picker",              // M-less palette commands: switch-model lists the REAL harness's models, filters, switches a live codex (confirmed); Tab = register; (none) clears; typed ids; set-default-model writes the default; a live claude asks y/n about the restart
+	"model-picker",              // M-less palette commands: switch-model lists the REAL harness's models, filters, switches a live codex (confirmed); Tab = register; (none) clears; typed ids; set-default-model picks a harness first (even one with no thread) then writes its default; a live claude asks y/n about the restart
 	"columns-config",            // the column system: defaults hide HEAD/BUSY text, [tui] config + overrides render exactly the named set, full-width NAME grows to content (untruncated within the cap; see column-max-width)
 	"cwd-label-column",          // the CWD column renders a real thread's real cwd through the [[cwd_label]] rules; unconfigured = ~-relative
 	"cwd-launch-scope",          // --cwd admits only an exact CWD; --cwd-tree adds descendants path-safely; both start in all while retaining configured views

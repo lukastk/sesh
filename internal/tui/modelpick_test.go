@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -82,5 +83,55 @@ func TestModelPickTabAndClaudeConfirm(t *testing.T) {
 	nm, cmd = pickerModel(pickSwitch, row).handleModelPickKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || nm.(Model).confirming != confirmNone {
 		t.Fatalf("headless claude switch should run directly (cmd=%v confirming=%v)", cmd != nil, nm.(Model).confirming)
+	}
+}
+
+func TestDefaultPickerStartsOnTheHarnessStage(t *testing.T) {
+	// No selection at all: the default picker does not need a thread.
+	nm, cmd := Model{machine: "mymain"}.openModelPick(pickDefault)
+	m := nm.(Model)
+	if !m.modelPick || !m.modelPickHarness || cmd == nil {
+		t.Fatalf("open: pick=%v harness=%v cmd=%v", m.modelPick, m.modelPickHarness, cmd != nil)
+	}
+	if m.ModelPickLoaded() || m.ModelPickCandidates() != nil {
+		t.Fatalf("the harness stage should load first")
+	}
+	m = m.applyModelDefaults(modelDefaultsMsg{defaults: map[string]string{"claude": "opus", "codex": "", "pi": "", "mypi": ""}})
+	if got := m.ModelPickCandidates(); !reflect.DeepEqual(got, []string{"claude", "codex", "mypi", "pi"}) {
+		t.Fatalf("harnesses = %v", got)
+	}
+	if v := m.modelPickView(); !strings.Contains(v, "default: opus") || !strings.Contains(v, "on mymain") {
+		t.Errorf("harness stage view:\n%s", v)
+	}
+	m.modelPickQuery = []rune("cod")
+	if got := m.ModelPickCandidates(); !reflect.DeepEqual(got, []string{"codex"}) {
+		t.Fatalf("filtered harnesses = %v", got)
+	}
+	// Choosing one moves to its model list (fetched), on the same machine.
+	nm, cmd = m.handleModelPickKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nm.(Model)
+	if m.modelPickHarness || m.modelPickRow.AgentKind != "codex" || m.modelPickRow.Machine != "mymain" || cmd == nil || len(m.modelPickQuery) != 0 {
+		t.Fatalf("after choosing: harness=%v row=%+v cmd=%v query=%q", m.modelPickHarness, m.modelPickRow.Thread, cmd != nil, string(m.modelPickQuery))
+	}
+	// A late list for another harness is dropped; this one's is taken.
+	if got := m.applyModelList(modelListMsg{rowID: "default:claude", list: api.ModelListResponse{Models: []api.ModelOption{{ID: "x"}}}}); got.modelPickList != nil {
+		t.Errorf("a stale list was applied")
+	}
+	m = m.applyModelList(modelListMsg{rowID: "default:codex", list: api.ModelListResponse{Models: []api.ModelOption{{ID: "gpt-6-luna"}}}})
+	if got := m.ModelPickCandidates(); !reflect.DeepEqual(got, []string{"", "gpt-6-luna"}) {
+		t.Fatalf("model stage = %v ((none) first)", got)
+	}
+}
+
+func TestRouteArgsLocalMachine(t *testing.T) {
+	m := Model{machine: "mymain"}
+	if got := m.routeArgs([]string{"x"}, "mymain"); len(got) != 1 {
+		t.Errorf("own machine routed: %v", got)
+	}
+	if got := m.routeArgs([]string{"x"}, ""); len(got) != 1 {
+		t.Errorf("empty machine routed: %v", got)
+	}
+	if got := m.routeArgs([]string{"x"}, "macbook"); !reflect.DeepEqual(got, []string{"x", "--machine", "macbook"}) {
+		t.Errorf("peer: %v", got)
 	}
 }

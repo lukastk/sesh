@@ -48,7 +48,7 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 	routed := []string{"enter", "archive", "delete", "stop", "flag", "fork", "flag-gate",
 		"rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid", "new-virtual",
 		"pin", "unpin", "move-mode", "new-divider", "hold", "hold-until", "notify", "tickets",
-		"switch-model", "set-model", "set-default-model"}
+		"switch-model", "set-model"}
 	for _, id := range routed {
 		if _, ok := commandByID(id); !ok {
 			t.Fatalf("routed command %q is not in the registry", id)
@@ -76,7 +76,11 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 		// shells fans out to every REACHABLE machine and acts on the viewer's own
 		// selection, not the grid's — same class as undo-archive. Its fan-out
 		// skips unreachable peers, so there is nothing for this gate to refuse.
-		"shells"}
+		"shells",
+		// set-default-model acts on the TUI's OWN machine (the local daemon), never
+		// on the selection — gating it on the selected row's machine would refuse it
+		// whenever the cursor sits on an offline peer's thread.
+		"set-default-model"}
 	for _, id := range local {
 		if _, ok := commandByID(id); !ok {
 			t.Fatalf("read-only command %q is not in the registry", id)
@@ -99,7 +103,7 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 // ownerRoutedCommands is the routed set, for the offline-gate tests below.
 var ownerRoutedCommands = []string{"enter", "archive", "delete", "stop", "flag", "fork",
 	"flag-gate", "rename", "tag-add", "tag-remove", "set-parent", "set-parent-uuid",
-	"switch-model", "set-model", "set-default-model",
+	"switch-model", "set-model",
 	"new-virtual", "pin", "unpin", "move-mode", "new-divider", "hold", "hold-until",
 	"notify", "tickets"}
 

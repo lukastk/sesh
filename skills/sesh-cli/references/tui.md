@@ -137,8 +137,9 @@ switch-model     switch the thread's model, LIVE — a picker over the models th
                  pane asks y/n first because it RESTARTS
 set-model        register the thread's model only (the same picker; the live agent
                  keeps its model)
-set-default-model  set the selected row's HARNESS default model on that row's
-                 machine (the same picker; `(none)` removes the default)
+set-default-model  set a HARNESS's default model on this machine — independent of
+                 the selection: pick the harness (each shows its current default),
+                 then its model; `(none)` removes the default
 new-virtual      new VIRTUAL group (name prompt; empty cancels). Creates a root
                  grouping thread on the SELECTED row's machine (virtual parents only
                  group same-machine threads) and lands the cursor on it — then
@@ -185,6 +186,9 @@ original paste-a-uuid form and is unchanged.
 asks the selected thread's harness ON THE THREAD'S MACHINE which models it can use
 (`sesh model list`) and lists them with their labels; `[registered]` and `[running]`
 mark the thread's registered and observed models (`[default]` in the default picker).
+`set-default-model` needs no selected thread: it first lists every harness with its
+current default (as this machine's daemon reports them), and picking one opens that
+harness's model list — so a harness with no thread open can still get a default.
 Type to filter (fuzzy, by id or label), `↑/↓` move, **enter applies**, esc cancels, a
 mouse click applies directly. **Tab** flips between switching the live agent and
 registering only. A query that is not an exact entry is also offered **as typed** —

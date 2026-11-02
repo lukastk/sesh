@@ -78,7 +78,8 @@ func pickerHas(m tui.Model, id string) bool {
 // filters them, and Enter switches the LIVE codex (codex confirms, the record
 // follows); Tab flips to register-only, whose "(none)" entry clears the record;
 // a typed id the list lacks is offered and registered as typed;
-// `set-default-model` writes the harness default to the owner's config.toml;
+// `set-default-model` starts on a harness stage (no selection needed) and
+// writes a default for pi, which has no thread at all;
 // and on a LIVE claude pane the switch stops at a y/n that says the pane
 // restarts — declining changes nothing.
 func claimModelPicker(t *testing.T) {
@@ -154,16 +155,28 @@ func claimModelPicker(t *testing.T) {
 		t.Errorf("(none) left the registration %q", got)
 	}
 
-	// The harness DEFAULT on the row's machine.
+	// A harness DEFAULT, independent of the selection: the picker starts on the
+	// harness stage, and pi — which has NO thread here — gets a default.
 	m = runCommand(t, m, "set-default-model")
-	m = typeText(t, m, "gpt-6-luna")
+	if !m.ModelPickLoaded() || !pickerHas(m, "pi") || !pickerHas(m, "claude") || !strings.Contains(m.View(), "set a harness's default model") {
+		t.Fatalf("set-default-model did not open on the harness stage: %v\n%s", m.ModelPickCandidates(), m.View())
+	}
+	m = typeText(t, m, "pi")
+	if got := m.ModelPickCandidates(); len(got) == 0 || got[0] != "pi" {
+		t.Fatalf("filtering harnesses by \"pi\" put %v first", got)
+	}
+	m = runSpecial(t, m, tea.KeyEnter) // choose pi -> its REAL model list loads
+	if !m.ModelPickLoaded() || !pickerHas(m, "openai-codex/gpt-6-luna") {
+		t.Fatalf("pi's model stage did not load its real list: %v", m.ModelPickCandidates())
+	}
+	m = typeText(t, m, "openai-codex/gpt-6-luna")
 	m = runSpecial(t, m, tea.KeyEnter)
 	if m.ActionErr() != nil {
 		t.Fatalf("set-default errored: %v", m.ActionErr())
 	}
 	out, _, err := sb.Runner.Run(t, "model", "defaults", "--json")
-	if err != nil || !strings.Contains(out, `"codex":"gpt-6-luna"`) {
-		t.Errorf("the codex default was not written: %v %s", err, out)
+	if err != nil || !strings.Contains(out, `"pi":"openai-codex/gpt-6-luna"`) {
+		t.Errorf("the pi default was not written: %v %s", err, out)
 	}
 
 	// A live claude pane: the switch asks first and says the pane restarts.

@@ -219,9 +219,11 @@ func LaunchArgs(k Kind, mode string, extra []string) string {
 	return out
 }
 
-// ShellEscape single-quotes s for safe embedding in a shell command line.
+// ShellEscape single-quotes s for safe embedding in a shell command line. An
+// embedded ' closes the quote, adds an escaped quote and reopens ('\''): inside
+// single quotes nothing else is special, so the shell reads s back exactly.
 func ShellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'''`) + "'"
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // HeadedCommand returns the shell command that launches the agent interactively

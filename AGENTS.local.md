@@ -58,8 +58,8 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-02 22:20Z**: mymain, macbook, macstudio, ideapad and termux run `c780a7f`
-(wire schema 59, store schema 27) on the split config (myrig `63558f2`) with refreshed
+Fleet on **2026-11-03**: mymain, macbook, macstudio, ideapad and termux run binary `4ef9904`
+(daemons from `c780a7f`; wire schema 59, store schema 27) on the split config (myrig `63558f2`) with refreshed
 `sesh-cli` skill copies; **pocket4 has been offline since 2026-10-31 ~17:10 and still runs
 `73e3ad7` on the old rendered config** — pull sesh AND myrig, rebuild, apply both config
 files, restart. macbook's `pi` shim has no mise Node version (`pi` itself fails there). Re-check the fleet rather

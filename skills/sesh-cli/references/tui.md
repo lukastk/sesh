@@ -140,6 +140,13 @@ set-model        register the thread's model only (the same picker; the live age
 set-default-model  set a HARNESS's default model on this machine — independent of
                  the selection: pick the harness (each shows its current default),
                  then its model; `(none)` removes the default
+context-view     read the thread's custom CONTEXT (fetched from its owner) in a
+                 scrollable takeover: ↑/↓ j/k, pgup/pgdn, g/G, wheel; `e` edits it;
+                 esc/q closes — see [context](context.md)
+context-edit     edit the thread's context in your editor ([tui] editor / --editor /
+                 $EDITOR); on exit it is saved on the owner and you are back in the
+                 TUI. An emptied file removes it; a context changed meanwhile is not
+                 overwritten (your text is kept in the file the error names)
 new-virtual      new VIRTUAL group (name prompt; empty cancels). Creates a root
                  grouping thread on the SELECTED row's machine (virtual parents only
                  group same-machine threads) and lands the cursor on it — then
@@ -256,6 +263,9 @@ agent was switched in-session). Claude's family aliases agree with their family
 (`opus` with `claude-opus-5-5`), and pi models drop their provider prefix for width;
 `I` shows both models in full. Blank = no model registered and no turn yet (or a
 settled archived thread, which is not observed).
+
+The **CTX** column (`context`, not in the default set) marks a thread that carries a
+custom context with `◆`; `context-view` shows it and `I` shows its version.
 
 The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**
 rail (**`└─ `** for the last one), a deeper level continues past it on **`│  `**, and a

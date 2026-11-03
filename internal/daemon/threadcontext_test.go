@@ -36,6 +36,59 @@ func TestDecideDelivery(t *testing.T) {
 		{"startup with no context records the session only", func(in *deliveryInput) {
 			in.event, in.source, in.text = api.ContextEventSessionStart, "startup", ""
 		}, want{record: true}},
+		// --- claude launched with its context file: the file carries session starts ---
+		{"file: startup sends nothing and records it", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile = api.ContextEventSessionStart, "startup", true
+		}, want{record: true}},
+		{"file: compact sends nothing", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile, in.deliveredSession, in.deliveredHash = api.ContextEventSessionStart, "compact", true, "S", h
+		}, want{}},
+		{"file: clear sends nothing", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile, in.session = api.ContextEventSessionStart, "clear", true, "S2"
+		}, want{record: true}},
+		{"file: first resume sends nothing and records it", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile = api.ContextEventSessionStart, "resume", true
+		}, want{record: true}},
+		{"file: restart after an edit marks the change in the history", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile, in.deliveredSession, in.deliveredHash = api.ContextEventSessionStart, "resume", true, "S", old
+		}, want{inject: "ctx", record: true}},
+		{"file: restart after a removal is told", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile, in.deliveredSession, in.deliveredHash, in.text = api.ContextEventSessionStart, "resume", true, "S", old, ""
+		}, want{inject: "cleared", record: true}},
+		{"file: a change mid-session still goes through the hook", func(in *deliveryInput) {
+			in.event, in.contextFile, in.deliveredSession, in.deliveredHash = api.ContextEventPrompt, true, "S", old
+		}, want{inject: "ctx", record: true}},
+		{"file: the first context on a running process goes through the hook", func(in *deliveryInput) {
+			in.event, in.contextFile, in.deliveredSession, in.deliveredHash = api.ContextEventPrompt, true, "S", ""
+		}, want{inject: "ctx", record: true}},
+		{"file: an unchanged prompt sends nothing", func(in *deliveryInput) {
+			in.event, in.contextFile, in.deliveredSession, in.deliveredHash = api.ContextEventPrompt, true, "S", h
+		}, want{skipped: "already delivered"}},
+		{"file: a stranger's session still gets nothing", func(in *deliveryInput) {
+			in.event, in.source, in.contextFile, in.session = api.ContextEventSessionStart, "startup", true, "OTHER"
+		}, want{skipped: "not thread"}},
+		{"no file (launched before schema 61): resume keeps today's rule", func(in *deliveryInput) {
+			in.event, in.source, in.deliveredSession, in.deliveredHash = api.ContextEventSessionStart, "resume", "S", h
+		}, want{skipped: "already delivered"}},
+		{"no file (launched before schema 61): compact still injects", func(in *deliveryInput) {
+			in.event, in.source, in.deliveredSession, in.deliveredHash = api.ContextEventSessionStart, "compact", "S", h
+		}, want{inject: "ctx"}},
+		// --- codex: a rewind fires SessionStart(resume) ---
+		{"codex: resume re-sends although already delivered", func(in *deliveryInput) {
+			in.family, in.event, in.source, in.deliveredSession, in.deliveredHash = agents.Codex, api.ContextEventSessionStart, "resume", "S", h
+		}, want{inject: "ctx"}},
+		{"codex: a headless turn's resume does not", func(in *deliveryInput) {
+			in.family, in.event, in.source, in.deliveredSession, in.deliveredHash, in.headless = agents.Codex, api.ContextEventSessionStart, "resume", "S", h, true
+		}, want{skipped: "already delivered"}},
+		{"codex: resume after a removal tells it once", func(in *deliveryInput) {
+			in.family, in.event, in.source, in.deliveredSession, in.deliveredHash, in.text = agents.Codex, api.ContextEventSessionStart, "resume", "S", old, ""
+		}, want{inject: "cleared", record: true}},
+		{"codex: resume with no context sends nothing", func(in *deliveryInput) {
+			in.family, in.event, in.source, in.deliveredSession, in.text = agents.Codex, api.ContextEventSessionStart, "resume", "S", ""
+		}, want{}},
+		{"codex: a prompt stays once per version", func(in *deliveryInput) {
+			in.family, in.event, in.deliveredSession, in.deliveredHash = agents.Codex, api.ContextEventPrompt, "S", h
+		}, want{skipped: "already delivered"}},
 		// --- resume / prompt: once per version per session ---
 		{"prompt, never delivered", func(in *deliveryInput) { in.event = api.ContextEventPrompt }, want{inject: "ctx", record: true}},
 		{"prompt, already delivered", func(in *deliveryInput) {

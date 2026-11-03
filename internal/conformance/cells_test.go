@@ -30,6 +30,8 @@ var skipReasons = map[string]string{
 	"thread.observed-model":      "after a real headless turn the owner's status, grid row and info report the transcript's model; a one-turn --model override moves it while the registered model stays; nothing before a turn; remote routed",
 	"thread.context":             "context set on a live thread: the next reply follows it, one injection per version (transcript), a change re-injects and the reply follows, clear tells the agent; context_hash on the row; remote routed",
 	"thread.context-headless":    "context reaches fresh per-turn headless processes: reply follows it, one injection across turns, a change reaches the next turn; remote routed",
+	"thread.context-rewind":      "real TUI rewind after a restart: the next reply still follows the context",
+	"thread.context-compact":     "an idle change survives a real compaction: new version in the transcript after it, reply follows it; claude file follows set/clear/delete",
 	"context.guards":             "oversize (8000+1) refused with nothing stored, exactly 8000 accepted, blank refused, stale/none expect-hash refused, matching accepted, same text unchanged, virtual thread refused; remote routed",
 	"context.edit":               "context edit via an editor script: given the current text, saves the edit trimmed, unchanged save reported, emptied file removes",
 	"config.local":               "an overlay's [defaults] agent decides thread new's harness, [spawn.*] model merges across both files, a shadowed set-default is refused with config.toml untouched; remote routed",

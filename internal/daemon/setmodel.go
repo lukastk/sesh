@@ -189,7 +189,7 @@ func (d *Daemon) restartClaudeOnModel(th api.Thread, pane, model string) error {
 	if err != nil {
 		return err
 	}
-	extra, err := d.launchArgs(kind)
+	extra, err := d.launchArgs(kind, th.ID)
 	if err != nil {
 		return err
 	}

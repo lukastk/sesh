@@ -20,7 +20,8 @@ import (
 // /v1/threads/context/deliver. Asking at the hook, rather than passing the text
 // at launch, is what makes a change apply to a running agent: claude and codex
 // freeze launch-time instructions into the session at creation and ignore them on
-// resume (claude also drops them at compaction).
+// resume (claude also drops them at compaction). Claude also gets the text as an
+// instruction file, the one form a rewind cannot remove (agents/contexthook.go).
 
 func (d *Daemon) routesThreadContext(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/threads/context", d.handleThreadContextGet)
@@ -115,8 +116,30 @@ func (d *Daemon) handleThreadContextSet(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if agents.Family(agents.Kind(th.AgentKind)) == agents.Claude {
+		if _, err := d.writeContextFile(req.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "context: stored, but the thread's context file was not updated: "+err.Error())
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, api.SetThreadContextResponse{Schema: api.SchemaVersion, Thread: th, Hash: th.ContextHash,
 		Changed: changed, Detail: contextDetail(th, req.Clear, changed)})
+}
+
+// writeContextFile renders thread id's claude context file from the store and
+// returns its folder. Called on every change and before every claude launch, so
+// the copy is rebuilt if it is missing or stale. A thread being created has no
+// record yet, and so no context: an empty file.
+func (d *Daemon) writeContextFile(id string) (string, error) {
+	text, _, err := d.store.GetThreadContext(id)
+	if err != nil && !errors.Is(err, store.ErrThreadNotFound) {
+		return "", err
+	}
+	content := ""
+	if text != "" {
+		content = renderContext(id, store.ContextHashOf(text), text)
+	}
+	return agents.WriteContextFile(d.cfg.Home, id, content)
 }
 
 func contextDetail(th api.Thread, cleared, changed bool) string {
@@ -183,6 +206,7 @@ func (d *Daemon) handleThreadContextDeliver(w http.ResponseWriter, r *http.Reque
 	}
 	in := deliveryInput{
 		threadID: th.ID, family: agents.Family(kind), event: req.Event, source: req.Source,
+		contextFile: req.ContextFile, headless: d.turnInFlight(th.ID),
 		session: req.SessionID, recorded: th.AgentSessionID,
 		deliveredSession: dSess, deliveredHash: dHash, text: text,
 		leafOf: func() string {
@@ -217,6 +241,12 @@ type deliveryInput struct {
 	family   agents.Kind
 	event    string
 	source   string
+	// contextFile: a claude launched with its context file, which claude itself
+	// reloads at every session start.
+	contextFile bool
+	// headless: a headless turn is running. Each is a new process, so its codex
+	// SessionStart(resume) is that turn starting, not a restart or a rewind.
+	headless bool
 	// session is the hook's agent session id; recorded the thread record's.
 	session  string
 	recorded string
@@ -253,7 +283,13 @@ type deliveryDecision struct {
 //     once per session — at a SessionStart that begins a fresh history (startup,
 //     clear, compact), or at the first hook of a session it has not reached, or
 //     when it changed since that session last received it (a removal is told as
-//     a notice).
+//     a notice);
+//   - claude launched with its context file: claude loads that file itself at
+//     every session start and keeps it through a rewind, so a SessionStart that
+//     begins a history sends nothing and only records what the session now has.
+//     The hook carries changes to the running process;
+//   - headed codex: a rewind removes the injection, and fires SessionStart(resume),
+//     so that event always re-sends. A restart fires it too, adding one copy.
 func decideDelivery(in deliveryInput) (deliveryDecision, error) {
 	var out deliveryDecision
 	if in.session == "" {
@@ -273,6 +309,8 @@ func decideDelivery(in deliveryInput) (deliveryDecision, error) {
 	}
 	cur := store.ContextHashOf(in.text)
 	fresh := in.event == api.ContextEventSessionStart && (in.source == "startup" || in.source == "clear" || in.source == "compact")
+	loadsFile := in.family == agents.Claude && in.contextFile && in.event == api.ContextEventSessionStart
+	codexRewind := in.family == agents.Codex && !in.headless && in.event == api.ContextEventSessionStart && in.source == "resume" && in.text != ""
 	accepted := in.recorded == "" || in.session == in.recorded || in.session == in.deliveredSession ||
 		(in.event == api.ContextEventSessionStart && in.source == "clear")
 	if !accepted && in.leafOf != nil && in.session == in.leafOf() {
@@ -302,6 +340,10 @@ func decideDelivery(in deliveryInput) (deliveryDecision, error) {
 	}
 
 	switch {
+	case codexRewind:
+		out.inject = renderContext(in.threadID, cur, in.text)
+	case loadsFile && (fresh || !same):
+		// The context file gives this history the current version.
 	case fresh:
 		// A history that holds no injection: give it the current version (if any).
 		if cur != "" {

@@ -46,14 +46,16 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   that goes THROUGH the symlinked config.toml (see the config bullet below). Pi
   cannot run `anthropic/*` turns on this account ("Third-party apps now draw from your
   extra usage"), so tests drive pi on `openai-codex/*`.
-- **Thread context (schema 60, [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md)):** delivered
-  by the agent's OWN hooks, asked fresh — claude `--settings` + codex `-c hooks.*` on
-  every sesh launch (`d.launchArgs`), pi via `integrations/pi/sesh-agent-state/context.ts`.
-  Never by launch flags: claude/codex freeze them at creation and ignore them on resume.
-  Codex needs the hooks TRUSTED (hash asked from `codex app-server hooks/list`, never
-  computed); a changed hook command string = untrusted = a refused codex launch. The pi
-  extension is live from THIS checkout (myagent symlink) the moment it is saved —
-  every new pi session on the machine runs it.
+- **Thread context (schema 61, [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md)):** claude =
+  per-thread `<SESH_HOME>/thread-context/<id>/CLAUDE.md` (`--add-dir`, a copy of the
+  store) + a hook for mid-session changes; codex = hooks only, trusted in its config
+  (hash from `codex app-server hooks/list`, never computed; a changed hook command = a
+  refused codex launch), re-sent at a headed `SessionStart(resume)`, which a rewind fires;
+  pi = `integrations/pi/sesh-agent-state/context.ts`, live from THIS checkout (myagent
+  symlink) the moment it is saved. Launch flags cannot carry it: claude/codex freeze them.
+  An injection can be REWOUND away, so "delivered" never proves the model has it. Claude
+  surfaces only the FIRST mid-session edit of an instruction file. Daemon log =
+  `supervisorctl tail`, not `~/.sesh/daemon.log`.
 - **Config layout (schema 59, 2026-11-02):** `~/.sesh/config.toml` is a SYMLINK to myrig's
   plain `home/.sesh/config.toml` (shared by the fleet); `~/.sesh/config.local.toml` is
   rendered per machine from `config.local.toml.jinja` and OVERLAYS it (tables merge key

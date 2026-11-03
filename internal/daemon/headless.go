@@ -206,7 +206,7 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		transferSocket = d.cfg.SocketPath()
 	}
 
-	hookArgs, hookErr := d.contextHookArgs(agents.Kind(thread.AgentKind))
+	hookArgs, hookErr := d.contextHookArgs(agents.Kind(thread.AgentKind), threadID)
 	if hookErr != nil {
 		releaseSlot()
 		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", hookErr)

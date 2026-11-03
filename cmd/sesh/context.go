@@ -253,6 +253,7 @@ func contextHook(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("context hook", flag.ContinueOnError)
 	agent := fs.String("agent", "", "the harness running this hook: claude, codex or pi")
 	session := fs.String("session", "", "pi: the agent session id (claude/codex read it from stdin)")
+	contextFile := fs.Bool("context-file", false, "claude: this process was launched with its thread-context file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -261,7 +262,7 @@ func contextHook(cfg config.Config, args []string) error {
 		return fmt.Errorf("context hook: %w", err)
 	}
 	family := agents.Family(kind)
-	req := api.ThreadContextDeliverRequest{Agent: string(family)}
+	req := api.ThreadContextDeliverRequest{Agent: string(family), ContextFile: *contextFile}
 	if family == agents.Pi {
 		if *session == "" {
 			return errors.New("context hook: --session is required for pi")

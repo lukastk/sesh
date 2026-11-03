@@ -24,22 +24,39 @@ cannot have one.
 
 ## How the agent receives it
 
-The agent asks for its context from its own extension points every time, so setting,
-changing or clearing it applies to an agent that is **already running** — no
-restart:
+The context stays in the owner's database. Each harness then receives it in its own
+way, so setting, changing or clearing it applies to an agent that is **already
+running** — no restart:
 
-| harness | how | when a change arrives |
+| harness | how it is held | when a change arrives |
 |---|---|---|
-| claude | `SessionStart` + `UserPromptSubmit` hooks that sesh adds to every claude it launches (`--settings`; your own settings hooks still run) | at the next prompt, or when the session next starts, resumes, clears or compacts |
-| codex | the same two hooks, added with `-c hooks.…` and trusted by the daemon in the codex config | at the next prompt or session start |
+| claude | a per-thread instruction file, `<SESH_HOME>/thread-context/<thread-id>/CLAUDE.md`, loaded with `--add-dir` like any other `CLAUDE.md`; a `UserPromptSubmit` hook carries changes to the running process | at the next prompt; the file itself is reloaded on restart, `/clear` and compaction |
+| codex | `SessionStart` + `UserPromptSubmit` hooks added with `-c hooks.…` and trusted by the daemon in the codex config. Codex has no per-session instruction file | at the next prompt or session start |
 | pi / mypi | the `sesh-agent-state` extension, before every turn: the context is a section of the system prompt | at the next turn |
 
-Claude and codex keep each injection in the conversation, so sesh sends a given
-version **once per agent session** (and again after a compaction or `/clear`, which
-drop it). A change is sent as a new version that says it replaces the earlier one; a
-clear is told as "the context was removed". The earlier text stays visible in the
-conversation history until a compaction, so a model may still recall it — the newest
-version is always the one marked current.
+The file is a copy that sesh rewrites on every change and before every launch: edit
+the context with `sesh context`, not the file. It lives outside the working
+directory, so nothing appears in a repository. `--add-dir` also lets that Claude read
+and write the folder, but what it writes there is overwritten and never reaches the
+database. Deleting a thread removes its folder.
+
+Claude and codex keep each hook injection in the conversation, so sesh sends a given
+version **once per agent session**. A change is sent as a new version that says it
+replaces the earlier one; a clear is told as "the context was removed". The earlier
+text stays visible in the conversation history until a compaction, so a model may
+still recall it — the newest version is always the one marked current.
+
+### Rewinding a conversation
+
+A rewind removes the later part of a conversation, including anything injected there.
+
+- **claude:** a context the thread had when Claude started is safe, because it is an
+  instruction file. A context set or changed *while it runs* arrives through the hook,
+  so rewinding to before that prompt returns the agent to the version it started with.
+  A restart, `/clear` or compaction brings it up to date.
+- **codex:** a rewind fires a session start, and sesh re-sends the context then, so the
+  next prompt has the current version. Each rewind or restart adds one copy.
+- **pi / mypi:** not affected: the context is applied on every turn.
 
 Only the thread's **own** agent receives it: the hook checks that it runs in the
 thread's pane or one of its headless turns (its verified identity), *and* that the
@@ -47,8 +64,10 @@ agent session is the thread's. Another agent started inside the thread — say a
 agent running `claude -p` from its shell — inherits the pane but gets nothing.
 
 Agents sesh did not launch (an adopted session, a `claude` you started yourself) have
-no context hooks until sesh next relaunches them (`thread resume`, a headless turn).
-pi and mypi are the exception: their extension is global.
+no context hooks or file until sesh next relaunches them (`thread resume`, a headless
+turn). pi and mypi are the exception: their extension is global. A Claude that was
+already running when sesh gained the context file gets it at its next restart; until
+then its context arrives only through the hook, so a rewind can remove it.
 
 ## Where it shows
 
@@ -74,10 +93,10 @@ them on. Routed to a peer over its HTTP API (`--machine`, any peer with an
 ## Troubleshooting
 
 - `sesh doctor` lists **context hooks** (the hook script sesh hands every claude and
-  codex) and **codex context hooks** (whether codex accepted their trust). Codex
+  codex; claude's context files live beside it in `thread-context/`) and **codex context hooks** (whether codex accepted their trust). Codex
   refuses to run an untrusted hook, so sesh refuses to launch codex when it cannot
   record the trust — the doctor line says why.
 - A `[spawn.claude] args` entry passing `--settings` is refused: sesh needs that flag
-  for the hooks. Put those settings in claude's own settings files.
+  for the hooks and the context file. Put those settings in claude's own settings files.
 - The daemon log notes each delivery it skipped for a thread that has a context
   (`context: thread … not delivered — …`), e.g. a nested agent run.

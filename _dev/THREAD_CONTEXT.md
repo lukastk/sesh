@@ -1,6 +1,7 @@
-# THREAD_CONTEXT — per-thread instructions (schema 60)
+# THREAD_CONTEXT — per-thread instructions (schema 60, 61)
 
-*Design record, 2026-11-03. Read before changing `sesh context`, the context hooks,
+*Design record, 2026-11-03; §9–§11 supersede the claude and codex delivery rules of
+§3 where they differ. Read before changing `sesh context`, the context hooks,
 the codex hook trust, or the pi extension's context handler. User-facing contract:
 [skills/sesh-cli/references/context.md](../skills/sesh-cli/references/context.md).*
 
@@ -110,3 +111,65 @@ and the reply.
   once.
 - A pre-60 TUI rejects the `context` column name loudly — deploy the binary before a
   config that names the column.
+
+## 9. The rewind bug (found live, 2026-11-03; schema 61)
+
+Schema 60 shipped with a design error: `(delivered_session, delivered_hash)` assumed an
+injected context stays in the conversation. A rewind removes it, fires nothing claude
+can report, and the record then blocks every re-send, restarts included. On thread
+`8e529ef4` the context arrived at `SessionStart(resume)`, the user rewound before the
+next prompt, and every later hook logged "already delivered". Claude writes a
+`SessionStart` attachment to the transcript only with the next prompt, so the rewind
+left no trace of it; the same sequence reproduced on a disposable thread (`NONE`), and
+on a real sesh codex thread after a rewind (`NONE`).
+
+The matrix missed it because no cell rewound anything, and no real cell compacted a
+claude/codex thread (the decision had only a unit test). `thread.context-rewind` and
+`thread.context-compact` cover both. When reading the evidence: the daemon log is
+`supervisorctl tail -100000 sesh-daemon stderr`; `~/.sesh/daemon.log` is empty on a
+supervised machine.
+
+## 10. Claude: a context file plus the hook (measured, Claude Code 2.1.317)
+
+`--add-dir <dir>` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` loads
+`<dir>/CLAUDE.md` as an ordinary instruction file. The variable works from
+`--settings`' `env` (without it: `NONE`), so no launch path needs a new environment.
+
+| case | instruction file |
+|---|---|
+| launch, restart (headless and interactive) | loads the file's current text |
+| `/compact`, `/clear` | reloads the current text |
+| rewind to before the first message | re-attaches the text it read at launch — not lost, but a later edit is not re-read, 3/3 prompts, until `/clear` |
+| first mid-session edit | an `edited_text_file` notice at the next prompt |
+| **second and later mid-session edits** | **nothing** (Ash-1 stayed through edits 2–4) |
+| file empty, or missing, at launch, filled later | **nothing** |
+
+So the file alone cannot carry a change, and the hook alone cannot survive a rewind.
+Hence both: the file is the base (written on every change and before every launch), and
+the hook sends changes. `--add-dir` is variadic, so it must be followed by a flag — here
+`--settings` — or it swallows a positional prompt.
+
+The hook command says `claude file`. That is how the daemon tells a process launched
+with the file (`context_file`: a history-starting `SessionStart` sends nothing and
+records the version) from one launched before schema 61, which has no file and keeps
+§3's rule. A set on a running thread reaches a tracked file too, so the first change
+can arrive twice, as a notice and as the hook's copy.
+
+Remaining limit: a change made while running, then rewound past, drops back to the
+launch version until a restart, `/clear` or compaction, while the record says delivered.
+Nothing signals the rewind; detecting it means walking claude's undocumented transcript
+format on every prompt, and a user can restart instead.
+
+## 11. Codex: no instruction file, but a rewind is visible (measured, codex 0.166.0)
+
+Not loaded: `AGENTS.md` in an `--add-dir` directory, and an absolute path in
+`project_doc_fallback_filenames` (with or without a repo `AGENTS.md`).
+`AGENTS.override.md` belongs to a directory. `developer_instructions` is frozen (§2).
+
+A TUI rewind (Esc Esc, Enter) keeps the session id, writes a new rollout file named with
+a second id, and fires `SessionStart(resume)` just before the next prompt, whose
+context the rewound conversation receives. So a `resume` always re-sends on a headed
+thread. Not on a headless turn: each is a new process firing the same event, which
+would inject once per turn (`turnInFlight` tells them apart). `/compact` keeps the
+injection in the `compacted` record and fires `SessionStart(compact)` as well.
+

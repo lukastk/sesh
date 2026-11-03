@@ -204,6 +204,7 @@ var flagDocs = map[string][]flagDoc{
 	"context hook": {
 		{"--agent", "the harness running the hook: claude | codex | pi (mypi uses pi)"},
 		{"--session", "pi only: the agent session id (claude/codex pass theirs in the hook input on stdin)"},
+		{"--context-file", "claude only: this process was launched with its thread-context file, so the hook sends only changes"},
 	},
 	"meta": {
 		{"--id", "thread id/prefix to target (default: the current thread)"},

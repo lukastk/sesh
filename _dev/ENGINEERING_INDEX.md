@@ -43,7 +43,7 @@ new ones. Preserve tracking/privacy and original evidence when archiving.
 | Mesh cost / phone resources | H99 scale pass; H102 fork/WAL improvements; H109 status options; H108 **follow-up 3 corrects the headline**; [MESH_SCALE](MESH_SCALE.md), whose §9 (2026-10-29) covers the serial peer fan-out and its concurrent replacement |
 | Cross-repo myrig/boxyard operations | H101 probe deadlines; H96 derived boxes and upstream-fix follow-up (historical, not permission to edit another repo) |
 | Test failures and safety | H91 vacuous cursor test; H92/H93/H95 filtered-run traps; H113 accidental conformance/leaks; H118 live-kill incident; H121 fixture/overlay techniques; [TESTING](TESTING.md) |
-| Thread context (schema 60) | [THREAD_CONTEXT](THREAD_CONTEXT.md): measured flag/hook behaviour per harness, size limits, codex hook trust, the ShellEscape quoting incident, nested-run exclusion |
+| Thread context (schemas 60–61) | [THREAD_CONTEXT](THREAD_CONTEXT.md): measured flag/hook behaviour per harness, the rewind bug and claude context file (2026-11-03), size limits, codex hook trust, the ShellEscape quoting incident, nested-run exclusion |
 | Deploy / skill copies / daemon environment | H112 stale installed copies; H115 binary-before-config; H121 last dated fleet report; [OPERATIONS](OPERATIONS.md) |
 
 ## Older shorthand still used in designs

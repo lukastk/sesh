@@ -8,8 +8,10 @@ package api
 // harness's own extension point, asked fresh, so a change applies without a
 // restart:
 //
-//   - claude: SessionStart + UserPromptSubmit hooks (passed with --settings on
-//     every sesh launch) return it as additionalContext;
+//   - claude: a per-thread instruction file (<SESH_HOME>/thread-context/<id>/
+//     CLAUDE.md, --add-dir on every sesh launch), which claude reloads at every
+//     session start and a rewind cannot remove, plus the hooks below for a change
+//     to a running process;
 //   - codex: the same two hooks, passed with -c on every sesh launch and trusted
 //     by the daemon in the codex config;
 //   - pi / mypi: the sesh-agent-state extension puts it in the system prompt
@@ -18,7 +20,9 @@ package api
 // Claude and codex record an injection as a message in the conversation, so the
 // owner remembers which version each agent session last received and injects
 // again only when it changed (or when the history lost it: a new, cleared or
-// compacted session). See POST /v1/threads/context/deliver.
+// compacted session, or a headed codex's rewind). An injection can still be
+// rewound away, so a recorded delivery is not proof the model has it. See POST
+// /v1/threads/context/deliver.
 
 // MaxThreadContextBytes bounds a thread's context. Claude Code inlines at most
 // 10,000 characters of hook context and replaces anything longer with a 2 KB
@@ -89,6 +93,10 @@ type ThreadContextDeliverRequest struct {
 	Event     string `json:"event"`
 	// Source is a SessionStart's reason: startup, resume, clear or compact.
 	Source string `json:"source,omitempty"`
+	// ContextFile: claude only. The process was launched with the thread's context
+	// file, which claude reloads itself at every session start, so the hook need
+	// only carry changes. Absent for a process launched before schema 61.
+	ContextFile bool `json:"context_file,omitempty"`
 }
 
 // ThreadContextDeliverResponse says what to inject. For claude/codex Inject is

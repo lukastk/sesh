@@ -32,11 +32,12 @@ func (d *Daemon) contextHookScript() (string, error) {
 	return agents.WriteContextHookScript(d.cfg.Home)
 }
 
-// launchArgs are the extra arguments for launching an agent of kind k: the
-// context hooks (claude --settings, codex -c, nothing for pi), then the
+// launchArgs are the extra arguments for launching thread threadID's agent of
+// kind k: the context arguments (claude --add-dir + --settings, codex -c, nothing
+// for pi), then the
 // configured [spawn.<agent>] args. For codex it first makes sure codex trusts
 // the hooks — a launch whose hooks codex would silently skip is refused.
-func (d *Daemon) launchArgs(kind agents.Kind) ([]string, error) {
+func (d *Daemon) launchArgs(kind agents.Kind, threadID string) ([]string, error) {
 	extra := d.spawn.ArgsFor(string(kind))
 	if agents.Family(kind) == agents.Claude {
 		for _, a := range extra {
@@ -45,7 +46,7 @@ func (d *Daemon) launchArgs(kind agents.Kind) ([]string, error) {
 			}
 		}
 	}
-	hook, err := d.contextHookArgs(kind)
+	hook, err := d.contextHookArgs(kind, threadID)
 	if err != nil {
 		return nil, err
 	}
@@ -54,12 +55,18 @@ func (d *Daemon) launchArgs(kind agents.Kind) ([]string, error) {
 
 // contextHookArgs is launchArgs without the configured args (headless turns
 // place them themselves).
-func (d *Daemon) contextHookArgs(kind agents.Kind) ([]string, error) {
+func (d *Daemon) contextHookArgs(kind agents.Kind, threadID string) ([]string, error) {
 	script, err := d.contextHookScript()
 	if err != nil {
 		return nil, err
 	}
-	args := agents.ContextHookArgs(kind, script)
+	contextDir := ""
+	if agents.Family(kind) == agents.Claude {
+		if contextDir, err = d.writeContextFile(threadID); err != nil {
+			return nil, err
+		}
+	}
+	args := agents.ContextHookArgs(kind, script, contextDir)
 	if agents.Family(kind) == agents.Codex {
 		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
 		if err != nil {

@@ -285,7 +285,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	extra, err := d.launchArgs(kind)
+	extra, err := d.launchArgs(kind, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -451,7 +451,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	extra, err := d.launchArgs(kind)
+	extra, err := d.launchArgs(kind, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -12,6 +12,7 @@ import (
 
 func TestClaudeContextSettingsShape(t *testing.T) {
 	var s struct {
+		Env   map[string]string `json:"env"`
 		Hooks map[string][]struct {
 			Hooks []struct{ Type, Command string } `json:"hooks"`
 		} `json:"hooks"`
@@ -21,18 +22,22 @@ func TestClaudeContextSettingsShape(t *testing.T) {
 	}
 	for _, ev := range []string{"SessionStart", "UserPromptSubmit"} {
 		g := s.Hooks[ev]
-		if len(g) != 1 || len(g[0].Hooks) != 1 || g[0].Hooks[0].Type != "command" || g[0].Hooks[0].Command != `'/h o/context-hook.sh' claude` {
+		if len(g) != 1 || len(g[0].Hooks) != 1 || g[0].Hooks[0].Type != "command" || g[0].Hooks[0].Command != `'/h o/context-hook.sh' claude file` {
 			t.Fatalf("%s: %+v", ev, g)
 		}
 	}
 	if len(s.Hooks) != 2 {
 		t.Fatalf("unexpected events: %v", s.Hooks)
 	}
-	args := ContextHookArgs(Claude, "/x")
-	if len(args) != 2 || args[0] != "--settings" {
+	if s.Env[claudeAddDirMemoryEnv] != "1" {
+		t.Fatalf("settings do not enable the --add-dir context file: %v", s.Env)
+	}
+	// --add-dir is variadic: what follows it must be a flag, or it swallows a prompt.
+	args := ContextHookArgs(Claude, "/x", "/ctx")
+	if len(args) != 4 || args[0] != "--add-dir" || args[1] != "/ctx" || args[2] != "--settings" {
 		t.Fatalf("claude args %v", args)
 	}
-	if ContextHookArgs(Pi, "/x") != nil || ContextHookArgs(MyPi, "/x") != nil {
+	if ContextHookArgs(Pi, "/x", "") != nil || ContextHookArgs(MyPi, "/x", "") != nil {
 		t.Fatal("pi family gets its context from the extension, not launch args")
 	}
 }
@@ -91,6 +96,15 @@ func TestWriteContextHookScriptAndRun(t *testing.T) {
 	}
 	if got := strings.Fields(string(b)); strings.Join(got, " ") != "context hook --agent codex" {
 		t.Fatalf("argv %q", got)
+	}
+	// claude's command adds "file", which must reach the CLI as its flag.
+	cmd := exec.Command("sh", "-c", ShellEscape(script)+" claude file")
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "SESH_BIN=" + fake, "SESH_THREAD_ID=t1"}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook: %v %s", err, out)
+	}
+	if b, _ = os.ReadFile(rec); strings.Join(strings.Fields(string(b)), " ") != "context hook --agent claude --context-file" {
+		t.Fatalf("argv %q", b)
 	}
 }
 
@@ -220,5 +234,64 @@ func TestShellEscapeRoundTrips(t *testing.T) {
 	}
 	if strings.Join(args, "\n")+"\n" != string(got) {
 		t.Fatalf("launch args did not survive the shell:\n%s", got)
+	}
+}
+
+func TestContextFileLifecycle(t *testing.T) {
+	home := t.TempDir()
+	const id = "11111111-2222"
+	dir, err := WriteContextFile(home, id, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ContextDirName, id); dir != want {
+		t.Fatalf("dir = %s, want %s", dir, want)
+	}
+	path := filepath.Join(dir, contextFileName)
+	if b, _ := os.ReadFile(path); string(b) != "first" {
+		t.Fatalf("file = %q", b)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+	// A clear leaves an empty file: --add-dir needs the folder to exist.
+	if _, err := WriteContextFile(home, id, ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(path); err != nil || len(b) != 0 {
+		t.Fatalf("after clear: %q %v", b, err)
+	}
+	other, _ := WriteContextFile(home, "other", "x")
+	if err := RemoveContextFile(home, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("folder survived: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("removing one thread touched another: %v", err)
+	}
+	if err := RemoveContextFile(home, "never-had-one"); err != nil {
+		t.Fatalf("no folder is not an error: %v", err)
+	}
+}
+
+// The folder is removed recursively, so an id must not be able to name its parent
+// or anything outside it.
+func TestContextFileRefusesPathLikeIDs(t *testing.T) {
+	home := t.TempDir()
+	if _, err := WriteContextFile(home, "keep", "x"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", ".", "..", "../keep", "a/b", `a\\b`, "/etc"} {
+		if err := RemoveContextFile(home, id); err == nil {
+			t.Errorf("id %q was accepted", id)
+		}
+		if _, err := WriteContextFile(home, id, "x"); err == nil {
+			t.Errorf("id %q was accepted for a write", id)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ContextDirName, "keep")); err != nil {
+		t.Fatalf("a refused id removed something: %v", err)
 	}
 }

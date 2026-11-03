@@ -805,7 +805,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 	},
 	"context hook": {
 		summary:  "INTERNAL: what an agent's hook runs to receive its thread's context (claude/codex via <SESH_HOME>/context-hook.sh, pi from the sesh-agent-state extension). Delivers only to a verified identity (pane marker or headless turn) whose session is the thread's own; prints nothing otherwise",
-		usage:    "sesh context hook --agent <claude|codex|pi> [--session <id>]",
+		usage:    "sesh context hook --agent <claude|codex|pi> [--session <id>] [--context-file]",
 		examples: []string{"echo '{\"session_id\":\"…\",\"hook_event_name\":\"UserPromptSubmit\"}' | sesh context hook --agent claude"},
 	},
 	"meta": {

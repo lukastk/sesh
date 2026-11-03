@@ -94,13 +94,25 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.context",
-		Description: "a thread's custom CONTEXT (`context set|show|clear`, owner-stored, ≤8000 bytes) reaches its LIVE agent from the agent's own hooks: set while the pane runs, the next prompt's reply follows it (claude/codex UserPromptSubmit additionalContext, pi's system-prompt section); injected ONCE per version per session (transcript evidence), a change re-injects and the reply follows the new version, a clear tells the agent it no longer applies; context_hash on the row; routed",
+		Description: "a thread's custom CONTEXT (`context set|show|clear`, owner-stored, ≤8000 bytes) reaches its LIVE agent from the agent's own hooks: set while the pane runs, the next prompt's reply follows it (claude/codex UserPromptSubmit additionalContext, pi's system-prompt section; claude also holds it as a per-thread instruction file); injected ONCE per version per session (transcript evidence), a change re-injects and the reply follows the new version, a clear tells the agent it no longer applies; context_hash on the row; routed",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})
 	Register(Feature{
 		ID:          "thread.context-headless",
 		Description: "a thread's custom context reaches HEADLESS turns — each a fresh agent process resuming the conversation (claude/codex SessionStart(resume) + UserPromptSubmit hooks via sesh's launch args, pi's extension in --print): the reply follows it, one injection per version across turns, a change reaches the next turn; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.context-rewind",
+		Description: "a thread's context survives a REWIND of the real TUI: context set, thread restarted, conversation rewound to before an earlier prompt with the harness's own command, and the next reply still follows the context (claude: its context file, which a rewind cannot remove; codex: re-sent at the SessionStart(resume) a rewind fires); pi rebuilds its prompt every turn and has no equivalent loss, so it is not an axis; routed",
+		Agents:      []Agent{Claude, Codex},
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.context-compact",
+		Description: "a context change made while a thread is idle survives a real COMPACTION before the next prompt: the transcript records the new version after the compaction and the reply follows it (claude reloads its context file, codex gets it at SessionStart(compact), pi at its next turn); on claude the owner's context file follows set and clear and goes with the thread; routed",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

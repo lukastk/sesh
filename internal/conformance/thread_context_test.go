@@ -15,6 +15,9 @@ package conformance
 //     per session however many prompts follow; pi records its system-prompt
 //     section (and a change notice).
 //
+// Claude's context can instead arrive from its context file (an `instructions`
+// record), and a change to a running process from the hook.
+//
 // Remote = the thread lives on the peer; every command is routed with --machine,
 // and the agent's hooks talk to the peer's daemon.
 
@@ -175,9 +178,41 @@ func assertDelivered(t *testing.T, sb *Sandbox, agent, id, hash string) {
 		}
 		return
 	}
-	if n := injections(t, agent, tr.Lines, hash); n != 1 {
+	n := injections(t, agent, tr.Lines, hash)
+	if agent == "claude" && n <= 1 && contextFileLoads(tr.Lines, hash) > 0 {
+		return // loaded from the context file; at most one hook copy on top
+	}
+	if n != 1 {
 		t.Fatalf("context version %s was injected %d times into %s's conversation, want exactly 1 (transcript %s)", hash, n, agent, tr.Path)
 	}
+}
+
+// contextFileLoads counts the claude instruction loads carrying context version
+// hash: claude records each load of the thread's context file as an `instructions`
+// attachment listing the files it read.
+func contextFileLoads(lines []string, hash string) int {
+	n := 0
+	for _, l := range lines {
+		var rec struct {
+			Type       string `json:"type"`
+			Attachment struct {
+				Type  string `json:"type"`
+				Files []struct {
+					Path    string `json:"path"`
+					Content string `json:"content"`
+				} `json:"files"`
+			} `json:"attachment"`
+		}
+		if json.Unmarshal([]byte(l), &rec) != nil || rec.Type != "attachment" || rec.Attachment.Type != "instructions" {
+			continue
+		}
+		for _, f := range rec.Attachment.Files {
+			if strings.Contains(f.Path, "thread-context") && strings.Contains(f.Content, `version="`+hash+`"`) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func assertReplyHas(t *testing.T, what, reply, want string) {

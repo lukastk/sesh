@@ -306,7 +306,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 		writeError(w, http.StatusBadRequest, merr.Error())
 		return
 	}
-	extra, xerr := d.launchArgs(kind)
+	extra, xerr := d.launchArgs(kind, thread.ID)
 	if xerr != nil {
 		writeError(w, http.StatusInternalServerError, xerr.Error())
 		return

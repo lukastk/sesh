@@ -389,7 +389,13 @@ package api
 // launch, pi/mypi read it from the sesh-agent-state extension. Mixed-deploy
 // direction: a pre-60 daemon 404s the routes (the CLI says so), launches agents
 // without the hooks, and omits context_hash (reads as "no context").
-const SchemaVersion = 60
+// 61: THREAD CONTEXT survives a rewind. Claude launches carry the thread's context
+// file (<SESH_HOME>/thread-context/<id>/CLAUDE.md, --add-dir) and their hook sends
+// context_file on POST /v1/threads/context/deliver, which then answers only with
+// changes; a headed codex is re-sent the context at SessionStart(resume), which
+// its rewind fires. Additive: a pre-61 daemon ignores context_file and keeps
+// injecting from the hook as well, which only repeats the text.
+const SchemaVersion = 61
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

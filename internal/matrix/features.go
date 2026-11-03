@@ -93,6 +93,28 @@ func init() {
 		Localities:  bothLoc,
 	})
 	Register(Feature{
+		ID:          "thread.context",
+		Description: "a thread's custom CONTEXT (`context set|show|clear`, owner-stored, ≤8000 bytes) reaches its LIVE agent from the agent's own hooks: set while the pane runs, the next prompt's reply follows it (claude/codex UserPromptSubmit additionalContext, pi's system-prompt section); injected ONCE per version per session (transcript evidence), a change re-injects and the reply follows the new version, a clear tells the agent it no longer applies; context_hash on the row; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.context-headless",
+		Description: "a thread's custom context reaches HEADLESS turns — each a fresh agent process resuming the conversation (claude/codex SessionStart(resume) + UserPromptSubmit hooks via sesh's launch args, pi's extension in --print): the reply follows it, one injection per version across turns, a change reaches the next turn; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "context.guards",
+		Description: "the OWNER refuses a context no harness could receive whole (> 8000 bytes; nothing stored) or no agent could receive at all (virtual/shell threads), a blank text as a silent clear, and a conditional write (--expect-hash, `none`) whose version moved; the same text again is unchanged; routed",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "context.edit",
+		Description: "`sesh context edit` opens the current context in $EDITOR, saves the edited file (minus the editor's trailing newline) conditionally on the opened version, reports an unchanged save, and removes the context when the file is emptied; local (the editor runs on the caller — an http-routed --machine does the same)",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "config.local",
 		Description: "<SESH_HOME>/config.local.toml overlays config.toml on the OWNER daemon (tables merge key by key; any other value, arrays included, is replaced): start-time policy ([defaults] agent), per-creation policy ([spawn.<agent>] model, merged) and set-default refusing a key the overlay shadows, config.toml untouched; routed",
 		Localities:  bothLoc,

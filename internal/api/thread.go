@@ -104,6 +104,10 @@ type Thread struct {
 	// default. Applied on headed spawn, resume, and every headless turn; a per-turn
 	// override (send-headless --model) does NOT change it.
 	Model string `json:"model,omitempty"`
+	// ContextHash identifies the thread's custom context (schema 60; see
+	// context.go): non-empty = the thread has one. The text itself is fetched from
+	// the owner on demand, so rows stay small.
+	ContextHash string `json:"context_hash,omitempty"`
 	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
 	// the thread is "on hold" and hidden from the default active view. 0 = not on
 	// hold. The caller supplies the absolute instant (the TUI computes "start of

@@ -63,6 +63,7 @@ var subcommandSets = map[string][]string{
 	"peer":    {"add", "list", "remove"},
 	"hooks":   {"list", "enable", "disable", "test"},
 	"meta":    {"set", "get", "unset", "list"},
+	"context": {"show", "set", "clear", "edit", "hook"},
 	"model":   {"list", "defaults", "set-default", "unset-default"},
 	"matrix":  {"grid", "skips"},
 }

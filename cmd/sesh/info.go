@@ -83,6 +83,9 @@ func runInfo(cfg config.Config, args []string) error {
 	fmt.Printf("name:       %s\n", th.Name)
 	fmt.Printf("agent:      %s\n", th.AgentKind)
 	fmt.Printf("model:      %s\n", modelLine(th.Model, st.ObservedModel))
+	if th.ContextHash != "" {
+		fmt.Printf("context:    yes (version %s — `sesh context show`)\n", th.ContextHash)
+	}
 	fmt.Printf("machine:    %s\n", th.Machine)
 	fmt.Printf("cwd:        %s\n", th.Cwd)
 	fmt.Printf("head:       %s\n", st.Head)

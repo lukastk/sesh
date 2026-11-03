@@ -142,6 +142,10 @@ type Daemon struct {
 	// daemon_auto_start=false (codexdaemon.go): an override of the user's explicit
 	// true, or a config sesh could not edit. Surfaced by doctor.
 	codexDaemonNote atomic.Value // string
+	// contextMu serialises thread-context deliveries (read-decide-record).
+	contextMu sync.Mutex
+	// codexHooks caches the codex context-hook trust check (codexcontext.go).
+	codexHooks codexHookTrust
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses

@@ -380,7 +380,16 @@ package api
 // ModelDefaultsResponse.local_config_path names the overlay when it exists, and
 // POST /v1/models/default refuses an agent whose default the overlay sets. Additive;
 // a pre-59 daemon simply has no overlay and omits the field.
-const SchemaVersion = 59
+// 60: THREAD CONTEXT. A thread may carry a block of text its agent receives as
+// standing instructions (see context.go). GET/POST /v1/threads/context read and
+// write it on the owner (store migration 28: thread_context table plus
+// threads.context_hash), Thread gains context_hash (non-empty = has context, the
+// TUI's CONTEXT column), and POST /v1/threads/context/deliver answers the agent
+// hooks: claude and codex get SessionStart/UserPromptSubmit hooks on every sesh
+// launch, pi/mypi read it from the sesh-agent-state extension. Mixed-deploy
+// direction: a pre-60 daemon 404s the routes (the CLI says so), launches agents
+// without the hooks, and omits context_hash (reads as "no context").
+const SchemaVersion = 60
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

@@ -156,6 +156,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh model:", err)
 			os.Exit(1)
 		}
+	case "context":
+		if err := runContext(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh context:", err)
+			os.Exit(1)
+		}
 	case "meta":
 		if err := runMeta(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh meta:", err)

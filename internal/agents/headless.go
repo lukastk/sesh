@@ -31,6 +31,9 @@ type TurnSpec struct {
 	Mode      string
 	// Model pins the model for THIS turn ('' = the agent default).
 	Model string
+	// HookArgs attach the thread-context hooks (ContextHookArgs): claude's
+	// --settings, codex's -c flags; nil for pi, whose extension asks itself.
+	HookArgs []string
 	// SeshBin is the LAUNCHING daemon's own executable, injected as $SESH_BIN so
 	// the worker can call sesh unambiguously. See TurnEnv.
 	SeshBin           string
@@ -81,6 +84,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 
 	case Claude:
 		args := append([]string{"--print"}, modeArgs(Claude, spec.Mode)...)
+		args = append(args, spec.HookArgs...)
 		if spec.Started {
 			args = append(args, "--resume", spec.SessionID)
 		} else {
@@ -94,7 +98,8 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 	case Codex:
 		// --model goes right after `exec` (a parent-command flag, before the
 		// optional `resume <id>` subcommand).
-		args := append([]string{"exec"}, modelArgs(spec.Model)...)
+		args := append([]string{"exec"}, spec.HookArgs...)
+		args = append(args, modelArgs(spec.Model)...)
 		if spec.Started {
 			args = append(args, "resume", spec.SessionID)
 		}

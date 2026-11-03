@@ -175,6 +175,36 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"context": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+	},
+	"context show": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--json", "emit machine-readable JSON (text, hash, updated_at_unix) instead of the bare text"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"context set": {
+		{"--text", "the context text (exclusive with --file)"},
+		{"--file", "read the context from this file on THIS machine; - reads stdin (exclusive with --text)"},
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--expect-hash", "write only if the current context's hash is this (from `context show --json`); `none` = only if it has none"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"context clear": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--expect-hash", "remove only if the current context's hash is this (from `context show --json`)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"context edit": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"context hook": {
+		{"--agent", "the harness running the hook: claude | codex | pi (mypi uses pi)"},
+		{"--session", "pi only: the agent session id (claude/codex pass theirs in the hook input on stdin)"},
+	},
 	"meta": {
 		{"--id", "thread id/prefix to target (default: the current thread)"},
 	},

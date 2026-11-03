@@ -75,6 +75,8 @@ var commands = []Command{
 	{ID: "switch-model", Desc: "switch the thread's model, live (pick from the harness's list; a live claude pane restarts)"},
 	{ID: "set-model", Desc: "register the thread's model (pick; the live agent keeps its model)"},
 	{ID: "set-default-model", Desc: "set a harness's default model on this machine (pick the harness, then the model)"},
+	{ID: "context-view", Desc: "view the thread's custom context (scrollable)"},
+	{ID: "context-edit", Desc: "edit the thread's custom context in $EDITOR (an empty file removes it)"},
 	{ID: "new-virtual", Desc: "new virtual group"},
 	{ID: "pin", Desc: "pin to the top block"},
 	{ID: "unpin", Desc: "unpin", Keys: []string{"u"}},

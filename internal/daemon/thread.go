@@ -285,7 +285,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, d.spawn.ArgsFor(string(kind)))
+	extra, err := d.launchArgs(kind)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra)
 
 	// Resolve placement -> the thread's session_name + its (marked) pane. teardown
 	// undoes ONLY what THIS spawn created (its own session, or its window/split
@@ -446,7 +451,12 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, d.spawn.ArgsFor(string(kind)))
+	extra, err := d.launchArgs(kind)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra)
 
 	thread := api.Thread{
 		ID:              id,

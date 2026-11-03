@@ -306,7 +306,12 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 		writeError(w, http.StatusBadRequest, merr.Error())
 		return
 	}
-	resumeCmd := agents.ResumeCommand(kind, sessionID, thread.Model, mode, d.spawn.ArgsFor(string(kind)))
+	extra, xerr := d.launchArgs(kind)
+	if xerr != nil {
+		writeError(w, http.StatusInternalServerError, xerr.Error())
+		return
+	}
+	resumeCmd := agents.ResumeCommand(kind, sessionID, thread.Model, mode, extra)
 
 	// If the session still exists, a SIBLING thread is keeping it alive — revive
 	// into a new WINDOW of it rather than colliding on the name (multiple threads

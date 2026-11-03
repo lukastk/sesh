@@ -189,7 +189,11 @@ func (d *Daemon) restartClaudeOnModel(th api.Thread, pane, model string) error {
 	if err != nil {
 		return err
 	}
-	cmd := agents.ResumeCommand(kind, sessionID, model, mode, d.spawn.ArgsFor(string(kind)))
+	extra, err := d.launchArgs(kind)
+	if err != nil {
+		return err
+	}
+	cmd := agents.ResumeCommand(kind, sessionID, model, mode, extra)
 	if err := d.tmux.RespawnPaneCmd(pane, th.Cwd, env, cmd); err != nil {
 		return err
 	}

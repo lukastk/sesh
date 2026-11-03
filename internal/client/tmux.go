@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -104,6 +105,10 @@ func (c *Client) postJSON(ctx context.Context, u string, body, out any) error {
 	return decodeOrError(resp, out)
 }
 
+// ErrRouteMissing is a 404 from the daemon's router rather than a handler: the
+// daemon has no such endpoint, i.e. it is older than the request.
+var ErrRouteMissing = errors.New("no such route on this daemon (it predates this request)")
+
 // decodeOrError decodes a success body into out (if non-nil), or turns a non-2xx
 // response into the daemon's structured error — loud, not a swallowed status.
 func decodeOrError(resp *http.Response, out any) error {
@@ -111,6 +116,11 @@ func decodeOrError(resp *http.Response, out any) error {
 		var e api.ErrorResponse
 		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Error != "" {
 			return fmt.Errorf("daemon: %s (HTTP %d)", e.Error, resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			// Every sesh handler answers 404 with a JSON error; a bare 404 is the
+			// mux's — the daemon has no such route (it predates the request).
+			return fmt.Errorf("daemon: HTTP 404: %w", ErrRouteMissing)
 		}
 		return fmt.Errorf("daemon: HTTP %d", resp.StatusCode)
 	}

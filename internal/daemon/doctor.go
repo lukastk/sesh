@@ -70,6 +70,7 @@ func (d *Daemon) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	// one started before the pin keeps holding thread writer locks until stopped,
 	// whatever the config now says.
 	d.doctorCodexDaemon(add)
+	d.doctorContextHooks(add)
 
 	// claude's BACKGROUND SESSIONS (sesh#16): a conversation owned by a background
 	// session cannot be `--resume`d, so its thread is silently un-revivable until

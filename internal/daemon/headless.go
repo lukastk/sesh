@@ -206,11 +206,17 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		transferSocket = d.cfg.SocketPath()
 	}
 
+	hookArgs, hookErr := d.contextHookArgs(agents.Kind(thread.AgentKind))
+	if hookErr != nil {
+		releaseSlot()
+		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", hookErr)
+	}
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
 			Kind: agents.Kind(thread.AgentKind), ThreadID: threadID, SessionID: sessionID,
 			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
-			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(),
+			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(), HookArgs: hookArgs,
 			TransferInbox: transferInbox, TransferAPISocket: transferSocket,
 			// The turn's root pid is this daemon's evidence that a process asking
 			// "who am I?" really is the worker it launched — the only verified

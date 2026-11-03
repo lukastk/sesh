@@ -778,6 +778,36 @@ OWN pane and environment and answer confidently about a different machine.`,
 		examples: []string{"sesh cwd-label ~/proj/sub"},
 	},
 
+	"context": {
+		summary:  "a thread's custom CONTEXT: text its agent receives as standing instructions, attached to the thread instead of its working directory. claude/codex get it from SessionStart/UserPromptSubmit hooks sesh attaches to every agent it launches (once per version per session; a change reaches a running agent at its next prompt), pi/mypi in the system prompt of every turn. At most 8000 bytes",
+		usage:    "sesh context <show|set|clear|edit> [--id <id>]",
+		examples: []string{"sesh context set --file brief.md --id 1a2b3c4d", "sesh context show", "sesh context edit --id 1a2b"},
+	},
+	"context show": {
+		summary:  "print a thread's context (nothing, with a note on stderr, when it has none); current thread inferred when no --id",
+		usage:    "sesh context show [--id <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh context show --id 1a2b3c4d", "sesh context show --json"},
+	},
+	"context set": {
+		summary:  "set a thread's context from --text or --file (- = stdin); the agent is told at its next prompt (pi: its next turn). Refuses more than 8000 bytes, the most every harness inlines whole",
+		usage:    "sesh context set (--text <t>|--file <path>|--file -) [--id <id>] [--expect-hash <h>|none] [--json] [--machine <m>]",
+		examples: []string{"sesh context set --file brief.md --id 1a2b3c4d", "echo 'Reply in French.' | sesh context set --file -"},
+	},
+	"context clear": {
+		summary:  "remove a thread's context; an agent that received it is told it no longer applies",
+		usage:    "sesh context clear [--id <id>] [--expect-hash <h>|none] [--json] [--machine <m>]",
+		examples: []string{"sesh context clear --id 1a2b3c4d"},
+	},
+	"context edit": {
+		summary:  "edit a thread's context in $VISUAL/$EDITOR and save it on exit (an empty file removes it); refuses to overwrite a context changed meanwhile, keeping your text in a file it names",
+		usage:    "sesh context edit [--id <id>] [--machine <m>]",
+		examples: []string{"sesh context edit", "sesh context edit --id 1a2b --machine macstudio"},
+	},
+	"context hook": {
+		summary:  "INTERNAL: what an agent's hook runs to receive its thread's context (claude/codex via <SESH_HOME>/context-hook.sh, pi from the sesh-agent-state extension). Delivers only to a verified identity (pane marker or headless turn) whose session is the thread's own; prints nothing otherwise",
+		usage:    "sesh context hook --agent <claude|codex|pi> [--session <id>]",
+		examples: []string{"echo '{\"session_id\":\"…\",\"hook_event_name\":\"UserPromptSubmit\"}' | sesh context hook --agent claude"},
+	},
 	"meta": {
 		summary:  "arbitrary per-thread key/value metadata (set | get | unset | list); feeds the TUI's meta.<key> predicates",
 		usage:    "sesh meta <set|get|unset|list> [--id <id>]",
@@ -940,7 +970,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
-	"whoami", "delegate", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
+	"whoami", "delegate", "context", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }

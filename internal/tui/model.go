@@ -555,6 +555,14 @@ type Model struct {
 	// reset whenever the popup opens or closes.
 	detailsOffset int
 	detailsRow    api.ThreadRow
+	// contextPopup: the thread-context viewer (contextview.go) — the selected
+	// thread's context text, fetched from its owner when opened, scrollable.
+	contextPopup   bool
+	contextRow     api.ThreadRow
+	contextResp    api.ThreadContextResponse
+	contextErr     error
+	contextLoading bool
+	contextOffset  int
 
 	// binaryPath + navEnv: how the nav action execs the `sesh tmux nav` primitive
 	// (the TUI drives the primitive, it does not re-implement nav). Defaults to the
@@ -1290,6 +1298,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.contextPopup {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.contextOffset = max(0, m.contextOffset-1)
+			case tea.MouseButtonWheelDown:
+				m.contextOffset = min(m.contextMaxOffset(), m.contextOffset+1)
+			}
+			return m, nil
+		}
 		// While the SHELLS VIEWER is up: the wheel moves its selection (viewport
 		// following, like the grid), a left click selects a session and a double
 		// click enters it.
@@ -1573,6 +1590,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetch() // reconcile against the daemon
 	case modelListMsg:
 		return m.applyModelList(msg), nil
+	case contextLoadedMsg:
+		return m.applyContextLoaded(msg)
+	case contextEditDoneMsg:
+		return m, m.applyContextEdit(msg)
 	case modelDefaultsMsg:
 		return m.applyModelDefaults(msg), nil
 	case clipboardDoneMsg:
@@ -2366,6 +2387,8 @@ func requiresReachableOwner(cmdID string) bool {
 		"set-parent-uuid", // reparent (paste a uuid)
 		"switch-model",    // model list + switch-model on the owner
 		"set-model",       // model list + set-model on the owner
+		"context-view",    // context show on the owner
+		"context-edit",    // context show + set on the owner
 		"hold",            // hold toggle
 		"hold-until",      // hold until date
 		"notify",          // notify on/off
@@ -2409,6 +2432,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.detailsPopup {
 		return m.handleDetailsKey(msg)
+	}
+	if m.contextPopup {
+		return m.handleContextKey(msg)
 	}
 	if m.helpPopup {
 		return m.handleHelpKey(msg)
@@ -2618,6 +2644,10 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		return m.openModelPick(pickSwitch)
 	case "set-model":
 		return m.openModelPick(pickRegister)
+	case "context-view":
+		return m.openContextView()
+	case "context-edit":
+		return m.openContextEdit()
 	case "set-default-model":
 		return m.openModelPick(pickDefault)
 	case "set-parent-uuid":
@@ -4333,6 +4363,9 @@ func (m Model) viewFrame() string {
 	if m.detailsPopup {
 		return m.detailsView() // full-screen takeover: all fields of one thread
 	}
+	if m.contextPopup {
+		return m.contextView() // full-screen takeover: one thread's context text
+	}
 	if m.helpPopup {
 		return m.helpView() // full-screen takeover: the complete keymap
 	}
@@ -4602,6 +4635,8 @@ func (m Model) detailsFields() []detailField {
 		{"model", orDash(r.Model)},
 		// What the transcript says the agent last ran on ('-' before any turn).
 		{"observed model", orDash(r.ObservedModel)},
+		// Whether the thread carries a custom context (`context-view` shows it).
+		{"context", detailContext(r)},
 		{"state", fmt.Sprintf("%s %s  (head=%s busy=%s attach=%s)",
 			HeadGlyph(r), BusyGlyph(r), orUnknown(string(r.Head)), orUnknown(string(r.Busy)), orUnknown(string(r.Attachment)))},
 		{"session", orDash(r.SessionName)},
@@ -4698,6 +4733,13 @@ func (m Model) detailsView() string {
 	}
 	b.WriteString("\n" + styleDim.Render("  ↑/↓ scroll · esc/q to close"))
 	return b.String()
+}
+
+func detailContext(r api.ThreadRow) string {
+	if r.ContextHash == "" {
+		return "—"
+	}
+	return "yes (version " + r.ContextHash + ")"
 }
 
 func detailAgent(r api.ThreadRow) string {

@@ -28,6 +28,7 @@ const (
 	ColMachine     = "machine"
 	ColAgent       = "agent"
 	ColModel       = "model"
+	ColContext     = "context"
 	ColHead        = "head"
 	ColBusy        = "busy"
 	ColName        = "name"
@@ -120,6 +121,13 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string {
 			if r.Notify {
 				return "▪" // notifications on; blank = off
+			}
+			return ""
+		}},
+	{name: ColContext, header: "CTX", fixedW: 3,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if r.ContextHash != "" {
+				return "◆" // the thread has a custom context (`context-view` shows it)
 			}
 			return ""
 		}},

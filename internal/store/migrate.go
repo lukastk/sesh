@@ -338,6 +338,23 @@ var migrations = []string{
 		END,
 		state_at = CASE WHEN last_fire > 0 THEN last_fire ELSE created_at END;
 	CREATE INDEX schedules_state ON schedules (state);`,
+	// 28: THREAD CONTEXT (api 60, api/context.go). A thread's custom context text
+	// lives in its own table so thread rows (replicated to every peer and read by
+	// every grid) stay small; threads.context_hash is the row-level "has context"
+	// signal, written in the same transaction as the text. Being a threads column,
+	// changing it bumps the threads rev, so peers and the TUI see the column change.
+	// delivered_session/delivered_hash record which version the thread's agent
+	// session last received (claude/codex inject into the conversation, so a version
+	// is sent once per session, not on every prompt); writing them does NOT touch
+	// threads, so a delivery never churns the mesh. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN context_hash TEXT NOT NULL DEFAULT '';
+	CREATE TABLE thread_context (
+		thread_id         TEXT PRIMARY KEY,
+		text              TEXT NOT NULL,
+		updated_at        INTEGER NOT NULL,
+		delivered_session TEXT NOT NULL DEFAULT '',
+		delivered_hash    TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

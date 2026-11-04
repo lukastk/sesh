@@ -31,8 +31,9 @@ type TurnSpec struct {
 	Mode      string
 	// Model pins the model for THIS turn ('' = the agent default).
 	Model string
-	// HookArgs attach the thread-context hooks (ContextHookArgs): claude's
-	// --settings, codex's -c flags; nil for pi, whose extension asks itself.
+	// HookArgs are the launch arguments sesh adds for this thread: the thread-context
+	// hooks (ContextHookArgs; none for pi, whose extension asks itself) and its MCP
+	// arguments (mcparg.go).
 	HookArgs []string
 	// ThreadEnv is the thread's own environment variables (api/env.go).
 	ThreadEnv map[string]string
@@ -80,6 +81,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 		// pi --session-id creates-if-missing and resumes uniformly. mypi shares the
 		// flag; only the executable differs.
 		args := append([]string{"--print", "--session-id", spec.SessionID}, modelArgs(spec.Model)...)
+		args = append(args, spec.HookArgs...)
 		args = append(args, spec.Prompt)
 		out, err := runHeadless(spec, env, Executable(spec.Kind), args...)
 		return strings.TrimSpace(out), spec.SessionID, err

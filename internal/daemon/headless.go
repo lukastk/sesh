@@ -51,6 +51,7 @@ func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req 
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          req.Model,
 		EnvCount:       envCount,
+		McpArgs:        req.McpArgs,
 		// HeadlessStarted stays false: the conversation begins on the first turn
 		// (codex mints its session id there; claude/pi create from the pre-assigned id).
 	}
@@ -224,6 +225,13 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		releaseSlot()
 		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", envErr)
 	}
+
+	mcpArgs, mcpErr := d.mcpLaunchArgs(agents.Kind(thread.AgentKind), threadID, thread.McpArgs)
+	if mcpErr != nil {
+		releaseSlot()
+		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", mcpErr)
+	}
+	hookArgs = append(hookArgs, mcpArgs...)
 
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{

@@ -403,7 +403,12 @@ package api
 // claude launch carries a FileChanged hook that follows env changes. Mixed-deploy
 // direction: a pre-62 daemon 404s the routes (client.ErrRouteMissing), ignores the
 // new request fields, and omits env_count (reads as "no variables").
-const SchemaVersion = 62
+// 63: THREAD MCP ARGS. A thread may add arguments to a global MCP server entry (see
+// mcparg.go). Thread and NewThreadRequest gain mcp_args (store migration 30); POST
+// /v1/threads/mcp-args changes them. Additive: a pre-63 daemon omits mcp_args and
+// 404s the route, and because it would also spawn without arguments it was sent,
+// `thread new` compares the arguments on the returned thread and fails loudly.
+const SchemaVersion = 63
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

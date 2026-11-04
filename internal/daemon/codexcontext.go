@@ -37,7 +37,7 @@ func (d *Daemon) contextHookScript() (string, error) {
 // for pi), then the
 // configured [spawn.<agent>] args. For codex it first makes sure codex trusts
 // the hooks — a launch whose hooks codex would silently skip is refused.
-func (d *Daemon) launchArgs(kind agents.Kind, threadID string) ([]string, error) {
+func (d *Daemon) launchArgs(kind agents.Kind, threadID string, mcpArgs map[string][]string) ([]string, error) {
 	extra := d.spawn.ArgsFor(string(kind))
 	if agents.Family(kind) == agents.Claude {
 		for _, a := range extra {
@@ -50,7 +50,11 @@ func (d *Daemon) launchArgs(kind agents.Kind, threadID string) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	return append(hook, extra...), nil
+	mcp, err := d.mcpLaunchArgs(kind, threadID, mcpArgs)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(hook, mcp...), extra...), nil
 }
 
 // contextHookArgs is launchArgs without the configured args (headless turns

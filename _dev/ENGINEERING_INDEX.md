@@ -45,6 +45,7 @@ new ones. Preserve tracking/privacy and original evidence when archiving.
 | Test failures and safety | H91 vacuous cursor test; H92/H93/H95 filtered-run traps; H113 accidental conformance/leaks; H118 live-kill incident; H121 fixture/overlay techniques; [TESTING](TESTING.md) |
 | Thread context (schemas 60–61) | [THREAD_CONTEXT](THREAD_CONTEXT.md): measured flag/hook behaviour per harness, the rewind bug and claude context file (2026-11-03), size limits, codex hook trust, the ShellEscape quoting incident, nested-run exclusion |
 | Thread env (schema 62) | [THREAD_ENV](THREAD_ENV.md): live env per harness (claude `FileChanged`, pi `process.env`, codex restart), what failed, tmux session-env leak, zsh specials aborting a source, `.zshenv` winning on pi/codex, codex plaintext shell snapshots (2026-11-04) |
+| Thread MCP arguments (schema 63) | [THREAD_MCP_ARGS](THREAD_MCP_ARGS.md): measured `--mcp-config` / `-c` / pi flag behaviour, append-not-replace, the no-secrets rule for generated files, the pi extension's own stdio client |
 | Deploy / skill copies / daemon environment | H112 stale installed copies; H115 binary-before-config; H121 last dated fleet report; [OPERATIONS](OPERATIONS.md) |
 
 ## Older shorthand still used in designs

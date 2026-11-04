@@ -111,6 +111,9 @@ type Thread struct {
 	// EnvCount is how many environment variables the thread carries (schema 62; see
 	// env.go). The values are fetched from the owner on demand and never replicate.
 	EnvCount int `json:"env_count,omitempty"`
+	// McpArgs maps an MCP server to the arguments this thread adds to that server's
+	// global entry (schema 63; see mcparg.go). Not inherited by a fork.
+	McpArgs map[string][]string `json:"mcp_args,omitempty"`
 	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
 	// the thread is "on hold" and hidden from the default active view. 0 = not on
 	// hold. The caller supplies the absolute instant (the TUI computes "start of
@@ -266,6 +269,9 @@ type NewThreadRequest struct {
 	// EnvFrom names the thread to inherit from when the new thread has no parent:
 	// `delegate`'s caller, whose worker is a root thread.
 	EnvFrom string `json:"env_from,omitempty"`
+	// McpArgs sets the new thread's MCP arguments (see mcparg.go). A fork starts with
+	// only these: it does not inherit its source's.
+	McpArgs map[string][]string `json:"mcp_args,omitempty"`
 	// Msg, for headed spawns, is an initial prompt sent once the agent is
 	// READY (the daemon waits for the pane asynchronously — never the blank-
 	// pane race; a delivery failure is loud in the daemon log).

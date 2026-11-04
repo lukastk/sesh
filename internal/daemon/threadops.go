@@ -24,6 +24,7 @@ func (d *Daemon) routesThreadOps(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/threads/transcript", d.handleThreadTranscript)
 	mux.HandleFunc("POST /v1/threads/import", d.handleThreadImport)
 	mux.HandleFunc("POST /v1/threads/meta", d.handleThreadMeta)
+	mux.HandleFunc("POST /v1/threads/mcp-args", d.handleThreadMcpArgs)
 	mux.HandleFunc("POST /v1/threads/tag", d.handleThreadTag)
 	mux.HandleFunc("POST /v1/threads/archive", d.handleThreadArchive)
 	mux.HandleFunc("POST /v1/threads/stop", d.handleThreadStop)
@@ -346,6 +347,10 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := agents.RemoveThreadEnv(d.cfg.Home, req.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but its env file was not removed: "+err.Error())
+		return
+	}
+	if err := agents.RemoveMcpConfig(d.cfg.Home, req.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but its generated MCP config was not removed: "+err.Error())
 		return
 	}
 	if d.transfers != nil {

@@ -81,6 +81,8 @@ func runThread(args []string) error {
 		return threadNotify(cfg, rest)
 	case "set-model":
 		return threadSetModel(cfg, rest)
+	case "mcp-arg":
+		return threadMcpArg(cfg, rest)
 	case "switch-model":
 		return threadSwitchModel(cfg, rest)
 	case "restart":
@@ -702,12 +704,24 @@ func threadNew(cfg config.Config, args []string) error {
 	envFile := fs.String("env-file", "", "set the environment variables in this KEY=VALUE file on THIS machine")
 	noInheritEnv := fs.Bool("no-inherit-env", false, "do not inherit the fork source's or parent's environment variables")
 	asJSON := fs.Bool("json", false, "emit JSON")
+	var mcpArgValues multiFlag
+	fs.Var(&mcpArgValues, "mcp-arg", "<server>=<arg> added to that global MCP server's arguments for this thread, repeatable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	threadEnvVars, err := envFromFlags(envSets, *envFile)
 	if err != nil {
 		return err
+	}
+	var mcpArgs map[string][]string
+	if len(mcpArgValues) > 0 {
+		var err error
+		if mcpArgs, err = api.ParseMcpArgs(mcpArgValues); err != nil {
+			return err
+		}
+		if *virtual || *divider {
+			return errors.New("thread new: --virtual and --divider have no agent, so they take no --mcp-arg")
+		}
 	}
 	if *virtual && *divider {
 		return errors.New("thread new: --virtual and --divider are mutually exclusive")
@@ -849,10 +863,13 @@ func threadNew(cfg config.Config, args []string) error {
 		Agent: *agent, Name: *name, Cwd: *cwd, Headless: *headless, Parent: resolvedParent,
 		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg, Model: *model,
 		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
-		Virtual: *virtual, ParentShell: *parentShell,
+		Virtual: *virtual, ParentShell: *parentShell, McpArgs: mcpArgs,
 		Env: threadEnvVars, NoInheritEnv: *noInheritEnv,
 	})
 	if err != nil {
+		return err
+	}
+	if err := checkMcpArgsApplied(mcpArgs, resp.Thread); err != nil {
 		return err
 	}
 	// --into-pane is register-then-exec: the daemon registered the thread + marked

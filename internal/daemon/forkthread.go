@@ -148,6 +148,9 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          model,
 		EnvCount:       envCount,
+		// Only what this request names: unlike the model, a fork does not inherit
+		// its source's MCP arguments.
+		McpArgs: req.McpArgs,
 		// The conversation EXISTS (the branched transcript): turns must RESUME.
 		HeadlessStarted: true,
 	}

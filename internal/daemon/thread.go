@@ -177,6 +177,14 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread: --env needs an agent; a virtual thread or divider runs none")
 		return
 	}
+	if err := api.ValidateMcpArgs(req.McpArgs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.McpArgs) > 0 && (req.Virtual || req.Divider) {
+		writeError(w, http.StatusBadRequest, "thread: a virtual thread or divider has no agent, so it takes no --mcp-arg")
+		return
+	}
 	// A VIRTUAL thread has no agent — branch before agent parsing; it does its
 	// own validation (agent-shaped fields refused, cwd optional).
 	if req.Virtual {
@@ -307,7 +315,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	extra, err := d.launchArgs(kind, id)
+	extra, err := d.launchArgs(kind, id, req.McpArgs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -408,6 +416,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          req.Model,
 		EnvCount:       envCount,
+		McpArgs:        req.McpArgs,
 		// A headed spawn BEGINS the conversation (the agent launches with this
 		// session id) — so a later headless turn on the idle thread must RESUME,
 		// not create. See api.Thread.HeadlessStarted.
@@ -486,7 +495,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	extra, err := d.launchArgs(kind, id)
+	extra, err := d.launchArgs(kind, id, req.McpArgs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -511,6 +520,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		Notify:          d.defaults.NotifyDefault(),
 		Model:           req.Model,
 		EnvCount:        envCount,
+		McpArgs:         req.McpArgs,
 		HeadlessStarted: true,
 	}
 	// Insert before stamping (no stamped-but-rowless pane on failure).

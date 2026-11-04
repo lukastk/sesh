@@ -17,6 +17,12 @@ func init() {
 
 	// ---- tmux layer (agent-agnostic) ----
 	Register(Feature{
+		ID:          "thread.mcp-arg",
+		Description: "per-thread MCP arguments: `thread new --mcp-arg <server>=<arg>` and `thread mcp-arg set|unset|list` store them on the record; the owner appends them to the harness's global entry at spawn, resume and every headless turn, through the harness's own mechanism (claude --mcp-config, codex -c, pi --sesh-mcp-args), so the REAL agent starts the REAL server process with those argv elements; a fork inherits none; routed with --machine",
+		Localities:  bothLoc,
+		Agents:      agentic,
+	})
+	Register(Feature{
 		ID:          "tmux.current",
 		Description: "resolve the calling terminal's locator + owning thread id",
 		Localities:  []Locality{Local},

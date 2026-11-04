@@ -40,6 +40,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { registerSeshThreadContext } from "./context.ts";
 import { registerSeshThreadEnv } from "./env.ts";
+import { registerSeshMcp } from "./mcp.ts";
 
 const DEFAULT_THREAD_ID = process.env.SESH_THREAD_ID;
 // The spawning daemon's own binary (SESH_BIN): pane login shells re-prepend
@@ -182,4 +183,8 @@ export default function (pi: ExtensionAPI) {
 	registerSeshThreadContext(pi);
 	// The thread's environment variables (sesh schema 62) — see env.ts.
 	registerSeshThreadEnv(pi);
+	// The thread's MCP arguments (sesh schema 63) — see mcp.ts. Outside the
+	// SESH_THREAD_ID guard: the flag must parse wherever it is passed, and it is only
+	// passed by sesh.
+	registerSeshMcp(pi);
 }

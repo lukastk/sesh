@@ -211,7 +211,7 @@ func (d *Daemon) restartAgent(th api.Thread, kind agents.Kind, pane, model strin
 	if err != nil {
 		return err
 	}
-	extra, err := d.launchArgs(kind, th.ID)
+	extra, err := d.launchArgs(kind, th.ID, th.McpArgs)
 	if err != nil {
 		return err
 	}

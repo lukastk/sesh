@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, env_count)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled), t.EnvCount,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, env_count, mcp_args)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled), t.EnvCount, mcpArgsJSON(t.McpArgs),
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -270,9 +270,9 @@ func scanThread(r scanner) (api.Thread, error) {
 	var t api.Thread
 	var tags string
 	var headless, started, archived, notify, flagged, flagDisabled int
-	var meta string
+	var meta, mcpArgs string
 	var pinOrder sql.NullFloat64
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash, &t.EnvCount); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash, &t.EnvCount, &mcpArgs); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
@@ -292,6 +292,12 @@ func scanThread(r scanner) (api.Thread, error) {
 		if err := json.Unmarshal([]byte(meta), &t.Meta); err != nil {
 			return t, fmt.Errorf("store: decode thread meta: %w", err)
 		}
+	}
+	if err := json.Unmarshal([]byte(mcpArgs), &t.McpArgs); err != nil {
+		return t, fmt.Errorf("store: decode thread mcp args: %w", err)
+	}
+	if len(t.McpArgs) == 0 {
+		t.McpArgs = nil
 	}
 	return t, nil
 }
@@ -377,6 +383,60 @@ func metaJSON(m map[string]string) string {
 	}
 	b, _ := json.Marshal(m) //nolint:errcheck — map[string]string cannot fail
 	return string(b)
+}
+
+func mcpArgsJSON(servers map[string][]string) string {
+	if len(servers) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(servers) //nolint:errcheck — map[string][]string cannot fail
+	return string(b)
+}
+
+// McpServerNotSetError is an unset of a server the thread has no arguments for.
+type McpServerNotSetError struct{ ID, Server string }
+
+func (e *McpServerNotSetError) Error() string {
+	return fmt.Sprintf("mcp-arg: thread %s has no arguments for server %q", e.ID, e.Server)
+}
+
+// UpdateThreadMcpArgs replaces the argument list of each server in set and removes
+// each server in unset, in one transaction, and returns the updated thread. An
+// unset of a server that has no arguments changes nothing and is an error, so a
+// misspelt name cannot look like a success.
+func (s *Store) UpdateThreadMcpArgs(id string, set map[string][]string, unset []string) (api.Thread, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return api.Thread{}, fmt.Errorf("store: update mcp args: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var cur string
+	if err := tx.QueryRow(`SELECT mcp_args FROM threads WHERE id = ?`, id).Scan(&cur); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return api.Thread{}, ErrThreadNotFound
+		}
+		return api.Thread{}, fmt.Errorf("store: update mcp args: %w", err)
+	}
+	servers := map[string][]string{}
+	if err := json.Unmarshal([]byte(cur), &servers); err != nil {
+		return api.Thread{}, fmt.Errorf("store: decode thread mcp args: %w", err)
+	}
+	for _, server := range unset {
+		if _, ok := servers[server]; !ok {
+			return api.Thread{}, &McpServerNotSetError{ID: id, Server: server}
+		}
+		delete(servers, server)
+	}
+	for server, args := range set {
+		servers[server] = args
+	}
+	if _, err := tx.Exec(`UPDATE threads SET mcp_args = ? WHERE id = ?`, mcpArgsJSON(servers), id); err != nil {
+		return api.Thread{}, fmt.Errorf("store: update mcp args: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return api.Thread{}, fmt.Errorf("store: update mcp args: %w", err)
+	}
+	return s.GetThread(id)
 }
 
 // SetThreadMetaKey sets (or, with value "", deletes) one meta key.

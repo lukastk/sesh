@@ -360,6 +360,10 @@ var migrations = []string{
 	// owner because rows replicate to every peer and backups copy this database.
 	// APPENDED last.
 	`ALTER TABLE threads ADD COLUMN env_count INTEGER NOT NULL DEFAULT 0;`,
+	// 30: THREAD MCP ARGS (api 63, api/mcparg.go): server -> the arguments the thread
+	// adds to that server's global entry, as JSON. On the row, so it replicates:
+	// paths and switches, never secrets. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN mcp_args TEXT NOT NULL DEFAULT '{}';`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

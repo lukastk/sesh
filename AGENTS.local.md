@@ -69,6 +69,12 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   env. `.zshenv` beats a thread value on pi/codex (open; Lukas's call). Remote pi/codex
   cells need current harnesses on a Linux host: macOS and pocket4 fail the CONTROL cells too,
   and pi's extension loads from the checkout, so a tar'd tree does not test `env.ts`.
+- **MCP arguments (schema 63, migration 30, [THREAD_MCP_ARGS](_dev/THREAD_MCP_ARGS.md)):**
+  `launchArgs` takes the args because a spawn computes it before the row exists. Claude's
+  `--mcp-config` replaces a same-named global entry whole, so a global `env` refuses the
+  launch. Pi's entry is `"disabled": true` so the adapter never runs an argument-less copy.
+  A claude or codex server that cannot start is silent (exit 0); pi headless exits 1.
+  `integrations/pi` loads from `~/mysetup/sesh`, so a worktree's `mcp.ts` is not what runs.
 - **Config layout (schema 59, 2026-11-02):** `~/.sesh/config.toml` is a SYMLINK to myrig's
   plain `home/.sesh/config.toml` (shared by the fleet); `~/.sesh/config.local.toml` is
   rendered per machine from `config.local.toml.jinja` and OVERLAYS it (tables merge key

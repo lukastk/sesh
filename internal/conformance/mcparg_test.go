@@ -37,22 +37,44 @@ func init() {
 
 const mcpGlobalArg = "--global"
 
+// fakeMcpServer offers one tool, `secret_word`. It logs each start to argv[1] and each
+// call to <argv[1]>.calls, and answers a call with its own last argument, which appears
+// in no prompt, so a reply holding it can only have come through the tool. While the
+// file <argv[1]>.hold exists it lists no tools, as a server does whose backend has not
+// answered yet; when the file goes it says so with tools/list_changed.
 const fakeMcpServer = `#!/usr/bin/env python3
-import json, sys
-with open(sys.argv[1], "a") as log:
-    log.write(json.dumps(sys.argv[2:]) + "\n")
+import json, os, sys, threading, time
+log, argv = sys.argv[1], sys.argv[2:]
+hold = log + ".hold"
+out = threading.Lock()
+def send(message):
+    with out:
+        print(json.dumps(message), flush=True)
+def release():
+    while os.path.exists(hold):
+        time.sleep(0.1)
+    send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+with open(log, "a") as f:
+    f.write(json.dumps(argv) + "\n")
+tool = {"name": "secret_word", "description": "Returns the secret word.", "inputSchema": {"type": "object", "properties": {}}}
 for line in sys.stdin:
     message = json.loads(line)
+    if message.get("method") == "notifications/initialized" and os.path.exists(hold):
+        threading.Thread(target=release, daemon=True).start()
     if "id" not in message:
         continue
     if message.get("method") == "initialize":
-        result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {"tools": {}},
+        result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {"tools": {"listChanged": True}},
                   "serverInfo": {"name": "fake", "version": "1"}}
     elif message.get("method") == "tools/list":
-        result = {"tools": []}
+        result = {"tools": [] if os.path.exists(hold) else [tool]}
+    elif message.get("method") == "tools/call":
+        with open(log + ".calls", "a") as f:
+            f.write(json.dumps({"tool": message["params"]["name"], "argv": argv}) + "\n")
+        result = {"content": [{"type": "text", "text": "SECRET=" + argv[-1]}]}
     else:
         result = {}
-    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+    send({"jsonrpc": "2.0", "id": message["id"], "result": result})
 `
 
 // fakeMcp is one sandbox's server executable and the log of its starts.
@@ -302,6 +324,19 @@ func testThreadMcpArg(t *testing.T, agent string, loc matrix.Locality) {
 	sb.headlessTurn(t, fork.ID, reply)
 	server.expectNoThreadArgs(t, agent, "fork's turn")
 
+	// A fork given its own arguments runs with those.
+	const forked = "--forked"
+	out, stderr, err = sb.Runner.Run(t, "thread", "new", "--fork-from", th.ID, "--name", "branch2", "--json", "--mcp-arg", "soliton="+forked)
+	if err != nil {
+		t.Fatalf("fork with arguments: %v\n%s", err, stderr)
+	}
+	var fork2 api.Thread
+	if err := json.Unmarshal([]byte(out), &fork2); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	sb.headlessTurn(t, fork2.ID, reply)
+	server.expect(t, "explicit fork's turn", forked)
+
 	// unset leaves the global entry alone.
 	if _, stderr, err := sb.Runner.Run(t, "thread", "mcp-arg", "unset", "--id", th.ID, "--server", "soliton"); err != nil {
 		t.Fatalf("mcp-arg unset: %v\n%s", err, stderr)
@@ -335,6 +370,13 @@ func testThreadMcpArg(t *testing.T, agent string, loc matrix.Locality) {
 	}
 	sb.waitThreadReady(t, headed.ID, agent)
 	server.expect(t, "headed resume", hostile)
+
+	// A restart in place starts the harness again, so the server too.
+	if _, stderr, err := sb.Runner.Run(t, "thread", "restart", "--id", headed.ID); err != nil {
+		t.Fatalf("restart: %v\n%s", err, stderr)
+	}
+	sb.waitThreadReady(t, headed.ID, agent)
+	server.expect(t, "headed restart", hostile)
 
 	if _, err := os.Stat(canary); err == nil {
 		t.Error("a shell metacharacter in an argument ran")

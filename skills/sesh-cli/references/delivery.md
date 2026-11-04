@@ -13,16 +13,26 @@ sesh thread command --id <pi-id> --text '/compact retain the plan' --timeout 5m 
 sesh thread send --id <id> --text 'fix it' --wait --timeout 5m  # ...and block until the turn SETTLES (idle/blocked);
                                                            # fails fast (~5s) if the input produces no state change
 sesh thread wait --id <id> --until settled --timeout 5m    # block until a state: busy|idle|blocked|settled
-                                                           # (settled = idle-or-blocked; loud error naming the last state on timeout)
+                                                           # (settled = idle-or-blocked; loud error naming the last state on timeout;
+                                                           # non-zero if the thread's last headless turn failed)
 sesh thread send-headless --id <id> --text 'summarize'     # run a stateless turn on an idle thread
 sesh thread send-headless --id <id> --text 'quick check' --model anthropic/claude-haiku-4-5  # override the model for THIS turn only
 sesh thread headless-reply --id <id> --json                # poll a headless turn's result
-sesh await <id> --timeout 5m                               # block until a turn finishes (mesh-aware)
+sesh await <id> --timeout 5m                               # block until a turn finishes (mesh-aware); non-zero if its headless turn failed
 sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → archive
 sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # leave the worker active instead of archiving
 sesh subscribe <subscribee> --from <subscriber>            # pipe one thread's turns into another
 sesh thread send --id <id> --text 'now' --respect-typing 0 # bypass the typing guard for this one paste
 ```
+
+**A failed headless turn is not a finished one.** `sesh await` and `thread wait` exit
+non-zero with the reason, and `await --json` carries it as `turn_error`, although the
+thread reads idle. `thread status --json` and `thread list --json` carry `turn_error`
+too, and `thread info` shows it, so a caller polling `busy` should read it. It survives
+a daemon restart and clears when the next turn starts or the thread starts in a pane.
+It is capped, with the thread's env values removed; `thread headless-reply` has the full
+text until the daemon restarts. `await` reads the merged mesh view, which lags a peer by
+a sync round, so to send and then await a thread on another machine pass `--machine`.
 
 **The typing guard (every paste into a live pane).** A pane paste is
 `paste-buffer` then Enter, so text delivered while a human is mid-line in that

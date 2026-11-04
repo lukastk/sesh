@@ -592,6 +592,10 @@ func (d *Daemon) handleThreadImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "import: id and agent are required")
 		return
 	}
+	if err := api.ValidateMcpArgs(th.McpArgs); err != nil {
+		writeError(w, http.StatusBadRequest, "import: "+err.Error())
+		return
+	}
 	if _, err := d.store.GetThread(th.ID); err == nil {
 		writeError(w, http.StatusConflict, "import: thread "+th.ID+" already exists")
 		return

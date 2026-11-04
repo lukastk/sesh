@@ -92,6 +92,9 @@ func runInfo(cfg config.Config, args []string) error {
 	if len(th.McpArgs) > 0 {
 		fmt.Printf("mcp args:   %s\n", mcpArgInfoLines(th))
 	}
+	if th.TurnError != "" {
+		fmt.Printf("last turn:  FAILED: %s\n", th.TurnError)
+	}
 	fmt.Printf("machine:    %s\n", th.Machine)
 	fmt.Printf("cwd:        %s\n", th.Cwd)
 	fmt.Printf("head:       %s\n", st.Head)

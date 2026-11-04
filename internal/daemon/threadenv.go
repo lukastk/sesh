@@ -292,12 +292,16 @@ func (d *Daemon) seedThreadEnv(id string, req api.NewThreadRequest) (int, error)
 	return len(vars), nil
 }
 
-// dropUnrecordedThreadEnv removes the env files of a spawn that left no record.
+// dropUnrecordedThreadEnv removes the files of a spawn that left no record: its env
+// files and its generated MCP config.
 func (d *Daemon) dropUnrecordedThreadEnv(id string, recorded bool) {
 	if recorded {
 		return
 	}
 	if err := agents.RemoveThreadEnv(d.cfg.Home, id); err != nil {
 		log.Printf("thread %s: remove the env files of a failed spawn: %v", id, err)
+	}
+	if err := agents.RemoveMcpConfig(d.cfg.Home, id); err != nil {
+		log.Printf("thread %s: remove the MCP config of a failed spawn: %v", id, err)
 	}
 }

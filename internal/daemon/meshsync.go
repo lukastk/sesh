@@ -561,6 +561,7 @@ func (d *Daemon) handleMesh(w http.ResponseWriter, r *http.Request) {
 	resp := api.MeshSnapshot{Schema: api.SchemaVersion}
 
 	self := d.maint.snapshot()
+	d.overlayTurns(self.Threads)
 	resp.Machines = append(resp.Machines, api.MachineView{
 		Machine:      d.cfg.Machine,
 		Self:         true,

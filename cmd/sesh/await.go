@@ -6,7 +6,8 @@ package main
 // the mesh, so a thread on ANY machine awaits with no forwarding (v1's
 // design). Already-idle returns immediately; an unknown busy value keeps
 // waiting (not-yet-idle); a vanished thread is a loud error; --timeout 0 = no
-// limit, expiry = loud non-zero (the scripting contract).
+// limit, expiry = loud non-zero (the scripting contract). A headless turn that failed
+// is non-zero too: idle alone would read a dead worker as a finished one.
 
 import (
 	"context"
@@ -19,6 +20,10 @@ import (
 	"github.com/lukastk/sesh/internal/api"
 	"github.com/lukastk/sesh/internal/config"
 )
+
+// awaitFirstSighting bounds how long a thread may be missing from the mesh view when
+// await begins. The maintainer publishes a new thread within a tick or two.
+const awaitFirstSighting = 5 * time.Second
 
 func runAwait(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("await", flag.ContinueOnError)
@@ -62,6 +67,7 @@ func runAwait(cfg config.Config, args []string) error {
 	}
 
 	start := time.Now()
+	seen := false
 	var deadline time.Time
 	if *timeout > 0 {
 		deadline = start.Add(*timeout)
@@ -72,15 +78,36 @@ func runAwait(cfg config.Config, args []string) error {
 			return err
 		}
 		if !found {
-			return fmt.Errorf("await: thread %s vanished while waiting", rid)
+			// A thread that was just created is in the store but not yet in the
+			// maintained view. Only one that was seen, or never turns up, has gone.
+			if seen || time.Since(start) > awaitFirstSighting {
+				return fmt.Errorf("await: thread %s vanished while waiting", rid)
+			}
+			time.Sleep(*poll)
+			continue
 		}
+		seen = true
 		if snap.Busy == api.BusyIdle {
+			var failed error
+			if snap.TurnError != "" {
+				failed = fmt.Errorf("await: the last turn of thread %s failed: %s", rid, snap.TurnError)
+			}
 			if *asJSON {
-				return emitJSON(map[string]any{
+				out := map[string]any{
 					"schema": api.SchemaVersion, "id": rid,
 					"head": snap.Head, "busy": snap.Busy,
 					"waited_ms": time.Since(start).Milliseconds(),
-				})
+				}
+				if failed != nil {
+					out["turn_error"] = snap.TurnError
+				}
+				if err := emitJSON(out); err != nil {
+					return err
+				}
+				return failed
+			}
+			if failed != nil {
+				return failed
 			}
 			fmt.Printf("idle (%s, waited %s)\n", snap.Head, time.Since(start).Round(time.Millisecond))
 			return nil

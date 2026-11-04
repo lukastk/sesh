@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -233,6 +234,8 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 	}
 	hookArgs = append(hookArgs, mcpArgs...)
 
+	d.clearTurnError(thread)
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
 			Kind: agents.Kind(thread.AgentKind), ThreadID: threadID, SessionID: sessionID,
@@ -252,6 +255,15 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 			},
 		})
 
+		turnError := ""
+		if runErr != nil {
+			turnError = turnErrorText(runErr, threadEnv.Vars)
+			log.Printf("headless turn of thread %s failed: %s", threadID, turnError)
+			if err := d.store.SetThreadTurnError(threadID, turnError); err != nil {
+				log.Printf("headless turn of thread %s: the failure could not be recorded: %v", threadID, err)
+			}
+		}
+
 		d.hlMu.Lock()
 		// ONE critical section for both, deliberately: the in-flight flag and the
 		// turn's root pid are the same fact with the same lifetime, and an
@@ -265,6 +277,7 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		} else {
 			d.hlReply[threadID] = "ERROR: " + runErr.Error()
 		}
+		d.hlTurnError[threadID] = turnError
 		d.hlMu.Unlock()
 
 		if runErr == nil {
@@ -303,6 +316,17 @@ func (d *Daemon) handleThreadHeadlessReply(w http.ResponseWriter, r *http.Reques
 	inFlight := d.hlInFlight[id]
 	reply, have := d.hlReply[id]
 	d.hlMu.Unlock()
+	// The registry is this process's memory; the failure of a turn outlives it.
+	if !have && !inFlight {
+		thread, err := d.store.GetThread(id)
+		if err != nil && !errors.Is(err, store.ErrThreadNotFound) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err == nil && thread.TurnError != "" {
+			reply, have = "ERROR: "+thread.TurnError, true
+		}
+	}
 	writeJSON(w, http.StatusOK, api.HeadlessReplyResponse{
 		Schema:    api.SchemaVersion,
 		ID:        id,
@@ -382,6 +406,59 @@ func (d *Daemon) turnOwnerOf(pid int) (threadID string, turnPID int, reason stri
 		sort.Strings(hits)
 		return "", 0, fmt.Sprintf("pid %d resolves to %d in-flight turns (%s) — refusing to guess",
 			pid, len(hits), strings.Join(hits, ", "))
+	}
+}
+
+// maxTurnErrorBytes caps what a failed turn leaves on its row. The harness's stderr
+// can be long, and the whole of it stays in `thread headless-reply`.
+const maxTurnErrorBytes = 2000
+
+// turnErrorText is what a failed turn leaves on its row. A row replicates to every
+// peer and backups copy it, and a thread's env values must never be on one, so a
+// harness or an MCP server echoing a variable to stderr does not put it there.
+func turnErrorText(err error, env map[string]string) string {
+	text := err.Error()
+	for _, value := range env {
+		if value != "" {
+			text = strings.ReplaceAll(text, value, "[thread env value]")
+		}
+	}
+	if len(text) > maxTurnErrorBytes {
+		text = strings.ToValidUTF8(text[:maxTurnErrorBytes], "") + "…"
+	}
+	return text
+}
+
+// clearTurnError ends what a thread's last failed turn said, as a new start begins.
+func (d *Daemon) clearTurnError(thread api.Thread) {
+	d.hlMu.Lock()
+	d.hlTurnError[thread.ID] = ""
+	d.hlMu.Unlock()
+	if thread.TurnError == "" {
+		return
+	}
+	if err := d.store.SetThreadTurnError(thread.ID, ""); err != nil {
+		log.Printf("thread %s: the last turn's failure could not be cleared: %v", thread.ID, err)
+	}
+}
+
+// overlayTurns brings headless threads in a maintained snapshot up to the moment. The
+// snapshot is up to a tick old, so without this an `await` straight after a send reads
+// the idle from before the turn, and returns before the turn has even begun.
+func (d *Daemon) overlayTurns(threads []api.ThreadSnapshot) {
+	d.hlMu.Lock()
+	defer d.hlMu.Unlock()
+	if len(d.hlInFlight) == 0 && len(d.hlTurnError) == 0 {
+		return
+	}
+	for i := range threads {
+		id := threads[i].ID
+		if d.hlInFlight[id] {
+			threads[i].Busy = api.BusyBusy
+		}
+		if text, ok := d.hlTurnError[id]; ok {
+			threads[i].TurnError = text
+		}
 	}
 }
 

@@ -114,6 +114,10 @@ type Thread struct {
 	// McpArgs maps an MCP server to the arguments this thread adds to that server's
 	// global entry (schema 63; see mcparg.go). Not inherited by a fork.
 	McpArgs map[string][]string `json:"mcp_args,omitempty"`
+	// TurnError says why the thread's last headless turn failed (schema 64): capped,
+	// and without the thread's env values. Empty when it succeeded, while a new turn
+	// runs, and once the thread has been started in a pane.
+	TurnError string `json:"turn_error,omitempty"`
 	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
 	// the thread is "on hold" and hidden from the default active view. 0 = not on
 	// hold. The caller supplies the absolute instant (the TUI computes "start of
@@ -560,6 +564,8 @@ type ThreadStatusResponse struct {
 	// ObservedModel is the model the transcript says the thread last ran on
 	// (schema 58; see ThreadSnapshot.ObservedModel).
 	ObservedModel string `json:"observed_model,omitempty"`
+	// TurnError mirrors Thread.TurnError (schema 64).
+	TurnError string `json:"turn_error,omitempty"`
 }
 
 // NeedsInput is the derived "the human is blocking the agent" view: a live pane
@@ -609,6 +615,8 @@ type ThreadRow struct {
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
 	// ObservedModel mirrors ThreadSnapshot's (schema 58).
 	ObservedModel string `json:"observed_model,omitempty"`
+	// TurnError mirrors Thread.TurnError (schema 64).
+	TurnError string `json:"turn_error,omitempty"`
 }
 
 // NeedsInput is the derived needs-input view for a row (headful·idle).
@@ -852,6 +860,8 @@ type ThreadWaitResponse struct {
 	// LastActiveUnix rides along for the send --wait stall guard: delivered
 	// keystrokes change the pane, which bumps it even before a turn latches.
 	LastActiveUnix int64 `json:"last_active_unix,omitempty"`
+	// TurnError mirrors Thread.TurnError (schema 64).
+	TurnError string `json:"turn_error,omitempty"`
 }
 
 // ReportStateRequest is POST /v1/threads/report-state — an in-agent reporter

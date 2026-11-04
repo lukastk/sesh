@@ -23,6 +23,24 @@ func init() {
 		Agents:      agentic,
 	})
 	Register(Feature{
+		ID:          "thread.mcp-tool",
+		Description: "a thread's MCP server is usable: a REAL agent calls a REAL tool of the server its arguments reached, in a headless turn and in a headed pane, and the server records the call and the argv of the process that took it",
+		Localities:  bothLoc,
+		Agents:      agentic,
+	})
+	Register(Feature{
+		ID:          "thread.mcp-list-changed",
+		Description: "a server that lists no tools at start recovers in that process: after notifications/tools/list_changed a headed agent calls the tool without restarting; a pi headless turn waits for the tools and calls one, and exits non-zero with the reason if they never come",
+		Localities:  bothLoc,
+		Agents:      agentic,
+	})
+	Register(Feature{
+		ID:          "thread.await-turn-failure",
+		Description: "a failed headless turn is loud where a caller polling await looks: await straight after the send waits for the turn, exits non-zero and carries turn_error in --json; status, info and headless-reply say so, also after a daemon restart; the next good turn clears it",
+		Localities:  bothLoc,
+		Agents:      agentic,
+	})
+	Register(Feature{
 		ID:          "tmux.current",
 		Description: "resolve the calling terminal's locator + owning thread id",
 		Localities:  []Locality{Local},

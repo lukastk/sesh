@@ -364,6 +364,11 @@ var migrations = []string{
 	// adds to that server's global entry, as JSON. On the row, so it replicates:
 	// paths and switches, never secrets. APPENDED last.
 	`ALTER TABLE threads ADD COLUMN mcp_args TEXT NOT NULL DEFAULT '{}';`,
+	// 31: TURN ERRORS (api 64): why the thread's last headless turn failed, '' when it
+	// did not. On the row so that it outlives a daemon restart and reaches `await` on
+	// any machine through the mesh. Capped and scrubbed by the daemon, because a row
+	// replicates (daemon/headless.go, turnErrorText). APPENDED last.
+	`ALTER TABLE threads ADD COLUMN turn_error TEXT NOT NULL DEFAULT '';`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

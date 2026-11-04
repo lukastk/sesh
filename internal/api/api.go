@@ -405,10 +405,13 @@ package api
 // new request fields, and omits env_count (reads as "no variables").
 // 63: THREAD MCP ARGS. A thread may add arguments to a global MCP server entry (see
 // mcparg.go). Thread and NewThreadRequest gain mcp_args (store migration 30); POST
-// /v1/threads/mcp-args changes them. Additive: a pre-63 daemon omits mcp_args and
-// 404s the route, and because it would also spawn without arguments it was sent,
-// `thread new` compares the arguments on the returned thread and fails loudly.
-const SchemaVersion = 63
+// /v1/threads/mcp-args changes them. Additive for reads: a pre-63 daemon omits mcp_args
+// and 404s the route. It refuses a new-thread request carrying mcp_args with a 400
+// (unknown field), so nothing spawns without the arguments it was sent.
+// 64: TURN ERRORS. Thread and ThreadStatusResponse gain turn_error (store migration
+// 31), the reason the last headless turn failed. `await` exits non-zero on it. Additive:
+// a pre-64 peer omits it, so `await` on such a peer's thread cannot see a failed turn.
+const SchemaVersion = 64
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

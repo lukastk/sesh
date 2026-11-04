@@ -76,3 +76,47 @@ func TestUpdateThreadMcpArgs(t *testing.T) {
 		t.Errorf("emptied map reads %q", th.McpArgs)
 	}
 }
+
+func TestThreadTurnError(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.InsertThread(api.Thread{ID: "t1", Machine: "m", SessionName: "s1", Cwd: "/", AgentKind: "pi", Tags: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.ThreadsRev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadTurnError("t1", "it broke"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ThreadsRev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Error("recording a failure left the rev alone, so the maintainer would not see it")
+	}
+	got, err := s.GetThread("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TurnError != "it broke" {
+		t.Errorf("get: %q", got.TurnError)
+	}
+	listed, err := s.ListThreads(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].TurnError != "it broke" {
+		t.Errorf("list: %+v", listed)
+	}
+	if err := s.SetThreadTurnError("t1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetThread("t1"); got.TurnError != "" {
+		t.Errorf("after clearing: %q", got.TurnError)
+	}
+	if err := s.SetThreadTurnError("absent", "x"); !errors.Is(err, ErrThreadNotFound) {
+		t.Errorf("absent thread: %v", err)
+	}
+}

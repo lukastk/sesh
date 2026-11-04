@@ -645,6 +645,9 @@ func threadWait(cfg config.Config, args []string) error {
 	if final.Blocked {
 		state = "blocked"
 	}
+	if final.TurnError != "" {
+		return fmt.Errorf("thread wait: the last turn of thread %s failed: %s", rid, final.TurnError)
+	}
 	fmt.Printf("%s reached %s (state: %s)\n", rid, *until, state)
 	return nil
 }
@@ -675,6 +678,9 @@ func threadStatus(cfg config.Config, args []string) error {
 	fmt.Printf("agent_running: %t\n", resp.AgentRunning)
 	fmt.Printf("needs_input:   %t\n", resp.NeedsInput())
 	fmt.Printf("pane:          %s\n", resp.Pane)
+	if resp.TurnError != "" {
+		fmt.Printf("last turn:     FAILED: %s\n", resp.TurnError)
+	}
 	return nil
 }
 
@@ -867,7 +873,7 @@ func threadNew(cfg config.Config, args []string) error {
 		Env: threadEnvVars, NoInheritEnv: *noInheritEnv,
 	})
 	if err != nil {
-		return err
+		return mcpArgFieldError(err)
 	}
 	if err := checkMcpArgsApplied(mcpArgs, resp.Thread); err != nil {
 		return err

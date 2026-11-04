@@ -47,6 +47,10 @@ type Daemon struct {
 	hlMu       sync.Mutex
 	hlInFlight map[string]bool
 	hlReply    map[string]string
+	// hlTurnError is the current turn's outcome as far as this process knows: set to
+	// '' as a turn starts, to the reason if it fails. Same lock as hlInFlight, so a
+	// reader never sees a finished turn without its outcome (mesh.go, overlayTurns).
+	hlTurnError map[string]string
 	// turnPID is the ROOT pid of each in-flight turn process, the fact behind
 	// GET /v1/threads/turn-identity: it is what lets the daemon tell a worker
 	// running inside a turn it launched which thread that turn belongs to, which
@@ -206,6 +210,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		transferStop: make(chan struct{}),
 		hlInFlight:   map[string]bool{},
 		hlReply:      map[string]string{},
+		hlTurnError:  map[string]string{},
 		turnPID:      map[string]int{},
 	}
 	threads, err := st.ListThreads(true)

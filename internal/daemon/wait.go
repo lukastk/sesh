@@ -82,6 +82,11 @@ func (d *Daemon) handleThreadWait(w http.ResponseWriter, r *http.Request) {
 		// A just-created thread may not have a published snapshot yet; that
 		// simply reads as condition-not-met until the maintainer's first tick.
 		snap, tracked := d.maint.stateOf(id)
+		if tracked {
+			current := []api.ThreadSnapshot{snap}
+			d.overlayTurns(current)
+			snap = current[0]
+		}
 		auth, _ := d.reportedState(id)
 		met := false
 		if tracked {
@@ -91,7 +96,7 @@ func (d *Daemon) handleThreadWait(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, api.ThreadWaitResponse{
 				Schema: api.SchemaVersion, ID: id, Reached: met,
 				Head: snap.Head, Busy: snap.Busy, Blocked: auth.blocked,
-				LastActiveUnix: snap.LastActiveUnix,
+				LastActiveUnix: snap.LastActiveUnix, TurnError: snap.TurnError,
 			})
 			return
 		}

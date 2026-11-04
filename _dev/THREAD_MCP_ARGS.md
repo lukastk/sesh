@@ -38,9 +38,29 @@ A stdio server logging its argv and one env variable, configured as a global ent
   in `mcpLaunchArgs`. TurnSpec's `HookArgs` now reaches pi too.
 - **Own stdio client in the extension,** on node built-ins: pi's two MCP mechanisms
   cannot add an argument to one entry for one process (above).
-- **Mixed fleet.** A pre-63 daemon ignores `mcp_args` in a new-thread request, which
-  would spawn a worker without its identity. `thread new` compares the returned thread
-  with what it sent and fails, naming the thread. `mcp-arg set` reports the 404.
+- **Mixed fleet.** A pre-63 daemon refuses `mcp_args` in a new-thread request with a 400
+  (`unknown field`), before anything spawns; `thread new` turns that into "upgrade it".
+  `mcp-arg set` reports the 404, and `mcp-arg list` refuses a daemon whose schema predates
+  the field rather than reading its silence as "no arguments". `thread new` still compares
+  the returned thread with what it sent, for a daemon that accepted them and lost them.
+- **The client stays live** (schema 64 fold of the independent review). `list_changed`
+  re-lists in the running process; pi cannot unregister a tool, so a withdrawn tool leaves
+  the active set. `instructions` become a system prompt section per run. Reading happens
+  one at a time per server with a rerun flag, so a burst ends on the last list.
+- **A headless pi waits, then fails.** One process is all a turn has, so a server that
+  declared `listChanged` and lists nothing gets 45s (above soliton-mcp's 15s poll), then
+  exit 1. A server that did not declare it is taken at its word. Headed pi does not wait:
+  nothing ends the process, and the tools arrive at the next model request.
+- **Tool calls have no default limit.** A timeout on a call still running is how a model
+  comes to repeat it, and tool length is the server's business. The entry's `timeout`
+  keeps pi's meaning (seconds, reset by progress). Cancelling is best effort.
+- **Turn errors are on the row** (`threads.turn_error`, migration 31): they must outlive
+  the daemon and reach `await` through the mesh. Rows replicate, so the text is capped at
+  2000 bytes and the thread's env values are scrubbed; the full text stays in the
+  in-memory reply. `await` reads the maintained snapshot, which can be a tick old, so
+  `handleMesh` overlays the in-flight registry: otherwise an `await` right after a send
+  returned at once on the idle from before the turn. Across machines the snapshot lags by
+  a sync round, so a caller sending then awaiting from elsewhere passes `--machine`.
 
 ## A server that cannot start
 
@@ -48,6 +68,34 @@ Measured with a nonexistent command: `claude --print` and `codex exec` both answ
 exited 0, with no sign in their output. So a claude or codex worker can run without its
 tools, silently; sesh checks that the global entry exists, not that it runs. The pi
 extension is stricter because it owns the start: a headless turn exits 1.
+
+That gap is open, and both halves belong to the harnesses. What each one exposes:
+
+- **claude:** `--output-format stream-json --verbose` opens with a `system/init` event
+  whose `mcp_servers` says `{"name": "bad", "status": "failed"}`. Text mode, which sesh
+  uses, has nothing on stdout or stderr. Reading that status would need sesh to parse
+  headless turns as stream-json. It would report a start failure only, not a tool list
+  that stayed empty.
+- **codex:** nothing. `codex exec --json` printed only `thread.started`, `turn.started`,
+  the message and `turn.completed`, stderr had no mention, and it exited 0.
+
+So sesh can honestly say what was asked for (`thread mcp-arg list`), not that a server
+runs. Asking the worker to call a tool is the only proof on those harnesses.
+
+## What the harnesses do with a late tool list
+
+Measured with a server listing nothing, then sending `list_changed` after 4s (Claude Code
+2.1.318, codex-cli 0.166.0, pi 1.4.0 with this extension):
+
+| harness | re-lists | tool usable | sees `instructions` |
+|---|---|---|---|
+| claude | yes | yes | yes |
+| codex | no | no | no |
+| pi + extension | yes | yes | yes |
+
+MCP sends `instructions` only at `initialize`, so a server's text cannot change in a
+running process on any harness. soliton-mcp's during an outage says that it has not
+answered yet, and a worker that started then keeps that text after the tools appear.
 
 ## Not measured
 

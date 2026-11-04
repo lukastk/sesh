@@ -758,7 +758,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 		examples: []string{"sesh subscriptions", "sesh subscriptions 1a2b3c4d --json"},
 	},
 	"await": {
-		summary:  "block until a thread's turn completes (busy → idle), then print its state; polls the merged mesh view so any machine's thread is awaitable by id",
+		summary:  "block until a thread's turn completes (busy → idle), then print its state; exits non-zero if its last headless turn failed (--json carries turn_error); polls the merged mesh view so any machine's thread is awaitable by id",
 		usage:    "sesh await [<id>] [--id <id>] [--timeout <dur>] [--poll <dur>] [--machine <m>] [--json]",
 		examples: []string{"sesh await 1a2b3c4d", "sesh await 1a2b3c4d --timeout 5m --json"},
 	},

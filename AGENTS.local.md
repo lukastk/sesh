@@ -68,11 +68,12 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-03 21:15Z**: all six machines (mymain, macbook, macstudio, ideapad, termux, pocket4)
-run binary AND daemon `65bd00c` (wire schema 60, store schema 28, thread context) on the split config with
-myrig `b52b5d4` (CTX column) and refreshed skill copies; pre-60 DB backups are in each `~/.sesh/backups/sesh-pre60-*`.
-Live smoke on mymain's supervised daemon: claude/codex/pi headless turns followed a context. macbook's `pi`
-shim has no mise Node version (`pi` itself fails there). Re-check the fleet rather
+Fleet on **2026-11-04**: all six machines (mymain, macbook, macstudio, ideapad, termux, pocket4)
+run binary AND daemon `3b19781` (wire schema 61, store schema 28: claude context file + codex rewind re-send)
+on the split config with myrig `b52b5d4` and refreshed skill copies; pre-60 DB backups are in each
+`~/.sesh/backups/sesh-pre60-*`. Live smoke on mymain's supervised daemon: a headless claude turn read its
+context from the file, a headed codex launch passed hook trust. Threads launched before 61 keep the old
+hook-only rule until restarted. macbook's `pi` shim has no mise Node version (`pi` itself fails there). Re-check the fleet rather
 than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,

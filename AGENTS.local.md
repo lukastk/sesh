@@ -81,13 +81,15 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-04**: mymain, macbook, macstudio, termux and pocket4 run binary AND daemon `889806e`
-(wire schema 61, store 28; model lists through `$SHELL -c`); **ideapad runs `3b19781`** because its sesh
-checkout holds someone else's uncommitted edits (~10 files incl. contexthook.go, the pi extension) — not
-pulled or built over. pocket4's pi model list now FAILS: with keys visible, pi waits ~96s for privatemode's
-podman proxy (never healthy), past sesh's 12s model-list timeout. macbook's `pi` shim has no mise Node
-version (`pi` itself fails there). Split config, myrig `b52b5d4`; pre-60 DB backups in `~/.sesh/backups/`. Re-check the fleet rather
-than repeating any recorded status, here or in an archive.
+Fleet on **2026-11-04 ~02:15Z**: ideapad, mymain, macstudio and pocket4 run binary AND daemon
+`c99aed6` (wire schema 62, store schema 29, thread env) with refreshed skill copies; pre-62 DB
+backups are in each `~/.sesh/backups/sesh-pre62-*`. Live smoke on ideapad's supervised daemon:
+claude and pi followed set/unset live, codex answered restart-required and followed a restart.
+**macbook and termux were unreachable and stay on `889806e` (schema 61)**: pull, build (termux:
+plain native `go build`, its PID recipe in OPERATIONS), back up, restart. pocket4's pi model list
+fails (privatemode's podman proxy outlasts the 12s timeout) and it runs codex 0.145 / pi 1.3,
+which fail the control cells. macbook's `pi` shim has no mise Node version. Re-check the fleet
+rather than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

@@ -28,6 +28,11 @@ func (d *Daemon) routesHeadless(mux *http.ServeMux) {
 // session id up front; codex generates its own on the first turn (left empty).
 func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req api.NewThreadRequest) {
 	id := uuid.NewString()
+	envCount, err := d.seedThreadEnv(id, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	agentSessionID := ""
 	if agents.Family(kind) == agents.Pi || kind == agents.Claude {
 		agentSessionID = uuid.NewString() // sesh pre-assigns; codex cannot
@@ -45,10 +50,12 @@ func (d *Daemon) newHeadlessThread(w http.ResponseWriter, kind agents.Kind, req 
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          req.Model,
+		EnvCount:       envCount,
 		// HeadlessStarted stays false: the conversation begins on the first turn
 		// (codex mints its session id there; claude/pi create from the pre-assigned id).
 	}
 	if err := d.store.InsertThread(thread); err != nil {
+		d.dropUnrecordedThreadEnv(id, false)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -212,11 +219,18 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", hookErr)
 	}
 
+	threadEnv, envErr := agents.ReadThreadEnv(d.cfg.Home, threadID)
+	if envErr != nil {
+		releaseSlot()
+		return http.StatusInternalServerError, fmt.Errorf("send-headless: %w", envErr)
+	}
+
 	go func() {
 		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
 			Kind: agents.Kind(thread.AgentKind), ThreadID: threadID, SessionID: sessionID,
 			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
 			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(), HookArgs: hookArgs,
+			ThreadEnv:     threadEnv.Vars,
 			TransferInbox: transferInbox, TransferAPISocket: transferSocket,
 			// The turn's root pid is this daemon's evidence that a process asking
 			// "who am I?" really is the worker it launched — the only verified

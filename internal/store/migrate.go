@@ -355,6 +355,11 @@ var migrations = []string{
 		delivered_session TEXT NOT NULL DEFAULT '',
 		delivered_hash    TEXT NOT NULL DEFAULT ''
 	);`,
+	// 29: THREAD ENV (api 62, api/env.go). Only the COUNT of a thread's variables is
+	// in the store, so a row can say it has some: the values are in a 0600 file on the
+	// owner because rows replicate to every peer and backups copy this database.
+	// APPENDED last.
+	`ALTER TABLE threads ADD COLUMN env_count INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

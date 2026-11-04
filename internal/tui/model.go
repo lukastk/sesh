@@ -557,6 +557,18 @@ type Model struct {
 	detailsRow    api.ThreadRow
 	// contextPopup: the thread-context viewer (contextview.go) — the selected
 	// thread's context text, fetched from its owner when opened, scrollable.
+	envPopup       bool
+	envRow         api.ThreadRow
+	envResp        api.ThreadEnvResponse
+	envErr         error
+	envLoading     bool
+	envReveal      bool
+	envCursor      int
+	envOffset      int
+	envNote        string
+	envConfirm     string
+	envInputMode   int
+	envInput       []rune
 	contextPopup   bool
 	contextRow     api.ThreadRow
 	contextResp    api.ThreadContextResponse
@@ -1590,6 +1602,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetch() // reconcile against the daemon
 	case modelListMsg:
 		return m.applyModelList(msg), nil
+	case envLoadedMsg:
+		return m.applyEnvLoaded(msg)
+	case envChangedMsg:
+		return m.applyEnvChanged(msg)
 	case contextLoadedMsg:
 		return m.applyContextLoaded(msg)
 	case contextEditDoneMsg:
@@ -2389,6 +2405,7 @@ func requiresReachableOwner(cmdID string) bool {
 		"set-model",       // model list + set-model on the owner
 		"context-view",    // context show on the owner
 		"context-edit",    // context show + set on the owner
+		"env-edit",        // env show + set on the owner
 		"hold",            // hold toggle
 		"hold-until",      // hold until date
 		"notify",          // notify on/off
@@ -2435,6 +2452,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.contextPopup {
 		return m.handleContextKey(msg)
+	}
+	if m.envPopup {
+		return m.handleEnvKey(msg)
 	}
 	if m.helpPopup {
 		return m.handleHelpKey(msg)
@@ -2648,6 +2668,8 @@ func (m Model) runCommand(id string) (tea.Model, tea.Cmd) {
 		return m.openContextView()
 	case "context-edit":
 		return m.openContextEdit()
+	case "env-edit":
+		return m.openEnvEdit()
 	case "set-default-model":
 		return m.openModelPick(pickDefault)
 	case "set-parent-uuid":
@@ -4366,6 +4388,9 @@ func (m Model) viewFrame() string {
 	if m.contextPopup {
 		return m.contextView() // full-screen takeover: one thread's context text
 	}
+	if m.envPopup {
+		return m.envView() // full-screen takeover: one thread's environment variables
+	}
 	if m.helpPopup {
 		return m.helpView() // full-screen takeover: the complete keymap
 	}
@@ -4637,6 +4662,8 @@ func (m Model) detailsFields() []detailField {
 		{"observed model", orDash(r.ObservedModel)},
 		// Whether the thread carries a custom context (`context-view` shows it).
 		{"context", detailContext(r)},
+		// How many environment variables it carries (`env-edit` shows them).
+		{"env", detailEnv(r)},
 		{"state", fmt.Sprintf("%s %s  (head=%s busy=%s attach=%s)",
 			HeadGlyph(r), BusyGlyph(r), orUnknown(string(r.Head)), orUnknown(string(r.Busy)), orUnknown(string(r.Attachment)))},
 		{"session", orDash(r.SessionName)},
@@ -4740,6 +4767,13 @@ func detailContext(r api.ThreadRow) string {
 		return "—"
 	}
 	return "yes (version " + r.ContextHash + ")"
+}
+
+func detailEnv(r api.ThreadRow) string {
+	if r.EnvCount == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d variable(s)", r.EnvCount)
 }
 
 func detailAgent(r api.ThreadRow) string {

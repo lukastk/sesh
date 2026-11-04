@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled),
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, env_count)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled), t.EnvCount,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -272,7 +272,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	var headless, started, archived, notify, flagged, flagDisabled int
 	var meta string
 	var pinOrder sql.NullFloat64
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash, &t.EnvCount); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
@@ -352,6 +352,18 @@ func (s *Store) SetThreadModel(id, model string) error {
 	res, err := s.db.Exec(`UPDATE threads SET model = ? WHERE id = ?`, model, id)
 	if err != nil {
 		return fmt.Errorf("store: set model: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+// SetThreadEnvCount records how many environment variables a thread has.
+func (s *Store) SetThreadEnvCount(id string, count int) error {
+	res, err := s.db.Exec(`UPDATE threads SET env_count = ? WHERE id = ?`, count, id)
+	if err != nil {
+		return fmt.Errorf("store: set env count: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrThreadNotFound

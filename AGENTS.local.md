@@ -60,6 +60,15 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   An injection can be REWOUND away, so "delivered" never proves the model has it. Claude
   surfaces only the FIRST mid-session edit of an instruction file. Daemon log =
   `supervisorctl tail`, not `~/.sesh/daemon.log`.
+- **Thread env (schema 62, [THREAD_ENV](_dev/THREAD_ENV.md)):** values live in 0600 files
+  (`<SESH_HOME>/thread-env/<id>/`), never in the store or a row: `env_count` only. Claude
+  follows via a `FileChanged` hook (`sesh env hook`), pi via the extension's `env.ts`, codex
+  needs `thread restart`. Hooks must write the `.` POINTER, never values (claude sources
+  every hook file, so a dropped key returns stale), and removals must be `unset` until the
+  next launch. Never put user values in `tmux -e` at new-session: they land in the SESSION
+  env. `.zshenv` beats a thread value on pi/codex (open; Lukas's call). Remote pi/codex
+  cells need current harnesses on a Linux host: macOS and pocket4 fail the CONTROL cells too,
+  and pi's extension loads from the checkout, so a tar'd tree does not test `env.ts`.
 - **Config layout (schema 59, 2026-11-02):** `~/.sesh/config.toml` is a SYMLINK to myrig's
   plain `home/.sesh/config.toml` (shared by the fleet); `~/.sesh/config.local.toml` is
   rendered per machine from `config.local.toml.jinja` and OVERLAYS it (tables merge key

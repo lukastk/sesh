@@ -101,6 +101,8 @@ var declaredTUIClaims = []string{
 	"context-column",            // the CTX column marks exactly the threads whose REAL record carries a context, and follows context set/clear
 	"context-view",              // context-view shows the selected thread's REAL context from the daemon, scrollable (▼/▲, G to the end), esc returns
 	"context-edit",              // the REAL tui binary: context-edit suspends to the editor on the current context, the saved file becomes the context, the TUI comes back; an emptied file removes it
+	"env-column",                // the ENV column shows how many variables a thread's REAL record carries, and follows env set/clear
+	"env-manager",               // env-edit lists the REAL variables with values masked until `v`; `a` adds, `e` edits and `d` `d` deletes them on the daemon, reporting how the change reaches the agent
 	"action-set-parent",         // the INTERACTIVE reparent picker: pick the new parent from the list (no uuid typed) and the daemon really moves the thread; a descendant is never offered (cycle); the (root) entry clears the parent
 }
 

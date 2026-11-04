@@ -190,7 +190,7 @@ does not wrap can be driven straight against the tmux server.`,
 	},
 	"thread new": {
 		summary:  "spawn a new headed thread (agent in a real tmux pane) or a headless thread (--headless); supports forking and parent inference. --fork-from branches an existing conversation into a HEADLESS thread (the branched transcript exists, so its next turn resumes it; nothing is spawned, so --msg, placement and --yolo/--sandbox are refused — promote it with `thread headful` or run its first turn with `thread send-headless`). --agent overrides [defaults] agent; when both are absent creation refuses loudly (forks inherit the source agent). --cwd accepts a relative path (expanded against the invocation directory) or ~/… (resolved by the OWNING daemon against THAT machine's home, so a ~-relative cwd is portable across a --machine spawn) and defaults to the current dir '.'. --model pins an opaque agent model on the thread (applied on spawn, resume, and every headless turn; empty = the agent's default; a bad model fails loudly at the agent). Placement (a session may host many threads): --into-session adds a window to an existing session, --into-window splits a target into a new pane, --into-pane runs the agent in an EXISTING shell pane (register-then-exec; pair with --exec). --virtual creates a VIRTUAL thread instead: a pure grouping node with NO agent (parent other threads under it; renders ≡ in the TUI) — takes no agent-shaped flag, cwd is optional (kept as the default for a later `thread realize`), and agent verbs on it refuse loudly until realized.",
-		usage:    "sesh thread new [--agent <claude|codex|pi|mypi>] [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--divider] [--parent <id>] [--no-parent] [--parent-shell] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--machine <m>] [--json]",
+		usage:    "sesh thread new [--agent <claude|codex|pi|mypi>] [--cwd <dir>] [--name <name>] [--model <m>] [--headless] [--virtual] [--divider] [--parent <id>] [--no-parent] [--parent-shell] [--fork-from <id>] [--message-id <n>] [--yolo|--sandbox] [--msg <text>] [--into-session <name>|--into-window <target>|--into-pane <pane> [--exec]] [--env KEY=VALUE]... [--env-file <path>] [--no-inherit-env] [--machine <m>] [--json]",
 		examples: []string{"sesh thread new --name default-agent --cwd ~/proj", "sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread new --agent pi --name notes --cwd . --headless", "sesh thread new --agent pi --name fast --cwd . --headless --model anthropic/claude-haiku-4-5", "exec sesh thread new --agent claude --name here --into-pane $TMUX_PANE --exec", "sesh thread new --virtual --name 'project X'", "sesh thread new --divider --name 'today'"},
 	},
 	"thread list": {
@@ -296,6 +296,11 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 		summary:  "change the registered model AND the live agent's, session-only: claude's pane restarts in place on the new model (the conversation resumes; the process and any turn in flight do not), codex gets `/model <m>`, pi/mypi switch over pi-rpc-socket; no live agent = record only. Refuses a mid-turn thread without --force",
 		usage:    "sesh thread switch-model --id <id> --model <m> [--force] [--json] [--machine <m>]",
 		examples: []string{"sesh thread switch-model --id 1a2b3c4d --model sonnet", "sesh thread switch-model --id 1a2b --model openai-codex/gpt-6-astra --machine macstudio"},
+	},
+	"thread restart": {
+		summary:  "replace a thread's running agent with a new process on the same conversation, in the same pane: what applies environment changes to codex, and to the agent process itself on claude and pi. Refuses a thread that is mid-turn without --force",
+		usage:    "sesh thread restart --id <id> [--force] [--json] [--machine <m>]",
+		examples: []string{"sesh thread restart --id 1a2b3c4d"},
 	},
 	"thread hold": {
 		summary: "park a thread until a date (hidden from the default active view), release it from an ancestor's hold, or clear both",
@@ -739,7 +744,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 	},
 	"delegate": {
 		summary:  "spawn a headless worker, send it a task, await the reply, print it, then archive the worker (--keep leaves it active); cross-machine via --machine",
-		usage:    "sesh delegate --agent <pi|claude|codex> <task> [--cwd <dir>] [--name <name>] [--keep] [--timeout <dur>] [--sandbox|--yolo] [--machine <m>] [--json]",
+		usage:    "sesh delegate --agent <pi|claude|codex> <task> [--cwd <dir>] [--name <name>] [--keep] [--timeout <dur>] [--sandbox|--yolo] [--no-inherit-env] [--machine <m>] [--json]",
 		examples: []string{"sesh delegate --agent pi 'summarize this repo'", "sesh delegate --agent claude 'run the tests' --cwd ~/proj --keep"},
 	},
 	"copy": {
@@ -807,6 +812,41 @@ OWN pane and environment and answer confidently about a different machine.`,
 		summary:  "INTERNAL: what an agent's hook runs to receive its thread's context (claude/codex via <SESH_HOME>/context-hook.sh, pi from the sesh-agent-state extension). Delivers only to a verified identity (pane marker or headless turn) whose session is the thread's own; prints nothing otherwise",
 		usage:    "sesh context hook --agent <claude|codex|pi> [--session <id>] [--context-file]",
 		examples: []string{"echo '{\"session_id\":\"…\",\"hook_event_name\":\"UserPromptSubmit\"}' | sesh context hook --agent claude"},
+	},
+	"env": {
+		summary:  "a thread's environment variables: every launch and headless turn starts with them, and a change reaches a running agent's shell commands (claude: next command; pi: next turn; codex: `thread restart`). Values stay on the owner in a 0600 file, never in the store or on peers; forks, children and delegate workers inherit them",
+		usage:    "sesh env <show|set|unset|clear|edit> [--id <id>]",
+		examples: []string{"sesh env set API_URL=https://staging.example --id 1a2b3c4d", "sesh env show", "sesh env unset API_URL", "sesh env edit --id 1a2b"},
+	},
+	"env show": {
+		summary:  "list a thread's environment variables, values masked unless --reveal; current thread inferred when no --id",
+		usage:    "sesh env show [--id <id>] [--reveal] [--json] [--machine <m>]",
+		examples: []string{"sesh env show --id 1a2b3c4d", "sesh env show --reveal"},
+	},
+	"env set": {
+		summary:  "set variables from KEY=VALUE arguments and/or --file (flags go first; arguments win over the file), and say how the change reaches the running agent. Refuses names sesh or zsh reserve",
+		usage:    "sesh env set [--id <id>] [--file <path>|--file -] [--json] [--machine <m>] [KEY=VALUE...]",
+		examples: []string{"sesh env set DEBUG=1 API_URL=https://staging.example", "sesh env set --id 1a2b --file staging.env"},
+	},
+	"env unset": {
+		summary:  "remove variables from a thread; naming one it does not have is an error",
+		usage:    "sesh env unset [--id <id>] [--json] [--machine <m>] KEY...",
+		examples: []string{"sesh env unset DEBUG API_URL"},
+	},
+	"env clear": {
+		summary:  "remove all of a thread's variables",
+		usage:    "sesh env clear [--id <id>] [--json] [--machine <m>]",
+		examples: []string{"sesh env clear --id 1a2b3c4d"},
+	},
+	"env edit": {
+		summary:  "edit a thread's variables as KEY=VALUE lines in $VISUAL/$EDITOR and save them on exit; refuses to overwrite variables changed meanwhile, keeping your edit in a file it names",
+		usage:    "sesh env edit [--id <id>] [--machine <m>]",
+		examples: []string{"sesh env edit", "sesh env edit --id 1a2b --machine macstudio"},
+	},
+	"env hook": {
+		summary:  "INTERNAL: claude's SessionStart and FileChanged hook, which points claude's shell at the thread's env file and refreshes it. Does nothing outside a pane sesh launched",
+		usage:    "sesh env hook",
+		examples: []string{"echo '{\"hook_event_name\":\"SessionStart\"}' | sesh env hook"},
 	},
 	"meta": {
 		summary:  "arbitrary per-thread key/value metadata (set | get | unset | list); feeds the TUI's meta.<key> predicates",
@@ -970,7 +1010,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
-	"whoami", "delegate", "context", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
+	"whoami", "delegate", "context", "env", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }

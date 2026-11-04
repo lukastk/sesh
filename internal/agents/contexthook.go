@@ -127,14 +127,25 @@ func contextHookCommand(script string, k Kind) string {
 	return cmd
 }
 
+// claudeEnvHookCommand finds the launching daemon's sesh like context-hook.sh does.
+const claudeEnvHookCommand = `"${` + EnvSeshBin + `:-sesh}" env hook`
+
 // ClaudeContextSettings is the --settings JSON adding the context hooks and
 // enabling the --add-dir context file. Setting the variable here rather than in
 // the launch environment keeps every launch path (pane, respawn, headless) alike.
 func ClaudeContextSettings(script string) string {
 	h := []map[string]any{{"hooks": []map[string]any{{"type": "command", "command": contextHookCommand(script, Claude)}}}}
+	// The thread-env hook (threadenv.go): SessionStart beside the context hook, and
+	// FileChanged, which claude runs for the file SessionStart names in watchPaths.
+	envHook := map[string]any{"hooks": []map[string]any{{"type": "command", "command": claudeEnvHookCommand}}}
+	envChanged := map[string]any{"matcher": threadEnvScript, "hooks": envHook["hooks"]}
 	b, _ := json.Marshal(map[string]any{
-		"env":   map[string]string{claudeAddDirMemoryEnv: "1"},
-		"hooks": map[string]any{"SessionStart": h, "UserPromptSubmit": h},
+		"env": map[string]string{claudeAddDirMemoryEnv: "1"},
+		"hooks": map[string]any{
+			"SessionStart":     append(h, envHook),
+			"UserPromptSubmit": h,
+			"FileChanged":      []map[string]any{envChanged},
+		},
 	})
 	return string(b)
 }

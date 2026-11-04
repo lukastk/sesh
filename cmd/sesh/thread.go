@@ -83,6 +83,8 @@ func runThread(args []string) error {
 		return threadSetModel(cfg, rest)
 	case "switch-model":
 		return threadSwitchModel(cfg, rest)
+	case "restart":
+		return threadRestart(cfg, rest)
 	case "report-state":
 		return threadReportState(cfg, rest)
 	case "wait":
@@ -695,8 +697,16 @@ func threadNew(cfg config.Config, args []string) error {
 	parentShell := fs.Bool("parent-shell", false, "parent the new thread under the SHELL THREAD hosting the target session (--into-*); only applies when it would otherwise be a root")
 	virtual := fs.Bool("virtual", false, "create a VIRTUAL thread — a pure grouping node with no agent (parent other threads under it; convert later with `thread realize`)")
 	divider := fs.Bool("divider", false, "create a DIVIDER — a visual horizontal rule in the pinned block (--name is its optional label; placed at the top, reposition with `thread pin`)")
+	var envSets multiFlag
+	fs.Var(&envSets, "env", "set an environment variable on the thread, KEY=VALUE (repeatable; over any it inherits)")
+	envFile := fs.String("env-file", "", "set the environment variables in this KEY=VALUE file on THIS machine")
+	noInheritEnv := fs.Bool("no-inherit-env", false, "do not inherit the fork source's or parent's environment variables")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	threadEnvVars, err := envFromFlags(envSets, *envFile)
+	if err != nil {
 		return err
 	}
 	if *virtual && *divider {
@@ -840,6 +850,7 @@ func threadNew(cfg config.Config, args []string) error {
 		ForkFrom: forkID, MessageID: *messageID, Mode: mode, Msg: *msg, Model: *model,
 		IntoSession: *intoSession, IntoWindow: *intoWindow, IntoPane: *intoPane,
 		Virtual: *virtual, ParentShell: *parentShell,
+		Env: threadEnvVars, NoInheritEnv: *noInheritEnv,
 	})
 	if err != nil {
 		return err

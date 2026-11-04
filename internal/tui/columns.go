@@ -29,6 +29,7 @@ const (
 	ColAgent       = "agent"
 	ColModel       = "model"
 	ColContext     = "context"
+	ColEnv         = "env"
 	ColHead        = "head"
 	ColBusy        = "busy"
 	ColName        = "name"
@@ -128,6 +129,13 @@ var colOrder = []colSpec{
 		cell: func(_ *Model, r api.ThreadRow) string {
 			if r.ContextHash != "" {
 				return "◆" // the thread has a custom context (`context-view` shows it)
+			}
+			return ""
+		}},
+	{name: ColEnv, header: "ENV", fixedW: 3,
+		cell: func(_ *Model, r api.ThreadRow) string {
+			if r.EnvCount > 0 {
+				return strconv.Itoa(r.EnvCount) // variables on the thread (`env-edit` shows them)
 			}
 			return ""
 		}},

@@ -395,7 +395,15 @@ package api
 // changes; a headed codex is re-sent the context at SessionStart(resume), which
 // its rewind fires. Additive: a pre-61 daemon ignores context_file and keeps
 // injecting from the hook as well, which only repeats the text.
-const SchemaVersion = 61
+// 62: THREAD ENV. A thread may carry environment variables (see env.go). GET/POST
+// /v1/threads/env read and write them on the owner, in a 0600 file rather than the
+// store (migration 29 adds only threads.env_count; Thread gains env_count, the TUI's
+// ENV column). POST /v1/threads/restart replaces a running agent in place on the
+// same conversation. NewThreadRequest gains env, no_inherit_env and env_from. Every
+// claude launch carries a FileChanged hook that follows env changes. Mixed-deploy
+// direction: a pre-62 daemon 404s the routes (client.ErrRouteMissing), ignores the
+// new request fields, and omits env_count (reads as "no variables").
+const SchemaVersion = 62
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

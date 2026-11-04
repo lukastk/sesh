@@ -39,6 +39,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerSeshThreadContext } from "./context.ts";
+import { registerSeshThreadEnv } from "./env.ts";
 
 const DEFAULT_THREAD_ID = process.env.SESH_THREAD_ID;
 // The spawning daemon's own binary (SESH_BIN): pane login shells re-prepend
@@ -179,4 +180,6 @@ export default function (pi: ExtensionAPI) {
 	createSeshAgentStateExtension()(pi);
 	// The thread's custom context (sesh schema 60) — see context.ts.
 	registerSeshThreadContext(pi);
+	// The thread's environment variables (sesh schema 62) — see env.ts.
+	registerSeshThreadEnv(pi);
 }

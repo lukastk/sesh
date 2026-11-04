@@ -34,6 +34,8 @@ type TurnSpec struct {
 	// HookArgs attach the thread-context hooks (ContextHookArgs): claude's
 	// --settings, codex's -c flags; nil for pi, whose extension asks itself.
 	HookArgs []string
+	// ThreadEnv is the thread's own environment variables (api/env.go).
+	ThreadEnv map[string]string
 	// SeshBin is the LAUNCHING daemon's own executable, injected as $SESH_BIN so
 	// the worker can call sesh unambiguously. See TurnEnv.
 	SeshBin           string
@@ -60,7 +62,7 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 	// per-agent branches below must never touch it: a carrier added to one
 	// branch and forgotten in another is how a worker ends up with an identity
 	// on two agents and none on the third.
-	env := TurnEnv(os.Environ(), spec.ThreadID, spec.SeshBin, spec.CodexHome)
+	env := ApplyThreadEnv(TurnEnv(os.Environ(), spec.ThreadID, spec.SeshBin, spec.CodexHome), spec.ThreadEnv)
 	if Family(spec.Kind) == Pi {
 		transferThreadID := ""
 		if spec.TransferInbox != "" || spec.TransferAPISocket != "" {

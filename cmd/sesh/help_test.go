@@ -64,6 +64,7 @@ var subcommandSets = map[string][]string{
 	"hooks":   {"list", "enable", "disable", "test"},
 	"meta":    {"set", "get", "unset", "list"},
 	"context": {"show", "set", "clear", "edit", "hook"},
+	"env":     {"show", "set", "unset", "clear", "edit", "hook"},
 	"model":   {"list", "defaults", "set-default", "unset-default"},
 	"matrix":  {"grid", "skips"},
 }

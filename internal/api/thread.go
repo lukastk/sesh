@@ -108,6 +108,9 @@ type Thread struct {
 	// context.go): non-empty = the thread has one. The text itself is fetched from
 	// the owner on demand, so rows stay small.
 	ContextHash string `json:"context_hash,omitempty"`
+	// EnvCount is how many environment variables the thread carries (schema 62; see
+	// env.go). The values are fetched from the owner on demand and never replicate.
+	EnvCount int `json:"env_count,omitempty"`
 	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
 	// the thread is "on hold" and hidden from the default active view. 0 = not on
 	// hold. The caller supplies the absolute instant (the TUI computes "start of
@@ -255,6 +258,14 @@ type NewThreadRequest struct {
 	// Model pins the agent model for this thread (opaque pass-through; '' = the
 	// agent's default). Stored on the record and applied to every later spawn/turn.
 	Model string `json:"model,omitempty"`
+	// Env sets environment variables on the new thread, over any it inherits. A
+	// thread inherits the variables of its fork source, else its EnvFrom, else its
+	// parent, unless NoInheritEnv is set.
+	Env          map[string]string `json:"env,omitempty"`
+	NoInheritEnv bool              `json:"no_inherit_env,omitempty"`
+	// EnvFrom names the thread to inherit from when the new thread has no parent:
+	// `delegate`'s caller, whose worker is a root thread.
+	EnvFrom string `json:"env_from,omitempty"`
 	// Msg, for headed spawns, is an initial prompt sent once the agent is
 	// READY (the daemon waits for the pane asynchronously — never the blank-
 	// pane race; a delivery failure is loud in the daemon log).

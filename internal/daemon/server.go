@@ -50,6 +50,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesUIConfig(mux)
 	d.routesModels(mux)
 	d.routesThreadContext(mux)
+	d.routesThreadEnv(mux)
 	d.routesSubscriptions(mux)
 	d.routesPeers(mux)
 	d.routesAdopt(mux)

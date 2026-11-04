@@ -146,6 +146,8 @@ type Daemon struct {
 	contextMu sync.Mutex
 	// codexHooks caches the codex context-hook trust check (codexcontext.go).
 	codexHooks codexHookTrust
+	// threadEnvMu serialises the read-modify-write of thread env files.
+	threadEnvMu sync.Mutex
 }
 
 // New opens the store and prepares (but does not start) the daemon. It refuses

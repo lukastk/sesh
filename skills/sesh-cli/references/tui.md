@@ -143,6 +143,10 @@ set-default-model  set a HARNESS's default model on this machine — independent
 context-view     read the thread's custom CONTEXT (fetched from its owner) in a
                  scrollable takeover: ↑/↓ j/k, pgup/pgdn, g/G, wheel; `e` edits it;
                  esc/q closes — see [context](context.md)
+env-edit         manage the thread's ENVIRONMENT VARIABLES (fetched from its owner),
+                 values masked: a add (KEY=value), e edit the value, d d delete,
+                 v reveal, r r restart the agent, esc/q close. Each change shows how
+                 it reaches the running agent — see [env](env.md)
 context-edit     edit the thread's context in your editor ([tui] editor / --editor /
                  $EDITOR); on exit it is saved on the owner and you are back in the
                  TUI. An emptied file removes it; a context changed meanwhile is not
@@ -263,6 +267,9 @@ agent was switched in-session). Claude's family aliases agree with their family
 (`opus` with `claude-opus-5-5`), and pi models drop their provider prefix for width;
 `I` shows both models in full. Blank = no model registered and no turn yet (or a
 settled archived thread, which is not observed).
+
+The **ENV** column (`env`, not in the default set) shows how many environment variables
+a thread carries; `env-edit` manages them and `I` shows the count.
 
 The **CTX** column (`context`, not in the default set) marks a thread that carries a
 custom context with `◆`; `context-view` shows it and `I` shows its version.

@@ -344,6 +344,10 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but its context file was not removed: "+err.Error())
 		return
 	}
+	if err := agents.RemoveThreadEnv(d.cfg.Home, req.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but its env file was not removed: "+err.Error())
+		return
+	}
 	if d.transfers != nil {
 		if removed, cleanupErr := d.transfers.DeleteArtifactMappings(req.ID); cleanupErr != nil {
 			writeError(w, http.StatusInternalServerError, "delete: thread "+req.ID+" was deleted but managed artifact cleanup failed")

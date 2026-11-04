@@ -160,6 +160,7 @@ sesh thread command --id <pi-id> --text '/compact retain the plan' --timeout 5m
 sesh thread command --id <pi-id> --request-id <uuid> --timeout 5m  # poll, no resend
 sesh subscribe <child-id> --from "$TID"                # completed turns into parent
 sesh context set --file brief.md --id <id>            # standing instructions for ONE thread
+sesh env set API_URL=https://… --id <id>              # environment variables for ONE thread
 sesh ticket list --current                            # assigned ticket prompts are work
 sesh ticket get --id <ticket-id> --field prompt
 sesh ticket set-status --id <ticket-id> --status done --note 'Changes; closed by <sha>'
@@ -189,6 +190,7 @@ work from `active`. Offline rows are hidden by default, not deleted.
 | Mesh, peers, cockpit/daemon recovery, environment | [fleet](references/fleet.md) |
 | Agent models: registered vs observed, set/switch a thread's model, the MODEL column, listing, per-harness defaults | [models](references/models.md) |
 | A thread's custom context: per-thread standing instructions (`sesh context`), how each harness receives it, the CTX column, viewing/editing | [context](references/context.md) |
+| A thread's environment variables (`sesh env`, `thread new --env`), when a change reaches a running agent, `thread restart`, inheritance, where values live, the ENV column | [env](references/env.md) |
 | Daemon/TUI config, the per-machine config.local.toml overlay, hooks, separate sesh-ui preferences | [config](references/config.md) |
 | Remote directory listing or plugins (bundled manifest example) | [integrations](references/integrations.md) |
 

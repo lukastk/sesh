@@ -161,6 +161,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh context:", err)
 			os.Exit(1)
 		}
+	case "env":
+		if err := runEnv(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh env:", err)
+			os.Exit(1)
+		}
 	case "meta":
 		if err := runMeta(config.Load(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh meta:", err)

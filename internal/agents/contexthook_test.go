@@ -14,7 +14,8 @@ func TestClaudeContextSettingsShape(t *testing.T) {
 	var s struct {
 		Env   map[string]string `json:"env"`
 		Hooks map[string][]struct {
-			Hooks []struct{ Type, Command string } `json:"hooks"`
+			Matcher string                           `json:"matcher"`
+			Hooks   []struct{ Type, Command string } `json:"hooks"`
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal([]byte(ClaudeContextSettings("/h o/context-hook.sh")), &s); err != nil {
@@ -22,11 +23,20 @@ func TestClaudeContextSettingsShape(t *testing.T) {
 	}
 	for _, ev := range []string{"SessionStart", "UserPromptSubmit"} {
 		g := s.Hooks[ev]
-		if len(g) != 1 || len(g[0].Hooks) != 1 || g[0].Hooks[0].Type != "command" || g[0].Hooks[0].Command != `'/h o/context-hook.sh' claude file` {
+		if len(g) == 0 || len(g[0].Hooks) != 1 || g[0].Hooks[0].Type != "command" || g[0].Hooks[0].Command != `'/h o/context-hook.sh' claude file` {
 			t.Fatalf("%s: %+v", ev, g)
 		}
 	}
-	if len(s.Hooks) != 2 {
+	// The thread-env hook: beside the context hook at SessionStart, and alone on
+	// FileChanged, matching the file SessionStart watches.
+	start, changed := s.Hooks["SessionStart"], s.Hooks["FileChanged"]
+	if len(start) != 2 || start[1].Hooks[0].Command != claudeEnvHookCommand {
+		t.Fatalf("SessionStart: %+v", start)
+	}
+	if len(changed) != 1 || changed[0].Matcher != threadEnvScript || changed[0].Hooks[0].Command != claudeEnvHookCommand {
+		t.Fatalf("FileChanged: %+v", changed)
+	}
+	if len(s.Hooks) != 3 {
 		t.Fatalf("unexpected events: %v", s.Hooks)
 	}
 	if s.Env[claudeAddDirMemoryEnv] != "1" {

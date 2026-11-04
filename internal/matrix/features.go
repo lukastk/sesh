@@ -127,6 +127,39 @@ func init() {
 		Localities:  []Locality{Local},
 	})
 	Register(Feature{
+		ID:          "thread.env",
+		Description: "a thread's environment VARIABLES (`thread new --env`, `env set|unset`) reach its agent's shell commands: set at spawn, the agent's own shell tool sees them; changed while the pane runs, claude's next command (FileChanged hook) and pi's next turn (extension, process.env) see additions, changes and removals in the SAME process and the owner answers `live`, while a running codex is unchanged and the owner answers `restart-required`; env_count on the row; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.env-restart",
+		Description: "`thread restart` replaces the running agent in the SAME pane with a new process on the same conversation, delivering the thread's current variables with removals gone (codex included): before any prompt (nothing to resume: a fresh launch) and after turns (the model still recalls a planted word); a thread with no running agent is refused; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.env-headless",
+		Description: "a thread's environment variables reach HEADLESS turns, each a fresh agent process: the turn's shell sees them, and a change or removal reaches the next turn; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "env.inherit",
+		Description: "a new thread inherits its parent's variables, a fork its source's, and a `delegate` worker its calling thread's: a copy, changed independently afterwards; --env wins over an inherited value and --no-inherit-env opts out; routed",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "env.guards",
+		Description: "the OWNER refuses names that are not shell variables, that sesh sets (SESH_*, TMUX) or that zsh reserves (an assignment could abort the sourced file), threads with no agent, unsetting a name the thread lacks, more than 64 KiB, and a conditional write whose version moved; the same value again is unchanged; `env show` masks values unless --reveal, in --json too; values stay out of sesh.db and off peers, in 0600 files, and go with the thread; routed",
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "env.edit",
+		Description: "`sesh env edit` opens the variables as KEY=VALUE lines in $EDITOR, saves the edited set conditionally on the opened version, reports an unchanged save, removes what was deleted, and clears them when the file is emptied; local (the editor runs on the caller — an http-routed --machine does the same)",
+		Localities:  []Locality{Local},
+	})
+	Register(Feature{
 		ID:          "config.local",
 		Description: "<SESH_HOME>/config.local.toml overlays config.toml on the OWNER daemon (tables merge key by key; any other value, arrays included, is replaced): start-time policy ([defaults] agent), per-creation policy ([spawn.<agent>] model, merged) and set-default refusing a key the overlay shadows, config.toml untouched; routed",
 		Localities:  bothLoc,

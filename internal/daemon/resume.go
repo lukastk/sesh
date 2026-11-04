@@ -33,6 +33,11 @@ func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd, thre
 	// never derive the transfer consumer identity from an inherited SESH_THREAD_ID or
 	// from the inbox basename.
 	env[agents.EnvThreadID] = threadID
+	script, err := d.startThreadEnv(threadID)
+	if err != nil {
+		return err
+	}
+	env[agents.EnvThreadEnvFile] = script
 	delete(env, agents.EnvPiTransferThreadID)
 	delete(env, agents.EnvPiTransferInbox)
 	delete(env, agents.EnvPiTransferAPISocket)
@@ -311,7 +316,11 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 		writeError(w, http.StatusInternalServerError, xerr.Error())
 		return
 	}
-	resumeCmd := agents.ResumeCommand(kind, sessionID, thread.Model, mode, extra)
+	resumeCmd, xerr := d.withThreadEnv(id, agents.ResumeCommand(kind, sessionID, thread.Model, mode, extra))
+	if xerr != nil {
+		writeError(w, http.StatusInternalServerError, xerr.Error())
+		return
+	}
 
 	// If the session still exists, a SIBLING thread is keeping it alive — revive
 	// into a new WINDOW of it rather than colliding on the name (multiple threads

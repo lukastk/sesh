@@ -77,6 +77,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"delegate": {
+		{"--no-inherit-env", "do not give the worker the calling thread's environment variables"},
 		{"--agent", "agent kind for the worker: pi|mypi|claude|codex (required)"},
 		{"--cwd", "working directory for the worker (default: $PWD)"},
 		{"--name", "worker thread name, mostly for --keep (default: delegate-<ts>)"},
@@ -206,6 +207,35 @@ var flagDocs = map[string][]flagDoc{
 		{"--session", "pi only: the agent session id (claude/codex pass theirs in the hook input on stdin)"},
 		{"--context-file", "claude only: this process was launched with its thread-context file, so the hook sends only changes"},
 	},
+	"env": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+	},
+	"env show": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--reveal", "print the values (they are masked otherwise, in --json too)"},
+		{"--json", "emit machine-readable JSON (vars, hash) instead of KEY=VALUE lines"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"env set": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--file", "read KEY=VALUE lines from this file on THIS machine; - reads stdin"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"env unset": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"env clear": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"env edit": {
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"meta": {
 		{"--id", "thread id/prefix to target (default: the current thread)"},
 	},
@@ -330,6 +360,9 @@ var flagDocs = map[string][]flagDoc{
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},
 	"thread new": {
+		{"--env", "set an environment variable on the thread, KEY=VALUE (repeatable; over any it inherits)"},
+		{"--env-file", "set the variables in this KEY=VALUE file on THIS machine"},
+		{"--no-inherit-env", "do not inherit the fork source's or parent's environment variables"},
 		{"--parent-shell", "parent the new thread under the SHELL THREAD whose session hosts it (--into-session/--into-window/--into-pane), so agents started inside a box's shell session become its children. Opt-in, and LAST in precedence: an explicit --parent wins, then SESH_THREAD_ID inference, then this — so it only ever applies to a thread that would otherwise be a root, and never re-parents anything"},
 		{"--agent", "agent to spawn: claude | codex | pi | mypi (mypi is the patched pi fork: same conversation format and RPC protocol, launched from the `mypi` executable on the owner daemon's PATH) (default: [defaults] agent in the OWNER daemon's config; loud error when neither is set; a fork inherits its source's agent)"},
 		{"--cwd", "start directory; a relative path expands against the invocation dir, a ~/… path resolves against the OWNER machine's home (portable cross-machine) (default: the current dir '.')"},
@@ -363,6 +396,12 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id or unique prefix (required: never inferred, since a claude pane restarts)"},
 		{"--model", "the model, in the harness's own spelling (required)"},
 		{"--force", "switch a thread that is mid-turn anyway (for claude the restart KILLS the turn in flight)"},
+		{"--json", "emit machine-readable JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"thread restart": {
+		{"--id", "thread id or unique prefix (required: never inferred, since the agent process is replaced)"},
+		{"--force", "restart a thread that is mid-turn anyway (KILLS the turn in flight)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

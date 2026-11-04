@@ -129,6 +129,11 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		return
 	}
 	id := uuid.NewString()
+	envCount, err := d.seedThreadEnv(id, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	thread := api.Thread{
 		ID:             id,
 		Machine:        d.cfg.Machine,
@@ -142,10 +147,12 @@ func (d *Daemon) newForkedThread(w http.ResponseWriter, kind agents.Kind, req ap
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          model,
+		EnvCount:       envCount,
 		// The conversation EXISTS (the branched transcript): turns must RESUME.
 		HeadlessStarted: true,
 	}
 	if err := d.store.InsertThread(thread); err != nil {
+		d.dropUnrecordedThreadEnv(id, false)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

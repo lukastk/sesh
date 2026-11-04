@@ -169,6 +169,14 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	// machine that actually runs the agent. Done once, up front, so every
 	// spawn path (headed/headless/fork) sees the expanded cwd.
 	req.Cwd = expandHomeCwd(req.Cwd)
+	if err := validateThreadEnv(req.Env); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if (req.Virtual || req.Divider) && len(req.Env) > 0 {
+		writeError(w, http.StatusBadRequest, "thread: --env needs an agent; a virtual thread or divider runs none")
+		return
+	}
 	// A VIRTUAL thread has no agent — branch before agent parsing; it does its
 	// own validation (agent-shaped fields refused, cwd optional).
 	if req.Virtual {
@@ -229,6 +237,12 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.EnvFrom != "" {
+		if _, err := d.store.GetThread(req.EnvFrom); err != nil {
+			writeError(w, http.StatusBadRequest, "thread: env source "+req.EnvFrom+" does not exist")
+			return
+		}
+	}
 	if req.ForkFrom != "" {
 		d.newForkedThread(w, kind, req)
 		return
@@ -266,6 +280,14 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := uuid.NewString()
+	envCount, err := d.seedThreadEnv(id, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// A failed spawn leaves no record, so nothing else would remove its env file.
+	recorded := false
+	defer func() { d.dropUnrecordedThreadEnv(id, recorded) }()
 
 	env := d.spawnEnv(id)
 	if err := d.prepAgentEnv(kind, env, req.Cwd, id); err != nil {
@@ -290,7 +312,11 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra)
+	command, err := d.withThreadEnv(id, agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	// Resolve placement -> the thread's session_name + its (marked) pane. teardown
 	// undoes ONLY what THIS spawn created (its own session, or its window/split
@@ -381,6 +407,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		Parent:         req.Parent,
 		Notify:         d.defaults.NotifyDefault(),
 		Model:          req.Model,
+		EnvCount:       envCount,
 		// A headed spawn BEGINS the conversation (the agent launches with this
 		// session id) — so a later headless turn on the idle thread must RESUME,
 		// not create. See api.Thread.HeadlessStarted.
@@ -391,6 +418,7 @@ func (d *Daemon) handleThreadNew(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	recorded = true
 	if req.Msg != "" {
 		go d.sendWhenReady(thread, req.Msg)
 	}
@@ -437,6 +465,13 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		cwd = info.Cwd
 	}
 	id := uuid.NewString()
+	envCount, err := d.seedThreadEnv(id, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	recorded := false
+	defer func() { d.dropUnrecordedThreadEnv(id, recorded) }()
 	env := d.spawnEnv(id)
 	if err := d.prepAgentEnv(kind, env, cwd, id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -456,7 +491,11 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	command := agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra)
+	command, err := d.withThreadEnv(id, agents.HeadedCommand(kind, agentSessionID, req.Model, mode, extra))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	thread := api.Thread{
 		ID:              id,
@@ -471,6 +510,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		Parent:          req.Parent,
 		Notify:          d.defaults.NotifyDefault(),
 		Model:           req.Model,
+		EnvCount:        envCount,
 		HeadlessStarted: true,
 	}
 	// Insert before stamping (no stamped-but-rowless pane on failure).
@@ -483,6 +523,7 @@ func (d *Daemon) newThreadIntoPane(w http.ResponseWriter, kind agents.Kind, req 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	recorded = true
 	writeJSON(w, http.StatusOK, api.ThreadResponse{
 		Schema:        api.SchemaVersion,
 		Thread:        thread,

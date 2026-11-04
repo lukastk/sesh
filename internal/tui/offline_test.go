@@ -50,7 +50,9 @@ func TestRequiresReachableOwnerCoversActions(t *testing.T) {
 		"pin", "unpin", "move-mode", "new-divider", "hold", "hold-until", "notify", "tickets",
 		"switch-model", "set-model",
 		// The context lives on the owner: viewing and editing both fetch it there.
-		"context-view", "context-edit"}
+		"context-view", "context-edit",
+		// So do the environment variables.
+		"env-edit"}
 	for _, id := range routed {
 		if _, ok := commandByID(id); !ok {
 			t.Fatalf("routed command %q is not in the registry", id)

@@ -115,7 +115,7 @@ func (d *Daemon) handleThreadModel(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if err := d.restartClaudeOnModel(thread, loc.Pane, req.Model); err != nil {
+		if err := d.restartAgent(thread, kind, loc.Pane, req.Model); err != nil {
 			writeError(w, http.StatusConflict, "model: registered "+req.Model+", but restarting the claude pane failed: "+err.Error())
 			return
 		}
@@ -168,18 +168,40 @@ func (d *Daemon) respondModel(w http.ResponseWriter, id, outcome, detail string)
 	writeJSON(w, http.StatusOK, api.SetThreadModelResponse{Schema: api.SchemaVersion, Thread: th, Outcome: outcome, Detail: detail})
 }
 
-// restartClaudeOnModel replaces the claude process in the thread's marked pane
-// with `claude --resume <live session> --model <m>` — the same command `thread
-// resume` builds — and confirms the new agent is up.
-func (d *Daemon) restartClaudeOnModel(th api.Thread, pane, model string) error {
-	if th.AgentSessionID == "" {
-		return errors.New("the thread has no captured claude session id to resume")
+// restartAgent replaces the agent in the thread's marked pane with a new process
+// on the same conversation — the command `thread resume` builds — pinned to model,
+// and confirms it is up. A conversation with nothing on disk yet (no prompt was
+// ever sent) has nothing to resume, and claude refuses to try, so it starts as a
+// fresh launch on the same session id.
+func (d *Daemon) restartAgent(th api.Thread, kind agents.Kind, pane, model string) error {
+	sessionID := th.AgentSessionID
+	if sessionID == "" && agents.Family(kind) != agents.Codex {
+		return fmt.Errorf("the thread has no captured %s session id to resume", kind)
 	}
-	kind := agents.Claude
-	// The stored id is the compaction chain's anchor; resume its live leaf.
-	sessionID, err := agents.ResolveCurrentSession(kind, th.AgentSessionID, th.Cwd, agents.ResolveHomes(d.cfg.CodexHome))
+	if kind == agents.Codex && sessionID == "" {
+		// The legacy fallback, as in revive: a pane that predates the notify reporter
+		// has turns but no recorded id.
+		codexHome, err := agents.CodexHome(d.cfg.CodexHome)
+		if err != nil {
+			return err
+		}
+		claimed, err := d.claimedAgentSessions(th.ID)
+		if err != nil {
+			return err
+		}
+		if sessionID, _, err = agents.DiscoverCodexSession(codexHome, th.Cwd, th.CreatedAtUnix, claimed); err != nil {
+			return err
+		}
+	}
+	homes := agents.ResolveHomes(d.cfg.CodexHome)
+	// The stored id is a compaction chain's anchor; resume its live leaf.
+	sessionID, err := agents.ResolveCurrentSession(kind, sessionID, th.Cwd, homes)
 	if err != nil {
-		return fmt.Errorf("resolve the current claude session: %w", err)
+		return fmt.Errorf("resolve the current %s session: %w", kind, err)
+	}
+	_, hasConversation, err := agents.TranscriptPath(kind, sessionID, th.Cwd, homes)
+	if err != nil {
+		return err
 	}
 	env := d.spawnEnv(th.ID)
 	if err := d.prepAgentEnv(kind, env, th.Cwd, th.ID); err != nil {
@@ -194,6 +216,12 @@ func (d *Daemon) restartClaudeOnModel(th api.Thread, pane, model string) error {
 		return err
 	}
 	cmd := agents.ResumeCommand(kind, sessionID, model, mode, extra)
+	if !hasConversation {
+		cmd = agents.HeadedCommand(kind, sessionID, model, mode, extra)
+	}
+	if cmd, err = d.withThreadEnv(th.ID, cmd); err != nil {
+		return err
+	}
 	if err := d.tmux.RespawnPaneCmd(pane, th.Cwd, env, cmd); err != nil {
 		return err
 	}

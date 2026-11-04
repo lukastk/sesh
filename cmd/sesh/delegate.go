@@ -32,6 +32,7 @@ func runDelegate(cfg config.Config, args []string) error {
 	timeout := fs.Duration("timeout", 10*time.Minute, "give up after this long (the worker is still archived unless --keep)")
 	sandbox := fs.Bool("sandbox", false, "restrict the worker (codex read-only; claude default-deny; pi: refused)")
 	yolo := fs.Bool("yolo", false, "bypass the worker's permissions (overrides [spawn] config)")
+	noInheritEnv := fs.Bool("no-inherit-env", false, "do not give the worker the calling thread's environment variables")
 	asJSON := fs.Bool("json", false, "emit {reply, id} as JSON")
 	// The task may be positional-first (v1's form): pop it before Parse.
 	task := ""
@@ -78,7 +79,15 @@ func runDelegate(cfg config.Config, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	resp, err := c.ThreadNew(ctx, api.NewThreadRequest{Agent: *agent, Name: *name, Cwd: *cwd, Headless: true})
+	// The worker does the caller's work, so it inherits the caller's environment;
+	// run from outside a thread there is nothing to inherit.
+	envFrom := ""
+	if !*noInheritEnv {
+		if caller, _, err := resolveCurrentThread(cfg, ""); err == nil {
+			envFrom = caller
+		}
+	}
+	resp, err := c.ThreadNew(ctx, api.NewThreadRequest{Agent: *agent, Name: *name, Cwd: *cwd, Headless: true, EnvFrom: envFrom})
 	if err != nil {
 		return fmt.Errorf("delegate: spawn worker: %w", err)
 	}

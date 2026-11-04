@@ -86,6 +86,9 @@ func runInfo(cfg config.Config, args []string) error {
 	if th.ContextHash != "" {
 		fmt.Printf("context:    yes (version %s — `sesh context show`)\n", th.ContextHash)
 	}
+	if th.EnvCount > 0 {
+		fmt.Printf("env:        %d variable(s) (`sesh env show`)\n", th.EnvCount)
+	}
 	fmt.Printf("machine:    %s\n", th.Machine)
 	fmt.Printf("cwd:        %s\n", th.Cwd)
 	fmt.Printf("head:       %s\n", st.Head)

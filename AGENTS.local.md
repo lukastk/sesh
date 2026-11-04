@@ -46,6 +46,10 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   that goes THROUGH the symlinked config.toml (see the config bullet below). Pi
   cannot run `anthropic/*` turns on this account ("Third-party apps now draw from your
   extra usage"), so tests drive pi on `openai-codex/*`.
+- **Daemon-run harness commands go through `$SHELL -c`** (headless turns, model lists,
+  hooks): the supervised daemon's own env has NO API keys — they come from `~/.zshenv`.
+  A bare exec silently loses every keyed provider (pi's model list showed 2 of 6).
+  Conformance cannot catch this: the sandbox daemon inherits the test shell's keys.
 - **Thread context (schema 61, [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md)):** claude =
   per-thread `<SESH_HOME>/thread-context/<id>/CLAUDE.md` (`--add-dir`, a copy of the
   store) + a hook for mid-session changes; codex = hooks only, trusted in its config

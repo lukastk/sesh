@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -43,33 +44,48 @@ type ModelList struct {
 //   - pi / mypi: `--list-models` prints a table of the models of every provider
 //     the user has credentials for.
 //
+// The harness runs THROUGH the user's shell ($SHELL -c), like a headless turn
+// (runHeadless) and a pane: providers authenticate from keys the shell's startup
+// files export (zsh's ~/.zshenv), and pi lists only the providers it has keys for.
+// A bare exec from the supervised daemon, whose own environment holds no keys, made
+// pi offer 2 providers of the 6 a pane on the same machine could use.
+//
 // env is the full environment for the child (the caller injects CODEX_HOME etc.);
 // dir is its working directory. An empty list is an error: a harness that can
 // use no model at all is misconfigured, and a picker must not show "nothing".
 func ListModels(ctx context.Context, k Kind, env []string, dir string) (ModelList, error) {
 	var (
-		cmd   *exec.Cmd
+		argv  []string
 		stdin string
 	)
 	switch k {
 	case Claude:
-		cmd = exec.CommandContext(ctx, Executable(k), "-p", "--input-format", "stream-json",
-			"--output-format", "stream-json", "--verbose", "--no-session-persistence")
+		argv = []string{Executable(k), "-p", "--input-format", "stream-json",
+			"--output-format", "stream-json", "--verbose", "--no-session-persistence"}
 		stdin = `{"type":"control_request","request_id":"sesh-models","request":{"subtype":"initialize"}}` + "\n"
 	case Codex:
-		cmd = exec.CommandContext(ctx, Executable(k), "debug", "models")
+		argv = []string{Executable(k), "debug", "models"}
 	case Pi, MyPi:
-		cmd = exec.CommandContext(ctx, Executable(k), "--list-models")
+		argv = []string{Executable(k), "--list-models"}
 	default:
 		return ModelList{}, fmt.Errorf("list models: unknown agent %q", k)
 	}
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shellQuoteArg(a)
+	}
+	cmd := exec.CommandContext(ctx, shell, "-c", strings.Join(quoted, " "))
 	cmd.Env = env
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return ModelList{}, fmt.Errorf("list %s models: %s: %w: %s", k, strings.Join(cmd.Args, " "), err, strings.TrimSpace(stderr.String()))
+		return ModelList{}, fmt.Errorf("list %s models: %s (via %s -c): %w: %s", k, strings.Join(argv, " "), shell, err, strings.TrimSpace(stderr.String()))
 	}
 	var (
 		out ModelList

@@ -1,6 +1,12 @@
 package agents
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseClaudeInitModels(t *testing.T) {
 	stream := `{"type":"system","subtype":"noise"}
@@ -67,5 +73,40 @@ func TestParsePiModels(t *testing.T) {
 	}
 	if _, err := parsePiModels([]byte("No models available.\n")); err == nil {
 		t.Error("output without the table header parsed as success")
+	}
+}
+
+// TestListModelsRunsThroughTheShell: providers authenticate from keys the user's
+// shell exports at startup, and pi lists only the providers it has keys for. A
+// fake $SHELL exports a key the caller's environment lacks; a fake pi lists the
+// keyed provider only when it sees that key.
+func TestListModelsRunsThroughTheShell(t *testing.T) {
+	dir := t.TempDir()
+	shell := filepath.Join(dir, "fake-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nexport FAKE_PROVIDER_KEY=1\nexec /bin/sh \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pi := filepath.Join(dir, "pi")
+	script := "#!/bin/sh\n" +
+		"[ \"$1\" = --list-models ] || exit 2\n" +
+		"echo 'provider       model            context  max-out  thinking  images'\n" +
+		"echo 'openai-codex   gpt-6-astra      400K     128K     yes       yes'\n" +
+		"[ -n \"$FAKE_PROVIDER_KEY\" ] && echo 'openrouter     qwen/qwen9       128K     32K      no        no'\n" +
+		"exit 0\n"
+	if err := os.WriteFile(pi, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	env := []string{"PATH=" + dir + ":/usr/bin:/bin"} // no FAKE_PROVIDER_KEY
+	got, err := ListModels(context.Background(), Pi, env, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range got.Models {
+		ids = append(ids, m.ID)
+	}
+	if strings.Join(ids, " ") != "openai-codex/gpt-6-astra openrouter/qwen/qwen9" {
+		t.Fatalf("models = %v: the shell's keyed provider is missing, so the harness did not run through $SHELL", ids)
 	}
 }

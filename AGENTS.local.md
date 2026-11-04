@@ -72,12 +72,12 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-04**: all six machines (mymain, macbook, macstudio, ideapad, termux, pocket4)
-run binary AND daemon `3b19781` (wire schema 61, store schema 28: claude context file + codex rewind re-send)
-on the split config with myrig `b52b5d4` and refreshed skill copies; pre-60 DB backups are in each
-`~/.sesh/backups/sesh-pre60-*`. Live smoke on mymain's supervised daemon: a headless claude turn read its
-context from the file, a headed codex launch passed hook trust. Threads launched before 61 keep the old
-hook-only rule until restarted. macbook's `pi` shim has no mise Node version (`pi` itself fails there). Re-check the fleet rather
+Fleet on **2026-11-04**: mymain, macbook, macstudio, termux and pocket4 run binary AND daemon `889806e`
+(wire schema 61, store 28; model lists through `$SHELL -c`); **ideapad runs `3b19781`** because its sesh
+checkout holds someone else's uncommitted edits (~10 files incl. contexthook.go, the pi extension) — not
+pulled or built over. pocket4's pi model list now FAILS: with keys visible, pi waits ~96s for privatemode's
+podman proxy (never healthy), past sesh's 12s model-list timeout. macbook's `pi` shim has no mise Node
+version (`pi` itself fails there). Split config, myrig `b52b5d4`; pre-60 DB backups in `~/.sesh/backups/`. Re-check the fleet rather
 than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,

@@ -87,15 +87,15 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-04 ~02:15Z**: ideapad, mymain, macstudio and pocket4 run binary AND daemon
-`c99aed6` (wire schema 62, store schema 29, thread env) with refreshed skill copies; pre-62 DB
-backups are in each `~/.sesh/backups/sesh-pre62-*`. Live smoke on ideapad's supervised daemon:
-claude and pi followed set/unset live, codex answered restart-required and followed a restart.
-**macbook and termux were unreachable and stay on `889806e` (schema 61)**: pull, build (termux:
-plain native `go build`, its PID recipe in OPERATIONS), back up, restart. pocket4's pi model list
-fails (privatemode's podman proxy outlasts the 12s timeout) and it runs codex 0.145 / pi 1.3,
-which fail the control cells. macbook's `pi` shim has no mise Node version. Re-check the fleet
-rather than repeating any recorded status, here or in an archive.
+Fleet on **2026-11-04 ~02:50Z**: mymain, ideapad, macstudio, pocket4 and termux run binary AND daemon
+`0745362` (wire schema 63, store schema 30, thread MCP arguments) with refreshed skill copies; pre-63 DB
+backups are in each `~/.sesh/backups/sesh-pre63-*` (termux: a stopped-daemon file copy, it has no sqlite3).
+Live smoke on mymain's supervised daemon: for claude, codex and pi the real soliton server read the agent
+file named by `--mcp-arg`; routed create/list/delete to ideapad over the mesh. **macbook was unreachable and
+stays on `889806e` (schema 61)**: pull, build, back up, restart. pocket4's pi model list fails (privatemode's
+podman proxy outlasts the 12s timeout) and it runs codex 0.145 / pi 1.3, which fail the control cells.
+macbook's `pi` shim has no mise Node version. Re-check the fleet rather than repeating any recorded status,
+here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

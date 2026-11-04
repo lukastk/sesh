@@ -75,6 +75,19 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   launch. Pi's entry is `"disabled": true` so the adapter never runs an argument-less copy.
   A claude or codex server that cannot start is silent (exit 0); pi headless exits 1.
   `integrations/pi` loads from `~/mysetup/sesh`, so a worktree's `mcp.ts` is not what runs.
+- **MCP review fold (schema 64, migration 31):** Pi's `mcp.ts` follows `tools/list_changed`, retries a
+  failed start, has no call limit unless `timeout` is set, and sends `notifications/cancelled`; a headless
+  turn waits 45s for tools, then fails. A failed headless turn is stored as `threads.turn_error`, so `await`
+  and `thread wait` exit non-zero and `status`/`info` show it. codex 0.166 ignores `tools/list_changed`
+  (honest Skip). A failed claude/codex server stays silent: sesh does not read claude's `system/init`.
+  Soliton's own `[key]` redaction rewrites any text containing a stub's one-letter key.
+- **Conformance traps (2026-11-04):** `go test -run 'TestMatrix/(a/b|c/d)'` splits on `/` and runs ZERO
+  cells; run a cell as `-run '^TestMatrix$/^a/b$'`. Moving mise's node `lts` (installing a newer node) breaks
+  every pi/codex shim at once, and the suite shows ~240 sub-second failures, not a verdict. Cross-host tests
+  use the partner's `~/.local/bin/sesh-v2`, NOT its `sesh`: refresh it or a PASS proves an old binary.
+  `TestRealCrossHostHTTP` cannot pass as written: it spawns `--headless`, then waits for `Headful`.
+  Pre-existing reds, also on b7acffc: `schedule.lifecycle`, `ticket.list-all/remote` (archive gate on a live
+  pane), `thread.model/pi` (no google key). Intermittent on both: `model.list/pi`, `schedule.spawn/codex`.
 - **Config layout (schema 59, 2026-11-02):** `~/.sesh/config.toml` is a SYMLINK to myrig's
   plain `home/.sesh/config.toml` (shared by the fleet); `~/.sesh/config.local.toml` is
   rendered per machine from `config.local.toml.jinja` and OVERLAYS it (tables merge key
@@ -87,15 +100,13 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-04 ~02:50Z**: mymain, ideapad, macstudio, pocket4 and termux run binary AND daemon
-`0745362` (wire schema 63, store schema 30, thread MCP arguments) with refreshed skill copies; pre-63 DB
-backups are in each `~/.sesh/backups/sesh-pre63-*` (termux: a stopped-daemon file copy, it has no sqlite3).
-Live smoke on mymain's supervised daemon: for claude, codex and pi the real soliton server read the agent
-file named by `--mcp-arg`; routed create/list/delete to ideapad over the mesh. **macbook was unreachable and
-stays on `889806e` (schema 61)**: pull, build, back up, restart. pocket4's pi model list fails (privatemode's
-podman proxy outlasts the 12s timeout) and it runs codex 0.145 / pi 1.3, which fail the control cells.
-macbook's `pi` shim has no mise Node version. Re-check the fleet rather than repeating any recorded status,
-here or in an archive.
+Fleet on **2026-11-04 ~15:10Z**: mymain, ideapad, macstudio, macbook and termux run binary AND daemon
+`c75b837` (wire schema 64, store schema 31, MCP review fold) with refreshed skill copies; pre-64 DB backups
+are in each `~/.sesh/backups/sesh-pre64-*` (termux: a stopped-daemon file copy, it has no sqlite3). macbook
+jumped from schema 61. **pocket4 was unreachable and stays on `0745362` (schema 63)**: pull, build, back up,
+restart; it runs codex 0.145 / pi 1.3, which fail the control cells, and its pi model list fails (privatemode's
+podman proxy outlasts the 12s timeout). macbook's `sesh-v2` is c75b837, the June build is beside it as
+`sesh-v2.e49b1e1`. Re-check the fleet rather than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

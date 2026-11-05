@@ -102,13 +102,16 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-04 ~15:10Z**: mymain, ideapad, macstudio, macbook and termux run binary AND daemon
-`c75b837` (wire schema 64, store schema 31, MCP review fold) with refreshed skill copies; pre-64 DB backups
-are in each `~/.sesh/backups/sesh-pre64-*` (termux: a stopped-daemon file copy, it has no sqlite3). macbook
-jumped from schema 61. **pocket4 was unreachable and stays on `0745362` (schema 63)**: pull, build, back up,
-restart; it runs codex 0.145 / pi 1.3, which fail the control cells, and its pi model list fails (privatemode's
-podman proxy outlasts the 12s timeout). macbook's `sesh-v2` is c75b837, the June build is beside it as
-`sesh-v2.e49b1e1`. Re-check the fleet rather than repeating any recorded status, here or in an archive.
+Fleet on **2026-11-05 ~11:15Z**: mymain, ideapad, macstudio, macbook and termux run binary AND daemon
+`410c4f7` (wire schema 64, store schema 31, env file on the launch line) on myrig `775b04c` (`.zshenv` sources
+`$SESH_THREAD_ENV_FILE`) with refreshed skill copies, and every tmux session had the variable scrubbed from its
+session env. **pocket4 was unreachable and stays on `0745362` (schema 63)**: pull sesh AND myrig, build, back up
+(`VACUUM INTO`, it migrates), restart, run `tmux -L sesh set-environment -t <session> -u SESH_THREAD_ENV_FILE` on
+each session; it runs codex 0.145 / pi 1.3, which fail the control cells, and its pi model list fails (privatemode's
+podman proxy outlasts the 12s timeout). mymain's myrig keeps someone's `.gitconfig` edit and a stray `already` file.
+macbook's `sesh-v2` is c75b837, the June build is beside it as `sesh-v2.e49b1e1`. `TestDoctorWarnsOnlyForTheMissingHarness`
+fails wherever `mypi` is installed (ideapad), with or without this work. Re-check the fleet rather than repeating
+any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

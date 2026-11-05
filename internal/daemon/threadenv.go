@@ -6,12 +6,16 @@ package daemon
 // (setmodel.go) is what applies one everywhere else.
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"maps"
 	"net/http"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
@@ -176,6 +180,12 @@ func (d *Daemon) threadEnvOutcome(th api.Thread) (string, string) {
 		return api.EnvLive, "claude's shell commands have the change from the next command" + processNote
 	case agents.Pi:
 		return api.EnvLive, "pi's shell commands have the change from its next turn" + processNote
+	case agents.Codex:
+		// Each codex command is a fresh shell, so the shell's startup is what follows.
+		if d.shellSourcesThreadEnv() {
+			return api.EnvLive, "codex's shell commands have the change from the next command" + processNote
+		}
+		return api.EnvRestartRequired, "this machine's shell startup does not source the thread's env file, so a running codex keeps its environment" + restart
 	default:
 		return api.EnvRestartRequired, "a running " + th.AgentKind + " cannot take a new environment" + restart
 	}
@@ -226,38 +236,69 @@ func (d *Daemon) handleThreadRestart(w http.ResponseWriter, r *http.Request) {
 		Detail: "the " + th.AgentKind + " pane was restarted in place; its conversation resumed"})
 }
 
-// startThreadEnv prepares thread id's env files for a launch and returns env.sh's
-// path. Every launch gets the file, variables or not: a claude only watches a file
-// that exists, and one set later has to reach it. A launch starts from the current
-// variables, so the removals recorded for the previous process are done with.
-func (d *Daemon) startThreadEnv(id string) (string, error) {
+// startThreadEnv prepares thread id's env files for a launch. Every launch gets the
+// file, variables or not: a claude only watches a file that exists, and one set later
+// has to reach it. A launch starts from the current variables, so the removals
+// recorded for the previous process are done with.
+func (d *Daemon) startThreadEnv(id string) error {
 	d.threadEnvMu.Lock()
 	defer d.threadEnvMu.Unlock()
 	e, err := agents.ReadThreadEnv(d.cfg.Home, id)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if err := agents.WriteThreadEnv(d.cfg.Home, id, agents.ThreadEnv{Vars: e.Vars}); err != nil {
-		return "", err
-	}
-	return agents.ThreadEnvScript(d.cfg.Home, id)
+	return agents.WriteThreadEnv(d.cfg.Home, id, agents.ThreadEnv{Vars: e.Vars})
 }
 
-// withThreadEnv is command, sourcing the thread's env.sh first if it has variables.
-// A thread without any launches on the same line as ever.
+// withThreadEnv is command as thread id's launch line (agents.WithThreadEnv).
 func (d *Daemon) withThreadEnv(id, command string) (string, error) {
 	e, err := agents.ReadThreadEnv(d.cfg.Home, id)
 	if err != nil {
 		return "", err
 	}
-	if len(e.Vars) == 0 {
-		return command, nil
-	}
 	script, err := agents.ThreadEnvScript(d.cfg.Home, id)
 	if err != nil {
 		return "", err
 	}
-	return agents.WithThreadEnv(script, command), nil
+	return agents.WithThreadEnv(script, len(e.Vars) > 0, command), nil
+}
+
+// shellSourcesThreadEnv reports whether this machine's shell startup sources
+// $SESH_THREAD_ENV_FILE. That is myrig's policy, not sesh's, so `env set` asks the
+// shell rather than assume it: a machine without the line must not be told a running
+// codex followed a change. Asked each time, because the answer changes with a myrig
+// pull and a change of environment is rare.
+func (d *Daemon) shellSourcesThreadEnv() bool {
+	const answer = "sesh-env-probe-sourced"
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		log.Printf("env: $SHELL is unset, so its startup cannot be asked about the thread env file")
+		return false
+	}
+	f, err := os.CreateTemp("", "sesh-env-probe-*.sh")
+	if err != nil {
+		log.Printf("env: shell probe: %v", err)
+		return false
+	}
+	defer os.Remove(f.Name())
+	_, werr := f.WriteString("export SESH_ENV_PROBE=" + answer + "\n")
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		log.Printf("env: shell probe: %v", werr)
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shell, "-c", `printf %s "$SESH_ENV_PROBE"`)
+	cmd.Env = append(os.Environ(), agents.EnvThreadEnvFile+"="+f.Name())
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("env: shell probe: %v", err)
+		return false
+	}
+	return strings.HasSuffix(string(out), answer)
 }
 
 // seedThreadEnv writes a new thread's starting variables and returns how many: what

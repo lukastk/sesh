@@ -35,8 +35,11 @@ type TurnSpec struct {
 	// hooks (ContextHookArgs; none for pi, whose extension asks itself) and its MCP
 	// arguments (mcparg.go).
 	HookArgs []string
-	// ThreadEnv is the thread's own environment variables (api/env.go).
-	ThreadEnv map[string]string
+	// ThreadEnv is the thread's own environment variables (api/env.go), and
+	// ThreadEnvFile its env.sh: a turn runs through $SHELL -c, whose .zshenv would
+	// otherwise replace any name it also exports. "" when it has no variables.
+	ThreadEnv     map[string]string
+	ThreadEnvFile string
 	// SeshBin is the LAUNCHING daemon's own executable, injected as $SESH_BIN so
 	// the worker can call sesh unambiguously. See TurnEnv.
 	SeshBin           string
@@ -64,6 +67,9 @@ func HeadlessTurn(spec TurnSpec) (reply, newSessionID string, err error) {
 	// branch and forgotten in another is how a worker ends up with an identity
 	// on two agents and none on the third.
 	env := ApplyThreadEnv(TurnEnv(os.Environ(), spec.ThreadID, spec.SeshBin, spec.CodexHome), spec.ThreadEnv)
+	if spec.ThreadEnvFile != "" {
+		env = append(env, EnvThreadEnvFile+"="+spec.ThreadEnvFile)
+	}
 	if Family(spec.Kind) == Pi {
 		transferThreadID := ""
 		if spec.TransferInbox != "" || spec.TransferAPISocket != "" {
@@ -168,6 +174,7 @@ func TurnEnv(base []string, threadID, seshBin, codexHome string) []string {
 		// about.
 		EnvThreadID:            true,
 		EnvSeshBin:             true,
+		EnvThreadEnvFile:       true, // a shell acts on it: never another thread's
 		EnvPiTransferInbox:     true,
 		EnvPiTransferThreadID:  true,
 		EnvPiTransferAPISocket: true,

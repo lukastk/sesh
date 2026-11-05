@@ -32,8 +32,12 @@ import (
 	"strings"
 )
 
-// EnvThreadEnvFile names the thread's env.sh in every sesh-launched pane: what
-// `sesh env hook` points claude at, and how the pi extension finds env.json.
+// EnvThreadEnvFile names the thread's env.sh to its agent: what `sesh env hook`
+// points claude at, how the pi extension finds env.json, and what the user's shell
+// startup sources (myrig's .zshenv ends with it). That last use is what keeps a
+// thread's value when .zshenv exports the same name, because pi and codex run every
+// command in a fresh zsh, and it is how a running codex follows a change. Since a
+// shell ACTS on this variable, it must never reach a pane that is not the thread's.
 const EnvThreadEnvFile = "SESH_THREAD_ENV_FILE"
 
 const (
@@ -222,12 +226,17 @@ func ThreadEnvHash(vars map[string]string) string {
 	return hex.EncodeToString(sum.Sum(nil))[:16]
 }
 
-// WithThreadEnv is a launch line that sources script, for a thread with variables.
-// The values reach the agent by this line rather than `tmux -e`, which at
-// new-session writes them to the SESSION environment, where every other pane of
-// that session reads them. exec keeps the agent the pane's own process.
-func WithThreadEnv(script, command string) string {
-	return ". " + ShellEscape(script) + "; exec " + command
+// WithThreadEnv is a thread's launch line: it names the env file, sources it if the
+// thread has variables, and execs the agent. Both are on this line rather than in
+// `tmux -e`, which at new-session writes to the SESSION environment, where every other
+// pane of that session reads it: the values directly, and through the variable, any
+// zsh started there. exec keeps the agent the pane's own process.
+func WithThreadEnv(script string, hasVars bool, command string) string {
+	line := "export " + EnvThreadEnvFile + "=" + ShellEscape(script) + "; "
+	if hasVars {
+		line += ". " + ShellEscape(script) + "; "
+	}
+	return line + "exec " + command
 }
 
 // ApplyThreadEnv overlays a thread's variables on a headless turn's environment.

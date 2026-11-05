@@ -33,11 +33,9 @@ func (d *Daemon) prepAgentEnv(kind agents.Kind, env map[string]string, cwd, thre
 	// never derive the transfer consumer identity from an inherited SESH_THREAD_ID or
 	// from the inbox basename.
 	env[agents.EnvThreadID] = threadID
-	script, err := d.startThreadEnv(threadID)
-	if err != nil {
+	if err := d.startThreadEnv(threadID); err != nil {
 		return err
 	}
-	env[agents.EnvThreadEnvFile] = script
 	delete(env, agents.EnvPiTransferThreadID)
 	delete(env, agents.EnvPiTransferInbox)
 	delete(env, agents.EnvPiTransferAPISocket)

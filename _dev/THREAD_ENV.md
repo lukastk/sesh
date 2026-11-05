@@ -77,14 +77,17 @@ composer, swallowing the probe's input. It did not appear on the next launch.
 - **Refuse zsh's special parameters.** `export LINES='a b'` is a math error that aborts
   the sourced file, so every later variable silently disappears (found by the round-trip
   test). `agents.zshSpecialNames` is checked against the local zsh by a test.
-- **`.zshenv` wins on pi and codex (open).** They run commands in a fresh `zsh`, which
-  re-reads it after the launch environment, so any name it exports replaces the thread's
-  value. Measured with `HF_TOKEN`: claude kept the thread's value at launch and live (its
-  hook file is sourced after shell startup); pi and codex got myrig's. myrig exports 126
-  names, including `GITHUB_TOKEN`. A last line in `.zshenv` sourcing
-  `$SESH_THREAD_ENV_FILE` would fix it, and make codex follow live (§2), and needs the
-  variable added to headless turns; not done because it is a rig-wide change in another
-  repo that reverses the restart-only codex decision. Lukas's call.
+- **`.zshenv` must end by sourcing `$SESH_THREAD_ENV_FILE`.** pi and codex run commands in
+  a fresh `zsh`, which re-reads it after the launch environment, so any name it exports
+  replaced the thread's value. Measured with `HF_TOKEN`: claude kept the thread's value
+  (its hook file is sourced after shell startup); pi and codex got myrig's, and a headless
+  turn's agent process did too, because turns start through `$SHELL -c`. myrig exports 126
+  names, including `GITHUB_TOKEN`. myrig's `.zshenv` now ends with those lines (2026-11-05),
+  and a turn carries the variable. `thread.env-zshenv` covers it.
+- **A shell ACTS on `$SESH_THREAD_ENV_FILE`, so it must stay out of the tmux session.** While
+  it was passed with `tmux -e`, a window opened by hand in a thread's session inherited it
+  and, once `.zshenv` sourced it, would have had that thread's values. It is now exported on
+  the launch line, and sessions created before that were scrubbed at rollout.
 
 ## 5. What was built, and why
 
@@ -96,14 +99,15 @@ composer, swallowing the probe's input. It did not appear on the next launch.
 - **pi:** `integrations/pi/sesh-agent-state/env.ts` reads `env.json` before each run, found
   through `$SESH_THREAD_ENV_FILE`, with no CLI call or route: an agent older than the
   variable predates the extension code too.
-- **Codex: restart-only** by decision, rather than the `ZDOTDIR` shim of §2, which forwards
-  the user's dotfiles and is inherited by everything the agent starts.
+- **Codex** follows through the `.zshenv` lines of §4, not the `ZDOTDIR` shim of §2, which
+  forwards the user's dotfiles. Those lines are myrig's policy, so `env set` asks the real
+  `$SHELL` whether they exist on this machine (`shellSourcesThreadEnv`) and answers
+  `restart-required` if not.
 - **`thread restart`** generalises the claude-only restart of `switch-model`. A
   conversation with nothing on disk starts fresh on the same session id, because
   `claude --resume` refuses a session with no transcript.
-- **Launch line:** `. <env.sh>; exec <agent>`, only for threads with variables, so every
-  other thread launches on the same line as before. `exec` keeps the agent the pane's own
-  process.
+- **Launch line:** `export SESH_THREAD_ENV_FILE=<env.sh>; [. <env.sh>;] exec <agent>`, sourcing
+  only for threads with variables. `exec` keeps the agent the pane's own process.
 - **Removals** stay in `env.json` as `removed` until the next launch: the launched
   process, and codex's snapshot, still hold the value, so `env.sh` must say `unset`.
 - **Inheritance** (Lukas): children, forks and delegate workers copy the source's variables;
@@ -111,7 +115,9 @@ composer, swallowing the probe's input. It did not appear on the next launch.
 
 ## 6. Mixed deploy
 
-A pre-62 daemon 404s the routes (the CLI reports the missing route), ignores `env`,
+The `.zshenv` lines are inert without the variable, and do nothing harmful under an older
+daemon. A daemon older than the launch-line change still passes the variable with `tmux -e`,
+so its sessions need the scrub. A pre-62 daemon 404s the routes (the CLI reports the missing route), ignores `env`,
 `no_inherit_env` and `env_from` on `thread new`, and omits `env_count`. A pre-62 `sesh`
 binary has no `env` command, but claude's hook runs `$SESH_BIN`, the launching daemon's own
 binary, so the two cannot disagree. The pi extension is inert without

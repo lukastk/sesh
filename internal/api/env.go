@@ -11,9 +11,10 @@ package api
 // Every launch and every headless turn starts with the thread's variables. A change
 // also reaches a running agent's SHELL COMMANDS where the harness allows it: claude
 // (a FileChanged hook) from the next command, pi (its extension sets process.env)
-// from the next turn. A running codex needs `thread restart`. On claude and codex
-// the agent process itself and the MCP servers it already started keep the
-// environment they launched with until that restart.
+// from the next turn, and codex from the next command where the shell's startup
+// sources the thread's env file (myrig's .zshenv does; `env set` asks the shell). On
+// claude and codex the agent process itself and the MCP servers it already started
+// keep the environment they launched with until `thread restart`.
 
 // MaxThreadEnvBytes bounds a thread's variables, keys and values together. Linux
 // refuses a single environment string over 128 KiB at exec, and a launch must not

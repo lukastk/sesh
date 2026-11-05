@@ -36,8 +36,8 @@ no agent, so they cannot have variables.
 
 | outcome | meaning |
 |---|---|
-| `live` | the running agent's shell commands have it: **claude** from the next command, **pi / mypi** from the next turn |
-| `restart-required` | **codex**, or a claude not launched by sesh's current daemon: nothing changes until `sesh thread restart` |
+| `live` | the running agent's shell commands have it: **claude** and **codex** from the next command, **pi / mypi** from the next turn |
+| `restart-required` | a claude not launched by a current daemon, or a codex on a machine whose shell startup does not source the thread's env file: nothing changes until `sesh thread restart` |
 | `next-launch` | nothing is running; the next launch or headless turn has it |
 
 `thread restart` replaces the agent process in the same pane, on the same conversation. It
@@ -51,13 +51,24 @@ URL, or an MCP server, needs `thread restart`.
 A pi that started before this feature, or was adopted rather than launched by sesh, has no
 env file to follow and needs one `thread restart`.
 
-## Variables your shell startup also sets
+## Variables your shell startup also exports
 
-pi and codex run each command in a fresh `zsh`, which reads `~/.zshenv`. If that file exports
-a name, its value replaces the thread's in those shells, and `env set` cannot tell. On this
-rig that means the names myrig exports, such as `GITHUB_TOKEN` and `HF_TOKEN`. Claude is not
-affected: it applies the thread's file after the shell starts. The variable is correct in
-the agent process itself on all three.
+pi and codex run each command in a fresh `zsh`, and a headless turn starts through one, so
+`~/.zshenv` runs after the launch environment is set. For a thread's value to win over a name
+that file exports, its **last** lines must source the thread's env file, as myrig's do:
+
+```zsh
+if [[ -r "${SESH_THREAD_ENV_FILE:-}" ]]; then
+  source "$SESH_THREAD_ENV_FILE"
+fi
+```
+
+sesh sets `SESH_THREAD_ENV_FILE` only for the thread's own agent and whatever that agent
+starts. A running codex follows changes through these same lines, and `env set` checks the
+machine's real shell before saying so. Without them a name `.zshenv` exports keeps its
+`.zshenv` value on pi and codex, and a running codex reports `restart-required`.
+
+Long-lived background shells an agent already started keep their environment.
 
 ## Inheritance
 

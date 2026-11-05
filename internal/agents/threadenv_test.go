@@ -163,3 +163,27 @@ func TestThreadEnvHashIsUnambiguous(t *testing.T) {
 		t.Fatal("different sets share a hash")
 	}
 }
+
+// The launch line names the env file itself, because a shell acts on the variable and
+// `tmux -e` at new-session would hand it to every pane of the session. A thread with
+// no variables has nothing to source.
+func TestWithThreadEnvLine(t *testing.T) {
+	bare := WithThreadEnv("/h o/env.sh", false, "claude --x")
+	if bare != `export SESH_THREAD_ENV_FILE='/h o/env.sh'; exec claude --x` {
+		t.Fatalf("%q", bare)
+	}
+	withVars := WithThreadEnv("/h o/env.sh", true, "claude --x")
+	if withVars != `export SESH_THREAD_ENV_FILE='/h o/env.sh'; . '/h o/env.sh'; exec claude --x` {
+		t.Fatalf("%q", withVars)
+	}
+}
+
+// A turn runs through a shell that acts on this variable, so one inherited by a
+// hand-started daemon must not survive into a turn.
+func TestTurnEnvDropsAnInheritedEnvFile(t *testing.T) {
+	for _, e := range TurnEnv([]string{EnvThreadEnvFile + "=/other/thread/env.sh", "A=1"}, "t", "", "") {
+		if strings.HasPrefix(e, EnvThreadEnvFile+"=") {
+			t.Fatalf("kept %q", e)
+		}
+	}
+}

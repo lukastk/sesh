@@ -30,6 +30,7 @@ func init() {
 		for _, a := range matrix.AllAgents {
 			a := a
 			matrix.RegisterTest("thread.env", a, loc, func(t *testing.T) { testThreadEnv(t, string(a), loc) })
+			matrix.RegisterTest("thread.env-zshenv", a, loc, func(t *testing.T) { testThreadEnvZshenv(t, string(a), loc) })
 			matrix.RegisterTest("thread.env-restart", a, loc, func(t *testing.T) { testThreadEnvRestart(t, string(a), loc) })
 			matrix.RegisterTest("thread.env-headless", a, loc, func(t *testing.T) { testThreadEnvHeadless(t, string(a), loc) })
 		}
@@ -172,7 +173,14 @@ func testThreadEnv(t *testing.T, agent string, loc matrix.Locality) {
 		t.Fatalf("grid row env_count = %d, want 1", row.EnvCount)
 	}
 
-	follows := agent != "codex"
+	// The variable and the values stay out of the session, where any pane reads them.
+	if session, err := sb.rawTmux(t, "show-environment", "-t", "="+th.SessionName); err != nil {
+		t.Fatalf("tmux show-environment: %v", err)
+	} else if strings.Contains(session, agents.EnvThreadEnvFile) || strings.Contains(session, "SESHT_") {
+		t.Fatalf("the thread's env reached the tmux session environment:\n%s", session)
+	}
+
+	follows := agent != "codex" || shellSourcesThreadEnv(t)
 	wantOutcome := api.EnvLive
 	if !follows {
 		wantOutcome = api.EnvRestartRequired
@@ -195,6 +203,87 @@ func testThreadEnv(t *testing.T, agent string, loc matrix.Locality) {
 	if _, pid := liveAgentPID(t, sb, th.ID); pid != pidBefore {
 		t.Fatalf("the agent process changed (%d -> %d): nothing here may restart it", pidBefore, pid)
 	}
+}
+
+// shellSourcesThreadEnv asks this machine's zsh what the daemon asks: whether its
+// startup sources the thread env file, which is the user's policy, not sesh's.
+func shellSourcesThreadEnv(t *testing.T) bool {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "env.sh")
+	if err := os.WriteFile(f, []byte("export SESHT_SOURCED=yes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("zsh", "-c", `printf %s "$SESHT_SOURCED"`)
+	cmd.Env = append(os.Environ(), agents.EnvThreadEnvFile+"="+f)
+	out, err := cmd.Output()
+	return err == nil && strings.HasSuffix(string(out), "yes")
+}
+
+// rigExportedName finds a name this machine's ~/.zshenv exports that an agent does
+// not need to log in. Only the name is read; the test never prints or stores a value.
+func rigExportedName(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{"HF_TOKEN", "BRAVE_API_KEY", "HETZNER_API_KEY"} {
+		cmd := exec.Command("zsh", "-c", `[ -n "${`+name+`:-}" ]`)
+		cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+		if cmd.Run() == nil {
+			return name
+		}
+	}
+	return ""
+}
+
+func testThreadEnvZshenv(t *testing.T, agent string, loc matrix.Locality) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	name := rigExportedName(t)
+	if name == "" {
+		t.Skip("NOT VERIFIABLE: this machine's ~/.zshenv exports none of the candidate names")
+	}
+	if !shellSourcesThreadEnv(t) {
+		t.Skip("NOT IMPLEMENTED: this machine's shell startup does not source $SESH_THREAD_ENV_FILE")
+	}
+	sb := newSandbox(t, loc)
+	if err := os.WriteFile(filepath.Join(sb.Home, "config.toml"), []byte("[spawn]\nmode = \"yolo\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sb.startDaemon(t)
+	probe := newEnvProbe(t)
+	// The command compares and writes a verdict, so the rig's real value is never
+	// written anywhere, whoever wins.
+	ask := func(want string) (string, func()) {
+		probe.n++
+		file := filepath.Join(probe.dir, fmt.Sprintf("verdict-%d.txt", probe.n))
+		prompt := fmt.Sprintf("Use your shell tool to run exactly this one command and nothing else, then reply with only the word DONE: [ \"$%s\" = %s ] && echo WON > %s || echo LOST > %s", name, want, file, file)
+		return prompt, func() {
+			t.Helper()
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("the agent's shell left no verdict: %v", err)
+			}
+			if got := strings.TrimSpace(string(raw)); got != "WON" {
+				t.Fatalf("%s: ~/.zshenv's value beat the thread's %s", name, want)
+			}
+		}
+	}
+
+	th := newThreadWithEnv(t, sb, agent, "zshenv", false, name+"=from-launch")
+	sb.waitThreadReady(t, th.ID, agent)
+	prompt, check := ask("from-launch")
+	headfulTurn(t, sb, th.ID, prompt)
+	check()
+	if got := envSetCmd(t, sb, th.ID, name+"=from-live"); got.Outcome != api.EnvLive {
+		t.Fatalf("env set answered %+v", got)
+	}
+	prompt, check = ask("from-live")
+	headfulTurn(t, sb, th.ID, prompt)
+	check()
+
+	turns := newThreadWithEnv(t, sb, agent, "zshenv-turns", true, name+"=from-turn")
+	prompt, check = ask("from-turn")
+	sb.headlessTurn(t, turns.ID, prompt)
+	check()
 }
 
 func testThreadEnvRestart(t *testing.T, agent string, loc matrix.Locality) {

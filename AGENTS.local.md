@@ -63,10 +63,12 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
 - **Thread env (schema 62, [THREAD_ENV](_dev/THREAD_ENV.md)):** values live in 0600 files
   (`<SESH_HOME>/thread-env/<id>/`), never in the store or a row: `env_count` only. Claude
   follows via a `FileChanged` hook (`sesh env hook`), pi via the extension's `env.ts`, codex
-  needs `thread restart`. Hooks must write the `.` POINTER, never values (claude sources
+  follows through the last lines of myrig's `.zshenv`, which also make a thread's value beat
+  `.zshenv`'s (`env set` asks the real `$SHELL`; a machine without them says restart-required).
+  A shell ACTS on `$SESH_THREAD_ENV_FILE`, so it is on the launch line, never `tmux -e`. Hooks must write the `.` POINTER, never values (claude sources
   every hook file, so a dropped key returns stale), and removals must be `unset` until the
   next launch. Never put user values in `tmux -e` at new-session: they land in the SESSION
-  env. `.zshenv` beats a thread value on pi/codex (open; Lukas's call). Remote pi/codex
+  env. Remote pi/codex
   cells need current harnesses on a Linux host: macOS and pocket4 fail the CONTROL cells too,
   and pi's extension loads from the checkout, so a tar'd tree does not test `env.ts`.
 - **MCP arguments (schema 63, migration 30, [THREAD_MCP_ARGS](_dev/THREAD_MCP_ARGS.md)):**

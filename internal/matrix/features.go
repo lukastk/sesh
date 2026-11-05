@@ -152,7 +152,13 @@ func init() {
 	})
 	Register(Feature{
 		ID:          "thread.env",
-		Description: "a thread's environment VARIABLES (`thread new --env`, `env set|unset`) reach its agent's shell commands: set at spawn, the agent's own shell tool sees them; changed while the pane runs, claude's next command (FileChanged hook) and pi's next turn (extension, process.env) see additions, changes and removals in the SAME process and the owner answers `live`, while a running codex is unchanged and the owner answers `restart-required`; env_count on the row; routed",
+		Description: "a thread's environment VARIABLES (`thread new --env`, `env set|unset`) reach its agent's shell commands: set at spawn, the agent's own shell tool sees them; changed while the pane runs, claude's next command (FileChanged hook), pi's next turn (extension, process.env) and codex's next command (the shell's startup sources the env file) see additions, changes and removals in the SAME process and the owner answers `live`; where the shell does not source it, a running codex is unchanged and the owner truthfully answers `restart-required`; neither the variables nor the env file's path reach the tmux SESSION environment; env_count on the row; routed",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
+		ID:          "thread.env-zshenv",
+		Description: "a thread's value beats the same name exported by the user's ~/.zshenv, which pi and codex re-read for every command and a headless turn re-reads before the agent starts: at launch, after a live change, and in a headless turn, on every harness (needs the machine's shell startup to source $SESH_THREAD_ENV_FILE); routed",
 		Agents:      agentic,
 		Localities:  bothLoc,
 	})

@@ -50,6 +50,9 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   hooks): the supervised daemon's own env has NO API keys — they come from `~/.zshenv`.
   A bare exec silently loses every keyed provider (pi's model list showed 2 of 6).
   Conformance cannot catch this: the sandbox daemon inherits the test shell's keys.
+- **Claude trust in worktrees (ee7d2bd):** claude keys a LINKED worktree's project by the MAIN repo root
+  (dirname of commondir; a bare repo's common dir itself), so `EnsureTrust` seeds that root too. Without it a
+  checkout tracking `.claude/settings.local.json` parks on "This folder pre-approves N tool permissions".
 - **Thread context (schema 61, [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md)):** claude =
   per-thread `<SESH_HOME>/thread-context/<id>/CLAUDE.md` (`--add-dir`, a copy of the
   store) + a hook for mid-session changes; codex = hooks only, trusted in its config
@@ -110,8 +113,8 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-11 ~14:45Z**: mymain, ideapad, macstudio and termux run binary AND daemon `d46c562`
-(wire schema 66, store schema 32: background-busy + idle stop) with `[idle_stop] after = "24h"` loaded from myrig
+Fleet on **2026-11-11 ~21:00Z**: mymain, ideapad, macstudio and termux run binary AND daemon `ee7d2bd`
+(wire schema 66, store schema 32: background-busy + idle stop; ee7d2bd adds the claude linked-worktree trust key) with `[idle_stop] after = "24h"` loaded from myrig
 `6ba582a`; pre-66 DB backups are in each `~/.sesh/backups/sesh-pre66-*` (termux: a stopped-daemon file copy). The
 TUI `bg` column is NOT in the shared config: a binary without it refuses to start the TUI on an unknown column.
 **macbook (`410c4f7`, schema 64) and pocket4 (`0745362`, schema 63) were unreachable**: pull sesh AND myrig, build,

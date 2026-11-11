@@ -83,6 +83,14 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   and `thread wait` exit non-zero and `status`/`info` show it. codex 0.166 ignores `tools/list_changed`
   (honest Skip). A failed claude/codex server stays silent: sesh does not read claude's `system/init`.
   Soliton's own `[key]` redaction rewrites any text containing a stub's one-letter key.
+- **Background-busy (schema 65, #24) + idle stop (schema 66, migration 32):** claude's Stop hook
+  forwards `background_tasks`/`session_crons` as `--background-json`; tasks keep the thread busy,
+  wake-ups do not. `authorityState.busy` is the TURN axis only (the stale-busy bound reads it),
+  `effectiveBusy()` folds background in. A pre-65 daemon decodes report-state strictly, so the
+  live hook script (from this checkout) + an old daemon loses turn ends: pull, build and restart
+  together. Idle stop counts a FIRST-SEEN time (`idleSeen`) because the maintainer's first pane
+  capture sets no `LastActiveUnix` (codex at rest never had a clock). A claude thread with no turn
+  cannot be resumed after any stop. Daemon state (background, clocks) resets on restart.
 - **Conformance traps (2026-11-04):** `go test -run 'TestMatrix/(a/b|c/d)'` splits on `/` and runs ZERO
   cells; run a cell as `-run '^TestMatrix$/^a/b$'`. Moving mise's node `lts` (installing a newer node) breaks
   every pi/codex shim at once, and the suite shows ~240 sub-second failures, not a verdict. Cross-host tests
@@ -102,16 +110,17 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-05 ~11:15Z**: mymain, ideapad, macstudio, macbook and termux run binary AND daemon
-`410c4f7` (wire schema 64, store schema 31, env file on the launch line) on myrig `775b04c` (`.zshenv` sources
-`$SESH_THREAD_ENV_FILE`) with refreshed skill copies, and every tmux session had the variable scrubbed from its
-session env. **pocket4 was unreachable and stays on `0745362` (schema 63)**: pull sesh AND myrig, build, back up
-(`VACUUM INTO`, it migrates), restart, run `tmux -L sesh set-environment -t <session> -u SESH_THREAD_ENV_FILE` on
-each session; it runs codex 0.145 / pi 1.3, which fail the control cells, and its pi model list fails (privatemode's
-podman proxy outlasts the 12s timeout). mymain's myrig keeps someone's `.gitconfig` edit and a stray `already` file.
-macbook's `sesh-v2` is c75b837, the June build is beside it as `sesh-v2.e49b1e1`. `TestDoctorWarnsOnlyForTheMissingHarness`
-fails wherever `mypi` is installed (ideapad), with or without this work. Re-check the fleet rather than repeating
-any recorded status, here or in an archive.
+Fleet on **2026-11-11 ~14:45Z**: mymain, ideapad, macstudio and termux run binary AND daemon `d46c562`
+(wire schema 66, store schema 32: background-busy + idle stop) with `[idle_stop] after = "24h"` loaded from myrig
+`6ba582a`; pre-66 DB backups are in each `~/.sesh/backups/sesh-pre66-*` (termux: a stopped-daemon file copy). The
+TUI `bg` column is NOT in the shared config: a binary without it refuses to start the TUI on an unknown column.
+**macbook (`410c4f7`, schema 64) and pocket4 (`0745362`, schema 63) were unreachable**: pull sesh AND myrig, build,
+back up (`VACUUM INTO`, it migrates), restart. pocket4 also still needs, from the 410c4f7 rollout, `tmux -L sesh
+set-environment -t <session> -u SESH_THREAD_ENV_FILE` on each session; it runs codex 0.145 / pi 1.3, which fail the
+control cells, and its pi model list fails (privatemode's podman proxy outlasts the 12s timeout). mymain's myrig
+keeps someone's `.gitconfig` edit and a stray `already` file. macbook's `sesh-v2` is c75b837, the June build is
+beside it as `sesh-v2.e49b1e1`. `TestDoctorWarnsOnlyForTheMissingHarness` fails wherever `mypi` is installed
+(ideapad). Re-check the fleet rather than repeating any recorded status, here or in an archive.
 
 Keep this file small. Put detailed findings in dated `_dev/` topic/history docs,
 linked from the index; do not eagerly import those docs. This memory and its

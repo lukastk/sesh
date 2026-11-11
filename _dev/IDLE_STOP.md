@@ -1,8 +1,9 @@
 # IDLE_STOP — stop threads that have sat idle too long
 
-*Design, 2026-11-11. Not built. Depends on [issue #24](https://github.com/lukastk/sesh/issues/24)
-(background work counts as busy). Read before building idle-stop or changing what resets a
-thread's idle clock.*
+*Design, 2026-11-11; built the same day (schema 66, store migration 32) on top of
+[issue #24](https://github.com/lukastk/sesh/issues/24) (background work counts as busy, schema 65).
+Read before changing idle-stop or what resets a thread's idle clock. User-facing contract:
+[skills/sesh-cli/references/threads.md](../skills/sesh-cli/references/threads.md), "Idle stop".*
 
 ## 1. What it does
 
@@ -33,18 +34,20 @@ and an API schema bump):
 | `never` | never idle-stop this thread |
 | a duration | use this limit instead of the machine's |
 
-CLI surface (exact naming to settle at build time; document in `skills/sesh-cli/SKILL.md`,
-`help.go`, `help_flags.go`):
+CLI surface (`POST /v1/threads/idle-stop`, `GET /v1/idle-stop/preview`):
 
 ```
-sesh thread idle-stop --id <id> (--never | --after <dur> | --inherit)
-sesh idle-stop --dry-run [--json]   # what would be stopped now, and why each other thread is not
+sesh idle-stop set (--never | --after <dur> | --inherit) [--id <id>]
+sesh idle-stop preview [--json]   # what would be stopped now, and why each other thread is not
 ```
+
+A per-thread duration applies even on a machine with no `[idle_stop] after`.
 
 ## 3. Who decides, and when
 
-The **owning daemon's maintainer** evaluates its own threads on its existing tick and calls the
-same internal stop path as `POST /v1/threads/stop`. Nothing crosses the mesh; a peer's threads
+The **owning daemon** sweeps its own threads (every quarter of the machine limit, between 1s
+and 30s; `idlestop.go`), reading the maintainer's published snapshots, and calls the same
+internal stop path as `POST /v1/threads/stop` (`stopAgentPane`). Nothing crosses the mesh; a peer's threads
 are that peer's business, under that peer's config.
 
 ## 4. The idle clock
@@ -55,7 +58,12 @@ A thread's last activity is the latest of:
    the thread busy, and a busy thread bumps `lastActive` every tick.
 2. `AttachedActivityUnix`: the last **input** from an attached client. Mere attachment does not
    count: cockpit clients sit attached to sessions indefinitely.
-3. The last message delivered to the thread. A delivered paste changes the pane, so this is
+3. When the sweep first saw the thread live. The maintainer counts its first capture of a pane
+   as a baseline, not a change, so a pane static since then (an agent resting at its prompt
+   since launch — codex reliably — or every pane after a daemon restart) publishes no
+   `LastActiveUnix`. The first-seen time lives in the sweep (`idleSeen`), not in
+   `LastActiveUnix`, because the browser shows that field as a row's "updated" time.
+4. The last message delivered to the thread. A delivered paste changes the pane, so this is
    covered by (1) today; keep it explicit if delivery stops touching the pane.
 
 `lastActive` is in-memory: a daemon restart resets every thread's clock to the restart. This can
@@ -79,12 +87,13 @@ only **delay** a stop, never cause an early one, so it is accepted rather than p
   mistaken for a crash.
 - Every stop is logged by the daemon with the thread id, the idle duration and the limit that
   applied.
-- `sesh idle-stop --dry-run` lists the candidates and the reason each other headful thread is
-  exempt.
+- `sesh idle-stop preview` lists each live thread with its verdict and reason.
 
 ## 7. Known costs
 
 - Text typed into an agent's prompt but not sent is lost when the pane dies.
+- A claude thread that never took a turn has no conversation on disk, so `thread resume`
+  fails after any stop ("No conversation found"); there was nothing in it to lose.
 - For Codex and Pi/mypi, an unanswered prompt is lost as a live prompt (the conversation keeps
   it).
 

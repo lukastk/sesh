@@ -123,6 +123,15 @@ type Thread struct {
 	// and without the thread's env values. Empty when it succeeded, while a new turn
 	// runs, and once the thread has been started in a pane.
 	TurnError string `json:"turn_error,omitempty"`
+	// IdleStop is the thread's own override of its machine's [idle_stop] after
+	// (schema 66, _dev/IDLE_STOP.md): '' = use the machine's limit, "never" = never
+	// stop it automatically, or a Go duration ("48h") = this limit instead.
+	IdleStop string `json:"idle_stop,omitempty"`
+	// IdleStoppedAtUnix / IdleStoppedReason record the last time the owning daemon
+	// stopped the thread for being idle (schema 66), e.g. "idle 24h3m (limit 24h)".
+	// Cleared when the thread next starts, so they describe the current stop only.
+	IdleStoppedAtUnix int64  `json:"idle_stopped_at_unix,omitempty"`
+	IdleStoppedReason string `json:"idle_stopped_reason,omitempty"`
 	// OnHoldUntilUnix parks a thread until a future instant: while now < this value
 	// the thread is "on hold" and hidden from the default active view. 0 = not on
 	// hold. The caller supplies the absolute instant (the TUI computes "start of

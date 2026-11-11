@@ -181,7 +181,7 @@ work from `active`. Offline rows are hidden by default, not deleted.
 |---|---|
 | Identity refusal, selectors, scheduled-worker provenance | [identity](references/identity.md) |
 | State glyphs, shell/virtual threads, trust, ownership | [concepts](references/concepts.md) |
-| Create/adopt/fork, lifecycle, held Claude sessions, navigation | [threads](references/threads.md) |
+| Create/adopt/fork, lifecycle, held Claude sessions, navigation, idle stop (`sesh idle-stop`) | [threads](references/threads.md) |
 | Send/wait/delegate/subscribe, Pi commands, typing and state authority | [delivery](references/delivery.md) |
 | Ticket lifecycle/routing/reporting, blob tokens/files | [tickets and blobs](references/tickets-and-blobs.md) |
 | TUI scope, palette/keymap, parent picker, tickets/columns | [TUI](references/tui.md) |

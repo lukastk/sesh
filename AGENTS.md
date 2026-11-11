@@ -28,7 +28,7 @@ files and myrig's `mmt-*` / `mt-*` vocabulary.
 | Mesh / performance | [MESH](_dev/MESH.md), [MESH_SCALE](_dev/MESH_SCALE.md) |
 | Cockpit / shells / sidebar / status | [MASTER](_dev/MASTER.md), [SHELL](_dev/SHELL.md), [SIDEBAR](_dev/SIDEBAR.md), [STATUS_OPTIONS](_dev/STATUS_OPTIONS.md), as applicable |
 | Thread MCP arguments | [THREAD_MCP_ARGS](_dev/THREAD_MCP_ARGS.md) |
-| Idle-stop (planned; needs issue #24 first) | [IDLE_STOP](_dev/IDLE_STOP.md) |
+| Idle stop / background-busy | [IDLE_STOP](_dev/IDLE_STOP.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) (background section) |
 | Current-thread inference | [IDENTITY](_dev/IDENTITY.md): env is a hint, not verified identity |
 | Delivery / agent state | [PI_DELIVERY](_dev/PI_DELIVERY.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) |
 | Scheduling | [SCHEDULING](_dev/SCHEDULING.md), including §16 implementation departures (built, not merely scoped) |

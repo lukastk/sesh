@@ -235,6 +235,7 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 	hookArgs = append(hookArgs, mcpArgs...)
 
 	d.clearTurnError(thread)
+	d.clearIdleStopped(thread)
 
 	threadEnvFile := ""
 	if len(threadEnv.Vars) > 0 {

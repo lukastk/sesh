@@ -190,3 +190,36 @@ the start point and as `prefix+L`'s from-location. An empty ring refuses loudly 
 distinctly: `no flagged active threads` vs `flagged threads are all dead`. Without
 `$SESH_NAV_CLIENT` there is no start point: `next` enters at the first entry, `prev` at the
 last.
+
+## Idle stop
+
+Each daemon stops its own headful **agent** threads once they have been idle for longer
+than their limit: `[idle_stop] after` in the machine's config (the shared `config.toml`,
+overridable per machine in `config.local.toml`), or the thread's own override. A stop is
+exactly `thread stop`: the agent process and its pane end; the record, its flag, archive
+state, tags, holds and parent stay; `thread resume` brings the conversation back. Without
+`[idle_stop] after` and without an override, nothing is ever stopped.
+
+```bash
+sesh idle-stop preview [--json] [--machine <m>]     # each live thread: STOP, or keep + why
+sesh idle-stop set --never [--id <id>]              # never stop this thread
+sesh idle-stop set --after 72h [--id <id>]          # this limit instead of the machine's
+sesh idle-stop set --inherit [--id <id>]            # back to the machine's limit
+```
+
+- **Idle** = no pane change, no reported turn or background work, and no input from an
+  attached client for the whole limit. Merely being attached (a cockpit parked on the
+  session) is not activity. A daemon restart restarts every clock, which can only delay
+  a stop.
+- **Never stopped:** busy threads (including a claude waiting on background work, and a
+  claude stalled on a question or permission prompt, which is mid-turn), headless
+  threads, shell threads (busy does not apply to them, and stopping one kills its whole
+  session), threads with pending in-session wake-ups (`ScheduleWakeup`, `CronCreate`,
+  `/loop` live inside the agent and would be cancelled), and `--never` threads.
+- **Not protected:** a codex or pi/mypi prompt waiting for an answer reads idle and is
+  stopped at the limit (the conversation keeps it); text typed into a prompt but not sent
+  is lost. A claude thread that never took a turn has no conversation to resume.
+- A stopped thread records why and when (`info` shows `idle-stopped: … — idle 24h3m
+  (limit 24h)`, the TUI's `I` panel shows it under `idle-stop`); the record clears when
+  the thread next starts. Each stop is also in the daemon log.
+

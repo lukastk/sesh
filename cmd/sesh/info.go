@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/lukastk/sesh/internal/api"
 	"strings"
 	"time"
 
@@ -99,6 +100,15 @@ func runInfo(cfg config.Config, args []string) error {
 	fmt.Printf("cwd:        %s\n", th.Cwd)
 	fmt.Printf("head:       %s\n", st.Head)
 	fmt.Printf("busy:       %s\n", st.Busy)
+	if st.Head == api.Headful {
+		fmt.Printf("background: %s\n", st.Background.Summary())
+	}
+	if th.IdleStop != "" {
+		fmt.Printf("idle-stop:  %s (override)\n", th.IdleStop)
+	}
+	if th.IdleStoppedAtUnix > 0 {
+		fmt.Printf("idle-stopped: %s — %s (`thread resume` brings it back)\n", time.Unix(th.IdleStoppedAtUnix, 0).Format("2006-01-02 15:04"), th.IdleStoppedReason)
+	}
 	fmt.Printf("attachment: %s (%d clients)\n", st.Attachment, st.Clients)
 	fmt.Printf("archived:   %t\n", th.Archived)
 	if len(th.Tags) > 0 {

@@ -868,6 +868,21 @@ OWN pane and environment and answer confidently about a different machine.`,
 		usage:    "sesh env hook",
 		examples: []string{"echo '{\"hook_event_name\":\"SessionStart\"}' | sesh env hook"},
 	},
+	"idle-stop": {
+		summary:  "automatic stopping of idle threads: each daemon stops its own headful AGENT threads once idle longer than [idle_stop] after (or the thread's own override). Stop = `thread stop`: the pane dies, the record, flags, archive state and holds stay, `thread resume` brings it back. Busy threads (including background work), shells and threads with pending in-session wake-ups are never stopped",
+		usage:    "sesh idle-stop <set|preview>",
+		examples: []string{"sesh idle-stop preview", "sesh idle-stop set --never --id 1a2b3c4d"},
+	},
+	"idle-stop set": {
+		summary:  "set a thread's own idle-stop override: --never exempts it, --after <duration> replaces the machine's limit for it (and applies even where the machine has none), --inherit drops the override; current thread inferred when no --id",
+		usage:    "sesh idle-stop set (--never|--after <duration>|--inherit) [--id <id>] [--machine <m>]",
+		examples: []string{"sesh idle-stop set --never", "sesh idle-stop set --after 72h --id 1a2b3c4d", "sesh idle-stop set --inherit --id 1a2b3c4d"},
+	},
+	"idle-stop preview": {
+		summary:  "what the idle-stop sweep would decide right now for each live thread on the machine: STOP with the idle time and limit, or keep with the reason (busy, under the limit, override never, wake-ups pending, …)",
+		usage:    "sesh idle-stop preview [--json] [--machine <m>]",
+		examples: []string{"sesh idle-stop preview", "sesh idle-stop preview --machine ideapad --json"},
+	},
 	"meta": {
 		summary:  "arbitrary per-thread key/value metadata (set | get | unset | list); feeds the TUI's meta.<key> predicates",
 		usage:    "sesh meta <set|get|unset|list> [--id <id>]",
@@ -1030,7 +1045,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
 	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "plugins", "tui", "info",
-	"whoami", "delegate", "context", "env", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
+	"whoami", "delegate", "context", "env", "idle-stop", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",
 }

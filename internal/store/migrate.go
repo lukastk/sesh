@@ -369,6 +369,13 @@ var migrations = []string{
 	// any machine through the mesh. Capped and scrubbed by the daemon, because a row
 	// replicates (daemon/headless.go, turnErrorText). APPENDED last.
 	`ALTER TABLE threads ADD COLUMN turn_error TEXT NOT NULL DEFAULT '';`,
+	// 32: IDLE STOP (api 66, _dev/IDLE_STOP.md). idle_stop is the thread's own
+	// override of the machine's [idle_stop] after ('' = use the machine's, 'never', or
+	// a Go duration); idle_stopped_at/idle_stopped_reason record the last automatic
+	// stop, cleared when the thread next starts. APPENDED last.
+	`ALTER TABLE threads ADD COLUMN idle_stop TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE threads ADD COLUMN idle_stopped_at INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE threads ADD COLUMN idle_stopped_reason TEXT NOT NULL DEFAULT '';`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

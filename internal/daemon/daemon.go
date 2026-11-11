@@ -141,6 +141,12 @@ type Daemon struct {
 	browserSends *browserSendRegistry
 	transferStop chan struct{}
 	transferWG   sync.WaitGroup
+	// idleStop is the resolved [idle_stop] table; idleStopStop/idleStopWG run
+	// the sweep (idlestop.go, _dev/IDLE_STOP.md).
+	idleStop     config.IdleStopConfig
+	idleStopStop chan struct{}
+	idleStopWG   sync.WaitGroup
+	idleSeen     idleSeen
 
 	// codexDaemonNote is the most recent loud event from pinning codex's
 	// daemon_auto_start=false (codexdaemon.go): an override of the user's explicit
@@ -208,6 +214,7 @@ func New(cfg config.Config) (*Daemon, error) {
 		tmux:         tmux.NewServerWithConf(cfg.TmuxSocket, cfg.TmuxConf),
 		transfers:    transfers.New(cfg.Home, cfg.Machine),
 		transferStop: make(chan struct{}),
+		idleStopStop: make(chan struct{}),
 		hlInFlight:   map[string]bool{},
 		hlReply:      map[string]string{},
 		hlTurnError:  map[string]string{},
@@ -254,6 +261,11 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err // a broken [send] refuses the daemon loudly
 	}
 	d.send = sendCfg
+	idleStopCfg, err := config.LoadIdleStop(cfg.Home)
+	if err != nil {
+		return nil, err // a broken [idle_stop] refuses the daemon loudly
+	}
+	d.idleStop = idleStopCfg
 	d.pasteStop = make(chan struct{})
 	schedCfg, err := config.LoadSchedules(cfg.Home)
 	if err != nil {
@@ -368,6 +380,7 @@ func (d *Daemon) Serve() error {
 		return fmt.Errorf("daemon: write pid: %w", err)
 	}
 	d.startTransferSweeper()
+	d.startIdleStopper()
 	// Clean up the on-disk markers in the foreground, after Serve returns. Doing
 	// this here (rather than in the async Shutdown goroutine) makes removal
 	// deterministic: the process cannot exit before these run. The listener
@@ -389,6 +402,7 @@ func (d *Daemon) Serve() error {
 // the foreground, so they are gone deterministically before the process exits.
 func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopTransferSweeper()
+	d.stopIdleStopper()
 	d.stopPastes()
 	d.stopAPI(ctx)
 	if d.sched != nil {

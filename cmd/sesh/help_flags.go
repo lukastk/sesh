@@ -236,6 +236,17 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id/prefix to target (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"idle-stop set": {
+		{"--never", "never stop this thread for being idle"},
+		{"--after", "stop this thread after this long idle (a Go duration, e.g. 48h) instead of the machine's [idle_stop] after"},
+		{"--inherit", "drop the thread's override and use the machine's [idle_stop] after"},
+		{"--id", "thread id/prefix to target (default: the current thread)"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
+	"idle-stop preview": {
+		{"--json", "emit JSON instead of the text form"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+	},
 	"meta": {
 		{"--id", "thread id/prefix to target (default: the current thread)"},
 	},

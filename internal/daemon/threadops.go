@@ -84,18 +84,26 @@ func (d *Daemon) handleThreadStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loc, found, err := d.tmux.FindPaneByThreadID(thread.ID)
-	if err != nil {
+	if err := d.stopAgentPane(thread.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if found {
-		if err := d.tmux.KillPane(loc.Pane); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "stopped": req.ID})
+}
+
+// stopAgentPane ends an AGENT thread's runtime: it kills the thread's marked
+// pane (only that pane — never the session around it), keeping the record. No
+// live pane is not an error: the thread is already stopped. Shared by `thread
+// stop` and the idle-stop sweep.
+func (d *Daemon) stopAgentPane(id string) error {
+	loc, found, err := d.tmux.FindPaneByThreadID(id)
+	if err != nil {
+		return err
+	}
+	if found {
+		return d.tmux.KillPane(loc.Pane)
+	}
+	return nil
 }
 
 func (d *Daemon) handleThreadRename(w http.ResponseWriter, r *http.Request) {

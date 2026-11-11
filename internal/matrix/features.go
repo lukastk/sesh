@@ -592,6 +592,12 @@ func init() {
 		},
 	})
 	Register(Feature{
+		ID:          "thread.idle-stop",
+		Description: "idle stop (schema 66, _dev/IDLE_STOP.md): the owning daemon stops a headful agent thread idle longer than [idle_stop] after — the real agent process dies, the record and its flags stay, the stop is recorded on it and cleared by `thread resume`; a thread with `idle-stop set --never` survives past the limit; `idle-stop preview` shows each verdict",
+		Agents:      agentic,
+		Localities:  bothLoc,
+	})
+	Register(Feature{
 		ID:          "thread.rename",
 		Description: "rename a thread (record only)",
 		Localities:  bothLoc,

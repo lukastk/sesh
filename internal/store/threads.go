@@ -27,9 +27,9 @@ func (s *Store) InsertThread(t api.Thread) error {
 		started = 1
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, env_count, mcp_args, turn_error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled), t.EnvCount, mcpArgsJSON(t.McpArgs), t.TurnError,
+		`INSERT INTO threads (id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, env_count, mcp_args, turn_error, idle_stop, idle_stopped_at, idle_stopped_reason)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Machine, t.SessionName, t.Cwd, t.AgentKind, t.Name, string(tags), headless, t.CreatedAtUnix, t.AgentSessionID, started, t.Parent, boolInt(t.Notify), metaJSON(t.Meta), t.Model, t.OnHoldUntilUnix, t.HoldReleaseUntilUnix, t.ArchivedAtUnix, t.PinOrder, boolInt(t.Flagged), t.FlagReason, boolInt(t.FlagDisabled), t.EnvCount, mcpArgsJSON(t.McpArgs), t.TurnError, t.IdleStop, t.IdleStoppedAtUnix, t.IdleStoppedReason,
 	)
 	if err != nil {
 		return fmt.Errorf("store: insert thread: %w", err)
@@ -40,7 +40,7 @@ func (s *Store) InsertThread(t api.Thread) error {
 // GetThread returns a thread by id, or ErrThreadNotFound.
 func (s *Store) GetThread(id string) (api.Thread, error) {
 	row := s.db.QueryRow(
-		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args, turn_error
+		`SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args, turn_error, idle_stop, idle_stopped_at, idle_stopped_reason
 		 FROM threads WHERE id = ?`, id)
 	t, err := scanThread(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -52,7 +52,7 @@ func (s *Store) GetThread(id string) (api.Thread, error) {
 // ListThreads returns this machine's threads, newest first. Archived threads are
 // excluded unless includeArchived is set (the active list hides them).
 func (s *Store) ListThreads(includeArchived bool) ([]api.Thread, error) {
-	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args, turn_error
+	q := `SELECT id, machine, session_name, cwd, agent_kind, name, tags, headless, created_at, agent_session_id, headless_started, archived, parent, notify, meta, model, on_hold_until, hold_release_until, archived_at, pin_order, flagged, flag_reason, flag_disabled, context_hash, env_count, mcp_args, turn_error, idle_stop, idle_stopped_at, idle_stopped_reason
 		 FROM threads`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
@@ -272,7 +272,7 @@ func scanThread(r scanner) (api.Thread, error) {
 	var headless, started, archived, notify, flagged, flagDisabled int
 	var meta, mcpArgs string
 	var pinOrder sql.NullFloat64
-	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash, &t.EnvCount, &mcpArgs, &t.TurnError); err != nil {
+	if err := r.Scan(&t.ID, &t.Machine, &t.SessionName, &t.Cwd, &t.AgentKind, &t.Name, &tags, &headless, &t.CreatedAtUnix, &t.AgentSessionID, &started, &archived, &t.Parent, &notify, &meta, &t.Model, &t.OnHoldUntilUnix, &t.HoldReleaseUntilUnix, &t.ArchivedAtUnix, &pinOrder, &flagged, &t.FlagReason, &flagDisabled, &t.ContextHash, &t.EnvCount, &mcpArgs, &t.TurnError, &t.IdleStop, &t.IdleStoppedAtUnix, &t.IdleStoppedReason); err != nil {
 		return t, err
 	}
 	t.Archived = archived == 1
@@ -398,6 +398,34 @@ type McpServerNotSetError struct{ ID, Server string }
 
 func (e *McpServerNotSetError) Error() string {
 	return fmt.Sprintf("mcp-arg: thread %s has no arguments for server %q", e.ID, e.Server)
+}
+
+// SetThreadIdleStop sets the thread's own idle-stop override ('' = use the
+// machine's limit, "never", or a duration the daemon has already validated).
+func (s *Store) SetThreadIdleStop(id, value string) error {
+	return s.execOne("set idle stop", `UPDATE threads SET idle_stop = ? WHERE id = ?`, value, id)
+}
+
+// SetThreadIdleStopped records (atUnix > 0) or clears (0, "") the thread's last
+// automatic idle stop.
+func (s *Store) SetThreadIdleStopped(id string, atUnix int64, reason string) error {
+	return s.execOne("set idle stopped", `UPDATE threads SET idle_stopped_at = ?, idle_stopped_reason = ? WHERE id = ?`, atUnix, reason, id)
+}
+
+// execOne runs a single-row UPDATE, ErrThreadNotFound when no row matched.
+func (s *Store) execOne(what, q string, args ...any) error {
+	res, err := s.db.Exec(q, args...)
+	if err != nil {
+		return fmt.Errorf("store: %s: %w", what, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: %s: %w", what, err)
+	}
+	if n == 0 {
+		return ErrThreadNotFound
+	}
+	return nil
 }
 
 // SetThreadTurnError records why the thread's last headless turn failed; an empty text clears it.

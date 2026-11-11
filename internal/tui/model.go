@@ -4679,6 +4679,9 @@ func (m Model) detailsFields() []detailField {
 		{"notify", yesNo(r.Notify)},
 		{"tickets open", strconv.Itoa(r.TicketsOpen)},
 		{"schedules", detailSchedules(r)},
+		// In-flight background work the agent reported at its last turn end (issue #24).
+		{"background", r.Background.Summary()},
+		{"idle-stop", detailIdleStop(r)},
 		{"ticket name", detailTicket(r)},
 		{"agent session", orDash(r.AgentSessionID)},
 		{"started", yesNo(r.HeadlessStarted)},
@@ -4879,4 +4882,17 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// detailIdleStop renders the thread's idle-stop override and its last automatic
+// stop (schema 66, _dev/IDLE_STOP.md).
+func detailIdleStop(r api.ThreadRow) string {
+	s := "machine limit"
+	if r.IdleStop != "" {
+		s = r.IdleStop + " (override)"
+	}
+	if r.IdleStoppedAtUnix > 0 {
+		s += "; stopped " + time.Unix(r.IdleStoppedAtUnix, 0).Format("2006-01-02 15:04") + ": " + r.IdleStoppedReason
+	}
+	return s
 }

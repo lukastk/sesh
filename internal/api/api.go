@@ -416,7 +416,12 @@ package api
 // row/snapshot gain `background` (nil = not reported). A thread whose reporter says
 // background TASKS are in flight reads busy until a later turn_ended says none.
 // Additive: a pre-65 peer omits it, so its threads read "not reported".
-const SchemaVersion = 65
+// 66: IDLE STOP (_dev/IDLE_STOP.md). The owning daemon stops a headful agent thread
+// idle longer than [idle_stop] after. Thread gains idle_stop (the per-thread override:
+// '' | "never" | a duration) and idle_stopped_at_unix/idle_stopped_reason (store
+// migration 32); POST /v1/threads/idle-stop sets the override and GET
+// /v1/idle-stop/preview lists what the sweep would do now. Additive.
+const SchemaVersion = 66
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

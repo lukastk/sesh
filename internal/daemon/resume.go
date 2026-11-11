@@ -320,6 +320,7 @@ func (d *Daemon) reviveThread(w http.ResponseWriter, r *http.Request, id string,
 		return
 	}
 	d.clearTurnError(thread) // from here its turns happen in a pane
+	d.clearIdleStopped(thread)
 
 	// If the session still exists, a SIBLING thread is keeping it alive — revive
 	// into a new WINDOW of it rather than colliding on the name (multiple threads

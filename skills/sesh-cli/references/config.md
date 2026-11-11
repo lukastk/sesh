@@ -73,6 +73,9 @@ model = "anthropic/claude-haiku-4-5" # this harness's DEFAULT model (see models.
 respect_typing = "60s"           # hold a delivery until the pane has seen no viewer input this long ("0s" = off)
 respect_typing_deadline = "10m"  # a delivery still held this long fails loudly + flags the thread
 
+[idle_stop]                      # stop headful agent threads left idle (see threads.md, "Idle stop")
+after = "24h"                    # positive duration; absent = no machine-wide limit
+
 [schedules]                      # `sesh schedule` policy (the schedules themselves are records, not config)
 enabled = true                   # false = this daemon fires nothing (run-now still works)
 disable_after_failures = 10      # a schedule failing this many runs in a row is disabled, loudly (0 = never)

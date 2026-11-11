@@ -86,7 +86,9 @@ prints that group's full `--help` (not a partial usage line).
   - **Workspace-trust prompts are pre-answered.** Every headed claude/codex launch
     (new, revive, `--into-pane`) first marks the thread's cwd trusted in that agent's own
     config — claude: `projects[<cwd>].hasTrustDialogAccepted` in `~/.claude.json` (or
-    `$CLAUDE_CONFIG_DIR/.claude.json`); codex: `[projects."<cwd>"] trust_level` in
+    `$CLAUDE_CONFIG_DIR/.claude.json`), plus the main repository's root when the cwd is
+    inside a linked git worktree, because claude judges a worktree's trust (including its
+    "This folder pre-approves N tool permissions" dialog) by that root; codex: `[projects."<cwd>"] trust_level` in
     `config.toml` — so the agent comes up at its input prompt and a `thread send` fired
     right after spawn lands in the agent, not in a "Quick safety check … trust this
     folder?" dialog (which would otherwise eat it: Enter there picks "No, exit").

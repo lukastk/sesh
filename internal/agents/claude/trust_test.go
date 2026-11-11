@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -267,4 +268,103 @@ func compact(t *testing.T, raw json.RawMessage) string {
 		t.Fatalf("compact: %v", err)
 	}
 	return buf.String()
+}
+
+func gitRun(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestTrustKeysLinkedWorktreeSeedsTheMainRoot(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(base, "main")
+	gitRun(t, "init", "-q", main)
+	gitRun(t, "-C", main, "commit", "-q", "--allow-empty", "-m", "init")
+	wt := filepath.Join(base, "wt")
+	gitRun(t, "-C", main, "worktree", "add", "-q", wt, "-b", "wt")
+	sub := filepath.Join(wt, "pkg")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, cwd := range []string{wt, sub} {
+		keys, err := TrustKeys(cwd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(keys) != 2 || keys[0] != cwd || keys[1] != main {
+			t.Fatalf("TrustKeys(%s) = %v, want [%s %s] — claude keys a linked worktree by its MAIN repository root", cwd, keys, cwd, main)
+		}
+	}
+
+	// The main checkout itself is an ordinary repo: just its own key.
+	if keys, err := TrustKeys(main); err != nil || len(keys) != 1 || keys[0] != main {
+		t.Fatalf("TrustKeys(main) = %v, %v; want only %s", keys, err, main)
+	}
+
+	cfg := filepath.Join(base, ".claude.json")
+	if err := EnsureTrust(cfg, wt); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{wt, main} {
+		if v, ok := readTrust(t, cfg, key); !ok || string(v) != "true" {
+			t.Fatalf("projects[%q] = %s (present=%v), want true", key, v, ok)
+		}
+	}
+}
+
+func TestTrustKeysBareRepoWorktreeSeedsTheCommonDir(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(base, "seed")
+	gitRun(t, "init", "-q", seed)
+	gitRun(t, "-C", seed, "commit", "-q", "--allow-empty", "-m", "init")
+	bare := filepath.Join(base, "repo.git")
+	gitRun(t, "clone", "-q", "--bare", seed, bare)
+	wt := filepath.Join(base, "wt")
+	gitRun(t, "-C", bare, "worktree", "add", "-q", wt, "-b", "wt")
+
+	keys, err := TrustKeys(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 || keys[1] != bare {
+		t.Fatalf("TrustKeys(%s) = %v, want [%s %s] — claude keys a bare repository's worktree by the common dir", wt, keys, wt, bare)
+	}
+}
+
+func TestTrustKeysIgnoresAForgedGitFile(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A .git file pointing at a gitdir that does not live under <common>/worktrees
+	// (and has no back-pointer) is not a linked worktree to claude either.
+	gd := filepath.Join(base, "elsewhere")
+	if err := os.MkdirAll(gd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gd, "commondir"), []byte("../victim/.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(base, "dir")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+gd+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if keys, err := TrustKeys(dir); err != nil || len(keys) != 1 {
+		t.Fatalf("TrustKeys(%s) = %v, %v; a forged .git file must not add a key", dir, keys, err)
+	}
 }

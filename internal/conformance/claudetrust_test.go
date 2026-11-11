@@ -16,7 +16,12 @@ package conformance
 //       reported workflow);
 //   (2) the revive path seeds too: with the trust entry deleted behind
 //       claude's back (a record created before this fix), `thread headful`
-//       still comes up clean.
+//       still comes up clean;
+//   (3) a LINKED GIT WORKTREE whose checkout tracks .claude/settings.local.json
+//       with permissions comes up clean too. Claude keys such a worktree by
+//       its MAIN repository's root, so trusting the worktree path alone left
+//       hq's worktree workers parked on "This folder pre-approves N tool
+//       permissions"; sesh seeds the main root as well.
 // waitThreadReady CANNOT catch the dialog by itself — a rendered, byte-stable
 // dialog reads as "TUI up, idle" — so the pane text is asserted explicitly.
 // Remote = the same via a real `--machine` hop; the seeding happens on the
@@ -47,7 +52,10 @@ func init() {
 
 // trustDialogMarkers are the dialog's own words (Claude Code 2.1.273); any of
 // them in a "ready" pane means the agent is parked on the safety check.
-var trustDialogMarkers = []string{"Quick safety check", "Accessing workspace", "I trust this folder"}
+// "pre-approves" is the variant claude shows when the checkout carries project
+// permissions in .claude/settings.local.json (2.1.322: "This folder pre-approves
+// 1 tool permission").
+var trustDialogMarkers = []string{"Quick safety check", "Accessing workspace", "I trust this folder", "pre-approves"}
 
 // setupClaudeConfigDir makes an isolated CLAUDE_CONFIG_DIR that is AUTHENTICATED
 // but trusts NO workspace: the user's credentials are symlinked in (the
@@ -262,6 +270,45 @@ func testClaudeTrust(t *testing.T, loc matrix.Locality) {
 	pane = sb.waitThreadReady(t, th.ID, "claude")
 	sb.assertNoTrustDialog(t, pane, "revive")
 	sb.answeredSend(t, th.ID, pane, "revive")
+
+	// (3) Linked worktree of a repo that tracks project permissions.
+	repos := filepath.Join(t.TempDir(), "repos")
+	mainRepo := filepath.Join(repos, "main")
+	wt := filepath.Join(repos, "wt")
+	if err := os.MkdirAll(filepath.Join(mainRepo, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", mainRepo)
+	if err := os.WriteFile(filepath.Join(mainRepo, ".claude", "settings.local.json"),
+		[]byte(`{"permissions":{"allow":["Bash(python3:*)"]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("-C", mainRepo, "add", "-f", ".claude/settings.local.json")
+	git("-C", mainRepo, "commit", "-q", "-m", "project permissions")
+	git("-C", mainRepo, "worktree", "add", "-q", wt, "-b", "wt")
+	for _, k := range []string{wt, mainRepo} {
+		if got, ok := trustEntry(t, cfgDir, k); ok {
+			t.Fatalf("precondition: %q is already trusted (%s) in the isolated config", k, got)
+		}
+	}
+	wth := sb.newThread(t, "claude", "trustwt", wt)
+	for _, k := range []string{wt, mainRepo} {
+		if got, ok := trustEntry(t, cfgDir, k); !ok || got != "true" {
+			t.Fatalf("worktree spawn did not seed projects[%q].hasTrustDialogAccepted (got %q, present=%v)", k, got, ok)
+		}
+	}
+	wpane := sb.waitThreadReady(t, wth.ID, "claude")
+	sb.assertNoTrustDialog(t, wpane, "worktree spawn")
+	sb.answeredSend(t, wth.ID, wpane, "worktree spawn")
 }
 
 // processAlive reports whether pid still exists (signal 0 probes without sending).

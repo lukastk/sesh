@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Claude Code shows a per-workspace "Quick safety check: Is this a project you
@@ -61,7 +62,9 @@ func GlobalConfigPath() (string, error) {
 }
 
 // TrustKeys returns the project keys EnsureTrust seeds for cwd: the cleaned
-// absolute path, plus its symlink-resolved form when that differs. cwd must be
+// absolute path, plus its symlink-resolved form when that differs, plus (for a
+// cwd inside a linked git worktree) the main repository's root and its
+// realpath — see linkedWorktreeMainRoot. cwd must be
 // absolute and must exist (a spawn into a missing dir fails here, loudly, rather
 // than after the pane is up).
 func TrustKeys(cwd string) ([]string, error) {
@@ -73,10 +76,95 @@ func TrustKeys(cwd string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude trust: resolve cwd: %w", err)
 	}
-	if real == clean {
-		return []string{clean}, nil
+	keys := []string{clean}
+	if real != clean {
+		keys = append(keys, real)
 	}
-	return []string{clean, real}, nil
+	if main := linkedWorktreeMainRoot(real); main != "" {
+		keys = appendKey(keys, main)
+		if mainReal, err := filepath.EvalSymlinks(main); err == nil {
+			keys = appendKey(keys, mainReal)
+		}
+	}
+	return keys, nil
+}
+
+func appendKey(keys []string, k string) []string {
+	for _, have := range keys {
+		if have == k {
+			return keys
+		}
+	}
+	return append(keys, k)
+}
+
+// linkedWorktreeMainRoot returns the CANONICAL root claude keys a linked git
+// worktree's project by, or "" when dir is not inside a linked worktree.
+//
+// Claude Code (measured against 2.1.322) does not judge trust for a linked
+// worktree by the worktree's own path alone: its project key (the record it
+// reads hasTrustDialogAccepted from, and the one its "This folder pre-approves
+// N tool permissions" dialog consults when the checkout carries a
+// .claude/settings.local.json) is the MAIN repository's root. A worktree whose
+// own path is trusted still opens on that dialog until the main root is, which
+// is what parked every worker hq spawns in a worktree.
+//
+// This mirrors claude's own resolution, file reads only (no git subprocess):
+// find the enclosing git root (the nearest ancestor holding a `.git` entry);
+// if `.git` is a FILE reading `gitdir: <g>`, read <g>/commondir as <c>, and
+// accept the layout only when <g>'s parent is <c>/worktrees and <g>/gitdir
+// points back at this checkout's `.git`. The canonical root is then
+// dirname(<c>) for an ordinary `.git` common dir, or <c> itself for a bare
+// repository. Any other shape (a plain repo, a submodule, a malformed or
+// foreign gitdir) is not a linked worktree to claude either, and the cwd's
+// own keys are all it needs.
+func linkedWorktreeMainRoot(dir string) string {
+	root := dir
+	for {
+		if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return ""
+		}
+		root = parent
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".git"))
+	if err != nil {
+		return "" // a .git DIRECTORY (an ordinary checkout) reads as an error here
+	}
+	line := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(line, "gitdir:") {
+		return ""
+	}
+	gitdir := resolveFrom(root, strings.TrimSpace(strings.TrimPrefix(line, "gitdir:")))
+	cd, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return "" // a submodule's gitdir has no commondir
+	}
+	common := resolveFrom(gitdir, strings.TrimSpace(string(cd)))
+	if filepath.Dir(gitdir) != filepath.Join(common, "worktrees") {
+		return ""
+	}
+	back, err := os.ReadFile(filepath.Join(gitdir, "gitdir"))
+	if err != nil {
+		return ""
+	}
+	if resolveFrom(gitdir, strings.TrimSpace(string(back))) != filepath.Join(root, ".git") {
+		return ""
+	}
+	if filepath.Base(common) == ".git" {
+		return filepath.Dir(common)
+	}
+	return common // bare repository: claude keys it by the common dir itself
+}
+
+func resolveFrom(base, p string) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(base, p)
 }
 
 // EnsureTrust idempotently marks cwd as trusted in the claude global config at

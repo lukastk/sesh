@@ -1171,7 +1171,8 @@ func (m Model) fetch() tea.Cmd {
 // different view than the one the grid actually renders the thread in.
 func meshRow(t api.ThreadSnapshot) api.ThreadRow {
 	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority,
-		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix, ObservedModel: t.ObservedModel}
+		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix, ObservedModel: t.ObservedModel,
+		Background: t.Background}
 }
 
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,

@@ -161,3 +161,71 @@ func TestClaudeHookSkipsBackgroundSession(t *testing.T) {
 		t.Fatalf("foreground session stopped reporting:\n%s", got)
 	}
 }
+
+// TestClaudeHookForwardsBackground pins issue #24: claude's Stop payload carries
+// background_tasks (in-flight shells/Monitors/subagents) and session_crons
+// (in-session wake-ups), and the hook forwards them as --background-json so the
+// daemon keeps the thread busy while tasks run. A Stop WITHOUT background_tasks
+// (an older claude) must send no flag at all — the daemon then records "not
+// reported", never "nothing running" — and an empty list is a positive report.
+func TestClaudeHookForwardsBackground(t *testing.T) {
+	for _, bin := range []string{"sh", "python3"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	script := claudeHookScript(t)
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "argv.log")
+	// One argument per line, so the JSON argument is checked as one argv entry.
+	fakeBin := filepath.Join(dir, "fake-sesh")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> "+argvLog+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(stdin string) string {
+		t.Helper()
+		os.Remove(argvLog)
+		cmd := exec.Command("sh", script)
+		cmd.Stdin = strings.NewReader(stdin)
+		cmd.Env = append(os.Environ(), "SESH_THREAD_ID=tid-claude", "SESH_BIN="+fakeBin)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("hook: %v\n%s", err, out)
+		}
+		b, _ := os.ReadFile(argvLog)
+		return string(b)
+	}
+	argAfter := func(log, flag string) (string, bool) {
+		lines := strings.Split(log, "\n")
+		for i, l := range lines {
+			if l == flag && i+1 < len(lines) {
+				return lines[i+1], true
+			}
+		}
+		return "", false
+	}
+
+	got := run(`{"hook_event_name":"Stop","session_id":"s1","background_tasks":[{"id":"b7bvve5pw","type":"shell","status":"running","description":"Sleep for 25 seconds","command":"sleep 25"}],"session_crons":[{"id":"c1","schedule":"*/20 * * * *","recurring":true,"prompt":"check"}]}`)
+	bg, ok := argAfter(got, "--background-json")
+	if !ok {
+		t.Fatalf("Stop with background_tasks sent no --background-json:\n%s", got)
+	}
+	want := `{"tasks":[{"id":"b7bvve5pw","type":"shell","status":"running","description":"sleep 25"}],"wakeups":[{"id":"c1","schedule":"*/20 * * * *","recurring":true}]}`
+	if bg != want {
+		t.Fatalf("--background-json:\n got %s\nwant %s", bg, want)
+	}
+
+	got = run(`{"hook_event_name":"Stop","session_id":"s1","background_tasks":[],"session_crons":[]}`)
+	if bg, ok = argAfter(got, "--background-json"); !ok || bg != `{"tasks":[],"wakeups":[]}` {
+		t.Fatalf("empty lists must be a positive empty report, got %q (present=%v):\n%s", bg, ok, got)
+	}
+
+	got = run(`{"hook_event_name":"Stop","session_id":"s1"}`)
+	if _, ok = argAfter(got, "--background-json"); ok || !strings.Contains(got, "turn_ended") {
+		t.Fatalf("Stop without background_tasks must report the turn end with no --background-json:\n%s", got)
+	}
+
+	got = run(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","background_tasks":[{"id":"x","type":"shell"}]}`)
+	if _, ok = argAfter(got, "--background-json"); ok {
+		t.Fatalf("only Stop may carry background:\n%s", got)
+	}
+}

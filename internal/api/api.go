@@ -411,7 +411,12 @@ package api
 // 64: TURN ERRORS. Thread and ThreadStatusResponse gain turn_error (store migration
 // 31), the reason the last headless turn failed. `await` exits non-zero on it. Additive:
 // a pre-64 peer omits it, so `await` on such a peer's thread cannot see a failed turn.
-const SchemaVersion = 64
+// 65: BACKGROUND WORK (issue #24). report-state's turn_ended may carry `background`
+// (in-flight tasks + in-session wake-ups; claude's Stop hook sends it), and
+// row/snapshot gain `background` (nil = not reported). A thread whose reporter says
+// background TASKS are in flight reads busy until a later turn_ended says none.
+// Additive: a pre-65 peer omits it, so its threads read "not reported".
+const SchemaVersion = 65
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

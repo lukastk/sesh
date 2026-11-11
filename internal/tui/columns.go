@@ -43,6 +43,7 @@ const (
 	ColHold        = "hold"
 	ColArchived    = "archived"
 	ColSched       = "sched"
+	ColBackground  = "bg"
 )
 
 // Built-in default max widths for the full-width columns (the cap the `w` toggle
@@ -155,6 +156,8 @@ var colOrder = []colSpec{
 			}
 			return s
 		}},
+	{name: ColBackground, header: "BG", fixedW: 10,
+		cell: func(_ *Model, r api.ThreadRow) string { return backgroundCell(r.Background) }},
 	{name: ColCreated, header: "CREATED", fixedW: 10,
 		cell: func(_ *Model, r api.ThreadRow) string { return createdLabel(r.CreatedAtUnix) }},
 	{name: ColHold, header: "HOLD", fixedW: 11,
@@ -607,4 +610,30 @@ func schedNextLabel(unix int64) string {
 	default:
 		return fmt.Sprintf("in %dd", int(d.Hours()/24))
 	}
+}
+
+// backgroundCell renders the BG column (schema 65, issue #24): the in-flight
+// background work an agent reported at its last turn end. Tasks keep the thread
+// busy, so this column is what explains a busy thread whose pane is still:
+// "1 shell", "3 tasks"; a "+w" suffix (or "wake" alone) marks pending
+// in-session wake-ups. Blank when nothing is reported or nothing is in flight —
+// `thread status` distinguishes "none" from "not reported".
+func backgroundCell(b *api.BackgroundState) string {
+	if b == nil {
+		return ""
+	}
+	s := ""
+	switch n := len(b.Tasks); {
+	case n == 1:
+		s = "1 " + b.Tasks[0].Type
+	case n > 1:
+		s = strconv.Itoa(n) + " tasks"
+	}
+	if len(b.Wakeups) > 0 {
+		if s == "" {
+			return "wake"
+		}
+		s += " +w"
+	}
+	return s
 }

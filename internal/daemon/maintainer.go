@@ -621,7 +621,9 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		// busy until the thread's next prompt. Drop the entry LOUDLY and
 		// degrade to the heuristic — visible via state_authority. Blocked
 		// entries are exempt (a permission/question prompt is genuinely
-		// mid-turn with a static pane).
+		// mid-turn with a static pane), and so is background work: auth.busy
+		// is the TURN axis only, so a thread busy solely on reported
+		// background tasks (issue #24) never trips this bound.
 		log.Printf("maintainer: thread %s reported busy by %s %ds ago but its pane has been byte-stable for %ds — dropping stale authority (lost turn_ended, e.g. an interrupted turn)",
 			th.ID, auth.source, now.Unix()-auth.reportedAtUnix, int(now.Sub(st.lastChange)/time.Second))
 		m.d.clearAuthority(th.ID)
@@ -642,13 +644,17 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		hasAuth = false
 	}
 	if hasAuth {
-		if auth.busy {
+		// effectiveBusy folds in reported background tasks (issue #24): a
+		// thread waiting on a background shell/Monitor/subagent is busy, and
+		// its waiting is activity, exactly like an in-flight turn.
+		if auth.effectiveBusy() {
 			snap.Busy = api.BusyBusy
 			st.lastActive = now.Unix() // a reported in-flight turn is activity
 		} else {
 			snap.Busy = api.BusyIdle
 		}
 		snap.StateAuthority = api.AuthorityReported
+		snap.Background = cloneBackground(auth.background)
 	} else {
 		snap.StateAuthority = api.AuthorityHeuristic
 	}

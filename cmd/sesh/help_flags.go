@@ -448,6 +448,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--seq", "strictly-increasing per-thread sequence; stale seqs are refused (default: current unix nanos)"},
 		{"--reason", "optional description carried by a blocked event (e.g. the permission prompt's message)"},
 		{"--agent-session", "the agent's OWN conversation id, if the reporter knows it (codex's notify payload thread-id); stamped onto the thread record"},
+		{"--background-json", "turn_ended only: the agent's in-flight background work, as JSON {\"tasks\":[{id,type,status,description}],\"wakeups\":[{id,schedule,recurring}]}. Background TASKS keep the thread busy until a later turn_ended reports none; wake-ups are shown but do not. Omitted = not reported (never read as nothing running)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
 	"thread hold": {

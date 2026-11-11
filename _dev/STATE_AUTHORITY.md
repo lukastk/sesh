@@ -77,3 +77,25 @@ integrations can RELEASE authority. Their per-agent mechanics, verbatim from the
   then #5 blocked (needs a design call on extending the activity enum vs a separate axis), then #6 done/seen
   (consumes #4's turn-end + H48's attachment ages). #7 (send --wait) rides the same eventer edges. #8 (UI
   sidebar) LAST, design-discussion-first.
+
+## Background work counts as busy (schema 65, 2026-11-11, issue #24)
+
+claude's `Stop` hook input carries `background_tasks` (in-flight background shells,
+Monitors, background subagents, MCP tasks, workflows) and `session_crons` (in-session
+wake-ups). Verified live on Claude Code 2.1.319: a `run_in_background` sleep produces
+`Stop background_tasks=[{type:"shell",status:"running",command:"sleep 25"}]`; on completion
+claude wakes itself with `UserPromptSubmit` (prompt = `<task-notification>…`), and that
+turn's `Stop` carries `[]`. The hook forwards both lists as `--background-json` on
+`turn_ended`.
+
+- `authorityState.busy` stays the TURN axis; `background` is separate and
+  `effectiveBusy()` folds them. The stale-busy bound reads only the turn axis, so a thread
+  busy solely on background work (byte-stable pane by design) is never dropped.
+- Mid-turn events carry the last set forward; only a `turn_ended` replaces it, and one
+  without `--background-json` sets it to nil (not reported), never keeps a stale set.
+- Wake-ups do not make a thread busy: each runs a real turn.
+- Limits: a daemon restart drops the set (runtime state is never persisted) until the
+  agent's next turn end; a task killed while claude is idle may not wake it, so the set
+  clears only at the next turn end.
+- codex: background terminals are visible only in its rollout (deferred). pi/mypi: no
+  background execution (N/A).

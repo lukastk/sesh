@@ -338,8 +338,8 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 	},
 	"thread report-state": {
 		summary:  "report an in-agent turn-lifecycle fact (reporter hooks; overrides the busy heuristic)",
-		usage:    "sesh thread report-state --event <turn_started|turn_ended|blocked|unblocked|release> --source <s> [--id <id>] [--seq <n>] [--reason <text>] [--agent-session <id>] [--machine <m>]",
-		examples: []string{"sesh thread report-state --event turn_ended --source sesh:pi-ext"},
+		usage:    "sesh thread report-state --event <turn_started|turn_ended|blocked|unblocked|release> --source <s> [--id <id>] [--seq <n>] [--reason <text>] [--agent-session <id>] [--background-json <json>] [--machine <m>]",
+		examples: []string{"sesh thread report-state --event turn_ended --source sesh:pi-ext", `sesh thread report-state --event turn_ended --source sesh:claude-hook --background-json '{"tasks":[{"id":"b1","type":"shell","description":"npm run dev"}],"wakeups":[]}'`},
 	},
 	"thread reparent": {
 		summary:  "re-parent a thread to a new parent, or make it a root (--root)",

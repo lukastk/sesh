@@ -28,7 +28,18 @@ type authorityState struct {
 	seq            int64
 	source         string
 	reportedAtUnix int64
+	// background is the in-flight background work the last turn_ended
+	// carried (schema 65, issue #24); nil = not reported. busy above is the
+	// TURN axis only (it alone feeds the stale-busy bound: a thread waiting
+	// on background work has a byte-stable pane by design); effectiveBusy()
+	// folds the two.
+	background *api.BackgroundState
 }
+
+// effectiveBusy is what the busy axis shows: a turn in flight, or background
+// tasks in flight (issue #24 — a thread waiting on a background shell,
+// Monitor or subagent is not finished).
+func (a authorityState) effectiveBusy() bool { return a.busy || a.background.HasTasks() }
 
 func (d *Daemon) routesReportState(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/report-state", d.handleThreadReportState)
@@ -43,6 +54,9 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 	}
 	if req.Source == "" {
 		return http.StatusBadRequest, fmt.Errorf("report-state: source is required")
+	}
+	if req.Background != nil && req.Event != api.ReportTurnEnded {
+		return http.StatusBadRequest, fmt.Errorf("report-state: background is only accepted with %s (got %s)", api.ReportTurnEnded, req.Event)
 	}
 	switch req.Event {
 	case api.ReportTurnStarted, api.ReportTurnEnded, api.ReportTurnEndedNoAuthority, api.ReportBlocked, api.ReportUnblocked, api.ReportRelease:
@@ -134,11 +148,20 @@ func (d *Daemon) reportState(req api.ReportStateRequest, nowUnix int64) (int, er
 		d.auth = map[string]*authorityState{}
 	}
 	next := &authorityState{seq: req.Seq, source: req.Source, reportedAtUnix: nowUnix}
+	// Background work outlives the turn that started it: a mid-turn event
+	// (a wake-up turn starting, a stall) carries the last known state
+	// forward, and only the next turn_ended replaces it.
+	if prev != nil {
+		next.background = prev.background
+	}
 	switch req.Event {
 	case api.ReportTurnStarted:
 		next.busy = true // a fresh turn is never still blocked
 	case api.ReportTurnEnded:
 		// busy false, blocked cleared: a finished turn is never blocked.
+		// The turn end is the one point the reporter knows the background
+		// set; nil (not reported) replaces a stale set rather than keeping it.
+		next.background = cloneBackground(req.Background)
 	case api.ReportBlocked:
 		// A blocked agent is MID-TURN by definition (stalled on the human), so
 		// blocked always implies busy — even if a late/lost report left the
@@ -174,10 +197,23 @@ func (d *Daemon) reportedState(id string) (authorityState, bool) {
 	return *st, true
 }
 
-// reportedBusy is reportedState reduced to the busy axis (test convenience).
+// reportedBusy is reportedState reduced to the effective busy axis (test
+// convenience).
 func (d *Daemon) reportedBusy(id string) (busy, ok bool) {
 	st, ok := d.reportedState(id)
-	return st.busy, ok
+	return st.effectiveBusy(), ok
+}
+
+// cloneBackground deep-copies a background state so the authority map never
+// aliases a request's or a published snapshot's slices.
+func cloneBackground(b *api.BackgroundState) *api.BackgroundState {
+	if b == nil {
+		return nil
+	}
+	return &api.BackgroundState{
+		Tasks:   append([]api.BackgroundTask{}, b.Tasks...),
+		Wakeups: append([]api.BackgroundWakeup{}, b.Wakeups...),
+	}
 }
 
 // clearAuthority drops a thread's authority entry. The maintainer calls it on

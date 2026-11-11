@@ -168,7 +168,27 @@ otherwise pin busy until the next prompt), and a reported-IDLE on a pane that
 has been ANIMATING for 2 minutes (the reporter isn't tracking turns — a session
 that predates the reporter hooks, or hooks that stopped firing — which would
 otherwise mask a running turn as idle). Blocked (question/approval) reports are
-exempt from the busy bound — those panes are legitimately static. codex threads stay heuristic for busy (no
+exempt from the busy bound — those panes are legitimately static — and so is
+background work (below).
+
+**Background work counts as busy** (schema 65). An agent that ends its turn with
+background work still running is not finished. claude's Stop hook carries its
+in-flight background tasks (background shells, Monitors, background subagents, MCP
+tasks, workflows) and its in-session wake-ups (`ScheduleWakeup`, `CronCreate`,
+`/loop`), and the reporter forwards them with `turn_ended` as `--background-json`.
+While any TASK is in flight the thread reads **busy**, and the snapshot, row and
+`thread status` carry the work as `background` (`thread status` prints
+`background: 1 shell: npm run dev`; the TUI's `bg` column shows `1 shell`). claude
+wakes itself when a task finishes, and that turn's Stop reports the new set; an
+empty set returns the thread to idle. Wake-ups alone do not make a thread busy —
+each wake-up runs a real turn — but they are shown (`wake` / `+w`). Consequences:
+a thread with a never-ending background job (a dev server) stays busy for as long
+as it runs, so `thread wait --until idle`, schedules that skip busy threads, and
+`env set` (without `--force`) all wait on it. `background` absent means **not
+reported** — a heuristic thread, an agent without this reporter (codex, pi), a
+claude too old to send it, or a daemon restarted since the last turn end — never
+"nothing running"; `thread status` prints `not reported` vs `none`. A task killed
+while claude sits idle only clears at claude's next turn end. codex threads stay heuristic for busy (no
 turn-start surface), but their `notify` hook — wired into the codex config by
 sesh at spawn — still reports turn ENDS for flagging, and since schema 46 that
 report also carries codex's OWN session id, which the daemon stamps onto the

@@ -1,5 +1,10 @@
 package api
 
+import (
+	"fmt"
+	"strings"
+)
+
 // VirtualAgentKind is the agent_kind of a VIRTUAL thread — a pure grouping node
 // in the thread tree with NO agent, pane, or transcript. It exists so threads
 // can be parented under something that is not (yet) a real thread; all record
@@ -231,6 +236,82 @@ const (
 	AuthorityReported  StateAuthority = "reported"
 	AuthorityHeuristic StateAuthority = "heuristic"
 )
+
+// BackgroundState is the background work an agent has in flight while no turn
+// is running (schema 65, issue #24): work the harness itself tracks and will
+// wake the agent for, or that the agent will come back to. A thread whose
+// reporter says it has background TASKS reads busy — a background shell,
+// Monitor or subagent means the thread is not finished. Wake-ups do not make
+// it busy: each one runs a real turn, which is busy on its own and resets the
+// thread's activity; they are carried so a view can show "next wake".
+//
+// Only an in-agent reporter can know this (claude's Stop hook carries it), so
+// nil means NOT REPORTED — a thread on the heuristic floor, a harness that does
+// not report it, or a claude too old to send it — never "nothing running". A
+// non-nil value with empty lists is a positive report of nothing in flight.
+type BackgroundState struct {
+	Tasks   []BackgroundTask   `json:"tasks"`
+	Wakeups []BackgroundWakeup `json:"wakeups"`
+}
+
+// BackgroundTask is one in-flight piece of background work, in the harness's
+// own vocabulary (claude: shell, monitor, local_agent, mcp_task, ...).
+type BackgroundTask struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// BackgroundWakeup is a scheduled in-session wake-up (claude: ScheduleWakeup,
+// CronCreate, /loop). It lives inside the agent process and dies with it.
+type BackgroundWakeup struct {
+	ID        string `json:"id"`
+	Schedule  string `json:"schedule"`
+	Recurring bool   `json:"recurring,omitempty"`
+}
+
+// HasTasks reports whether any background task is in flight (nil-safe).
+func (b *BackgroundState) HasTasks() bool { return b != nil && len(b.Tasks) > 0 }
+
+// Summary is a one-line human rendering: "1 shell: npm run dev",
+// "3 tasks (shell, monitor)", "1 wake-up (*/20 * * * *)"; "none" for a
+// positive empty report and "not reported" for nil.
+func (b *BackgroundState) Summary() string {
+	if b == nil {
+		return "not reported"
+	}
+	var parts []string
+	switch n := len(b.Tasks); {
+	case n == 1:
+		t := b.Tasks[0]
+		s := "1 " + t.Type
+		if t.Description != "" {
+			s += ": " + t.Description
+		}
+		parts = append(parts, s)
+	case n > 1:
+		var types []string
+		seen := map[string]bool{}
+		for _, t := range b.Tasks {
+			if !seen[t.Type] {
+				seen[t.Type] = true
+				types = append(types, t.Type)
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d tasks (%s)", n, strings.Join(types, ", ")))
+	}
+	switch n := len(b.Wakeups); {
+	case n == 1:
+		parts = append(parts, "1 wake-up ("+b.Wakeups[0].Schedule+")")
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%d wake-ups", n))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " + ")
+}
 
 // NewThreadRequest is the body of POST /v1/threads.
 type NewThreadRequest struct {
@@ -566,6 +647,9 @@ type ThreadStatusResponse struct {
 	ObservedModel string `json:"observed_model,omitempty"`
 	// TurnError mirrors Thread.TurnError (schema 64).
 	TurnError string `json:"turn_error,omitempty"`
+	// Background is the reported in-flight background work (schema 65); nil =
+	// not reported. See BackgroundState.
+	Background *BackgroundState `json:"background,omitempty"`
 }
 
 // NeedsInput is the derived "the human is blocking the agent" view: a live pane
@@ -613,6 +697,9 @@ type ThreadRow struct {
 	// owner-local — and "finished while you weren't looking" became the
 	// stored, manually-cleared Flagged field on the record.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// Background is the reported in-flight background work (schema 65); nil =
+	// not reported. See BackgroundState.
+	Background *BackgroundState `json:"background,omitempty"`
 	// ObservedModel mirrors ThreadSnapshot's (schema 58).
 	ObservedModel string `json:"observed_model,omitempty"`
 	// TurnError mirrors Thread.TurnError (schema 64).
@@ -675,6 +762,9 @@ type ThreadSnapshot struct {
 	// blocked/done snapshot overlays were replaced by the stored Flagged
 	// record field in 44 — see Thread.Flagged.)
 	StateAuthority StateAuthority `json:"state_authority,omitempty"`
+	// Background is the reported in-flight background work (schema 65); nil =
+	// not reported. See BackgroundState.
+	Background *BackgroundState `json:"background,omitempty"`
 	// ObservedModel is the model the thread's own transcript says it last ran on
 	// (schema 58), read by the OWNING daemon from the harness's records — claude
 	// assistant entries, codex turn_context, pi model_change/assistant messages —
@@ -886,6 +976,11 @@ type ReportStateRequest struct {
 	// for codex, whose id is minted on the first turn and was otherwise only
 	// recovered by ambiguous cwd+time rollout discovery at revive time.
 	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// Background is the agent's in-flight background work at a turn_ended
+	// (schema 65; claude's Stop hook). nil = the reporter did not say, which
+	// the daemon records as not reported, never as nothing running. Refused
+	// on any other event: background state is only known at a turn end.
+	Background *BackgroundState `json:"background,omitempty"`
 }
 
 // Reporter event vocabulary. `release` withdraws the reporter's authority

@@ -55,7 +55,10 @@ command -v python3 >/dev/null 2>&1 || exit 0
 
 input="$(cat 2>/dev/null || true)"
 
-# Emit TAB-separated: <event>\t<reason>\t<session_id>. Empty event => no report.
+# Emit TAB-separated: <event>\t<reason>\t<session_id>\t<background JSON>.
+# Empty event => no report. The background field is set only for Stop, and only
+# when claude sent `background_tasks` (older claudes do not: then the field is
+# empty and the daemon records "not reported", never "nothing running").
 out="$(printf '%s' "$input" | python3 -c '
 import json, sys
 
@@ -99,18 +102,44 @@ else:
     event = {"UserPromptSubmit": "turn_started", "Stop": "turn_ended", "PostToolUse": "unblocked"}.get(name, "")
 if not event:
     sys.exit(0)
+# Stop carries the in-flight background work (issue #24): background shells,
+# Monitors, background subagents, MCP tasks and workflows in background_tasks,
+# in-session wake-ups (ScheduleWakeup, CronCreate, /loop) in session_crons.
+# claude wakes the session itself when a task finishes (UserPromptSubmit with a
+# <task-notification> prompt), and the next Stop carries the updated list.
+bg = ""
+if name == "Stop" and isinstance(h.get("background_tasks"), list):
+    def clip(v, n=160):
+        return str(v if v is not None else "")[:n]
+    tasks = []
+    for t in h.get("background_tasks")[:50]:
+        if not isinstance(t, dict):
+            continue
+        desc = t.get("command") or t.get("description") or t.get("name") or ""
+        tasks.append({"id": clip(t.get("id")), "type": clip(t.get("type"), 40),
+                      "status": clip(t.get("status"), 40), "description": clip(desc)})
+    wakeups = []
+    crons = h.get("session_crons")
+    for c in (crons if isinstance(crons, list) else [])[:50]:
+        if not isinstance(c, dict):
+            continue
+        wakeups.append({"id": clip(c.get("id")), "schedule": clip(c.get("schedule"), 80),
+                        "recurring": bool(c.get("recurring"))})
+    bg = json.dumps({"tasks": tasks, "wakeups": wakeups}, separators=(",", ":"))
 reason = reason.replace("\t", " ").replace("\n", " ")[:200]
-print(event + "\t" + reason + "\t" + sid)
+print(event + "\t" + reason + "\t" + sid + "\t" + bg)
 ' 2>/dev/null || true)"
 
 event="$(printf '%s' "$out" | cut -f1)"
 reason="$(printf '%s' "$out" | cut -f2)"
 sid="$(printf '%s' "$out" | cut -f3)"
+bg="$(printf '%s' "$out" | cut -f4)"
 
 [ -n "$event" ] || exit 0
 # Build argv so the optional --reason / --agent-session are only passed when set.
 set -- --id "$SESH_THREAD_ID" --source sesh:claude-hook --event "$event"
 [ -n "$reason" ] && set -- "$@" --reason "$reason"
 [ -n "$sid" ] && set -- "$@" --agent-session "$sid"
+[ -n "$bg" ] && set -- "$@" --background-json "$bg"
 "$SESH_CMD" thread report-state "$@" >/dev/null 2>&1 || true
 exit 0

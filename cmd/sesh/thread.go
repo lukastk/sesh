@@ -678,6 +678,9 @@ func threadStatus(cfg config.Config, args []string) error {
 	fmt.Printf("agent_running: %t\n", resp.AgentRunning)
 	fmt.Printf("needs_input:   %t\n", resp.NeedsInput())
 	fmt.Printf("pane:          %s\n", resp.Pane)
+	if resp.Head == api.Headful {
+		fmt.Printf("background:    %s\n", resp.Background.Summary())
+	}
 	if resp.TurnError != "" {
 		fmt.Printf("last turn:     FAILED: %s\n", resp.TurnError)
 	}
@@ -1129,11 +1132,27 @@ func threadReportState(cfg config.Config, args []string) error {
 	seq := fs.Int64("seq", 0, "strictly-increasing per-thread sequence (default: current unix nanos)")
 	reason := fs.String("reason", "", "optional description for a blocked event (the prompt's message)")
 	agentSession := fs.String("agent-session", "", "the agent's own conversation id, if the reporter knows it (codex notify payload thread-id); the daemon stamps it onto the thread record")
+	backgroundJSON := fs.String("background-json", "", `turn_ended only: the agent's in-flight background work as JSON {"tasks":[{"id","type","status","description"}],"wakeups":[{"id","schedule","recurring"}]}`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *event == "" {
 		return errors.New("thread report-state: --event is required")
+	}
+	var background *api.BackgroundState
+	if *backgroundJSON != "" {
+		background = &api.BackgroundState{}
+		dec := json.NewDecoder(strings.NewReader(*backgroundJSON))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(background); err != nil {
+			return fmt.Errorf("thread report-state: --background-json: %w", err)
+		}
+		if background.Tasks == nil {
+			background.Tasks = []api.BackgroundTask{}
+		}
+		if background.Wakeups == nil {
+			background.Wakeups = []api.BackgroundWakeup{}
+		}
 	}
 	if *source == "" {
 		return errors.New("thread report-state: --source is required")
@@ -1151,7 +1170,7 @@ func threadReportState(cfg config.Config, args []string) error {
 	}
 	return daemonClient(cfg).ThreadReportState(context.Background(), api.ReportStateRequest{
 		ThreadID: rid, Source: *source, Event: *event, Seq: s, Reason: *reason,
-		AgentSessionID: *agentSession,
+		AgentSessionID: *agentSession, Background: background,
 	})
 }
 

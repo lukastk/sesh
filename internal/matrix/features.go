@@ -582,6 +582,16 @@ func init() {
 		},
 	})
 	Register(Feature{
+		ID:          "thread.background-busy",
+		Description: "background work counts as busy (schema 65, issue #24): an agent that ends its turn with background tasks in flight (claude: background shells, Monitors, subagents, reported by its Stop hook) stays busy, with the work visible as `background` on the snapshot/row/status, until a later turn end reports none; the stale-busy bound never drops it; in-session wake-ups are shown but are not busy",
+		Agents:      agentic,
+		Localities:  bothLoc,
+		NA: []NAEntry{
+			{Agent: Pi, Locality: Local, Reason: "pi (and mypi) have no background execution: the bash tool always waits for its command and no installed extension adds a background mode, so there is no in-flight background work to report — Lukas 2026-11-11 (issue #24)"},
+			{Agent: Pi, Locality: Remote, Reason: "pi (and mypi) have no background execution: the bash tool always waits for its command and no installed extension adds a background mode, so there is no in-flight background work to report — Lukas 2026-11-11 (issue #24)"},
+		},
+	})
+	Register(Feature{
 		ID:          "thread.rename",
 		Description: "rename a thread (record only)",
 		Localities:  bothLoc,

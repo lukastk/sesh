@@ -274,6 +274,12 @@ a thread carries; `env-edit` manages them and `I` shows the count.
 The **CTX** column (`context`, not in the default set) marks a thread that carries a
 custom context with `◆`; `context-view` shows it and `I` shows its version.
 
+The **BG** column (`bg`, not in the default set) shows the background work a thread's
+agent reported at its last turn end: `1 shell`, `3 tasks`, a `+w` suffix (or `wake`
+alone) for pending in-session wake-ups. Background tasks keep a thread busy (`▶`), so
+this column is what explains a busy thread whose pane is still. Blank when nothing is
+in flight or nothing was reported; `thread status` tells those apart.
+
 The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**
 rail (**`└─ `** for the last one), a deeper level continues past it on **`│  `**, and a
 thread with children carries the `▸`/`▾` fold marker ahead of its name.

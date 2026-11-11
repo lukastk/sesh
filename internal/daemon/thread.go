@@ -809,6 +809,15 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	if working {
 		resp.Busy = api.BusyBusy
 	}
+	// Reported background work (schema 65, issue #24): a reporter that said
+	// background tasks are in flight makes the thread busy even though its
+	// pane is still — the content-diff above cannot see it.
+	if auth, ok := d.reportedState(id); ok {
+		resp.Background = cloneBackground(auth.background)
+		if auth.background.HasTasks() {
+			resp.Busy = api.BusyBusy
+		}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

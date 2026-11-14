@@ -129,8 +129,7 @@ resumes and headless turns are affected. `tmux` and `ssh` remain the only `fail`
 rows in that group.
 
 The daemon reads `[defaults]` at startup, so changing it requires a daemon restart
-through the machine's service manager. This is separate from `ui_config.toml`'s `default_agent`, which only
-preselects a value in sesh-ui's New-thread modal.
+through the machine's service manager. This is separate from `ui_config.toml`'s `default_agent`, a client preference (see below).
 
 `[browser_hub]` is a security boundary, not a convenience fallback. When absent or
 `enabled = false`, browser endpoints may address only this daemon's own threads. When
@@ -302,9 +301,11 @@ a recent attachment flip), failing open when the vars are absent. Under
 
 ### `ui_config.toml` — the app's preferences (a SECOND file)
 
-`<SESH_HOME>/ui_config.toml` is separate from `config.toml`: it holds preferences for the
-**sesh-ui app**, which the daemon stores and serves over `GET`/`POST /v1/ui-config`. sesh
-does not otherwise interpret them, and the CLI/TUI ignores the file entirely. It lives in
+`<SESH_HOME>/ui_config.toml` is separate from `config.toml`: it holds preferences for
+graphical clients, which the daemon stores and serves over `GET`/`POST /v1/ui-config`. sesh
+does not otherwise interpret them, and the CLI/TUI ignores the file entirely. It was written
+for the retired sesh-ui desktop/Android app; the current sesh-ui library (Sesh in Obsidian)
+does not read it. It lives in
 `SESH_HOME` so it follows whichever daemon a client connects to (per-machine).
 
 ```toml

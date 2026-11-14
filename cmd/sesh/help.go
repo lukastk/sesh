@@ -515,7 +515,7 @@ wrapper function or an older install.`,
 		examples: []string{"sesh fs list --path ~/dev", "sesh fs list --path ~/mysetup --machine macbook --json"},
 	},
 	"plugins": {
-		summary:  "the daemon command-provider substrate: manifests at <SESH_HOME>/plugins/*.toml declare commands the daemon runs ON ITS OWN HOST and how the sesh-ui app surfaces them — a LIST capability (e.g. boxyard boxes → cwd picker WITH groups) and ACTION capabilities (e.g. create-box from a form). Endpoints route per --machine, so the app drives any machine's plugins. Field values pass as ARGV (no shell injection); commands come from the manifest only",
+		summary:  "the daemon command-provider substrate: manifests at <SESH_HOME>/plugins/*.toml declare commands the daemon runs ON ITS OWN HOST and how a graphical client surfaces them — a LIST capability (e.g. boxyard boxes → cwd picker WITH groups) and ACTION capabilities (e.g. create-box from a form). Endpoints route per --machine, so the app drives any machine's plugins. Field values pass as ARGV (no shell injection); commands come from the manifest only",
 		usage:    "sesh plugins <list|run>",
 		examples: []string{"sesh plugins list --json", "sesh plugins run boxyard boxes --machine macbook --json"},
 	},

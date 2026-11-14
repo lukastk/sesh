@@ -24,8 +24,9 @@ Dirs only (symlinks not followed). A path **outside the home dir** — or one es
 ## Plugins (`sesh plugins`) — daemon command-providers
 
 A plugin manifest at `<SESH_HOME>/plugins/*.toml` declares commands the daemon runs **on
-its own host** and how the sesh-ui app surfaces them. The app (especially mobile / a remote
-daemon) has no shell on the target, so machine ops go via the daemon. Two capability kinds:
+its own host** and how a graphical client surfaces them. A client (especially mobile / a remote
+daemon) has no shell on the target, so machine ops go via the daemon. The retired sesh-ui
+desktop/Android app was the client that surfaced them; the current sesh-ui library does not yet. Two capability kinds:
 
 - **list** — a command whose JSON output is mapped to `{id,label,groups,path}` items
   (templated `id`/`label`/`path` over each item's fields; `groups` names a string-array
@@ -55,9 +56,9 @@ Place only the TOML block in the destination manifest after reviewing it.
 # boxyard plugin — the first command-provider, validating the substrate.
 #
 # Drop this at <SESH_HOME>/plugins/boxyard.toml on any machine that has `boxyard`
-# on the daemon's PATH. The daemon runs these commands ON ITS OWN HOST; the sesh-ui
-# app reaches them over the API (GET /v1/plugins, POST /v1/plugins/boxyard/<cap>),
-# routed cross-machine like fs/list — so the app drives the boxyard on whichever
+# on the daemon's PATH. The daemon runs these commands ON ITS OWN HOST; a graphical
+# client reaches them over the API (GET /v1/plugins, POST /v1/plugins/boxyard/<cap>),
+# routed cross-machine like fs/list — so the client drives the boxyard on whichever
 # machine you are deploying a thread to.
 #
 # Unlocks two things in the app:

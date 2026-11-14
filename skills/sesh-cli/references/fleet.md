@@ -90,7 +90,7 @@ is wedged right now, that same restart is the recovery — rebuilding the sideba
 (`prefix+r`) will not help, because the rot is in the window attaches, not the sidebar.
 
 **Mesh sync cadence (demand-driven).** The background peer sync runs at full pace (~1s)
-only while something is consuming the mesh view — a `sesh tui` or graphical-client poll or an
+only while something is consuming the mesh view — a `sesh tui` or browser-client poll or an
 `--all-machines` read — or when `[[hooks]]` are configured (hooks observe remote threads
 through the cache, so they pin full pace). Otherwise it idles to `[mesh] idle_interval`
 (default 60s; `"0s"` = never idle) and snaps back instantly on the next read, so opening

@@ -193,8 +193,8 @@ work from `active`. Offline rows are hidden by default, not deleted.
 | A thread's custom context: per-thread standing instructions (`sesh context`), how each harness receives it, the CTX column, viewing/editing | [context](references/context.md) |
 | A thread's environment variables (`sesh env`, `thread new --env`), when a change reaches a running agent, `thread restart`, inheritance, where values live, the ENV column | [env](references/env.md) |
 | A thread's MCP arguments: `--mcp-arg`, `thread mcp-arg set/unset/list`, what each harness receives, what the global entry must look like | [mcp-args](references/mcp-args.md) |
-| Daemon/TUI config, the per-machine config.local.toml overlay, hooks, separate graphical-client preferences (`ui_config.toml`) | [config](references/config.md) |
-| Remote directory listing or plugins (bundled manifest example) | [integrations](references/integrations.md) |
+| Daemon/TUI config, the per-machine config.local.toml overlay, hooks | [config](references/config.md) |
+| Remote directory listing | [integrations](references/integrations.md) |
 
 Detailed examples retain their versioned incident context; check installed help
 and observed state rather than assuming an old deployment claim is current.

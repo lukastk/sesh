@@ -421,7 +421,13 @@ package api
 // '' | "never" | a duration) and idle_stopped_at_unix/idle_stopped_reason (store
 // migration 32); POST /v1/threads/idle-stop sets the override and GET
 // /v1/idle-stop/preview lists what the sweep would do now. Additive.
-const SchemaVersion = 66
+// 67: REMOVED the graphical-app-only surfaces, whose one client (the sesh-ui desktop/
+// Android app) was retired 2026-11-14: GET/POST /v1/ui-config and <SESH_HOME>/
+// ui_config.toml (24–33), GET /v1/master/terminal (28), and the plugin command providers
+// GET /v1/plugins + POST /v1/plugins/{name}/{capability} with `sesh plugins` (29). A 67
+// daemon 404s them; nothing else on the wire changes, so older clients of every other
+// route are unaffected. The browser API is unchanged.
+const SchemaVersion = 67
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it
@@ -434,49 +440,6 @@ const RoutedByHeader = "X-Sesh-Routed-To"
 // turns these into an error carrying the message whatever method made the call, so a
 // refusal is never reduced to a bare status code.
 const RouteRefusedHeader = "X-Sesh-Route-Refused"
-
-// UIConfig is the sesh-ui app's UI preferences, stored in <SESH_HOME>/ui_config.toml
-// and served over GET/POST /v1/ui-config. Typed settings sesh stores + serves but does
-// not otherwise interpret; missing keys resolve to their defaults on read.
-type UIConfig struct {
-	// CollapseParents makes parent threads start collapsed in the app's thread tree.
-	CollapseParents bool `json:"collapse_parents"`
-	// CwdRoots are the new-thread "default parent folders" — the app lists each one's
-	// subdirs (per target machine, via fs/list) as a quick cwd pick. Default ~/mysetup, ~/dev.
-	CwdRoots []string `json:"cwd_roots"`
-	// CwdLabels are match→label regex rules the app applies to format picker entries.
-	CwdLabels []CwdLabelRule `json:"cwd_labels"`
-	// TranscriptPrefetchSecs is the app's background transcript-prefetch interval (0=off).
-	TranscriptPrefetchSecs int `json:"transcript_prefetch_secs"`
-	// MasterCommand is the command the app's "Master" mode runs in a pty (e.g. mmt-start).
-	MasterCommand string `json:"master_command"`
-	// DefaultAgent is the agent_kind the New-thread modal preselects (empty = app fallback).
-	DefaultAgent string `json:"default_agent"`
-	// DefaultMachine is the machine the New-thread modal preselects (empty = local daemon).
-	DefaultMachine string `json:"default_machine"`
-	// DefaultChatView is the chat surface the app opens a thread in by default
-	// (terminal|transcript|rpc; empty = the app falls back to terminal). NOT omitempty:
-	// the app gates its Settings control on the field being PRESENT (its "does this daemon
-	// support it" signal, same as default_agent/default_machine) — omitempty would drop the
-	// empty default from the GET and hide the control, so the field must always serialize.
-	DefaultChatView string `json:"default_chat_view"`
-	// ExtraKeys is the Android extra-keys row layout (Termux-style) as an opaque JSON string
-	// the app renders (empty = no row). NOT omitempty — same present-to-advertise-support
-	// contract as default_chat_view, so the Settings editor shows.
-	ExtraKeys string `json:"extra_keys"`
-}
-
-// CwdLabelRule is one new-thread-picker display rule (regex match + template label).
-type CwdLabelRule struct {
-	Match string `json:"match"`
-	Label string `json:"label"`
-}
-
-// UIConfigResponse is returned by GET and POST /v1/ui-config.
-type UIConfigResponse struct {
-	Schema   int      `json:"schema"`
-	UIConfig UIConfig `json:"ui_config"`
-}
 
 // StatusResponse is returned by GET /v1/status.
 type StatusResponse struct {

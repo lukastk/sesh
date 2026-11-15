@@ -189,7 +189,9 @@ The browser seam is deliberately narrower than the daemon's general API:
   use the same hub policy. `POST /v1/browser/tickets{,/status,/set,/delete,/send-prompt}`
   and `POST /v1/browser/blobs` take `{machine, request}` and forward `request` unchanged to
   that fixed canonical route on the owner (empty `machine` = the daemon answering);
-  `GET /v1/browser/tickets/get` and `GET /v1/browser/fs/list` take `?machine=`; ticket
+  `POST /v1/browser/blobs/expand` expands `@blob()` tokens on the owner (browser sends
+  deliver text verbatim and never expand them). `GET /v1/browser/tickets/get` and
+  `GET /v1/browser/fs/list` take `?machine=`; ticket
   `find`, `list-all` and `move` run on the hub; `GET /v1/browser/machines` lists machines
   with `routable` (whether the hub forwards to them). The blob route accepts bodies up to
   48 MiB (a 32 MiB blob as base64); every other browser body is limited to 1 MiB. Thread

@@ -31,6 +31,9 @@ var browserOwnerPosts = map[string]string{
 	"/v1/browser/tickets/delete":      "/v1/tickets/delete",
 	"/v1/browser/tickets/send-prompt": "/v1/tickets/send-prompt",
 	"/v1/browser/blobs":               "/v1/blobs",
+	// Expands @blob() tokens on the owner, for a caller that sends the text through a
+	// browser send (which delivers text verbatim and never expands tokens itself).
+	"/v1/browser/blobs/expand": "/v1/blobs/expand",
 }
 
 // browserMaxBlobBody bounds POST /v1/browser/blobs, whose body carries the blob as

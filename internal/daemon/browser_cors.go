@@ -106,6 +106,9 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/tickets/move": {
 		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
 	},
+	"/v1/browser/blobs/expand": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
 	"/v1/browser/blobs": {
 		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
 	},

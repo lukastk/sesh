@@ -156,6 +156,12 @@ func TestBrowserBlobsAndFsListRouteToTheOwner(t *testing.T) {
 		t.Fatalf("blob did not land on the owner: %v", err)
 	}
 
+	// The owner expands its own tokens; a browser send then delivers the result verbatim.
+	rec = browserCall(t, hub, http.MethodPost, "/v1/browser/blobs/expand", routed("peer", api.ExpandBlobsRequest{Text: "see @blob(" + blob.Blob.Hash[:12] + ")"}))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "note.txt") {
+		t.Fatalf("expand status %d: %s", rec.Code, rec.Body.String())
+	}
+
 	// Past the 1 MiB every other browser body is held to: the blob route has its own bound.
 	big := bytes.Repeat([]byte{7}, 2<<20)
 	rec = browserCall(t, hub, http.MethodPost, "/v1/browser/blobs", routed("peer", api.AddBlobRequest{Name: "big.bin", Data: big}))

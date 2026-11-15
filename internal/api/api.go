@@ -434,7 +434,9 @@ package api
 // BrowserRoutedRequest {machine, request} and forward `request` unchanged to the
 // owner's canonical route; GET /v1/browser/tickets/get and /v1/browser/fs/list take
 // ?machine=; GET /v1/browser/tickets/{find,list-all} and POST
-// /v1/browser/tickets/move run on the hub; GET /v1/browser/machines lists machines
+// /v1/browser/tickets/move run on the hub; POST /v1/browser/blobs/expand expands
+// @blob() tokens on the owner (browser sends deliver text verbatim); GET
+// /v1/browser/machines lists machines
 // with `routable`. Capabilities browser.tickets-v1, browser.fs-list-v1,
 // browser.blobs-v1, browser.machines-v1. BrowserThreadSummary gains cwd_rel and
 // created_at_unix. Additive: a pre-68 daemon 404s the routes and omits the fields.

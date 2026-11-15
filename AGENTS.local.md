@@ -113,10 +113,11 @@ Last recorded open leads (**2026-10-05**, H121; not reverified): Pi symlink-CWD
 transcript lookup (`/tmp` vs `/private/tmp`), two nonreproducing Codex full-run
 failures, and a development SDK bundled audit finding.
 
-Fleet on **2026-11-11 ~21:00Z**: mymain, ideapad, macstudio and termux run binary AND daemon `ee7d2bd`
-(wire schema 66, store schema 32: background-busy + idle stop; ee7d2bd adds the claude linked-worktree trust key) with `[idle_stop] after = "24h"` loaded from myrig
+Fleet on **2026-11-15**: mymain, ideapad, macstudio and termux run binary AND daemon `4c7a711`
+(wire schema 69, store schema 32; 69 = `background_busy`, the gutter's ▷; BG column last in myrig `c21b5e5`,
+NOT pulled on ideapad, whose myrig has unpushed local commits) with `[idle_stop] after = "24h"` loaded from myrig
 `6ba582a`; pre-66 DB backups are in each `~/.sesh/backups/sesh-pre66-*` (termux: a stopped-daemon file copy). The
-TUI `bg` column is NOT in the shared config: a binary without it refuses to start the TUI on an unknown column.
+TUI `bg` column IS in the shared config now: a pre-bdf424c binary refuses to start the TUI on it, so update sesh before pulling myrig.
 **macbook (`410c4f7`, schema 64) and pocket4 (`0745362`, schema 63) were unreachable**: pull sesh AND myrig, build,
 back up (`VACUUM INTO`, it migrates), restart. pocket4 also still needs, from the 410c4f7 rollout, `tmux -L sesh
 set-environment -t <session> -u SESH_THREAD_ENV_FILE` on each session; it runs codex 0.145 / pi 1.3, which fail the

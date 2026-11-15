@@ -4,7 +4,7 @@ A thread can carry environment variables of its own. They belong to the *thread*
 launch and headless turn starts with them, wherever the thread's agent runs from.
 
 ```sh
-sesh env set API_URL=https://staging.example DEBUG=1 [--id <id>]
+sesh env set [--id <id>] API_URL=https://staging.example DEBUG=1   # flags first
 sesh env set --file staging.env                     # KEY=VALUE lines; - reads stdin
 sesh env unset DEBUG
 sesh env show [--id <id>]                           # values masked

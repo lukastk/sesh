@@ -18,6 +18,11 @@ files and myrig's `mmt-*` / `mt-*` vocabulary.
   `internal/migrate/`: persistence; `internal/agents/`: harness integrations.
 - `internal/tmux/`, `internal/tui/`: orchestration and UI;
   `internal/matrix/`, `internal/conformance/`: feature registry and real e2e tests.
+- `internal/api/browser.go` + `internal/daemon/browser*.go`: the `/v1/browser/*` hub
+  API for graphical clients (sesh-ui).
+- `integrations/`: harness-side hooks — the Pi extension `pi/sesh-agent-state/`
+  (state reporting, thread context, env, MCP args) and `claude/sesh-agent-state.sh`;
+  `examples/`: host-command samples.
 - `skills/`: user-facing CLI and ticket guides; `_dev/`: on-demand designs/history.
 
 | Task | Read before changing that area |
@@ -28,6 +33,8 @@ files and myrig's `mmt-*` / `mt-*` vocabulary.
 | Mesh / performance | [MESH](_dev/MESH.md), [MESH_SCALE](_dev/MESH_SCALE.md) |
 | Cockpit / shells / sidebar / status | [MASTER](_dev/MASTER.md), [SHELL](_dev/SHELL.md), [SIDEBAR](_dev/SIDEBAR.md), [STATUS_OPTIONS](_dev/STATUS_OPTIONS.md), as applicable |
 | Thread MCP arguments | [THREAD_MCP_ARGS](_dev/THREAD_MCP_ARGS.md) |
+| Thread context / env | [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md), [THREAD_ENV](_dev/THREAD_ENV.md) |
+| Browser API | [config](skills/sesh-cli/references/config.md), [browser-api](skills/sesh-cli/references/browser-api.md); every `api.SchemaVersion` bump must also be accepted in `~/mysetup/sesh-ui` `src/sesh/live-adapter.ts` |
 | Idle stop / background-busy | [IDLE_STOP](_dev/IDLE_STOP.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) (background section) |
 | Current-thread inference | [IDENTITY](_dev/IDENTITY.md): env is a hint, not verified identity |
 | Delivery / agent state | [PI_DELIVERY](_dev/PI_DELIVERY.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) |

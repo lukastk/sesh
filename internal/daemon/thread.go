@@ -122,6 +122,11 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "thread send: "+err.Error()+" — not sent (on_typing=skip)")
 			return
 		}
+		var blocked errBlocked
+		if errors.As(err, &blocked) {
+			writeError(w, http.StatusConflict, "thread send: "+err.Error()+" — not sent (on_typing="+req.OnTyping+"; only defer holds a send for a blocked thread)")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -145,7 +150,7 @@ func (d *Daemon) pasteByPolicy(ctx context.Context, preq pasteRequest, onTyping 
 
 // response renders a paste outcome as the wire shape.
 func (o pasteOutcome) response(id string) api.ThreadSendResponse {
-	resp := api.ThreadSendResponse{Schema: api.SchemaVersion, ID: id, Deferred: o.Deferred, Typing: o.Typing,
+	resp := api.ThreadSendResponse{Schema: api.SchemaVersion, ID: id, Deferred: o.Deferred, Typing: o.Typing, HeldReason: o.HeldReason,
 		InputAgoSec: int64(o.InputAgo / time.Second), DeadlineUnix: o.DeadlineUnix}
 	if o.Sent {
 		resp.Sent = id

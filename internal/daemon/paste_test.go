@@ -317,3 +317,63 @@ func TestPasteGuardFor(t *testing.T) {
 		t.Fatalf("a zero deadline must fall back to config, got %+v", g)
 	}
 }
+
+// setBlocked sets the fixture thread's reported blocked state directly, as a
+// claude PreToolUse (blocked) or turn_ended (cleared) report would.
+func (f *pasteFixture) setBlocked(blocked bool, reason string) {
+	f.d.authMu.Lock()
+	defer f.d.authMu.Unlock()
+	if f.d.auth == nil {
+		f.d.auth = map[string]*authorityState{}
+	}
+	f.d.auth[f.th.ID] = &authorityState{busy: blocked, blocked: blocked, blockedReason: reason}
+}
+
+// TestPasteGuardBlockedRefusesWithNoBypass: a thread blocked on a dialog
+// refuses skip and wait at once — even with the typing guard off and nobody
+// typing — and nothing reaches the pane, where it would answer the dialog.
+func TestPasteGuardBlockedRefusesWithNoBypass(t *testing.T) {
+	f := newPasteFixture(t)
+	f.setBlocked(true, "Which option?")
+	_, err := f.d.pasteNow(f.request("INTO-DIALOG", pasteGuard{Window: 0}))
+	var blocked errBlocked
+	if !errors.As(err, &blocked) || !strings.Contains(err.Error(), "Which option?") {
+		t.Fatalf("skip into a blocked thread: want errBlocked with the reason, got %v", err)
+	}
+	start := time.Now()
+	_, err = f.d.pasteWait(context.Background(), f.request("INTO-DIALOG", pasteGuard{Window: 0}), 5*time.Second)
+	if !errors.As(err, &blocked) || time.Since(start) > 2*time.Second {
+		t.Fatalf("wait into a blocked thread: want an immediate errBlocked, got %v after %s", err, time.Since(start))
+	}
+	time.Sleep(300 * time.Millisecond)
+	if strings.Contains(f.captured(), "INTO-DIALOG") {
+		t.Fatalf("a refused paste reached the blocked pane:\n%s", f.captured())
+	}
+}
+
+// TestPasteGuardBlockedDefersPastTheDeadline: defer holds a send for a blocked
+// thread (held_reason blocked), keeps holding it past the typing deadline
+// without flagging, and delivers it once the block clears.
+func TestPasteGuardBlockedDefersPastTheDeadline(t *testing.T) {
+	f := newPasteFixture(t)
+	f.setBlocked(true, "Which option?")
+	g := pasteGuard{Window: 0, Deadline: time.Second}
+	out, err := f.d.pasteDefer(f.request("AFTER-DIALOG", g))
+	if err != nil || !out.Deferred || out.HeldReason != heldBlocked {
+		t.Fatalf("want deferred with held_reason blocked, got %+v %v", out, err)
+	}
+	time.Sleep(3500 * time.Millisecond) // well past the 1s deadline, still blocked
+	if th, _ := f.st.GetThread(f.th.ID); th.Flagged {
+		t.Fatalf("a blocked hold was failed and flagged at the typing deadline: %q", th.FlagReason)
+	}
+	if strings.Contains(f.captured(), "AFTER-DIALOG") || f.d.pendingPastes(f.th.ID) != 1 {
+		t.Fatalf("the held send left the queue while blocked (pending %d):\n%s", f.d.pendingPastes(f.th.ID), f.captured())
+	}
+	f.setBlocked(false, "")
+	if !eventuallyD(8*time.Second, func() bool { return strings.Contains(f.captured(), "AFTER-DIALOG") }) {
+		t.Fatalf("the held send never landed after the block cleared:\n%s", f.captured())
+	}
+	if _, delivered, flagged := f.d.pasteQueueStats(); delivered != 1 || flagged != 0 {
+		t.Fatalf("stats delivered=%d flagged=%d", delivered, flagged)
+	}
+}

@@ -514,6 +514,21 @@ wrapper function or an older install.`,
 		usage:    "sesh fs list --path <p> [--machine <m>] [--json]",
 		examples: []string{"sesh fs list --path ~/dev", "sesh fs list --path ~/mysetup --machine macbook --json"},
 	},
+	"host-cmd": {
+		summary:  "named commands a machine declares in <SESH_HOME>/host-commands/*.toml, run by that machine's daemon on request (argv from the manifest only; callers supply declared arg values, never a shell). Routes per --machine, so a client with no shell there can still run them",
+		usage:    "sesh host-cmd <list|run>",
+		examples: []string{"sesh host-cmd list --machine macbook", "sesh host-cmd run --provider boxyard --command create-box --arg name=scratch --machine macbook"},
+	},
+	"host-cmd list": {
+		summary:  "list the providers and commands the daemon's host declares",
+		usage:    "sesh host-cmd list [--machine <m>] [--json]",
+		examples: []string{"sesh host-cmd list", "sesh host-cmd list --machine macbook --json"},
+	},
+	"host-cmd run": {
+		summary:  "run one declared command and wait for it; prints its stdout and stderr and exits non-zero when the command failed, timed out or could not start",
+		usage:    "sesh host-cmd run --provider <p> --command <c> [--arg <name=value>]... [--machine <m>] [--json]",
+		examples: []string{"sesh host-cmd run --provider boxyard --command create-box --arg name=scratch", "sesh host-cmd run --provider tmp --command make-dir --machine macbook --json"},
+	},
 	"blob add": {
 		summary:  "store a file (or --stdin bytes); prints the @blob(<hex>) token to paste into a prompt. Idempotent (content-addressed: identical bytes dedup)",
 		usage:    "sesh blob add <path> [--name <n>] [--machine <m>] [--json]   |   sesh blob add --stdin --name <n> [--machine <m>]",
@@ -1029,7 +1044,7 @@ OWN pane and environment and answer confidently about a different machine.`,
 // topLevelCommands is the dispatched command set (mirrors main.go's switch). The
 // meta-test asserts every one has a help entry — the "no silent gap" guard.
 var topLevelCommands = []string{
-	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "tui", "info",
+	"matrix", "daemon", "tmux", "shell", "thread", "resume", "ticket", "schedule", "blob", "fs", "host-cmd", "tui", "info",
 	"whoami", "delegate", "context", "env", "idle-stop", "meta", "model", "backup", "restore", "copy", "tail", "transcript",
 	"subscribe", "unsubscribe", "subscriptions", "await", "hooks", "import",
 	"doctor", "cwd-label", "mesh", "master", "peer", "help-tree",

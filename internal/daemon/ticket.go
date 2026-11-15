@@ -205,6 +205,11 @@ func (d *Daemon) handleTicketSendPrompt(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "ticket send-prompt: "+err.Error()+" — not sent (on_typing=skip)")
 			return
 		}
+		var blocked errBlocked
+		if errors.As(err, &blocked) {
+			writeError(w, http.StatusConflict, "ticket send-prompt: "+err.Error()+" — not sent (on_typing="+req.OnTyping+"; only defer holds a send for a blocked thread)")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

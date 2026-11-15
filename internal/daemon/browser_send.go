@@ -279,6 +279,10 @@ func (d *Daemon) browserSendAttempt(r *http.Request, thread api.Thread, req api.
 			resp.InputAgoSec = int64(typing.ago / time.Second)
 			return answer(http.StatusConflict, api.BrowserSendSkippedTyping, err.Error())
 		}
+		var blocked errBlocked
+		if errors.As(err, &blocked) {
+			return answer(http.StatusConflict, api.BrowserSendRefusedBlocked, err.Error())
+		}
 		return answer(browserSendFailureStatus(err), browserSendFailureOutcome(err), err.Error())
 	}
 	resp.InputAgoSec = int64(out.InputAgo / time.Second)
@@ -286,7 +290,12 @@ func (d *Daemon) browserSendAttempt(r *http.Request, thread api.Thread, req api.
 	switch {
 	case out.Sent:
 		return answer(http.StatusOK, api.BrowserSendSent, "delivered to the live pane; the agent's turn is observed separately")
+	case out.Deferred && out.HeldReason == heldBlocked:
+		resp.HeldReason = out.HeldReason
+		return answer(http.StatusOK, api.BrowserSendDeferred,
+			"the thread is blocked on a dialog; queued and delivered once it unblocks or its turn ends")
 	case out.Deferred:
+		resp.HeldReason = out.HeldReason
 		return answer(http.StatusOK, api.BrowserSendDeferred,
 			"pane in use; queued and delivered when it is quiet, or failed and flagged at the deadline")
 	default:

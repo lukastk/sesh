@@ -55,6 +55,16 @@ detached session (nobody viewing) is quiet by definition. Held deliveries live
 in daemon memory: a daemon restart drops them, loudly in its log. NB tmux counts
 ANY key as input — PgUp while reading holds the guard like typing does.
 
+**The blocked guard (checked first, no bypass).** A terminal agent the hooks
+report as **blocked** (claude's `AskUserQuestion` or a permission prompt) has a
+dialog open, and a paste would land in the dialog, picking its highlighted
+option, instead of reaching the conversation. So no paste goes into a blocked
+thread: `defer` queues it (`deferred`, held reason `blocked`) and delivers it once
+the thread unblocks or its turn ends and the typing window is quiet; time spent
+blocked does not count towards the typing deadline. `wait` and `skip` refuse at
+once with a non-zero exit. `--respect-typing 0` turns off only the typing guard.
+Answer the dialog in the terminal. Pi and mypi take RPC steering and are exempt.
+
 **Browser send (`POST /v1/browser/threads/action`, capability `browser.send-v1`).**
 Two additional actions, both owner-routed through the same `[browser_hub]` policy as
 every other verb and both carrying a caller-minted `request_id` UUID:
@@ -68,8 +78,9 @@ every other verb and both carrying a caller-minted `request_id` UUID:
 - `send_headless` starts one headless turn on an IDLE thread; a live pane or an
   in-flight turn is refused.
 
-Outcomes are explicit and never implicit: `sent`, `deferred`, `skipped_typing`,
-`refused_busy`, `refused_dead`, `uncertain`. **`sent` is submission, not
+Outcomes are explicit and never implicit: `sent`, `deferred` (with `held_reason`
+`typing` or `blocked`), `skipped_typing`, `refused_blocked` (`skip` into a thread
+blocked on a dialog), `refused_busy`, `refused_dead`, `uncertain`. **`sent` is submission, not
 completion** — observe the turn through live-v1, the display projection, or
 `headless-reply`. `uncertain` is only the PI_DELIVERY case: an RPC message whose
 ACK did not arrive, where submission may or may not have happened; do not retry it

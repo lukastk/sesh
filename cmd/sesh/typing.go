@@ -62,6 +62,8 @@ func reportTyping(what string, resp api.ThreadSendResponse) bool {
 	switch {
 	case resp.Sent != "":
 		return true
+	case resp.Deferred && resp.HeldReason == "blocked":
+		fmt.Fprintf(os.Stderr, "%s deferred: the thread is blocked on a dialog — the daemon delivers it once the thread unblocks or its turn ends (and the pane is quiet)\n", what)
 	case resp.Deferred:
 		fmt.Fprintf(os.Stderr, "%s deferred: the pane is in use (viewer input %ds ago) — the daemon delivers it once the pane has been quiet, by %s, else it FLAGS the thread with the undelivered message\n",
 			what, resp.InputAgoSec, time.Unix(resp.DeadlineUnix, 0).Format("15:04:05"))

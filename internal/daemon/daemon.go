@@ -109,6 +109,13 @@ type Daemon struct {
 	pasteHeld      atomic.Int64
 	pasteDelivered atomic.Int64
 	pasteFlagged   atomic.Int64
+	// Host command runs (hostcommands.go), in memory; hostCancel kills the
+	// running ones at shutdown.
+	hostMu        sync.Mutex
+	hostRuns      map[string]*hostRun
+	hostByRequest map[string]string
+	hostCtx       context.Context
+	hostCancel    context.CancelFunc
 	// mmaint converges the cockpit (one window per connected machine);
 	// nil when SESH_MASTER_SELFHEAL=off.
 	mmaint *masterMaint
@@ -267,6 +274,7 @@ func New(cfg config.Config) (*Daemon, error) {
 	}
 	d.idleStop = idleStopCfg
 	d.pasteStop = make(chan struct{})
+	d.hostCtx, d.hostCancel = context.WithCancel(context.Background())
 	schedCfg, err := config.LoadSchedules(cfg.Home)
 	if err != nil {
 		return nil, err // a broken [schedules] refuses the daemon loudly
@@ -404,6 +412,7 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	d.stopTransferSweeper()
 	d.stopIdleStopper()
 	d.stopPastes()
+	d.stopHostCommands()
 	d.stopAPI(ctx)
 	if d.sched != nil {
 		d.sched.stopAndWait()

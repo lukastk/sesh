@@ -749,6 +749,12 @@ func init() {
 		Localities:  bothLoc,
 	})
 
+	Register(Feature{
+		ID:          "host-cmd.run",
+		Description: "host commands (`host-cmd list/run`): a manifest in <SESH_HOME>/host-commands/<provider>.toml declares named argv commands; run substitutes declared --arg values into argv (never a shell), refuses unknown/missing/dash-leading args loudly, runs async (start + long-poll) and reports exit code, stdout and stderr; a nonzero exit is a reported result, a timeout kills the process group. Routes per --machine",
+		Localities:  bothLoc,
+	})
+
 	// ---- daemon / API ----
 	Register(Feature{
 		ID:          "daemon.lifecycle",

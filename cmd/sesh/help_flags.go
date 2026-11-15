@@ -607,6 +607,17 @@ var flagDocs = map[string][]flagDoc{
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON"},
 	},
+	"host-cmd list": {
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit machine-readable JSON"},
+	},
+	"host-cmd run": {
+		{"--provider", "the provider: its manifest's file stem in <SESH_HOME>/host-commands/"},
+		{"--command", "the command name within the provider"},
+		{"--arg", "name=value for one declared arg (repeatable); a value starting with - is refused unless the manifest allows it"},
+		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
+		{"--json", "emit the finished run as JSON (exit code, stdout, stderr, duration)"},
+	},
 	"blob get": {
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

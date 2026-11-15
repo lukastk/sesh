@@ -1,0 +1,22 @@
+# An example host-commands provider. Copy it to <SESH_HOME>/host-commands/ on a
+# machine (the provider name is the file stem, here "scratch"); that machine's
+# daemon then runs these commands on request: `sesh host-cmd list --machine <m>`,
+# `sesh host-cmd run --provider scratch --command make-dir --machine <m>`.
+description = "Scratch directories on this machine"
+
+# mktemp prints the new directory's absolute path on stdout.
+[[command]]
+name = "make-dir"
+description = "create a fresh temporary directory and print its path"
+argv = ["mktemp", "-d", "-t", "sesh-scratch-XXXXXX"]
+
+[[command]]
+name = "make-named-dir"
+description = "create a temporary directory whose name starts with a prefix"
+argv = ["mktemp", "-d", "-t", "{prefix}-XXXXXX"]
+timeout = "10s"
+
+[[command.arg]]
+name = "prefix"
+label = "Name prefix"
+required = true

@@ -26,6 +26,15 @@ package daemon
 //     wants to block loops (the CLI's --wait).
 //   - skip: a typing pane is a loud refusal, nothing queued — for periodic
 //     senders that have a next occurrence anyway.
+//
+// The blocked guard comes first and has no bypass: a terminal agent the hooks
+// report as BLOCKED (claude's PreToolUse for AskUserQuestion, a permission
+// prompt) has a dialog open, and paste-then-Enter would land in that dialog —
+// selecting its highlighted option — instead of reaching the conversation.
+// defer holds such a delivery until the block clears (unblocked or turn_ended)
+// and the pane is quiet, and time spent blocked does not count against the
+// typing deadline (a dialog can sit open for hours); wait and skip refuse it
+// loudly. respect_typing=0 turns off only the typing guard, never this one.
 
 import (
 	"context"
@@ -69,6 +78,32 @@ type errTyping struct{ ago time.Duration }
 func (e errTyping) Error() string {
 	return fmt.Sprintf("pane is in use: a viewer typed %s ago", e.ago.Round(time.Second))
 }
+
+// errBlocked is the refusal of a paste into a thread whose agent is blocked on
+// a dialog (the reported authority state). It is never bypassed.
+type errBlocked struct{ reason string }
+
+func (e errBlocked) Error() string {
+	if e.reason == "" {
+		return "thread is blocked on a dialog; a paste would answer it instead of reaching the conversation"
+	}
+	return fmt.Sprintf("thread is blocked on a dialog (%s); a paste would answer it instead of reaching the conversation", e.reason)
+}
+
+// threadBlocked reports the hooks' blocked state for a thread on this daemon.
+func (d *Daemon) threadBlocked(id string) (bool, string) {
+	st, ok := d.reportedState(id)
+	if !ok || !st.blocked {
+		return false, ""
+	}
+	return true, st.blockedReason
+}
+
+// Held-delivery reasons, as the send responses report them.
+const (
+	heldTyping  = "typing"
+	heldBlocked = "blocked"
+)
 
 // paneInputAgo reports how long ago the session last saw input from an attached
 // client. attached=false means nobody is viewing it (quiet by definition).
@@ -114,7 +149,8 @@ type pasteRequest struct {
 type pasteOutcome struct {
 	Sent         bool
 	Deferred     bool
-	Typing       bool // wait mode: budget spent, still typing, nothing queued
+	Typing       bool   // wait mode: budget spent, still typing, nothing queued
+	HeldReason   string // with Deferred: heldTyping or heldBlocked
 	InputAgo     time.Duration
 	DeadlineUnix int64
 }
@@ -139,6 +175,9 @@ func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
 		d.pasteDelivered.Add(1)
 		return pasteOutcome{Sent: true}, nil
 	}
+	if blocked, why := d.threadBlocked(req.thread.ID); blocked {
+		return pasteOutcome{}, errBlocked{reason: why}
+	}
 	quiet, ago, err := d.paneQuiet(session, req.guard, time.Now())
 	if err != nil {
 		return pasteOutcome{}, deliveryRefused{err}
@@ -153,21 +192,29 @@ func (d *Daemon) pasteNow(req pasteRequest) (pasteOutcome, error) {
 	return pasteOutcome{Sent: true, InputAgo: ago}, nil
 }
 
-// pasteDefer is the "defer" policy: paste now if quiet, else queue it.
+// pasteDefer is the "defer" policy: paste now if quiet and unblocked, else queue it.
 func (d *Daemon) pasteDefer(req pasteRequest) (pasteOutcome, error) {
 	out, err := d.pasteNow(req)
 	var typing errTyping
-	if !errors.As(err, &typing) {
+	var blocked errBlocked
+	reason := heldTyping
+	switch {
+	case errors.As(err, &typing):
+	case errors.As(err, &blocked):
+		reason = heldBlocked
+	default:
 		return out, err
 	}
 	deadline := time.Now().Add(req.guard.Deadline)
-	d.enqueuePaste(req, deadline)
+	d.enqueuePaste(req, deadline, reason)
 	d.pasteHeld.Add(1)
-	return pasteOutcome{Deferred: true, InputAgo: typing.ago, DeadlineUnix: deadline.Unix()}, nil
+	return pasteOutcome{Deferred: true, HeldReason: reason, InputAgo: typing.ago, DeadlineUnix: deadline.Unix()}, nil
 }
 
 // pasteWait is the "wait" policy: block up to budget for a quiet pane; a pane
-// still in use at the end returns Typing=true with nothing queued.
+// still in use at the end returns Typing=true with nothing queued. A blocked
+// thread is refused at once (errBlocked from pasteNow): a dialog outlasts any
+// wait budget, and looping on it would only hide the refusal.
 func (d *Daemon) pasteWait(ctx context.Context, req pasteRequest, budget time.Duration) (pasteOutcome, error) {
 	if budget <= 0 || budget > pasteWaitBudget {
 		budget = pasteWaitBudget
@@ -210,7 +257,7 @@ type pasteQueue struct {
 	inFlight bool // the drainer holds one popped item it is still polling
 }
 
-func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time) {
+func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time, reason string) {
 	d.pasteMu.Lock()
 	defer d.pasteMu.Unlock()
 	if d.pasteQueues == nil {
@@ -222,8 +269,13 @@ func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time) {
 		d.pasteQueues[req.thread.ID] = q
 	}
 	q.items = append(q.items, pendingPaste{req: req, queuedAt: time.Now(), deadline: deadline})
-	log.Printf("send: %s → %s (%s) held — pane in use; delivering when quiet for %s, deadline %s",
-		req.sender, req.thread.ID, req.thread.Name, req.guard.Window, deadline.Format("15:04:05"))
+	if reason == heldBlocked {
+		log.Printf("send: %s → %s (%s) held — the thread is blocked on a dialog; delivering once it unblocks",
+			req.sender, req.thread.ID, req.thread.Name)
+	} else {
+		log.Printf("send: %s → %s (%s) held — pane in use; delivering when quiet for %s, deadline %s",
+			req.sender, req.thread.ID, req.thread.Name, req.guard.Window, deadline.Format("15:04:05"))
+	}
 	if !q.draining {
 		q.draining = true
 		go d.drainPastes(req.thread.ID)
@@ -270,6 +322,8 @@ func (d *Daemon) drainPastes(threadID string) {
 }
 
 // deliverHeldPaste polls one held delivery to its end: pasted, or failed + flagged.
+// While the thread is blocked the typing deadline does not run: it restarts
+// from each blocked poll, so the full typing window applies after the block.
 func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 	req := item.req
 	for {
@@ -283,6 +337,16 @@ func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 			return
 		}
 		now := time.Now()
+		if blocked, _ := d.threadBlocked(req.thread.ID); blocked {
+			item.deadline = now.Add(req.guard.Deadline)
+			select {
+			case <-d.pasteStop:
+				log.Printf("send: %s → %s (%s) DROPPED at shutdown — the held delivery does not survive a restart", req.sender, req.thread.ID, req.thread.Name)
+				return
+			case <-time.After(pasteQuietPoll):
+			}
+			continue
+		}
 		quiet, ago, qerr := d.paneQuiet(session, req.guard, now)
 		if qerr != nil {
 			d.failHeldPaste(req, qerr.Error())

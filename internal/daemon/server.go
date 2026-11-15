@@ -46,6 +46,7 @@ func (d *Daemon) routes() http.Handler {
 	d.routesTickets(mux)
 	d.routesBlobs(mux)
 	d.routesFs(mux)
+	d.routesHostCommands(mux)
 	d.routesModels(mux)
 	d.routesThreadContext(mux)
 	d.routesThreadEnv(mux)

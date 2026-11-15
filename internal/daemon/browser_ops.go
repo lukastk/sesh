@@ -39,6 +39,8 @@ var browserOwnerPosts = map[string]string{
 	"/v1/browser/models/default":    "/v1/models/default",
 	"/v1/browser/shells/promote":    "/v1/shells/promote",
 	"/v1/browser/tmux/kill-session": "/v1/tmux/kill-session",
+	// Host commands (schema 74): start a run on the named machine.
+	"/v1/browser/host-commands/run": "/v1/host-commands/run",
 }
 
 // browserMaxBlobBody bounds POST /v1/browser/blobs, whose body carries the blob as
@@ -64,6 +66,9 @@ func (d *Daemon) routesBrowserOps(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/browser/models", d.handleBrowserMachineGet("/v1/models", "agent", "refresh"))
 	mux.HandleFunc("GET /v1/browser/models/defaults", d.handleBrowserMachineGet("/v1/models/defaults"))
 	mux.HandleFunc("GET /v1/browser/shells/sessions", d.handleBrowserMachineGet("/v1/shells/sessions"))
+	// Host commands (schema 74): a machine's declared commands, and a run's state.
+	mux.HandleFunc("GET /v1/browser/host-commands", d.handleBrowserMachineGet("/v1/host-commands"))
+	mux.HandleFunc("GET /v1/browser/host-commands/run", d.handleBrowserMachineGet("/v1/host-commands/run", "id", "wait_ms"))
 }
 
 // browserOwnerPost forwards Request to the owner's canonical route. An empty

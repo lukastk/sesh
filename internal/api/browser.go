@@ -545,6 +545,10 @@ const (
 	BrowserSendRefusedBusy   = "refused_busy"
 	BrowserSendRefusedDead   = "refused_dead"
 	BrowserSendUncertain     = "uncertain"
+	// BrowserSendRefusedBlocked (schema 74): on_typing=skip into a thread whose
+	// agent is blocked on a dialog. Nothing was delivered; a defer send to a
+	// blocked thread is `deferred` with held_reason "blocked" instead.
+	BrowserSendRefusedBlocked = "refused_blocked"
 )
 
 // BrowserSendResponse is the outcome of a `send` or `send_headless` browser
@@ -560,6 +564,7 @@ type BrowserSendResponse struct {
 	Outcome      string `json:"outcome"`
 	Detail       string `json:"detail,omitempty"`
 	Replayed     bool   `json:"replayed"`
+	HeldReason   string `json:"held_reason,omitempty"` // with deferred (schema 74): "typing" | "blocked"
 	InputAgoSec  int64  `json:"input_ago_sec,omitempty"`
 	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
 }

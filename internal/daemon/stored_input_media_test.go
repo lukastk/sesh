@@ -571,7 +571,7 @@ func TestStoredInputMediaCapabilityAndCORS(t *testing.T) {
 	// Sorted, per the published contract (see browser_capabilities_test.go, which
 	// asserts the PROPERTY; this one pins the exact expected content).
 	if !reflect.DeepEqual(page.Capabilities, []string{
-		"browser.blobs-v1", "browser.display-v1", "browser.fs-list-v1",
+		"browser.blobs-v1", "browser.display-v1", "browser.fs-list-v1", "browser.host-commands-v1",
 		"browser.live-input-media-v1", "browser.machines-v1", "browser.mesh-v1", "browser.models-v1", "browser.send-v1",
 		"browser.shells-v1", "browser.stored-input-media-v1", "browser.stored-media-presentation-v2",
 		"browser.thread-context-v1", "browser.thread-env-v1", "browser.thread-ops-v1", "browser.tickets-v1", "browser.tui-config-v1",

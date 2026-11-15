@@ -468,7 +468,17 @@ package api
 // tmux/kill-session} ({machine, request}). Each forwards the canonical request unchanged.
 // Capabilities browser.models-v1, browser.thread-context-v1, browser.thread-env-v1,
 // browser.shells-v1. Additive.
-const SchemaVersion = 73
+// 74: HOST COMMANDS AND THE BLOCKED SEND GUARD. Named commands declared per machine
+// in <SESH_HOME>/host-commands/*.toml: GET /v1/host-commands, POST
+// /v1/host-commands/run {provider, command, args, request_id} starts a run and GET
+// /v1/host-commands/run?id=&wait_ms= long-polls it (async: a run may outlast the 15 s
+// hop timeout); browser twins GET /v1/browser/host-commands?machine=, POST
+// /v1/browser/host-commands/run {machine, request} and GET
+// /v1/browser/host-commands/run?machine=&id=&wait_ms=, capability
+// browser.host-commands-v1. Every typed send refuses or holds a paste into a thread
+// the hooks report as blocked on a dialog: send responses gain held_reason
+// ("typing" | "blocked") and the browser send gains the outcome refused_blocked.
+const SchemaVersion = 74
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

@@ -191,7 +191,9 @@ The browser seam is deliberately narrower than the daemon's general API:
   that fixed canonical route on the owner (empty `machine` = the daemon answering);
   `POST /v1/browser/blobs/expand` expands `@blob()` tokens on the owner (browser sends
   deliver text verbatim and never expand them). `GET /v1/browser/tickets/get` and
-  `GET /v1/browser/fs/list` take `?machine=`; ticket
+  `GET /v1/browser/fs/list` take `?machine=`; host commands (schema 74, capability
+  `browser.host-commands-v1`) use `GET /v1/browser/host-commands{,/run}?machine=` and
+  `POST /v1/browser/host-commands/run` (see integrations); ticket
   `find`, `list-all` and `move` run on the hub; `GET /v1/browser/machines` lists machines
   with `routable` (whether the hub forwards to them). The blob route accepts bodies up to
   48 MiB (a 32 MiB blob as base64); every other browser body is limited to 1 MiB. Thread

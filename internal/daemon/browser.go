@@ -85,6 +85,7 @@ var browserCapabilityNames = []string{
 	"browser.thread-context-v1",
 	"browser.thread-env-v1",
 	"browser.shells-v1",
+	"browser.host-commands-v1",
 }
 
 // browserCapabilityTokens returns the published list, sorted, de-duplicated, and

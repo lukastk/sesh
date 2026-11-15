@@ -500,13 +500,17 @@ const (
 // daemon holds the delivery for a quiet pane (until DeadlineUnix, then it flags);
 // Typing means a "wait"-mode caller's budget ran out with the viewer still at the
 // keyboard and nothing was queued (loop, or give up). InputAgoSec is how long
-// ago the session last saw viewer input when the decision was made.
+// ago the session last saw viewer input when the decision was made. HeldReason
+// (schema 74) says why a Deferred delivery is held: "typing" (a viewer is at the
+// keyboard) or "blocked" (the agent has a dialog open; delivered once it
+// unblocks or the turn ends, and the deadline runs only after that).
 type ThreadSendResponse struct {
 	Schema       int    `json:"schema"`
 	ID           string `json:"id"`
 	Sent         string `json:"sent,omitempty"`
 	Deferred     bool   `json:"deferred,omitempty"`
 	Typing       bool   `json:"typing,omitempty"`
+	HeldReason   string `json:"held_reason,omitempty"`
 	InputAgoSec  int64  `json:"input_ago_sec,omitempty"`
 	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
 }

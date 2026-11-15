@@ -154,6 +154,13 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/tmux/kill-session": {
 		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
 	},
+	"/v1/browser/host-commands": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/host-commands/run": {
+		http.MethodGet:  {requestHeaders: corsHeaders("Authorization")},
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
 	"/v1/browser/tui-config": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},

@@ -126,6 +126,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sesh fs:", err)
 			os.Exit(1)
 		}
+	case "host-cmd":
+		if err := runHostCmd(config.Load(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "sesh host-cmd:", err)
+			os.Exit(1)
+		}
 	case "tui":
 		if err := runTUI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "sesh tui:", err)

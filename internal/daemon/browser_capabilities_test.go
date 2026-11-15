@@ -58,6 +58,7 @@ func TestBrowserCapabilitiesHonourTheSortedUniqueContract(t *testing.T) {
 		"browser.thread-context-v1":            true,
 		"browser.thread-env-v1":                true,
 		"browser.shells-v1":                    true,
+		"browser.host-commands-v1":             true,
 	}
 	if len(page.Capabilities) != len(want) {
 		t.Fatalf("capabilities = %#v, want %d tokens", page.Capabilities, len(want))

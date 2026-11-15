@@ -130,6 +130,30 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/mesh": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},
+	"/v1/browser/models": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/models/defaults": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/shells/sessions": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/threads/context": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/threads/env": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/models/default": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/shells/promote": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tmux/kill-session": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
 	"/v1/browser/tui-config": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},

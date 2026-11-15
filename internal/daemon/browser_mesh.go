@@ -10,6 +10,7 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/lukastk/sesh/internal/api"
@@ -34,12 +35,25 @@ var browserThreadOps = map[string]string{
 	"resume":   "/v1/threads/resume",
 	"realize":  "/v1/threads/realize",
 	"model":    "/v1/threads/model",
+	// schema 73: the TUI's context-edit and env-edit.
+	"context": "/v1/threads/context",
+	"env":     "/v1/threads/env",
+}
+
+// browserThreadReads maps each per-thread read a browser may make to its canonical
+// GET (?id=), served by the thread's owner (schema 73).
+var browserThreadReads = map[string]string{
+	"/v1/browser/threads/context": "/v1/threads/context",
+	"/v1/browser/threads/env":     "/v1/threads/env",
 }
 
 func (d *Daemon) routesBrowserMesh(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/browser/mesh", d.handleBrowserMesh)
 	mux.HandleFunc("POST /v1/browser/threads/op", d.handleBrowserThreadOp)
 	mux.HandleFunc("GET /v1/browser/tui-config", d.handleBrowserTUIConfig)
+	for browserPath, canonical := range browserThreadReads {
+		mux.HandleFunc("GET "+browserPath, d.handleBrowserThreadRead(canonical))
+	}
 }
 
 // handleBrowserMesh serves the merged mesh snapshot. By default it leaves out the
@@ -155,4 +169,28 @@ func (d *Daemon) handleBrowserThreadOp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.serveBrowserCanonical(w, r, owner, http.MethodPost, canonical, nil, req.Request)
+}
+
+// handleBrowserThreadRead forwards a per-thread GET (?id=) to the thread's owner.
+func (d *Daemon) handleBrowserThreadRead(canonical string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !onlyQuery(w, r, "id") {
+			return
+		}
+		id := r.URL.Query().Get("id")
+		if !validCanonicalUUID(id) {
+			writeError(w, http.StatusBadRequest, "browser thread read: id must be a canonical UUID")
+			return
+		}
+		owner, err := d.browserThreadOwnerFresh(r.Context(), id)
+		if err != nil {
+			writeError(w, browserOwnerStatus(err), err.Error())
+			return
+		}
+		if err := d.authorizeBrowserOwner(owner); err != nil {
+			writeError(w, browserOwnerStatus(err), err.Error())
+			return
+		}
+		d.serveBrowserCanonical(w, r, owner, http.MethodGet, canonical, url.Values{"id": {id}}, nil)
+	}
 }

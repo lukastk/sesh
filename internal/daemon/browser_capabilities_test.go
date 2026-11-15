@@ -54,6 +54,10 @@ func TestBrowserCapabilitiesHonourTheSortedUniqueContract(t *testing.T) {
 		"browser.mesh-v1":                      true,
 		"browser.thread-ops-v1":                true,
 		"browser.tui-config-v1":                true,
+		"browser.models-v1":                    true,
+		"browser.thread-context-v1":            true,
+		"browser.thread-env-v1":                true,
+		"browser.shells-v1":                    true,
 	}
 	if len(page.Capabilities) != len(want) {
 		t.Fatalf("capabilities = %#v, want %d tokens", page.Capabilities, len(want))

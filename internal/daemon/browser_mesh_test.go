@@ -191,3 +191,46 @@ color = "#00cc00"
 		t.Fatalf("a broken [tui] config: status %d, want 500", rec.Code)
 	}
 }
+
+// Context and env are read and written on the thread's owner through the hub; the
+// machine-scoped model defaults read is served by the named machine; bad ids and
+// unknown query parameters are refused.
+func TestBrowserThreadContextEnvAndMachineReadsRouteToTheOwner(t *testing.T) {
+	hub, peer := browserOpsMesh(t)
+	id := uuid.NewString()
+	insertBrowserThread(t, peer, id, uuid.NewString(), "remote", 30)
+	peer.maint.tick()
+	op := func(name string, request any) int {
+		raw, _ := json.Marshal(request)
+		return browserCall(t, hub, http.MethodPost, "/v1/browser/threads/op", api.BrowserThreadOpRequest{Op: name, Request: raw}).Code
+	}
+	if code := op("context", api.SetThreadContextRequest{ID: id, Text: "be brief"}); code != http.StatusOK {
+		t.Fatalf("context set status %d", code)
+	}
+	rec := browserCall(t, hub, http.MethodGet, "/v1/browser/threads/context?id="+id, nil)
+	var ctx api.ThreadContextResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &ctx) != nil || ctx.Text != "be brief" || ctx.Machine != "peer" {
+		t.Fatalf("context get %d %s", rec.Code, rec.Body.String())
+	}
+	if code := op("env", api.SetThreadEnvRequest{ID: id, Set: map[string]string{"FOO": "bar"}}); code != http.StatusOK {
+		t.Fatalf("env set status %d", code)
+	}
+	rec = browserCall(t, hub, http.MethodGet, "/v1/browser/threads/env?id="+id, nil)
+	var env api.ThreadEnvResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &env) != nil || env.Vars["FOO"] != "bar" {
+		t.Fatalf("env get %d %s", rec.Code, rec.Body.String())
+	}
+	rec = browserCall(t, hub, http.MethodGet, "/v1/browser/models/defaults?machine=peer", nil)
+	var defaults api.ModelDefaultsResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &defaults) != nil || defaults.Machine != "peer" {
+		t.Fatalf("model defaults %d %s", rec.Code, rec.Body.String())
+	}
+	for _, target := range []string{"/v1/browser/threads/env?id=nope", "/v1/browser/threads/context?id=" + id + "&x=1", "/v1/browser/models/defaults?machine=peer&agent=claude"} {
+		if rec := browserCall(t, hub, http.MethodGet, target, nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400", target, rec.Code)
+		}
+	}
+	if rec := browserCall(t, hub, http.MethodGet, "/v1/browser/models/defaults?machine=stranger", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("untrusted machine: status %d, want 403", rec.Code)
+	}
+}

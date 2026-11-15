@@ -34,6 +34,11 @@ var browserOwnerPosts = map[string]string{
 	// Expands @blob() tokens on the owner, for a caller that sends the text through a
 	// browser send (which delivers text verbatim and never expands tokens itself).
 	"/v1/browser/blobs/expand": "/v1/blobs/expand",
+	// The TUI's machine-scoped commands (schema 73): set-default-model, the shells
+	// view's promote and kill.
+	"/v1/browser/models/default":    "/v1/models/default",
+	"/v1/browser/shells/promote":    "/v1/shells/promote",
+	"/v1/browser/tmux/kill-session": "/v1/tmux/kill-session",
 }
 
 // browserMaxBlobBody bounds POST /v1/browser/blobs, whose body carries the blob as
@@ -55,6 +60,10 @@ func (d *Daemon) routesBrowserOps(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/browser/tickets/move", d.handleBrowserTicketMove)
 	mux.HandleFunc("GET /v1/browser/fs/list", d.handleBrowserFsList)
 	mux.HandleFunc("GET /v1/browser/machines", d.handleBrowserMachines)
+	// Machine-scoped reads for the TUI's model pickers and shells view (schema 73).
+	mux.HandleFunc("GET /v1/browser/models", d.handleBrowserMachineGet("/v1/models", "agent", "refresh"))
+	mux.HandleFunc("GET /v1/browser/models/defaults", d.handleBrowserMachineGet("/v1/models/defaults"))
+	mux.HandleFunc("GET /v1/browser/shells/sessions", d.handleBrowserMachineGet("/v1/shells/sessions"))
 }
 
 // browserOwnerPost forwards Request to the owner's canonical route. An empty
@@ -111,6 +120,28 @@ func onlyQuery(w http.ResponseWriter, r *http.Request, allowed ...string) bool {
 		}
 	}
 	return true
+}
+
+// handleBrowserMachineGet serves a machine-scoped canonical GET on the machine the
+// `machine` query parameter names (empty = this daemon), passing through only the
+// named parameters.
+func (d *Daemon) handleBrowserMachineGet(canonical string, params ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !onlyQuery(w, r, append([]string{"machine"}, params...)...) {
+			return
+		}
+		owner, ok := d.browserOwnerQuery(w, r)
+		if !ok {
+			return
+		}
+		query := url.Values{}
+		for _, name := range params {
+			if value := r.URL.Query().Get(name); value != "" {
+				query.Set(name, value)
+			}
+		}
+		d.serveBrowserCanonical(w, r, owner, http.MethodGet, canonical, query, nil)
+	}
 }
 
 func (d *Daemon) handleBrowserTicketGet(w http.ResponseWriter, r *http.Request) {

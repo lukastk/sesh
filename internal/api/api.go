@@ -461,7 +461,14 @@ package api
 // custom filters, view ring, key overrides, colours, column widths); the browser mesh
 // gains per-machine `cwd_labels` (the hub's [[cwd_label]] rules applied). Capability
 // browser.tui-config-v1. Additive.
-const SchemaVersion = 72
+// 73: THE TUI'S REMAINING COMMANDS FOR A BROWSER. Owner-routed reads GET
+// /v1/browser/threads/{context,env}?id= and machine-scoped reads GET
+// /v1/browser/{models,models/defaults,shells/sessions}?machine=; thread ops gain
+// `context` and `env`; owner-routed POSTs /v1/browser/{models/default,shells/promote,
+// tmux/kill-session} ({machine, request}). Each forwards the canonical request unchanged.
+// Capabilities browser.models-v1, browser.thread-context-v1, browser.thread-env-v1,
+// browser.shells-v1. Additive.
+const SchemaVersion = 73
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

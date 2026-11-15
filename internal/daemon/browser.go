@@ -81,6 +81,10 @@ var browserCapabilityNames = []string{
 	"browser.mesh-v1",
 	"browser.thread-ops-v1",
 	"browser.tui-config-v1",
+	"browser.models-v1",
+	"browser.thread-context-v1",
+	"browser.thread-env-v1",
+	"browser.shells-v1",
 }
 
 // browserCapabilityTokens returns the published list, sorted, de-duplicated, and

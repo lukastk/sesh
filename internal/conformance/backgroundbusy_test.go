@@ -9,7 +9,7 @@ import (
 	"github.com/lukastk/sesh/internal/matrix"
 )
 
-// thread.background-busy (schema 65, issue #24): an agent that ends its turn
+// thread.background-busy (schema 65, issue #24; background_busy = the gutter's ▷, schema 69): an agent that ends its turn
 // with background work in flight is NOT finished, so the thread reads busy and
 // carries the work as `background` until a later turn end reports none.
 //
@@ -67,20 +67,20 @@ func testBackgroundBusyClaude(t *testing.T, loc matrix.Locality) {
 	}
 	if !waitUntil(90*time.Second, func() bool {
 		s := sb.threadSnapshot(t, th.ID)
-		return s.Busy == api.BusyBusy && s.StateAuthority == api.AuthorityReported && hasShell(s)
+		return s.Busy == api.BusyBusy && s.StateAuthority == api.AuthorityReported && hasShell(s) && s.BackgroundBusy
 	}) {
 		s := sb.threadSnapshot(t, th.ID)
-		t.Fatalf("claude never reached busy+reported with a background shell (busy=%s authority=%q background=%s) — is the claude hook registered from a checkout with --background-json?",
-			s.Busy, s.StateAuthority, s.Background.Summary())
+		t.Fatalf("claude never reached busy+reported+background_busy with a background shell (busy=%s authority=%q background=%s background_busy=%v) — is the claude hook registered from a checkout with --background-json?",
+			s.Busy, s.StateAuthority, s.Background.Summary(), s.BackgroundBusy)
 	}
 	reportedAt := time.Now()
 
 	// (2) It STAYS busy past the stale-busy bound while the pane is still.
 	for time.Since(reportedAt) < 135*time.Second {
 		s := sb.threadSnapshot(t, th.ID)
-		if s.Busy != api.BusyBusy || s.StateAuthority != api.AuthorityReported || !hasShell(s) {
-			t.Fatalf("background-busy thread lost its state after %s (busy=%s authority=%q background=%s) — the stale-busy bound or a lost report dropped it",
-				time.Since(reportedAt).Round(time.Second), s.Busy, s.StateAuthority, s.Background.Summary())
+		if s.Busy != api.BusyBusy || s.StateAuthority != api.AuthorityReported || !hasShell(s) || !s.BackgroundBusy {
+			t.Fatalf("background-busy thread lost its state after %s (busy=%s authority=%q background=%s background_busy=%v) — the stale-busy bound or a lost report dropped it",
+				time.Since(reportedAt).Round(time.Second), s.Busy, s.StateAuthority, s.Background.Summary(), s.BackgroundBusy)
 		}
 		time.Sleep(5 * time.Second)
 	}
@@ -99,7 +99,7 @@ func testBackgroundBusyClaude(t *testing.T, loc matrix.Locality) {
 	if !waitUntil(150*time.Second, func() bool {
 		s := sb.threadSnapshot(t, th.ID)
 		return s.Busy == api.BusyIdle && s.StateAuthority == api.AuthorityReported &&
-			s.Background != nil && !s.Background.HasTasks()
+			s.Background != nil && !s.Background.HasTasks() && !s.BackgroundBusy
 	}) {
 		s := sb.threadSnapshot(t, th.ID)
 		t.Fatalf("after the background shell finished: busy=%s authority=%q background=%s, want idle+reported with an empty report",

@@ -39,8 +39,9 @@ prints that group's full `--help` (not a partial usage line).
     threads* below). Each KIND draws from a different stroke class — round for an
     agent, a prompt chevron for a shell, stacked lines for a group — so the kind
     reads at a glance rather than by comparing outlines.
-  - **busy**: `▶` busy (mid-turn, or — for claude — waiting on reported background
-    work such as a background shell; the `bg` column says which) / `·` idle. **Blank
+  - **busy**: `▶` busy (a turn is running) / `▷` busy on background work only (for
+    claude: the turn ended but a background shell, Monitor or subagent it started is
+    still running; the `bg` column or `I` says which) / `·` idle. **Blank
     for a shell thread** — it has no turn that could be executing, so the axis does
     not apply.
   - **flag** (last gutter cell): `⚑` **flagged** — this thread needs your

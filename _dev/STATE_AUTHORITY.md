@@ -94,6 +94,9 @@ turn's `Stop` carries `[]`. The hook forwards both lists as `--background-json` 
 - Mid-turn events carry the last set forward; only a `turn_ended` replaces it, and one
   without `--background-json` sets it to nil (not reported), never keeps a stale set.
 - Wake-ups do not make a thread busy: each runs a real turn.
+- Schema 69: the snapshot/row carry `background_busy` = `!busy && background.HasTasks()`
+  (`backgroundOnlyBusy()`), drawn as `▷` in the TUI gutter. The client cannot derive it
+  from `background` because the set is carried through a later turn unchanged.
 - Limits: a daemon restart drops the set (runtime state is never persisted) until the
   agent's next turn end; a task killed while claude is idle may not wake it, so the set
   clears only at the next turn end.

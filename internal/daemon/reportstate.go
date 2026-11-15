@@ -41,6 +41,9 @@ type authorityState struct {
 // Monitor or subagent is not finished).
 func (a authorityState) effectiveBusy() bool { return a.busy || a.background.HasTasks() }
 
+// backgroundOnlyBusy is busy with no turn in flight: only background tasks.
+func (a authorityState) backgroundOnlyBusy() bool { return !a.busy && a.background.HasTasks() }
+
 func (d *Daemon) routesReportState(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/report-state", d.handleThreadReportState)
 }

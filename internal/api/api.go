@@ -440,7 +440,10 @@ package api
 // with `routable`. Capabilities browser.tickets-v1, browser.fs-list-v1,
 // browser.blobs-v1, browser.machines-v1. BrowserThreadSummary gains cwd_rel and
 // created_at_unix. Additive: a pre-68 daemon 404s the routes and omits the fields.
-const SchemaVersion = 68
+// 69: BACKGROUND-ONLY BUSY. Row/snapshot gain `background_busy`: busy only because
+// of reported background tasks, no turn in flight (the TUI gutter's ▷). Additive: a
+// pre-69 peer omits it, so its background-busy threads draw as an ordinary ▶.
+const SchemaVersion = 69
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

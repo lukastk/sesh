@@ -276,8 +276,9 @@ custom context with `◆`; `context-view` shows it and `I` shows its version.
 
 The **BG** column (`bg`, not in the default set) shows the background work a thread's
 agent reported at its last turn end: `1 shell`, `3 tasks`, a `+w` suffix (or `wake`
-alone) for pending in-session wake-ups. Background tasks keep a thread busy (`▶`), so
-this column is what explains a busy thread whose pane is still. Blank when nothing is
+alone) for pending in-session wake-ups. Background tasks keep a thread busy, and the
+gutter draws that as `▷` (a running turn is `▶`), so the gutter alone tells you a
+thread is waiting on background work; this column (or `I`) says what that work is. Blank when nothing is
 in flight or nothing was reported; `thread status` tells those apart.
 
 The tree itself lives in the NAME cell: a child hangs off its parent on a **`├─ `**

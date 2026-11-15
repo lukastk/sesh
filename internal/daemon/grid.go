@@ -95,7 +95,7 @@ func (d *Daemon) resolveRow(th api.Thread, tickets map[string]store.TicketDigest
 			TicketNeedsInput: dg.HasActive && snap.Head == api.Headful && snap.Busy == api.BusyIdle,
 			CwdRel:           snap.CwdRel, OnHold: onHold, OnHoldEffectiveUnix: effHoldUntil,
 			StateAuthority: snap.StateAuthority, ObservedModel: snap.ObservedModel,
-			Background: snap.Background}
+			Background: snap.Background, BackgroundBusy: snap.BackgroundBusy}
 	}
 	// NB the on-demand fallback below never runs the rolling probe, so it
 	// carries no state_authority/blocked (unknown, omitted) by design.

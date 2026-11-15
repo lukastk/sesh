@@ -1172,7 +1172,7 @@ func (m Model) fetch() tea.Cmd {
 func meshRow(t api.ThreadSnapshot) api.ThreadRow {
 	return api.ThreadRow{Thread: t.Thread, Head: t.Head, Busy: t.Busy, Attachment: t.Attachment, TicketsOpen: t.TicketsOpen, TicketName: t.TicketName, TicketNeedsInput: t.TicketNeedsInput, CwdRel: t.CwdRel, OnHold: t.OnHold, OnHoldEffectiveUnix: t.OnHoldEffectiveUnix, StateAuthority: t.StateAuthority,
 		Schedules: t.Schedules, ScheduleNextUnix: t.ScheduleNextUnix, ObservedModel: t.ObservedModel,
-		Background: t.Background}
+		Background: t.Background, BackgroundBusy: t.BackgroundBusy}
 }
 
 // flattenMeshRows flattens a mesh view into the sorted row set the grid renders,
@@ -4155,7 +4155,9 @@ func HeadGlyph(row api.ThreadRow) string {
 
 // BusyGlyph renders the execution axis:
 //
-//	▶ busy (a turn is executing)   · idle (quiet)   ? unknown
+//	▶ busy (a turn is executing)   ▷ busy on background work only (the turn
+//	ended; a background shell/Monitor/subagent is still running — the BG
+//	column and the `I` panel say what)   · idle (quiet)   ? unknown
 //
 // (Attention states render in the FLAG gutter cell — see FlagGlyph — not
 // here; the 43-era ‼/✔ overlays were replaced by the flagged system.)
@@ -4168,6 +4170,9 @@ func BusyGlyph(row api.ThreadRow) string {
 	}
 	switch row.Busy {
 	case api.BusyBusy:
+		if row.BackgroundBusy {
+			return "▷"
+		}
 		return "▶"
 	case api.BusyIdle:
 		return "·"

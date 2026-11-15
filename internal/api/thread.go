@@ -709,6 +709,11 @@ type ThreadRow struct {
 	// Background is the reported in-flight background work (schema 65); nil =
 	// not reported. See BackgroundState.
 	Background *BackgroundState `json:"background,omitempty"`
+	// BackgroundBusy is true when the thread reads busy ONLY because of reported
+	// background tasks: no turn is in flight (schema 69). The TUI's state gutter
+	// draws it as ▷ instead of ▶. Background alone cannot say this: it is carried
+	// unchanged through a later turn until that turn ends.
+	BackgroundBusy bool `json:"background_busy,omitempty"`
 	// ObservedModel mirrors ThreadSnapshot's (schema 58).
 	ObservedModel string `json:"observed_model,omitempty"`
 	// TurnError mirrors Thread.TurnError (schema 64).
@@ -774,6 +779,11 @@ type ThreadSnapshot struct {
 	// Background is the reported in-flight background work (schema 65); nil =
 	// not reported. See BackgroundState.
 	Background *BackgroundState `json:"background,omitempty"`
+	// BackgroundBusy is true when the thread reads busy ONLY because of reported
+	// background tasks: no turn is in flight (schema 69). The TUI's state gutter
+	// draws it as ▷ instead of ▶. Background alone cannot say this: it is carried
+	// unchanged through a later turn until that turn ends.
+	BackgroundBusy bool `json:"background_busy,omitempty"`
 	// ObservedModel is the model the thread's own transcript says it last ran on
 	// (schema 58), read by the OWNING daemon from the harness's records — claude
 	// assistant entries, codex turn_context, pi model_change/assistant messages —

@@ -33,3 +33,22 @@ func TestBackgroundCell(t *testing.T) {
 		}
 	}
 }
+
+// TestBusyGlyphBackgroundOnly pins the state gutter's busy axis: ▶ for a turn in
+// flight, ▷ for busy on background work alone, · idle, blank for shells.
+func TestBusyGlyphBackgroundOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  api.ThreadRow
+		want string
+	}{
+		{"turn", api.ThreadRow{Busy: api.BusyBusy}, "▶"},
+		{"background only", api.ThreadRow{Busy: api.BusyBusy, BackgroundBusy: true}, "▷"},
+		{"idle", api.ThreadRow{Busy: api.BusyIdle}, "·"},
+		{"shell", api.ThreadRow{Thread: api.Thread{AgentKind: api.ShellAgentKind}, Busy: api.BusyBusy, BackgroundBusy: true}, " "},
+	} {
+		if got := BusyGlyph(tc.row); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

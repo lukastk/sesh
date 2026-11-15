@@ -655,6 +655,7 @@ func (m *maintainer) refreshThread(th api.Thread, attached map[string]int64, tic
 		}
 		snap.StateAuthority = api.AuthorityReported
 		snap.Background = cloneBackground(auth.background)
+		snap.BackgroundBusy = auth.backgroundOnlyBusy()
 	} else {
 		snap.StateAuthority = api.AuthorityHeuristic
 	}

@@ -53,6 +53,9 @@ func TestReportStateBackground(t *testing.T) {
 	if a := state(); a.busy || !a.effectiveBusy() || len(a.background.Tasks) != 1 {
 		t.Fatalf("turn_ended with a running shell: want turn idle + effectively busy, got busy=%v effective=%v bg=%+v", a.busy, a.effectiveBusy(), a.background)
 	}
+	if !state().backgroundOnlyBusy() {
+		t.Fatal("turn_ended with a running shell: want backgroundOnlyBusy (the gutter's ▷)")
+	}
 	// The reporter's struct must not be aliased by the authority entry.
 	shell.Tasks[0].ID = "mutated"
 	if state().background.Tasks[0].ID != "b1" {
@@ -64,6 +67,10 @@ func TestReportStateBackground(t *testing.T) {
 	if a := state(); !a.busy || !a.background.HasTasks() {
 		t.Fatalf("turn_started after background: want busy + carried set, got busy=%v bg=%+v", a.busy, a.background)
 	}
+	// A running turn is a turn, whatever was left in the background: ▶, not ▷.
+	if state().backgroundOnlyBusy() {
+		t.Fatal("turn_started after background: backgroundOnlyBusy must be false while a turn runs")
+	}
 	// A stall mid-turn also carries it.
 	mustReport(api.ReportBlocked, nil)
 	if !state().background.HasTasks() {
@@ -72,6 +79,9 @@ func TestReportStateBackground(t *testing.T) {
 
 	// The turn ends with nothing in flight but a pending wake-up: idle.
 	mustReport(api.ReportTurnEnded, &api.BackgroundState{Tasks: []api.BackgroundTask{}, Wakeups: []api.BackgroundWakeup{{ID: "c1", Schedule: "*/20 * * * *", Recurring: true}}})
+	if state().backgroundOnlyBusy() {
+		t.Fatal("wake-up only: backgroundOnlyBusy must be false (wake-ups are not busy)")
+	}
 	if a := state(); a.effectiveBusy() || a.background == nil || len(a.background.Wakeups) != 1 {
 		t.Fatalf("wake-up only: want idle with the wake-up recorded, got effective=%v bg=%+v", a.effectiveBusy(), a.background)
 	}

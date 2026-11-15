@@ -19,7 +19,7 @@ the measured builds, not current fleet deployment.
 
   ```bash
   sesh ticket create --name <name> [--prompt <text>]      # ONLY when Lukas asked; starts in triage
-  sesh ticket list [--thread <id>] [--current] [--all-machines] [--local]   # --current = calling pane's thread; --all-machines fans out across the mesh (emits machine + thread name per ticket)
+  sesh ticket list [--thread <id>] [--current] [--all-machines] [--local] [--summary]   # --summary (with --all-machines) leaves out prompts and notes; --current = calling pane's thread; --all-machines fans out across the mesh (emits machine + thread name per ticket)
   sesh ticket get --id <id> [--field prompt] [--json]     # --field: id|name|prompt|status|thread|created|closed|notes (raw)
   sesh ticket find --id <id> [--json]                     # MESH-WIDE lookup: fans out across peers; returns the
                                                           #   ticket + its owning machine + bound-thread context

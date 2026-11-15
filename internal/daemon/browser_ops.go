@@ -51,7 +51,7 @@ func (d *Daemon) routesBrowserOps(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /v1/browser/tickets/get", d.handleBrowserTicketGet)
 	mux.HandleFunc("GET /v1/browser/tickets/find", d.handleBrowserHubGet("/v1/tickets/find", "id"))
-	mux.HandleFunc("GET /v1/browser/tickets/list-all", d.handleBrowserHubGet("/v1/tickets/list-all"))
+	mux.HandleFunc("GET /v1/browser/tickets/list-all", d.handleBrowserHubGet("/v1/tickets/list-all", "summary"))
 	mux.HandleFunc("POST /v1/browser/tickets/move", d.handleBrowserTicketMove)
 	mux.HandleFunc("GET /v1/browser/fs/list", d.handleBrowserFsList)
 	mux.HandleFunc("GET /v1/browser/machines", d.handleBrowserMachines)

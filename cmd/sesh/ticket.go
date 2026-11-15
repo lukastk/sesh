@@ -108,6 +108,7 @@ func ticketList(cfg config.Config, args []string) error {
 	fs.Bool("current", false, "auto-detect the current thread and list its tickets")
 	allMachines := fs.Bool("all-machines", false, "fan out across the mesh (this machine + peers); emits machine + thread name per ticket")
 	localOnly := fs.Bool("local", false, "with --all-machines: only this daemon's tickets (the leaf form the fan-out calls)")
+	summary := fs.Bool("summary", false, "with --all-machines: leave out each ticket's prompt and notes (much smaller; read one with `sesh ticket get`)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -115,7 +116,7 @@ func ticketList(cfg config.Config, args []string) error {
 	c := daemonClient(cfg)
 	// Mesh-wide listing (the ticket browser): a different, machine-stamped shape.
 	if *allMachines {
-		resp, err := c.TicketListAll(context.Background(), *localOnly)
+		resp, err := c.TicketListAll(context.Background(), *localOnly, *summary)
 		if err != nil {
 			return err
 		}

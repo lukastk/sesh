@@ -258,3 +258,64 @@ func TestBrowserActionFindsAThreadAPeerCreatedSinceTheLastSync(t *testing.T) {
 		t.Fatalf("unknown thread status %d, want 404: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// summary=1 leaves every ticket's prompt and notes out, the hub's own and a peer's,
+// and says so; without it the listing carries both.
+func TestBrowserTicketListAllSummaryLeavesOutPromptsAndNotes(t *testing.T) {
+	hub, _ := browserOpsMesh(t)
+	notes := "closed by abc"
+	for _, machine := range []string{"", "peer"} {
+		rec := browserCall(t, hub, http.MethodPost, "/v1/browser/tickets", routed(machine, api.CreateTicketRequest{Name: "t-" + machine, Prompt: "a long prompt"}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("create on %q: status %d: %s", machine, rec.Code, rec.Body.String())
+		}
+		var created api.TicketResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		rec = browserCall(t, hub, http.MethodPost, "/v1/browser/tickets/set", routed(machine, api.SetTicketRequest{ID: created.Ticket.ID, Notes: &notes}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("set notes on %q: status %d: %s", machine, rec.Code, rec.Body.String())
+		}
+	}
+	list := func(target string) api.TicketListAllResponse {
+		rec := browserCall(t, hub, http.MethodGet, target, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d: %s", target, rec.Code, rec.Body.String())
+		}
+		var out api.TicketListAllResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Tickets) != 2 {
+			t.Fatalf("%s: %d tickets, want the hub's and the peer's", target, len(out.Tickets))
+		}
+		return out
+	}
+	full := list("/v1/browser/tickets/list-all")
+	if full.Summary {
+		t.Fatal("a full listing says summary")
+	}
+	for _, e := range full.Tickets {
+		if e.Ticket.Prompt != "a long prompt" || e.Ticket.Notes != notes {
+			t.Fatalf("full listing lost a field on %s: %#v", e.Machine, e.Ticket)
+		}
+	}
+	summary := list("/v1/browser/tickets/list-all?summary=1")
+	if !summary.Summary {
+		t.Fatal("a summary listing does not say summary")
+	}
+	machines := map[string]bool{}
+	for _, e := range summary.Tickets {
+		machines[e.Machine] = true
+		if e.Ticket.Prompt != "" || e.Ticket.Notes != "" {
+			t.Fatalf("summary listing carries a prompt or notes on %s: %#v", e.Machine, e.Ticket)
+		}
+		if e.Ticket.ID == "" || e.Ticket.Name == "" || e.Ticket.Status == "" {
+			t.Fatalf("summary listing lost an identifying field on %s: %#v", e.Machine, e.Ticket)
+		}
+	}
+	if !machines["hub"] || !machines["peer"] {
+		t.Fatalf("summary listing machines %v, want hub and peer", machines)
+	}
+}

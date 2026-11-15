@@ -155,21 +155,33 @@ func (d *Daemon) fanOutFindTicket(id string) (*api.TicketFindResponse, []string)
 // and its bound-thread name) plus, unless `&local=1`, every reachable peer's tickets
 // (each peer answering local-only — no recursion). Unreachable peers are reported,
 // not dropped, so an incomplete listing is visible (offline browsing).
+//
+// `&summary=1` (schema 70) leaves every ticket's prompt and notes out and says so with
+// `summary: true`. The fan-out asks HTTP peers for the summary too, but this daemon
+// clears both fields on every entry itself, so a pre-70 peer (which ignores the
+// parameter and answers in full) still yields a summary listing.
 func (d *Daemon) handleTicketListAll(w http.ResponseWriter, r *http.Request) {
 	localOnly := r.URL.Query().Get("local") == "1"
+	summary := r.URL.Query().Get("summary") == "1"
 	local, err := d.listTicketsLocalEntries()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := api.TicketListAllResponse{Schema: api.SchemaVersion, Tickets: local}
+	out := api.TicketListAllResponse{Schema: api.SchemaVersion, Summary: summary, Tickets: local}
 	if !localOnly {
-		peerEntries, unreachable := d.fanOutListTickets()
+		peerEntries, unreachable := d.fanOutListTickets(summary)
 		out.Tickets = append(out.Tickets, peerEntries...)
 		out.Unreachable = unreachable
 	}
 	if out.Tickets == nil {
 		out.Tickets = []api.TicketListEntry{}
+	}
+	if summary {
+		for i := range out.Tickets {
+			out.Tickets[i].Ticket.Prompt = ""
+			out.Tickets[i].Ticket.Notes = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -210,7 +222,7 @@ func (d *Daemon) listTicketsLocalEntries() ([]api.TicketListEntry, error) {
 // fanOutListTickets queries every peer's list-all endpoint (local-only) CONCURRENTLY
 // and merges the entries (already stamped with each peer's machine). A peer error is
 // non-fatal — reported in unreachable so the caller knows the listing is incomplete.
-func (d *Daemon) fanOutListTickets() ([]api.TicketListEntry, []string) {
+func (d *Daemon) fanOutListTickets(summary bool) ([]api.TicketListEntry, []string) {
 	reg, err := peers.Load(d.cfg.PeersPath())
 	if err != nil {
 		return nil, nil
@@ -235,7 +247,7 @@ func (d *Daemon) fanOutListTickets() ([]api.TicketListEntry, []string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			entries, err := fetchPeerTicketList(p)
+			entries, err := fetchPeerTicketList(p, summary)
 			if err != nil {
 				results[i] = result{ok: false}
 				return
@@ -260,8 +272,10 @@ func (d *Daemon) fanOutListTickets() ([]api.TicketListEntry, []string) {
 // fetchPeerTicketList asks ONE peer's daemon for its tickets (local-only, no further
 // fan-out) over the peer's EXPLICIT transport — http via its TCP API, else a real ssh
 // hop. A failure is returned to the caller (reported Unreachable); never a silent
-// transport downgrade.
-func fetchPeerTicketList(p peers.Peer) ([]api.TicketListEntry, error) {
+// transport downgrade. summary is passed on over HTTP only, where a pre-70 peer
+// ignores it; the ssh hop runs the peer's own CLI, which a pre-70 binary would refuse
+// with an unknown flag, so it always asks in full. The caller strips either way.
+func fetchPeerTicketList(p peers.Peer, summary bool) ([]api.TicketListEntry, error) {
 	if p.Transport() == "http" {
 		c, err := peerRemoteClient(p)
 		if err != nil {
@@ -269,7 +283,7 @@ func fetchPeerTicketList(p peers.Peer) ([]api.TicketListEntry, error) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), meshFetchTimeout)
 		defer cancel()
-		resp, err := c.TicketListAll(ctx, true)
+		resp, err := c.TicketListAll(ctx, true, summary)
 		if err != nil {
 			return nil, err
 		}

@@ -96,8 +96,15 @@ type TicketListEntry struct {
 // THIS daemon plus (unless local-only) every reachable peer's tickets, each stamped
 // with its owning machine. Unreachable lists peers the fan-out could not reach (the
 // listing is incomplete by those machines if non-empty) — never silently dropped.
+//
+// Summary is true when the caller asked for `summary=1` (schema 70): every entry's
+// Ticket.Prompt and Ticket.Notes are then empty because they were left out, not
+// because the tickets have none. Prompts and notes are most of a listing's bytes, and
+// a caller that only reconciles ids, names, statuses and threads does not need them;
+// it fetches one ticket's prompt with GET /v1/tickets/get when it needs it.
 type TicketListAllResponse struct {
 	Schema      int               `json:"schema"`
+	Summary     bool              `json:"summary,omitempty"`
 	Tickets     []TicketListEntry `json:"tickets"`
 	Unreachable []string          `json:"unreachable,omitempty"`
 }

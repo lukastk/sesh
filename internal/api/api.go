@@ -443,7 +443,13 @@ package api
 // 69: BACKGROUND-ONLY BUSY. Row/snapshot gain `background_busy`: busy only because
 // of reported background tasks, no turn in flight (the TUI gutter's ▷). Additive: a
 // pre-69 peer omits it, so its background-busy threads draw as an ordinary ▶.
-const SchemaVersion = 69
+// 70: TICKET LIST SUMMARY. GET /v1/tickets/list-all (and /v1/browser/tickets/list-all)
+// take `summary=1`: every entry's prompt and notes are left out and the response says
+// `summary: true`. Prompts and notes are most of a mesh listing's bytes, and Obsidian's
+// periodic ticket reconcile reads neither. `sesh ticket list --all-machines --summary`.
+// Additive: a pre-70 daemon ignores the parameter and answers in full without
+// `summary`; a 70 hub strips entries from pre-70 peers itself.
+const SchemaVersion = 70
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

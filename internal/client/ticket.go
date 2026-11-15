@@ -48,11 +48,20 @@ func (c *Client) TicketFind(ctx context.Context, id string, localOnly bool) (api
 // the ticket browser. The daemon it hits returns its own tickets plus (unless
 // localOnly) every reachable peer's, each stamped with its owning machine. localOnly
 // restricts it to THIS daemon's store (the leaf form the fan-out calls on each peer).
-func (c *Client) TicketListAll(ctx context.Context, localOnly bool) (api.TicketListAllResponse, error) {
+// summary asks for the listing without each ticket's prompt and notes (schema 70);
+// the response then says `summary: true`.
+func (c *Client) TicketListAll(ctx context.Context, localOnly, summary bool) (api.TicketListAllResponse, error) {
 	var out api.TicketListAllResponse
-	u := "http://unix/v1/tickets/list-all"
+	q := url.Values{}
 	if localOnly {
-		u += "?local=1"
+		q.Set("local", "1")
+	}
+	if summary {
+		q.Set("summary", "1")
+	}
+	u := "http://unix/v1/tickets/list-all"
+	if len(q) > 0 {
+		u += "?" + q.Encode()
 	}
 	return out, c.getJSON(ctx, u, &out)
 }

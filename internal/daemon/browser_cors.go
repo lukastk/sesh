@@ -127,6 +127,12 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/machines": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},
+	"/v1/browser/mesh": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/threads/op": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
 }
 
 // browserCORS is the outermost TCP middleware. It handles unauthenticated

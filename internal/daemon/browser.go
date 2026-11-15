@@ -78,6 +78,8 @@ var browserCapabilityNames = []string{
 	"browser.fs-list-v1",
 	"browser.blobs-v1",
 	"browser.machines-v1",
+	"browser.mesh-v1",
+	"browser.thread-ops-v1",
 }
 
 // browserCapabilityTokens returns the published list, sorted, de-duplicated, and
@@ -148,6 +150,7 @@ func (d *Daemon) routesBrowser(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/browser/threads/artifact-bytes", d.handleBrowserStoredArtifactBytes)
 	d.routesBrowserTransfers(mux)
 	d.routesBrowserOps(mux)
+	d.routesBrowserMesh(mux)
 }
 
 // browserOwnerRefreshWait bounds how long an action on an unknown thread waits for

@@ -449,7 +449,14 @@ package api
 // periodic ticket reconcile reads neither. `sesh ticket list --all-machines --summary`.
 // Additive: a pre-70 daemon ignores the parameter and answers in full without
 // `summary`; a 70 hub strips entries from pre-70 peers itself.
-const SchemaVersion = 70
+// 71: BROWSER MESH + THREAD OPS (internal/daemon/browser_mesh.go), so a browser can
+// be a full `sesh tui`: GET /v1/browser/mesh[?archived=1] is the TUI's merged mesh
+// snapshot (by default without the archived threads its active view hides) with a
+// per-machine `routable`; POST /v1/browser/threads/op {op, request} forwards one
+// canonical thread mutation (flag, hold, pin, notify, tag, rename, reparent,
+// archive, delete, stop, resume, realize, model) unchanged to the thread's owner.
+// Capabilities browser.mesh-v1, browser.thread-ops-v1. Additive.
+const SchemaVersion = 71
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

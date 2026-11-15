@@ -337,6 +337,36 @@ type BrowserRoutedRequest struct {
 	Request json.RawMessage `json:"request"`
 }
 
+// BrowserMeshResponse is GET /v1/browser/mesh (schema 71): the merged mesh snapshot
+// `sesh tui` polls (GET /v1/mesh), one entry per machine. Archived is true when the
+// caller asked for `archived=1`; otherwise archived threads the TUI's active view
+// would hide (not flagged, no live pane, not running) are left out.
+type BrowserMeshResponse struct {
+	Schema   int                  `json:"schema"`
+	Archived bool                 `json:"archived"`
+	Machines []BrowserMeshMachine `json:"machines"`
+}
+
+// BrowserMeshMachine is MachineView plus Routable: whether the browser hub forwards
+// thread ops to this machine (trusted, reachable, HTTP transport).
+type BrowserMeshMachine struct {
+	Machine      string           `json:"machine"`
+	Self         bool             `json:"self"`
+	Reachable    bool             `json:"reachable"`
+	Routable     bool             `json:"routable"`
+	SyncedAtUnix int64            `json:"synced_at_unix"`
+	Threads      []ThreadSnapshot `json:"threads"`
+}
+
+// BrowserThreadOpRequest is POST /v1/browser/threads/op (schema 71): Op names one
+// canonical thread mutation (flag, hold, pin, notify, tag, rename, reparent,
+// archive, delete, stop, resume, realize, model) and Request is that route's own
+// body, forwarded unchanged to the owner of the thread its `id` names.
+type BrowserThreadOpRequest struct {
+	Op      string          `json:"op"`
+	Request json.RawMessage `json:"request"`
+}
+
 // BrowserMachine is one row of GET /v1/browser/machines. Routable says whether the
 // browser hub will forward to it (trusted, reachable, HTTP transport).
 type BrowserMachine struct {

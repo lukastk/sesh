@@ -226,3 +226,29 @@ func TestBrowserCapabilitiesListTheOperations(t *testing.T) {
 		}
 	}
 }
+
+// A browser create on a peer followed at once by an action: the hub has not synced
+// the new thread yet, so the action asks the trusted peers to sync and then routes.
+func TestBrowserActionFindsAThreadAPeerCreatedSinceTheLastSync(t *testing.T) {
+	hub, peer := browserOpsMesh(t)
+	id := uuid.NewString()
+	insertBrowserThread(t, peer, id, uuid.NewString(), "fresh", 30)
+	peer.maint.tick() // the peer's own snapshot now has it, as its running maintainer would
+	if owner, err := hub.browserThreadOwner(id); err == nil {
+		t.Fatalf("the hub already knows the thread (owner %q); the test needs a stale view", owner)
+	}
+	action := map[string]string{"thread_id": id, "action": "rename", "name": "renamed"}
+	rec := browserCall(t, hub, http.MethodPost, "/v1/browser/threads/action", action)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("action on a just-created peer thread: status %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := peer.store.GetThread(id); got.Name != "renamed" {
+		t.Fatalf("rename did not reach the owner: %#v", got)
+	}
+
+	// A thread nobody has still fails, after the bounded wait.
+	rec = browserCall(t, hub, http.MethodPost, "/v1/browser/threads/action", map[string]string{"thread_id": uuid.NewString(), "action": "rename", "name": "x"})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown thread status %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}

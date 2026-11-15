@@ -150,6 +150,42 @@ func (d *Daemon) routesBrowser(mux *http.ServeMux) {
 	d.routesBrowserOps(mux)
 }
 
+// browserOwnerRefreshWait bounds how long an action on an unknown thread waits for
+// the trusted peers' snapshots to arrive.
+const browserOwnerRefreshWait = 3 * time.Second
+
+// browserThreadOwnerFresh is browserThreadOwner for an action, which may name a
+// thread a peer created moments ago (a browser create followed at once by a send):
+// the hub learns of it only on its next mesh sync. On "not found" it asks every
+// trusted peer to sync now and looks again until the thread appears or
+// browserOwnerRefreshWait passes. It never invents a record: the owner always comes
+// from a real store or a real peer snapshot.
+func (d *Daemon) browserThreadOwnerFresh(ctx context.Context, id string) (string, error) {
+	owner, err := d.browserThreadOwner(id)
+	if browserOwnerStatus(err) != http.StatusNotFound || !d.browserHub.Enabled || d.mesh == nil {
+		return owner, err
+	}
+	for machine := range d.browserHub.TrustedPeers {
+		_ = d.mesh.nudgePeer(machine) // an unregistered peer simply is not asked
+	}
+	deadline := time.NewTimer(browserOwnerRefreshWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return d.browserThreadOwner(id)
+		case <-tick.C:
+			if owner, err := d.browserThreadOwner(id); browserOwnerStatus(err) != http.StatusNotFound {
+				return owner, err
+			}
+		}
+	}
+}
+
 // browserThreadOwner resolves one thread from the authoritative local store or
 // the replicated mesh records. More than one owner is a loud conflict: choosing
 // one would turn replication corruption into a potentially destructive action.
@@ -538,7 +574,7 @@ func (d *Daemon) handleBrowserThreadAction(w http.ResponseWriter, r *http.Reques
 		}
 		path, body = routed, routedBody
 	}
-	owner, err := d.browserThreadOwner(req.ThreadID)
+	owner, err := d.browserThreadOwnerFresh(r.Context(), req.ThreadID)
 	if err != nil {
 		writeError(w, browserOwnerStatus(err), err.Error())
 		return

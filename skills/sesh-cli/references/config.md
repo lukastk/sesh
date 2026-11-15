@@ -191,7 +191,9 @@ The browser seam is deliberately narrower than the daemon's general API:
   that fixed canonical route on the owner (empty `machine` = the daemon answering);
   `GET /v1/browser/tickets/get` and `GET /v1/browser/fs/list` take `?machine=`; ticket
   `find`, `list-all` and `move` run on the hub; `GET /v1/browser/machines` lists machines
-  with `routable` (whether the hub forwards to them). Thread rows carry `cwd_rel` and
+  with `routable` (whether the hub forwards to them). The blob route accepts bodies up to
+  48 MiB (a 32 MiB blob as base64); every other browser body is limited to 1 MiB. Thread
+  rows carry `cwd_rel` and
   `created_at_unix`.
 - `GET /v1/browser/threads/history?id=<uuid>[&cursor=...&max_items=...&max_bytes=...]`
   is the canonical stopped-Pi history seam. The owner resolves the session file only from

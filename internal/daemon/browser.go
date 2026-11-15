@@ -95,7 +95,11 @@ func browserCapabilityTokens() []string {
 }
 
 func decodeBrowserJSON(w http.ResponseWriter, r *http.Request, value any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, browserMaxRequestBody)
+	return decodeBrowserJSONLimit(w, r, value, browserMaxRequestBody)
+}
+
+func decodeBrowserJSONLimit(w http.ResponseWriter, r *http.Request, value any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(value); err != nil {

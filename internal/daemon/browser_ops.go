@@ -33,9 +33,18 @@ var browserOwnerPosts = map[string]string{
 	"/v1/browser/blobs":               "/v1/blobs",
 }
 
+// browserMaxBlobBody bounds POST /v1/browser/blobs, whose body carries the blob as
+// base64: 48 MiB admits a 32 MiB blob (what sesh-ui sends at most) with room for the
+// envelope. Every other browser body keeps browserMaxRequestBody (1 MiB).
+const browserMaxBlobBody = 48 << 20
+
 func (d *Daemon) routesBrowserOps(mux *http.ServeMux) {
 	for browserPath, canonical := range browserOwnerPosts {
-		mux.HandleFunc("POST "+browserPath, d.browserOwnerPost(canonical))
+		limit := int64(browserMaxRequestBody)
+		if browserPath == "/v1/browser/blobs" {
+			limit = browserMaxBlobBody
+		}
+		mux.HandleFunc("POST "+browserPath, d.browserOwnerPost(canonical, limit))
 	}
 	mux.HandleFunc("GET /v1/browser/tickets/get", d.handleBrowserTicketGet)
 	mux.HandleFunc("GET /v1/browser/tickets/find", d.handleBrowserHubGet("/v1/tickets/find", "id"))
@@ -48,10 +57,10 @@ func (d *Daemon) routesBrowserOps(mux *http.ServeMux) {
 // browserOwnerPost forwards Request to the owner's canonical route. An empty
 // Machine means this daemon, so a ticket created without one lands here, as the
 // canonical POST /v1/tickets does.
-func (d *Daemon) browserOwnerPost(canonical string) http.HandlerFunc {
+func (d *Daemon) browserOwnerPost(canonical string, limit int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req api.BrowserRoutedRequest
-		if err := decodeBrowserJSON(w, r, &req); err != nil {
+		if err := decodeBrowserJSONLimit(w, r, &req, limit); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

@@ -156,6 +156,17 @@ func TestBrowserBlobsAndFsListRouteToTheOwner(t *testing.T) {
 		t.Fatalf("blob did not land on the owner: %v", err)
 	}
 
+	// Past the 1 MiB every other browser body is held to: the blob route has its own bound.
+	big := bytes.Repeat([]byte{7}, 2<<20)
+	rec = browserCall(t, hub, http.MethodPost, "/v1/browser/blobs", routed("peer", api.AddBlobRequest{Name: "big.bin", Data: big}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("2 MiB blob status %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = browserCall(t, hub, http.MethodPost, "/v1/browser/tickets", routed("peer", api.CreateTicketRequest{Name: "x", Prompt: string(bytes.Repeat([]byte("p"), 2<<20))}))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("2 MiB ticket body status %d, want 400", rec.Code)
+	}
+
 	rec = browserCall(t, hub, http.MethodGet, "/v1/browser/fs/list?machine=peer&path="+url.QueryEscape("~/dev"), nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "box-a") {
 		t.Fatalf("fs list status %d: %s", rec.Code, rec.Body.String())

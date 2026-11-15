@@ -35,6 +35,10 @@ type BrowserThreadSummary struct {
 	Reachable         bool     `json:"reachable"`
 	SyncedAtUnix      int64    `json:"synced_at_unix"`
 	AgentSessionID    string   `json:"agent_session_id,omitempty"`
+	// CwdRel is Cwd relative to the OWNING machine's home ("~/dev/x"), comparable
+	// across machines; empty when the owner did not stamp one.
+	CwdRel        string `json:"cwd_rel"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
 }
 
 type BrowserThreadPage struct {
@@ -325,6 +329,29 @@ type BrowserTransferErrorResponse struct {
 
 // BrowserThreadCreateRequest routes one canonical NewThreadRequest to an
 // explicit owner machine. An empty Machine means this daemon.
+// BrowserRoutedRequest is the body of the owner-routed browser POSTs (tickets,
+// blobs): Machine names the owner (empty = the daemon answering) and Request is the
+// canonical route's own body, forwarded unchanged and validated there.
+type BrowserRoutedRequest struct {
+	Machine string          `json:"machine"`
+	Request json.RawMessage `json:"request"`
+}
+
+// BrowserMachine is one row of GET /v1/browser/machines. Routable says whether the
+// browser hub will forward to it (trusted, reachable, HTTP transport).
+type BrowserMachine struct {
+	Machine      string `json:"machine"`
+	Self         bool   `json:"self"`
+	Reachable    bool   `json:"reachable"`
+	Routable     bool   `json:"routable"`
+	SyncedAtUnix int64  `json:"synced_at_unix"`
+}
+
+type BrowserMachinesResponse struct {
+	Schema   int              `json:"schema"`
+	Machines []BrowserMachine `json:"machines"`
+}
+
 type BrowserThreadCreateRequest struct {
 	Machine string           `json:"machine"`
 	Request NewThreadRequest `json:"request"`

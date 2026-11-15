@@ -20,6 +20,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 	"github.com/lukastk/sesh/internal/peers"
 	"github.com/lukastk/sesh/internal/store"
 )
@@ -73,6 +74,10 @@ var browserCapabilityNames = []string{
 	"browser.stored-media-presentation-v2",
 	"browser.display-v1",
 	"browser.send-v1",
+	"browser.tickets-v1",
+	"browser.fs-list-v1",
+	"browser.blobs-v1",
+	"browser.machines-v1",
 }
 
 // browserCapabilityTokens returns the published list, sorted, de-duplicated, and
@@ -138,6 +143,7 @@ func (d *Daemon) routesBrowser(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/browser/threads/artifacts", d.handleBrowserStoredArtifacts)
 	mux.HandleFunc("GET /v1/browser/threads/artifact-bytes", d.handleBrowserStoredArtifactBytes)
 	d.routesBrowserTransfers(mux)
+	d.routesBrowserOps(mux)
 }
 
 // browserThreadOwner resolves one thread from the authoritative local store or
@@ -382,6 +388,7 @@ func (d *Daemon) browserThreadRows() ([]api.BrowserThreadSummary, error) {
 		snap, ok := localSnap[th.ID]
 		if !ok {
 			snap.Thread = th
+			snap.CwdRel = config.TildeRelative(th.Cwd, d.maint.home)
 		}
 		rows = append(rows, browserSummary(snap, d.cfg.Machine, true, now, false))
 	}
@@ -442,6 +449,7 @@ func browserSummary(snap api.ThreadSnapshot, machine string, reachable bool, syn
 		RuntimeAvailable:  reachable && !stale && (snap.Head == api.Headful || snap.Busy == api.BusyBusy),
 		TerminalAvailable: reachable && !stale && snap.Head == api.Headful,
 		Reachable:         reachable, SyncedAtUnix: syncedAt, AgentSessionID: snap.AgentSessionID,
+		CwdRel: snap.CwdRel, CreatedAtUnix: snap.CreatedAtUnix,
 	}
 }
 

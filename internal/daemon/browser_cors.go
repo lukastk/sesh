@@ -87,6 +87,43 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/ws-ticket": {
 		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
 	},
+	// Tickets, directory listing, blobs and machines (browser_ops.go).
+	"/v1/browser/tickets": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/status": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/set": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/delete": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/send-prompt": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/move": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/blobs": {
+		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
+	},
+	"/v1/browser/tickets/get": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/tickets/find": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/tickets/list-all": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/fs/list": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
+	"/v1/browser/machines": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
 }
 
 // browserCORS is the outermost TCP middleware. It handles unauthenticated

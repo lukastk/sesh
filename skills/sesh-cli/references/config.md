@@ -184,6 +184,15 @@ The browser seam is deliberately narrower than the daemon's general API:
   `headful` snapshot. In particular, a busy headless turn has runtime work but no terminal.
 - `POST /v1/browser/threads` and `POST /v1/browser/threads/action` dispatch fixed schemas
   through canonical owner-side Sesh handlers; they are not arbitrary peer proxies.
+- Tickets, directory listing, blobs and machines (schema 68; capabilities
+  `browser.tickets-v1`, `browser.fs-list-v1`, `browser.blobs-v1`, `browser.machines-v1`)
+  use the same hub policy. `POST /v1/browser/tickets{,/status,/set,/delete,/send-prompt}`
+  and `POST /v1/browser/blobs` take `{machine, request}` and forward `request` unchanged to
+  that fixed canonical route on the owner (empty `machine` = the daemon answering);
+  `GET /v1/browser/tickets/get` and `GET /v1/browser/fs/list` take `?machine=`; ticket
+  `find`, `list-all` and `move` run on the hub; `GET /v1/browser/machines` lists machines
+  with `routable` (whether the hub forwards to them). Thread rows carry `cwd_rel` and
+  `created_at_unix`.
 - `GET /v1/browser/threads/history?id=<uuid>[&cursor=...&max_items=...&max_bytes=...]`
   is the canonical stopped-Pi history seam. The owner resolves the session file only from
   the authoritative Sesh thread association, then directly execs metadata-only

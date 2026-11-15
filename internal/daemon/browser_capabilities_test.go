@@ -47,6 +47,10 @@ func TestBrowserCapabilitiesHonourTheSortedUniqueContract(t *testing.T) {
 		"browser.send-v1":                      true,
 		"browser.stored-input-media-v1":        true,
 		"browser.stored-media-presentation-v2": true,
+		"browser.tickets-v1":                   true,
+		"browser.fs-list-v1":                   true,
+		"browser.blobs-v1":                     true,
+		"browser.machines-v1":                  true,
 	}
 	if len(page.Capabilities) != len(want) {
 		t.Fatalf("capabilities = %#v, want %d tokens", page.Capabilities, len(want))

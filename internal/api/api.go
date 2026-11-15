@@ -427,7 +427,18 @@ package api
 // GET /v1/plugins + POST /v1/plugins/{name}/{capability} with `sesh plugins` (29). A 67
 // daemon 404s them; nothing else on the wire changes, so older clients of every other
 // route are unaffected. The browser API is unchanged.
-const SchemaVersion = 67
+// 68: BROWSER OPERATIONS (internal/daemon/browser_ops.go), so a browser client with
+// one endpoint and one credential reaches tickets, directory listing, blobs and the
+// machine list through the browser hub: owner-routed POST /v1/browser/tickets
+// {,/status,/set,/delete,/send-prompt} and POST /v1/browser/blobs take
+// BrowserRoutedRequest {machine, request} and forward `request` unchanged to the
+// owner's canonical route; GET /v1/browser/tickets/get and /v1/browser/fs/list take
+// ?machine=; GET /v1/browser/tickets/{find,list-all} and POST
+// /v1/browser/tickets/move run on the hub; GET /v1/browser/machines lists machines
+// with `routable`. Capabilities browser.tickets-v1, browser.fs-list-v1,
+// browser.blobs-v1, browser.machines-v1. BrowserThreadSummary gains cwd_rel and
+// created_at_unix. Additive: a pre-68 daemon 404s the routes and omits the fields.
+const SchemaVersion = 68
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

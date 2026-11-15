@@ -130,6 +130,9 @@ var browserCORSRoutes = map[string]browserCORSRoutePolicy{
 	"/v1/browser/mesh": {
 		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
 	},
+	"/v1/browser/tui-config": {
+		http.MethodGet: {requestHeaders: corsHeaders("Authorization")},
+	},
 	"/v1/browser/threads/op": {
 		http.MethodPost: {requestHeaders: corsHeaders("Authorization", "Content-Type")},
 	},

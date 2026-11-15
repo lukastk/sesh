@@ -574,7 +574,7 @@ func TestStoredInputMediaCapabilityAndCORS(t *testing.T) {
 		"browser.blobs-v1", "browser.display-v1", "browser.fs-list-v1",
 		"browser.live-input-media-v1", "browser.machines-v1", "browser.mesh-v1", "browser.send-v1",
 		"browser.stored-input-media-v1", "browser.stored-media-presentation-v2",
-		"browser.thread-ops-v1", "browser.tickets-v1",
+		"browser.thread-ops-v1", "browser.tickets-v1", "browser.tui-config-v1",
 	}) {
 		t.Fatalf("browser capabilities = %#v", page.Capabilities)
 	}

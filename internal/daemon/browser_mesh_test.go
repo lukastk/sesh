@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -112,5 +113,81 @@ func TestBrowserThreadOpForwardsToTheOwnerAndRefusesTheRest(t *testing.T) {
 	}
 	if code := op("flag", api.FlagThreadRequest{ID: uuid.NewString(), Action: api.FlagOn}); code != http.StatusNotFound {
 		t.Fatalf("unknown thread status %d, want 404", code)
+	}
+}
+
+// tui-config resolves the hub's [tui] section as `sesh tui` does: column moves
+// applied, custom views placed by position with their filters, keys and colours
+// (defaults overlaid). The mesh carries the hub's cwd labels.
+func TestBrowserTUIConfigAndCwdLabelsFollowTheHubConfig(t *testing.T) {
+	cfg := `
+[[cwd_label]]
+match = "^/tmp/(?P<rest>.+)$"
+label = "tmp:{rest}"
+
+[tui]
+view_ring = ["active", "active flagged"]
+
+[[tui.column]]
+name = "machine"
+position = 1
+
+[[tui.views]]
+name = "active flagged"
+filter = "flagged and not onhold"
+position = 2
+
+[[tui.key]]
+command = "fork"
+key = "F"
+
+[[tui.glyph_color]]
+name = "busy"
+color = "#00cc00"
+`
+	d := newBrowserTestDaemon(t, "hub", cfg)
+	rec := browserCall(t, d, http.MethodGet, "/v1/browser/tui-config", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tui-config status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got api.BrowserTUIConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Columns) == 0 || got.Columns[0] != "machine" {
+		t.Fatalf("columns %v: want machine moved first", got.Columns)
+	}
+	names := []string{}
+	for _, v := range got.Views {
+		names = append(names, v.Name)
+	}
+	if want := []string{"active", "active flagged", "on hold", "archived", "all"}; strings.Join(names, "|") != strings.Join(want, "|") {
+		t.Fatalf("views %v, want %v", names, want)
+	}
+	if got.Views[1].Filter != "flagged and not onhold" || got.Views[0].Filter != "" {
+		t.Fatalf("view filters %#v", got.Views)
+	}
+	if len(got.Keys) != 1 || got.Keys[0].Command != "fork" || got.Keys[0].Key != "F" {
+		t.Fatalf("keys %#v", got.Keys)
+	}
+	if got.GlyphColors["busy"] != "#00cc00" || got.GlyphColors["flag"] == "" || got.ColumnColors["name"] != "blue" {
+		t.Fatalf("colours glyph=%v column=%v", got.GlyphColors, got.ColumnColors)
+	}
+	if strings.Join(got.ViewRing, "|") != "active|active flagged" || !got.MaxColumnWidths {
+		t.Fatalf("ring %v cap %v", got.ViewRing, got.MaxColumnWidths)
+	}
+
+	id := uuid.NewString()
+	th := insertBrowserThread(t, d, id, uuid.NewString(), "labelled", 1)
+	d.maint.tick()
+	mesh := browserMesh(t, d, "/v1/browser/mesh")
+	label := mesh.Machines[0].CwdLabels[id]
+	if !strings.HasPrefix(label, "tmp:") || !strings.HasSuffix(th.Cwd, strings.TrimPrefix(label, "tmp:")) {
+		t.Fatalf("cwd label %q for %s", label, th.Cwd)
+	}
+
+	broken := newBrowserTestDaemon(t, "hub2", "[[tui.views]]\nname = \"x\"\nfilter = \"nonsense ==\"\n")
+	if rec := browserCall(t, broken, http.MethodGet, "/v1/browser/tui-config", nil); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("a broken [tui] config: status %d, want 500", rec.Code)
 	}
 }

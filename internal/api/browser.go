@@ -356,6 +356,39 @@ type BrowserMeshMachine struct {
 	Routable     bool             `json:"routable"`
 	SyncedAtUnix int64            `json:"synced_at_unix"`
 	Threads      []ThreadSnapshot `json:"threads"`
+	// CwdLabels (schema 72) maps a thread id to its CWD column label as `sesh tui`
+	// on the hub shows it (the hub's [[cwd_label]] rules applied to the thread's
+	// cwd_rel); a thread whose label is just its cwd_rel is left out.
+	CwdLabels map[string]string `json:"cwd_labels"`
+}
+
+// BrowserTUIConfig is GET /v1/browser/tui-config (schema 72): the hub's `sesh tui`
+// configuration resolved as the TUI resolves it. Columns is the final ordered
+// column list; Views every view in display order (Filter is a custom view's
+// predicate source, empty for a built-in); Keys the [[tui.key]] overrides as
+// written; colours are the built-in defaults overlaid by the config, each a colour
+// name, a 0-255 palette number or #rrggbb; ColumnWidths the [[tui.column_width]] caps.
+type BrowserTUIConfig struct {
+	Schema          int               `json:"schema"`
+	Columns         []string          `json:"columns"`
+	Views           []BrowserTUIView  `json:"views"`
+	ViewRing        []string          `json:"view_ring"`
+	Keys            []BrowserTUIKey   `json:"keys"`
+	ColumnColors    map[string]string `json:"column_colors"`
+	GlyphColors     map[string]string `json:"glyph_colors"`
+	ColumnWidths    map[string]int    `json:"column_widths"`
+	MaxColumnWidths bool              `json:"max_column_widths"`
+	ShowOffline     bool              `json:"show_offline"`
+}
+
+type BrowserTUIView struct {
+	Name   string `json:"name"`
+	Filter string `json:"filter,omitempty"`
+}
+
+type BrowserTUIKey struct {
+	Command string `json:"command"`
+	Key     string `json:"key"`
 }
 
 // BrowserThreadOpRequest is POST /v1/browser/threads/op (schema 71): Op names one

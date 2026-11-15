@@ -456,7 +456,12 @@ package api
 // canonical thread mutation (flag, hold, pin, notify, tag, rename, reparent,
 // archive, delete, stop, resume, realize, model) unchanged to the thread's owner.
 // Capabilities browser.mesh-v1, browser.thread-ops-v1. Additive.
-const SchemaVersion = 71
+// 72: BROWSER TUI CONFIG. GET /v1/browser/tui-config returns the hub's `sesh tui`
+// configuration resolved as the TUI resolves it (columns, views in display order with
+// custom filters, view ring, key overrides, colours, column widths); the browser mesh
+// gains per-machine `cwd_labels` (the hub's [[cwd_label]] rules applied). Capability
+// browser.tui-config-v1. Additive.
+const SchemaVersion = 72
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

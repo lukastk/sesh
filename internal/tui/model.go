@@ -4901,3 +4901,16 @@ func detailIdleStop(r api.ThreadRow) string {
 	}
 	return s
 }
+
+// ViewNames returns every view's display name in display (Tab/picker) order: the
+// built-ins (active, on hold, archived, all) with the custom views placed by their
+// `position`. A browser client reads it (GET /v1/browser/tui-config) to offer the
+// same views in the same order.
+func ViewNames(customs []customView) []string {
+	m := Model{}.WithViews(customs)
+	var out []string
+	for _, v := range m.orderedViews() {
+		out = append(out, m.viewNameAt(int(v)))
+	}
+	return out
+}

@@ -80,6 +80,7 @@ var browserCapabilityNames = []string{
 	"browser.machines-v1",
 	"browser.mesh-v1",
 	"browser.thread-ops-v1",
+	"browser.tui-config-v1",
 }
 
 // browserCapabilityTokens returns the published list, sorted, de-duplicated, and

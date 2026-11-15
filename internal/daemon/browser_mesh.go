@@ -10,8 +10,10 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/config"
 )
 
 // browserThreadOps maps each op a browser may run on a thread to the canonical
@@ -37,6 +39,7 @@ var browserThreadOps = map[string]string{
 func (d *Daemon) routesBrowserMesh(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/browser/mesh", d.handleBrowserMesh)
 	mux.HandleFunc("POST /v1/browser/threads/op", d.handleBrowserThreadOp)
+	mux.HandleFunc("GET /v1/browser/tui-config", d.handleBrowserTUIConfig)
 }
 
 // handleBrowserMesh serves the merged mesh snapshot. By default it leaves out the
@@ -61,6 +64,11 @@ func (d *Daemon) handleBrowserMesh(w http.ResponseWriter, r *http.Request) {
 	views := append([]api.MachineView{{
 		Machine: d.cfg.Machine, Self: true, Reachable: true, SyncedAtUnix: self.GeneratedAtUnix, Threads: self.Threads,
 	}}, d.view.machineViews()...)
+	labels, err := config.LoadCwdLabels(d.cfg.Home)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "browser mesh: "+err.Error())
+		return
+	}
 	out := api.BrowserMeshResponse{Schema: api.SchemaVersion, Archived: archived == "1", Machines: make([]api.BrowserMeshMachine, 0, len(views))}
 	for _, view := range views {
 		threads := view.Threads
@@ -78,9 +86,36 @@ func (d *Daemon) handleBrowserMesh(w http.ResponseWriter, r *http.Request) {
 		out.Machines = append(out.Machines, api.BrowserMeshMachine{
 			Machine: view.Machine, Self: view.Self, Reachable: view.Reachable,
 			Routable: view.Self || d.authorizeBrowserOwner(view.Machine) == nil, SyncedAtUnix: view.SyncedAtUnix, Threads: threads,
+			CwdLabels: browserCwdLabels(labels, threads),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// browserCwdLabels applies the hub's [[cwd_label]] rules to each thread's cwd as
+// `sesh tui` does (cwdDisplay: the owner-relative cwd_rel, else the absolute cwd,
+// passed through LabelFor). A rule that fails to expand is shown as the TUI shows
+// it, "!ERR <reason>", rather than dropped.
+func browserCwdLabels(labels *config.Labeling, threads []api.ThreadSnapshot) map[string]string {
+	out := map[string]string{}
+	if labels == nil {
+		return out
+	}
+	home, _ := os.UserHomeDir()
+	for _, t := range threads {
+		disp := t.CwdRel
+		if disp == "" {
+			disp = config.TildeRelative(t.Cwd, home)
+		}
+		label, err := labels.LabelFor(disp, home)
+		if err != nil {
+			label = "!ERR " + err.Error()
+		}
+		if label != disp {
+			out[t.ID] = label
+		}
+	}
+	return out
 }
 
 // browserMeshKeeps is the default (non-archived) filter: every live thread, and an

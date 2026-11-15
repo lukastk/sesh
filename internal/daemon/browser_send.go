@@ -268,7 +268,7 @@ func (d *Daemon) browserSendAttempt(r *http.Request, thread api.Thread, req api.
 		// attachments go through the bounded transfer subsystem, which must stay
 		// the only browser path that names owner-side files.
 		text:    text,
-		guard:   d.pasteGuardFor(nil, nil),
+		guard:   d.browserPasteGuard(),
 		sender:  "browser send",
 		resolve: resolve,
 	}
@@ -325,4 +325,13 @@ func browserSendFailureStatus(err error) int {
 		return http.StatusConflict
 	}
 	return http.StatusBadGateway
+}
+
+// browserPasteGuard is the typing guard for a browser-UI send: [send]
+// browser_respect_typing as the quiet window (the user's own message, so they may
+// choose not to wait for their own typing), the usual deadline.
+func (d *Daemon) browserPasteGuard() pasteGuard {
+	g := d.pasteGuardFor(nil, nil)
+	g.Window = d.send.BrowserRespectTyping
+	return g
 }

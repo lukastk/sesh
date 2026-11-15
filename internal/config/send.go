@@ -15,6 +15,13 @@ import (
 //	[send]
 //	respect_typing          = "60s"   # "0s" disables the guard machine-wide
 //	respect_typing_deadline = "10m"   # how long a deferred delivery waits before it fails + flags
+//	browser_respect_typing  = "0s"    # the window for sends from a browser UI (default: respect_typing)
+//
+// browser_respect_typing applies to POST /v1/browser/threads/action sends, which are
+// the user's own messages typed in a UI (Sesh in Obsidian): the person sending them is
+// the person the guard protects, so they may choose not to wait. Agent, ticket,
+// subscription and scheduled deliveries keep respect_typing. The blocked-dialog guard
+// applies to every send regardless.
 //
 // A pane paste is `paste-buffer` then Enter, so text delivered while a human is
 // mid-line in that pane is appended to their half-typed prompt and SUBMITTED with
@@ -40,11 +47,15 @@ type SendConfig struct {
 	// RespectTypingDeadline is how long a held delivery waits for that quiet
 	// window before failing loudly (and flagging the thread).
 	RespectTypingDeadline time.Duration
+	// BrowserRespectTyping is the quiet window for browser-UI sends; it equals
+	// RespectTyping unless [send] browser_respect_typing sets it.
+	BrowserRespectTyping time.Duration
 }
 
 type sendFileTable struct {
 	RespectTyping         *string `toml:"respect_typing"`
 	RespectTypingDeadline *string `toml:"respect_typing_deadline"`
+	BrowserRespectTyping  *string `toml:"browser_respect_typing"`
 }
 
 type sendConfigFile struct {
@@ -54,7 +65,7 @@ type sendConfigFile struct {
 // LoadSend reads the [send] table. Missing file/table/key = the built-in defaults.
 // A present-but-broken value is a LOUD error (parity with the other loaders).
 func LoadSend(home string) (SendConfig, error) {
-	out := SendConfig{RespectTyping: DefaultRespectTyping, RespectTypingDeadline: DefaultRespectTypingDeadline}
+	out := SendConfig{RespectTyping: DefaultRespectTyping, RespectTypingDeadline: DefaultRespectTypingDeadline, BrowserRespectTyping: DefaultRespectTyping}
 	raw, err := readConfig(home)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -85,6 +96,14 @@ func LoadSend(home string) (SendConfig, error) {
 			return out, fmt.Errorf("config: [send] respect_typing_deadline %q must be positive (a held delivery needs a bound)", *f.Send.RespectTypingDeadline)
 		}
 		out.RespectTypingDeadline = d
+	}
+	out.BrowserRespectTyping = out.RespectTyping
+	if f.Send.BrowserRespectTyping != nil {
+		d, err := parseNonNegativeDuration("[send] browser_respect_typing", *f.Send.BrowserRespectTyping)
+		if err != nil {
+			return out, err
+		}
+		out.BrowserRespectTyping = d
 	}
 	return out, nil
 }

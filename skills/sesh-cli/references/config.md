@@ -72,6 +72,7 @@ model = "anthropic/claude-haiku-4-5" # this harness's DEFAULT model (see models.
 [send]                           # the typing guard on every paste into a live pane
 respect_typing = "60s"           # hold a delivery until the pane has seen no viewer input this long ("0s" = off)
 respect_typing_deadline = "10m"  # a delivery still held this long fails loudly + flags the thread
+browser_respect_typing = "0s"    # the window for sends typed in a browser UI (Sesh in Obsidian); default: respect_typing
 
 [idle_stop]                      # stop headful agent threads left idle (see threads.md, "Idle stop")
 after = "24h"                    # positive duration; absent = no machine-wide limit

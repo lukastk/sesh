@@ -39,6 +39,34 @@ func TestLoadSendValues(t *testing.T) {
 	}
 }
 
+// TestLoadSendBrowserWindow: browser_respect_typing defaults to respect_typing (with
+// or without a file), and may be set on its own, e.g. "0s" so a UI user's own
+// messages never wait while agent deliveries keep the guard.
+func TestLoadSendBrowserWindow(t *testing.T) {
+	cases := []struct {
+		body              string
+		window, browserWd time.Duration
+	}{
+		{"", DefaultRespectTyping, DefaultRespectTyping},
+		{"[send]\nrespect_typing = \"30s\"\n", 30 * time.Second, 30 * time.Second},
+		{"[send]\nbrowser_respect_typing = \"0s\"\n", DefaultRespectTyping, 0},
+		{"[send]\nrespect_typing = \"0s\"\nbrowser_respect_typing = \"5s\"\n", 0, 5 * time.Second},
+	}
+	for _, c := range cases {
+		home := t.TempDir()
+		if c.body != "" {
+			home = writeSendConfig(t, c.body)
+		}
+		got, err := LoadSend(home)
+		if err != nil || got.RespectTyping != c.window || got.BrowserRespectTyping != c.browserWd {
+			t.Errorf("%q: got %+v %v, want window %s browser %s", c.body, got, err, c.window, c.browserWd)
+		}
+	}
+	if _, err := LoadSend(writeSendConfig(t, "[send]\nbrowser_respect_typing = \"-1s\"\n")); err == nil {
+		t.Error("a negative browser_respect_typing must be refused loudly")
+	}
+}
+
 func TestLoadSendLoud(t *testing.T) {
 	for _, body := range []string{
 		"[send]\nrespect_typing = \"soon\"\n",

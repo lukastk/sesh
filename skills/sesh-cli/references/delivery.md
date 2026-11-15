@@ -71,7 +71,11 @@ every other verb and both carrying a caller-minted `request_id` UUID:
 
 - `send` delivers into a LIVE pane through the per-kind path above — literal RPC
   steering for pi and mypi, the guarded terminal paste for claude and codex. The
-  typing guard is not bypassable from a browser: `on_typing` accepts only `defer`
+  typing guard's window for these sends is `[send] browser_respect_typing` (default:
+  `respect_typing`): a browser send is the UI user's own message, so a machine can set it
+  to `"0s"` and the user never waits on their own typing, while agent, ticket,
+  subscription and scheduled deliveries keep `respect_typing`. The blocked-dialog guard
+  still applies. `on_typing` accepts only `defer`
   (the default, which queues exactly like a CLI deferred send) or `skip`. There is
   no `wait` (it would hold a browser, and a hub→peer, request open for the whole
   guard budget) and no force.

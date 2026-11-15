@@ -200,8 +200,33 @@ func newBrowserSendFixture(t *testing.T) *browserSendFixture {
 	f := newPasteFixture(t)
 	f.d.browserSends = newBrowserSendRegistry()
 	f.d.cfg = config.Config{Machine: "test"}
-	f.d.send = config.SendConfig{RespectTyping: 30 * time.Second, RespectTypingDeadline: time.Minute}
+	f.d.send = config.SendConfig{RespectTyping: 30 * time.Second, RespectTypingDeadline: time.Minute, BrowserRespectTyping: 30 * time.Second}
 	return &browserSendFixture{pasteFixture: f}
+}
+
+// [send] browser_respect_typing = "0s": a browser send (the UI user's own message)
+// lands at once while a viewer is typing, while a CLI-style delivery through the
+// same daemon still waits for [send] respect_typing.
+func TestBrowserSendUsesItsOwnTypingWindow(t *testing.T) {
+	f := newBrowserSendFixture(t)
+	f.d.send.BrowserRespectTyping = 0
+	f.typeThrough()
+	time.Sleep(200 * time.Millisecond)
+
+	text := "BROWSER-NO-WAIT"
+	rec, resp := callSend(t, f.d, api.BrowserThreadActionRequest{
+		ThreadID: f.th.ID, Action: "send", Text: &text, RequestID: uuid.NewString(),
+	})
+	if rec.Code != http.StatusOK || resp.Outcome != api.BrowserSendSent {
+		t.Fatalf("browser send with browser_respect_typing=0 while typing = %d %+v", rec.Code, resp)
+	}
+	if !eventuallyD(3*time.Second, func() bool { return strings.Contains(f.captured(), text) }) {
+		t.Fatalf("the browser send never reached the pane:\n%s", f.captured())
+	}
+	out, err := f.d.pasteDefer(f.request("AGENT-WAITS", f.d.pasteGuardFor(nil, nil)))
+	if err != nil || !out.Deferred {
+		t.Fatalf("a non-browser delivery must still wait for respect_typing: %+v %v", out, err)
+	}
 }
 
 // The typing guard is honoured on the browser path: a viewer who just typed

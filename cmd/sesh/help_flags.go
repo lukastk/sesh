@@ -589,6 +589,7 @@ var flagDocs = map[string][]flagDoc{
 		{"--current", "auto-detect the current thread and list its tickets"},
 		{"--all-machines", "fan out across the mesh (this machine + peers); emits machine + thread name per ticket"},
 		{"--local", "with --all-machines: only this daemon's tickets (the leaf form the fan-out calls on each peer)"},
+		{"--summary", "with --all-machines: leave out each ticket's prompt and notes (much smaller; read one with `sesh ticket get`)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 		{"--json", "emit machine-readable JSON instead of the text form"},
 	},

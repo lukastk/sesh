@@ -566,7 +566,7 @@ wrapper function or an older install.`,
 	},
 	"ticket list": {
 		summary:  "list tickets (id, status, name, thread); --thread filters to one thread, --current auto-detects the calling pane's thread, --all-machines fans out across the mesh (machine + thread name per ticket)",
-		usage:    "sesh ticket list [--thread <id>] [--current] [--all-machines] [--local] [--machine <m>] [--json]",
+		usage:    "sesh ticket list [--thread <id>] [--current] [--all-machines] [--local] [--summary] [--machine <m>] [--json]",
 		examples: []string{"sesh ticket list", "sesh ticket list --current --json", "sesh ticket list --all-machines --json"},
 	},
 	"ticket get": {

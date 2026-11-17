@@ -87,7 +87,7 @@ func sendUntilQuiet(c *client.Client, req api.ThreadSendRequest, timeout time.Du
 		if err != nil {
 			return resp, err
 		}
-		if resp.Sent != "" {
+		if resp.Sent != "" || resp.QueueSeq > 0 {
 			return resp, nil
 		}
 		if !resp.Typing {

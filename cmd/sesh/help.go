@@ -184,8 +184,8 @@ does not wrap can be driven straight against the tmux server.`,
 	},
 
 	"thread": {
-		summary:  "thread layer — coding-agent sessions (new | list | stop | delete | resume | headful | rename | tag | archive | send | send-headless | status | grid | …)",
-		usage:    "sesh thread <new|list|stop|pane|capture|status|send|send-headless|headless-reply|rename|info|adopt|transcript|notify|mcp-arg|reparent|tag|archive|delete|resume|headful|grid|snapshot>",
+		summary:  "thread layer — coding-agent sessions (new | list | stop | delete | resume | headful | rename | tag | archive | send | send-headless | queue | status | grid | …)",
+		usage:    "sesh thread <new|list|stop|pane|capture|status|send|send-headless|queue|headless-reply|rename|info|adopt|transcript|notify|mcp-arg|reparent|tag|archive|delete|resume|headful|grid|snapshot>",
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
@@ -244,9 +244,20 @@ does not wrap can be driven straight against the tmux server.`,
 Pi RPC acknowledgement means submitted, not model completion. Missing/broken RPC
 fails loudly; no terminal fallback and no automatic retry. Pi bypasses typing guards.
 For other agents the daemon holds the paste until [send] respect_typing (60s) of
-viewer quiet, or fails and flags at the deadline (10m). --wait waits for the turn.`,
+viewer quiet, or fails and flags at the deadline (10m). --wait waits for the turn.
+A HEADLESS thread (no live pane) takes the message as a turn: an idle thread starts it
+at once; a thread whose turn is in flight QUEUES it (on_typing defer or wait), and the
+queue runs each message as the next turn, in send order, when the turn ends. --on-typing
+skip refuses instead of queueing. A queued message is never dropped silently: if its
+delivery cannot start, the thread is flagged with it and it stays queued (see
+` + "`thread queue`" + `). --wait then waits for that message's turn to settle.`,
 		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m", "sesh thread send --id 1a2b3c4d --text 'now' --respect-typing 0"},
+	},
+	"thread queue": {
+		summary:  "list a headless thread's queued messages (sent while a turn was in flight), in the order they will run, or drop one without delivering it",
+		usage:    "sesh thread queue --id <id> [--drop <seq>] [--json] [--machine <m>]",
+		examples: []string{"sesh thread queue --id 1a2b3c4d", "sesh thread queue --id 1a2b3c4d --drop 3"},
 	},
 	"thread command": {
 		summary:  "explicitly invoke a command in a live Pi session (never terminal paste)",
@@ -268,7 +279,7 @@ Operations expire an hour after completion and are lost on reload/exit.`,
 		examples: []string{"sesh thread wait --id 1a2b3c4d --until settled --timeout 5m", "sesh thread wait --id 1a2b3c4d --until blocked --timeout 2m"},
 	},
 	"thread send-headless": {
-		summary:  "start a headless turn on an idle thread (a stateless --resume turn); 409 if a pane is live or a turn is in flight. --model overrides the thread's pinned model for THIS turn only (empty = the thread's model / agent default).",
+		summary:  "start a headless turn on an idle thread (a stateless --resume turn); 409 if a pane is live or a turn is in flight (strict: it never queues — `thread send` queues behind a turn in flight). --model overrides the thread's pinned model for THIS turn only (empty = the thread's model / agent default).",
 		usage:    "sesh thread send-headless --id <id> --text <text> [--model <m>] [--machine <m>]",
 		examples: []string{"sesh thread send-headless --id 1a2b3c4d --text 'summarize the diff'", "sesh thread send-headless --id 1a2b3c4d --text 'quick check' --model anthropic/claude-haiku-4-5"},
 	},

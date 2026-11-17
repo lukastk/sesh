@@ -17,6 +17,9 @@ sesh thread wait --id <id> --until settled --timeout 5m    # block until a state
                                                            # non-zero if the thread's last headless turn failed)
 sesh thread send-headless --id <id> --text 'summarize'     # run a stateless turn on an idle thread
 sesh thread send-headless --id <id> --text 'quick check' --model anthropic/claude-haiku-4-5  # override the model for THIS turn only
+sesh thread send --id <id> --text 'and also this'          # headless thread mid-turn: QUEUED, runs as its next turn
+sesh thread queue --id <id>                                # list queued messages in delivery order (working=…)
+sesh thread queue --id <id> --drop <seq>                   # drop one without delivering it
 sesh thread headless-reply --id <id> --json                # poll a headless turn's result
 sesh await <id> --timeout 5m                               # block until a turn finishes (mesh-aware); non-zero if its headless turn failed
 sesh delegate --agent pi 'summarize this repo'             # spawn worker → ask → reply → archive
@@ -24,6 +27,20 @@ sesh delegate --agent claude 'run CI' --cwd ~/proj --keep  # leave the worker ac
 sesh subscribe <subscribee> --from <subscriber>            # pipe one thread's turns into another
 sesh thread send --id <id> --text 'now' --respect-typing 0 # bypass the typing guard for this one paste
 ```
+
+**Sending to a headless thread (no pane) is a turn.** `thread send` on an idle headless
+thread starts a turn at once, like `send-headless`. On a thread whose turn is in flight it
+QUEUES the message (`--on-typing defer`, the default, or `wait`); when the turn ends the next
+queued message runs as its own turn, in send order, one turn each. `--on-typing skip` refuses
+instead. `send-headless` stays strict: it refuses while a turn is in flight and never queues.
+A queued message is never dropped silently: a delivery that cannot start (the thread gained a
+pane, its conversation cannot resume) flags the thread with the undelivered message and the
+message stays queued, so `thread queue` shows it; fix the cause and the next turn end retries
+it, or `thread queue --drop <seq>` removes it. The queue lives in the daemon's store, so it
+survives a restart, but a restart does NOT run it: each thread with survivors is flagged
+("survived a daemon restart") and the queue waits for the next send or turn end. `--wait` on
+a headless send waits for that message's turn to settle; `delete` refuses while messages
+are queued, and `archive` names them as an unmet condition (`--force` overrides).
 
 **A failed headless turn is not a finished one.** `sesh await` and `thread wait` exit
 non-zero with the reason, and `await --json` carries it as `turn_error`, although the

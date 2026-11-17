@@ -103,7 +103,9 @@ sesh thread new --name subtask --cwd . --parent "$TID"
 sesh thread new --name independent --cwd '~/proj' --machine macbook --no-parent
 sesh thread resume --id <id>
 sesh thread send --id <id> --text 'Continue the approved task' --wait --timeout 5m
-sesh thread send-headless --id <id> --text 'Summarize'   # idle thread, no pane
+sesh thread send-headless --id <id> --text 'Summarize'   # idle thread, no pane (strict: refuses while busy)
+sesh thread send --id <id> --text 'Also check X'         # headless thread: a turn now, or queued behind one in flight
+sesh thread queue --id <id>                              # queued messages for a headless thread
 sesh thread command --id <pi-id> --text '/compact retain the plan' --timeout 5m
 sesh thread command --id <pi-id> --request-id <uuid> --timeout 5m  # poll, no resend
 sesh subscribe <child-id> --from "$TID"                # completed turns into parent

@@ -38,6 +38,10 @@ archive's “LIVE”, “pending”, or “all green” as today's fleet/test st
   it. Un-archiving is ungated. Archived-but-headful (H40) still exists through those
   paths, so the default view's flagged/running/headful exception stays load-bearing.
   The gate lives in the daemon: it arrives with a restart, not with a new client.
+- **Headless queue (schema 75, lukastk/sesh#26):** `thread send` to a headless thread with a turn in flight
+  QUEUES it (store `headless_queue`, migration 33); the turn's end drains it in order. The queue is popped BEFORE
+  its turn starts (double-start guard) and a refused delivery goes back with its seq and flags the thread. A
+  restart does NOT run survivors (a turn may still be running): it flags the thread. `send-headless` stays strict.
 - **Models (schema 58):** a thread has a REGISTERED model (`Thread.Model`, what sesh
   launches with) and an OBSERVED one (owner-read from the transcript, never stored).
   Never `/model` a live claude pane: Claude Code's typed `/model <m>` writes `"model"`

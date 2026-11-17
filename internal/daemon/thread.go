@@ -98,7 +98,13 @@ func (d *Daemon) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, ferr.Error())
 			return
 		} else if !found {
-			writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
+			// No pane: a headless thread's message is a turn (schema 75). An agent
+			// that keeps no conversation still refuses loudly, as it always has.
+			if !api.HasConversation(thread.AgentKind) {
+				writeError(w, http.StatusConflict, "thread has no live pane (dead); cannot send")
+				return
+			}
+			d.headlessSend(w, thread, req)
 			return
 		}
 	}
@@ -726,6 +732,12 @@ func (d *Daemon) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.ThreadStatusResponse{Schema: api.SchemaVersion, ID: id, ObservedModel: d.models.observed(id), TurnError: thread.TurnError}
+	queued, qerr := d.store.HeadlessQueueCount(id)
+	if qerr != nil {
+		writeError(w, http.StatusInternalServerError, qerr.Error())
+		return
+	}
+	resp.QueuedMessages = queued
 
 	// SHELL THREAD: its runtime is a tmux SESSION, so head comes from the session
 	// marker, never the pane index — a pane lookup would find nothing and report

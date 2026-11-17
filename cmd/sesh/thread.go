@@ -65,6 +65,8 @@ func runThread(args []string) error {
 		return threadCommand(cfg, rest)
 	case "send-headless":
 		return threadSendHeadless(cfg, rest)
+	case "queue":
+		return threadQueue(cfg, rest)
 	case "headless-reply":
 		return threadHeadlessReply(cfg, rest)
 	case "rename":
@@ -478,6 +480,63 @@ func threadHeadlessReply(cfg config.Config, args []string) error {
 	return nil
 }
 
+// reportHeadlessSend prints the outcome of a send to a headless thread: started
+// (its turn is running now) or queued (it runs as the next turn, in send order).
+// A queued message that could not start returns an error, and the thread is
+// flagged with the reason.
+func reportHeadlessSend(id string, resp api.ThreadSendResponse) error {
+	switch {
+	case resp.Sent != "":
+		fmt.Printf("sent %s (headless turn started; message %d)\n", id, resp.QueueSeq)
+	case resp.Deferred && resp.HeldReason == api.HeldReasonTurn:
+		fmt.Printf("queued %s (message %d): a turn is in flight; this message runs as the next turn, in order. `sesh thread queue --id %s` lists it\n", id, resp.QueueSeq, id)
+	default:
+		return fmt.Errorf("thread send: headless send not accepted (%+v)", resp)
+	}
+	return nil
+}
+
+// waitHeadlessMessage blocks until queued message seq has left the queue and the
+// headless thread has no turn in flight. A message that stays queued while no
+// turn runs is stuck (its delivery failed and the thread was flagged): that is
+// reported at once, not after the whole timeout.
+func waitHeadlessMessage(c *client.Client, id string, seq int64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	stuck := 0
+	for {
+		q, err := c.ThreadQueue(context.Background(), id)
+		if err != nil {
+			return err
+		}
+		queued := false
+		for _, m := range q.Messages {
+			if m.Seq == seq {
+				queued = true
+			}
+		}
+		if !queued && !q.Working {
+			fmt.Println("settled", id)
+			return nil
+		}
+		if !queued {
+			stuck = 0
+		} else if !q.Working {
+			// Between two turns the queue is briefly empty of a turn in flight; only a
+			// message still queued across several polls with no turn is stuck.
+			stuck++
+			if stuck >= 6 {
+				return fmt.Errorf("thread send: message %d is still queued and no turn is running — its delivery failed; the thread is flagged (see `sesh thread queue --id %s`)", seq, id)
+			}
+		} else {
+			stuck = 0
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("thread send: timed out after %s waiting for message %d to run (still queued or in flight)", timeout, seq)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func threadSend(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id (required)")
@@ -532,6 +591,9 @@ func threadSend(cfg config.Config, args []string) error {
 		if err != nil {
 			return err
 		}
+		if resp.QueueSeq > 0 {
+			return reportHeadlessSend(*id, resp)
+		}
 		if reportTyping("thread send", resp) {
 			fmt.Println("sent", *id)
 			return nil
@@ -544,18 +606,31 @@ func threadSend(cfg config.Config, args []string) error {
 	}
 	// --wait: the delivery itself blocks for a quiet pane (wait mode), bounded
 	// by the same --timeout, before the turn is waited for.
+	var sent api.ThreadSendResponse
 	if req.OnTyping == api.OnTypingWait {
-		if _, err := sendUntilQuiet(c, req, *timeout); err != nil {
+		resp, err := sendUntilQuiet(c, req, *timeout)
+		if err != nil {
 			return err
 		}
+		sent = resp
 	} else {
 		resp, err := c.ThreadSendWith(context.Background(), req)
 		if err != nil {
 			return err
 		}
-		if !reportTyping("thread send", resp) {
-			return fmt.Errorf("thread send: not sent (%+v)", resp)
+		sent = resp
+	}
+	// A HEADLESS thread has no pane to watch: the message is a turn (or waits behind
+	// one), so the wait is for its queue entry to leave the queue and the thread to
+	// go idle. The pane-based guard below does not apply.
+	if sent.QueueSeq > 0 {
+		if err := reportHeadlessSend(*id, sent); err != nil {
+			return err
 		}
+		return waitHeadlessMessage(c, rid, sent.QueueSeq, *timeout)
+	}
+	if !reportTyping("thread send", sent) {
+		return fmt.Errorf("thread send: not sent (%+v)", sent)
 	}
 	// STALL GUARD (herdr's agent_prompt_stalled): a send from a non-busy state
 	// must produce SOME observed change within 5s — a busy latch, or at least
@@ -683,6 +758,9 @@ func threadStatus(cfg config.Config, args []string) error {
 	}
 	if resp.TurnError != "" {
 		fmt.Printf("last turn:     FAILED: %s\n", resp.TurnError)
+	}
+	if resp.QueuedMessages > 0 {
+		fmt.Printf("queued:        %d message(s) waiting for a turn (see `sesh thread queue --id %s`)\n", resp.QueuedMessages, resp.ID)
 	}
 	return nil
 }
@@ -1406,5 +1484,47 @@ func threadAdopt(cfg config.Config, args []string) error {
 		return emitJSON(resp.Thread)
 	}
 	fmt.Printf("adopted %s (%s, session %s) as %s\n", *pane, resp.Thread.AgentKind, resp.Thread.AgentSessionID, resp.Thread.ID)
+	return nil
+}
+
+// threadQueue lists a headless thread's queued messages, or drops one (schema 75).
+func threadQueue(cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("queue", flag.ContinueOnError)
+	id := fs.String("id", "", "thread id or unique prefix (required)")
+	drop := fs.Int64("drop", 0, "drop the queued message with this seq without delivering it")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rid, err := resolveIDFlag(cfg, fs, id)
+	if err != nil {
+		return err
+	}
+	c := daemonClient(cfg)
+	if *drop != 0 {
+		if *drop < 0 {
+			return errors.New("thread queue: --drop takes a positive message seq")
+		}
+		if err := c.ThreadQueueDrop(context.Background(), rid, *drop); err != nil {
+			return err
+		}
+		fmt.Printf("dropped message %d from %s (not delivered)\n", *drop, rid)
+		return nil
+	}
+	resp, err := c.ThreadQueue(context.Background(), rid)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitJSON(resp)
+	}
+	if len(resp.Messages) == 0 {
+		fmt.Printf("no queued messages for %s (working=%t)\n", rid, resp.Working)
+		return nil
+	}
+	fmt.Printf("%d queued message(s) for %s (working=%t), in delivery order:\n", len(resp.Messages), rid, resp.Working)
+	for _, m := range resp.Messages {
+		fmt.Printf("  %d  %s  from %s  %s\n", m.Seq, time.Unix(m.QueuedAtUnix, 0).Format("15:04:05"), m.Sender, m.Text)
+	}
 	return nil
 }

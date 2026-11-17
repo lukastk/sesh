@@ -438,3 +438,16 @@ func (c *Client) ScheduleRuns(ctx context.Context, ref string, limit int) (api.S
 	var out api.ScheduleRunsResponse
 	return out, c.getJSON(ctx, "http://unix/v1/schedules/runs?id="+url.QueryEscape(ref)+"&limit="+strconv.Itoa(limit), &out)
 }
+
+// ThreadQueue reads GET /v1/threads/queue (schema 75): a headless thread's queued
+// messages, oldest first, and whether its turn is in flight.
+func (c *Client) ThreadQueue(ctx context.Context, id string) (api.ThreadQueueResponse, error) {
+	var out api.ThreadQueueResponse
+	return out, c.getJSON(ctx, "http://unix/v1/threads/queue?id="+url.QueryEscape(id), &out)
+}
+
+// ThreadQueueDrop posts POST /v1/threads/queue/drop: removes one queued message
+// without delivering it.
+func (c *Client) ThreadQueueDrop(ctx context.Context, id string, seq int64) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/queue/drop", api.ThreadQueueDropRequest{ID: id, Seq: seq}, nil)
+}

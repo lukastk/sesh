@@ -478,7 +478,15 @@ package api
 // browser.host-commands-v1. Every typed send refuses or holds a paste into a thread
 // the hooks report as blocked on a dialog: send responses gain held_reason
 // ("typing" | "blocked") and the browser send gains the outcome refused_blocked.
-const SchemaVersion = 74
+// 75: HEADLESS QUEUE (lukastk/sesh#26). `thread send` works on a headless thread
+// (no live pane): on an idle one it starts a turn at once, on a busy one it queues the
+// message as the thread's next turn and answers deferred with held_reason "turn" and
+// queue_seq. Queued messages run in order, one turn each, and never vanish silently: a
+// delivery that cannot start flags the thread with the message. GET /v1/threads/queue
+// lists them, POST /v1/threads/queue/drop removes one, and ThreadStatusResponse gains
+// queued_messages. `send-headless` keeps its strict refusal while a turn is in flight.
+// Browser envelopes are unchanged (the browser send_headless path is still strict).
+const SchemaVersion = 75
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

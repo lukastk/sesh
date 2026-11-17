@@ -20,6 +20,8 @@ import (
 
 func (d *Daemon) routesHeadless(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/send-headless", d.handleThreadSendHeadless)
+	mux.HandleFunc("GET /v1/threads/queue", d.handleThreadQueue)
+	mux.HandleFunc("POST /v1/threads/queue/drop", d.handleThreadQueueDrop)
 	mux.HandleFunc("GET /v1/threads/headless-reply", d.handleThreadHeadlessReply)
 	mux.HandleFunc("GET /v1/threads/turn-identity", d.handleTurnIdentity)
 }
@@ -129,7 +131,7 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 	d.hlMu.Lock()
 	if d.hlInFlight[threadID] {
 		d.hlMu.Unlock()
-		return http.StatusConflict, errors.New("a turn is already in flight for this thread")
+		return http.StatusConflict, errHeadlessTurnInFlight
 	}
 	d.hlInFlight[threadID] = true
 	d.hlMu.Unlock()
@@ -247,7 +249,7 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 	}
 
 	go func() {
-		reply, newSessionID, runErr := agents.HeadlessTurn(agents.TurnSpec{
+		reply, newSessionID, runErr := headlessTurnRunner(agents.TurnSpec{
 			Kind: agents.Kind(thread.AgentKind), ThreadID: threadID, SessionID: sessionID,
 			Cwd: thread.Cwd, Started: started, Prompt: text, CodexHome: codexHome,
 			Mode: turnMode, Model: turnModel, SeshBin: seshBinPath(), HookArgs: hookArgs,
@@ -312,6 +314,10 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 				d.sched.onHeadlessDone(threadID)
 			}
 		}
+		// Messages queued behind this turn run now, in order (headless_queue.go).
+		// A failed turn still drains: its error is the thread's turn_error, and the
+		// queued messages are independent requests.
+		d.kickHeadless(threadID, 0)
 	}()
 
 	return http.StatusOK, nil

@@ -513,6 +513,39 @@ type ThreadSendResponse struct {
 	HeldReason   string `json:"held_reason,omitempty"`
 	InputAgoSec  int64  `json:"input_ago_sec,omitempty"`
 	DeadlineUnix int64  `json:"deadline_unix,omitempty"`
+	// QueueSeq (schema 75) is set when a HEADLESS thread (no live pane) took the
+	// message through its queue: Sent is the id when the message's turn started at
+	// once; otherwise Deferred is true, HeldReason is HeldReasonTurn, and the message
+	// runs as a later turn in seq order. Either way QueueSeq names the message.
+	QueueSeq int64 `json:"queue_seq,omitempty"`
+}
+
+// HeldReasonTurn is a ThreadSendResponse.HeldReason for a message queued behind a
+// headless thread's in-flight turn (schema 75).
+const HeldReasonTurn = "turn"
+
+// QueuedMessage is one message waiting for a headless thread's turn (schema 75).
+type QueuedMessage struct {
+	Seq          int64  `json:"seq"`
+	Sender       string `json:"sender"`
+	Text         string `json:"text"`
+	QueuedAtUnix int64  `json:"queued_at_unix"`
+}
+
+// ThreadQueueResponse is the body of GET /v1/threads/queue?id= (schema 75): the
+// messages waiting for a headless thread, oldest first, and whether a turn is in
+// flight now (the queue drains when it ends).
+type ThreadQueueResponse struct {
+	Schema   int             `json:"schema"`
+	ID       string          `json:"id"`
+	Working  bool            `json:"working"`
+	Messages []QueuedMessage `json:"messages"`
+}
+
+// ThreadQueueDropRequest is the body of POST /v1/threads/queue/drop (schema 75).
+type ThreadQueueDropRequest struct {
+	ID  string `json:"id"`
+	Seq int64  `json:"seq"`
 }
 
 // DeleteThreadResponse is the body of POST /v1/threads/delete. SchedulesRemoved
@@ -655,6 +688,9 @@ type ThreadStatusResponse struct {
 	AgentRunning bool       `json:"agent_running"`
 	Clients      int        `json:"clients"`
 	Pane         string     `json:"pane,omitempty"`
+	// QueuedMessages (schema 75) counts the messages waiting for this headless
+	// thread's turn (see ThreadQueueResponse).
+	QueuedMessages int `json:"queued_messages,omitempty"`
 	// ObservedModel is the model the transcript says the thread last ran on
 	// (schema 58; see ThreadSnapshot.ObservedModel).
 	ObservedModel string `json:"observed_model,omitempty"`

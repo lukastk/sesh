@@ -376,6 +376,21 @@ var migrations = []string{
 	`ALTER TABLE threads ADD COLUMN idle_stop TEXT NOT NULL DEFAULT '';
 	 ALTER TABLE threads ADD COLUMN idle_stopped_at INTEGER NOT NULL DEFAULT 0;
 	 ALTER TABLE threads ADD COLUMN idle_stopped_reason TEXT NOT NULL DEFAULT '';`,
+	// 33: HEADLESS QUEUE (api 75, lukastk/sesh#26). Messages sent to a headless
+	// thread while its turn is in flight, delivered as its next turns in seq order.
+	// The text is stored already expanded (@blob references resolved at send time)
+	// so a restarted daemon delivers exactly what was asked. seq is the FIFO key and
+	// never reused (AUTOINCREMENT), so a drop cannot reorder what remains. A row is
+	// deleted only when its turn starts, when it is dropped, or when its delivery
+	// fails loudly (flag). APPENDED last.
+	`CREATE TABLE headless_queue (
+		seq            INTEGER PRIMARY KEY AUTOINCREMENT,
+		thread_id      TEXT NOT NULL,
+		sender         TEXT NOT NULL,
+		text           TEXT NOT NULL,
+		queued_at_unix INTEGER NOT NULL
+	);
+	CREATE INDEX headless_queue_thread ON headless_queue (thread_id, seq);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

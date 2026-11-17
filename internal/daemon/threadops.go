@@ -245,6 +245,13 @@ func (d *Daemon) archiveGate(thread api.Thread) (string, error) {
 	if live {
 		unmet = append(unmet, why+" — end it with `sesh thread stop --id "+thread.ID+"`")
 	}
+	queued, qerr := d.store.HeadlessQueueCount(thread.ID)
+	if qerr != nil {
+		return "", qerr
+	}
+	if queued > 0 {
+		unmet = append(unmet, fmt.Sprintf("%d queued message(s) not yet delivered — see `sesh thread queue --id %s`", queued, thread.ID))
+	}
 	if len(unmet) == 0 {
 		return "", nil
 	}
@@ -302,6 +309,17 @@ func (d *Daemon) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	thread, err := d.store.GetThread(req.ID)
 	if err != nil {
 		d.threadOpErr(w, err)
+		return
+	}
+	// Queued messages are requests nobody has answered yet: deleting the thread
+	// would drop them, so the delete refuses and names the way out (schema 75).
+	if queued, qerr := d.store.HeadlessQueueCount(req.ID); qerr != nil {
+		writeError(w, http.StatusInternalServerError, qerr.Error())
+		return
+	} else if queued > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"delete: %d queued message(s) for %s have not been delivered; let the running turn deliver them, or drop them with `sesh thread queue --id %s --drop <seq>` first",
+			queued, req.ID, req.ID))
 		return
 	}
 	// A SHELL thread's liveness is its SESSION, not a pane — and the consequence

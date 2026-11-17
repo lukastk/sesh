@@ -155,6 +155,19 @@ type scanner interface {
 // SetHeadlessSession records the agent session id and marks the headless thread
 // as started (after its first turn). codex discovers its id on the first turn;
 // pi/claude keep the pre-assigned one.
+// MarkHeadlessStarted records that a headless turn has started the thread's
+// conversation, without touching its session id. It runs when the turn process
+// starts, not when it succeeds: the agent creates the conversation at once, so a
+// turn that then fails must still leave later turns resuming it. The
+// --session-id start of a session that already exists is refused by claude
+// ("Session ID ... is already in use") on every turn after that.
+func (s *Store) MarkHeadlessStarted(id string) error {
+	if _, err := s.db.Exec(`UPDATE threads SET headless_started = 1 WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("store: mark headless started: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) SetHeadlessSession(id, agentSessionID string) error {
 	res, err := s.db.Exec(
 		`UPDATE threads SET agent_session_id = ?, headless_started = 1 WHERE id = ?`,

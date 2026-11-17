@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -300,4 +301,52 @@ func TestSurvivingLiveTurnHoldsTheSlotAfterRestart(t *testing.T) {
 	awaitTurnStart(t, started, "after the restart")
 	hold <- struct{}{}
 	awaitIdle(t, d, th.ID)
+}
+
+// A turn that fails still leaves its conversation started: the next turn resumes it
+// (--resume) and does not create it again (--session-id), which claude refuses for a
+// session that already exists. This was the stuck-session bug: the first turn of a
+// delegate worker failed after writing its transcript, so the thread never recorded
+// the conversation as started, and every later turn was refused.
+func TestFailedFirstTurnLeavesTheConversationStarted(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "failed-first-turn")
+	th.HeadlessStarted = false
+	var calls []bool
+	done := make(chan struct{}, 4)
+	prev := headlessTurnRunner
+	headlessTurnRunner = func(spec agents.TurnSpec) (string, string, error) {
+		calls = append(calls, spec.Started)
+		if spec.OnStart != nil {
+			spec.OnStart(0)
+		}
+		done <- struct{}{}
+		if len(calls) == 1 {
+			return "", "", errors.New("exit status 1: already in use")
+		}
+		return "ok", spec.SessionID, nil
+	}
+	t.Cleanup(func() { headlessTurnRunner = prev })
+
+	if status, err := d.startHeadlessTurn(th, "first", "", ""); err != nil || status != http.StatusOK {
+		t.Fatalf("first turn = %d %v", status, err)
+	}
+	<-done
+	awaitIdle(t, d, th.ID)
+	// The send paths load the thread fresh for each turn; do the same here.
+	th, err := d.store.GetThread(th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !th.HeadlessStarted {
+		t.Fatal("the failed first turn left the thread not started")
+	}
+	if status, err := d.startHeadlessTurn(th, "second", "", ""); err != nil || status != http.StatusOK {
+		t.Fatalf("second turn = %d %v", status, err)
+	}
+	<-done
+	awaitIdle(t, d, th.ID)
+	if len(calls) != 2 || calls[0] || !calls[1] {
+		t.Fatalf("turn Started flags = %v, want [false true]: the second turn must resume the failed first one", calls)
+	}
 }

@@ -265,6 +265,12 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 				d.hlMu.Lock()
 				d.turnPID[threadID] = pid
 				d.hlMu.Unlock()
+				// The conversation now exists, whatever this turn's outcome: a later
+				// turn must resume it, not create it again (see MarkHeadlessStarted).
+				if err := d.store.MarkHeadlessStarted(threadID); err != nil {
+					log.Printf("headless turn of thread %s: %v", threadID, err)
+					d.flagUndeliveredHeadless(threadID, "the turn started but its conversation could not be marked started, so the next turn would try to create it again: "+err.Error())
+				}
 				// Persisted too: the in-memory slot dies with this daemon, but the
 				// process can outlive it (see migration 34). A failure here is loud:
 				// the restart would not know this turn is running.

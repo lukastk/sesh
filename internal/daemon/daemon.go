@@ -324,6 +324,10 @@ func New(cfg config.Config) (*Daemon, error) {
 		return nil, err
 	}
 	d.seedSubTracker()
+	if err := d.reclaimSurvivingHeadlessTurns(); err != nil {
+		st.Close() //nolint:errcheck
+		return nil, err
+	}
 	if err := d.reportSurvivingHeadlessQueues(); err != nil {
 		st.Close() //nolint:errcheck
 		return nil, err

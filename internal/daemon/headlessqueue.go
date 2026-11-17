@@ -33,6 +33,7 @@ import (
 
 	"github.com/lukastk/sesh/internal/agents"
 	"github.com/lukastk/sesh/internal/api"
+	"github.com/lukastk/sesh/internal/procs"
 )
 
 // errHeadlessTurnInFlight is startHeadlessTurn's refusal while the thread's turn
@@ -164,7 +165,57 @@ func (d *Daemon) flagUndeliveredHeadless(threadID, reason string) {
 	}
 }
 
-// reportSurvivingHeadlessQueues runs at daemon start. Queues that survived the
+// reclaimSurvivingHeadlessTurns runs at daemon start, before anything is served. A
+// turn process recorded by the previous daemon and still alive is still running and
+// still holds its conversation, so this daemon claims the thread's turn slot for it:
+// a send queues, and `send-headless` refuses, exactly as they would for a turn this
+// daemon started. A watcher releases the slot when the process exits, then drains the
+// queue. The turn's reply is not retained (the transcript has it).
+func (d *Daemon) reclaimSurvivingHeadlessTurns() error {
+	rows, err := d.store.HeadlessTurns()
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if !procs.Alive(r.PID) {
+			log.Printf("headless: turn process %d of %s ended while the daemon was down; its record is cleared", r.PID, r.ThreadID)
+			if err := d.store.ClearHeadlessTurn(r.ThreadID); err != nil {
+				return err
+			}
+			continue
+		}
+		log.Printf("headless: turn process %d of %s is still running after a restart; queueing sends until it ends", r.PID, r.ThreadID)
+		d.hlMu.Lock()
+		d.hlInFlight[r.ThreadID] = true
+		d.turnPID[r.ThreadID] = r.PID
+		d.hlMu.Unlock()
+		go d.watchSurvivingTurn(r.ThreadID, r.PID)
+	}
+	return nil
+}
+
+// watchSurvivingTurn releases a reclaimed turn slot when its process exits, then
+// delivers whatever queued while it ran.
+func (d *Daemon) watchSurvivingTurn(threadID string, pid int) {
+	for procs.Alive(pid) {
+		select {
+		case <-d.pasteStop:
+			return // shutdown: the record stays, and the next start reclaims it
+		case <-time.After(time.Second):
+		}
+	}
+	d.hlMu.Lock()
+	delete(d.hlInFlight, threadID)
+	delete(d.turnPID, threadID)
+	d.hlMu.Unlock()
+	if err := d.store.ClearHeadlessTurn(threadID); err != nil {
+		log.Printf("headless turn of thread %s ended but its record was not cleared: %v", threadID, err)
+	}
+	log.Printf("headless: turn process %d of %s ended after the restart; delivering its queue", pid, threadID)
+	d.kickHeadless(threadID, 0)
+}
+
+// reportSurvivingHeadlessQueues runs at daemon start, after reclaimSurvivingHeadlessTurns. Queues that survived the
 // restart stay queued (see the package comment) and each thread is flagged, so
 // the messages are visible in the gutter instead of waiting unnoticed.
 func (d *Daemon) reportSurvivingHeadlessQueues() error {
@@ -173,6 +224,9 @@ func (d *Daemon) reportSurvivingHeadlessQueues() error {
 		return err
 	}
 	for id, n := range counts {
+		if d.turnInFlight(id) {
+			continue // a reclaimed turn is running; its end delivers the queue
+		}
 		reason := fmt.Sprintf("%d queued message(s) survived a daemon restart and were not delivered; see `sesh thread queue --id %s`", n, id)
 		log.Printf("headless: %s: %s", id, reason)
 		if _, err := d.store.AutoFlag(id, reason); err != nil {

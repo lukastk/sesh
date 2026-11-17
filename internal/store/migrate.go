@@ -391,6 +391,18 @@ var migrations = []string{
 		queued_at_unix INTEGER NOT NULL
 	);
 	CREATE INDEX headless_queue_thread ON headless_queue (thread_id, seq);`,
+	// 34: HEADLESS TURNS (lukastk/sesh#26 follow-up). The root pid of each headless
+	// turn the daemon started, written when the process starts and removed when the
+	// turn ends. The in-memory turn slot dies with the daemon, but the agent process
+	// can outlive it (a restart does not kill it), and it still holds the
+	// conversation: a restart reads this table and reclaims the slot while the pid
+	// lives, so a send queues instead of starting a second --resume turn. Owner-only,
+	// so it is a table, not a threads column (threads replicate to peers). APPENDED last.
+	`CREATE TABLE headless_turns (
+		thread_id   TEXT PRIMARY KEY,
+		pid         INTEGER NOT NULL,
+		started_unix INTEGER NOT NULL
+	);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

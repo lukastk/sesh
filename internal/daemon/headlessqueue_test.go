@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -223,4 +224,80 @@ func TestHeadlessQueueFailedDeliveryStaysQueued(t *testing.T) {
 	if err != nil || len(msgs) != 1 || msgs[0].Seq != seq {
 		t.Fatalf("queue after failed delivery = %+v err=%v, want the message kept", msgs, err)
 	}
+}
+
+// A turn started the way `sesh delegate` starts one (send-headless, the path its
+// worker uses) holds the thread's slot: a `thread send` to that thread queues behind
+// it instead of starting a second --resume turn on the same conversation.
+func TestSendQueuesBehindADelegateStyleTurn(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "delegate-worker")
+	started, hold := stubHeadlessTurns(t)
+
+	b, _ := json.Marshal(api.ThreadSendRequest{ID: th.ID, Text: "the task"})
+	rec := httptest.NewRecorder()
+	d.handleThreadSendHeadless(rec, httptest.NewRequest(http.MethodPost, "/v1/threads/send-headless", strings.NewReader(string(b))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("send-headless = %d %s", rec.Code, rec.Body.String())
+	}
+	awaitTurnStart(t, started, "the task")
+
+	resp := sendResponse(t, postSend(t, d, api.ThreadSendRequest{ID: th.ID, Text: "extra context from the parent"}))
+	if resp.Sent != "" || !resp.Deferred || resp.HeldReason != api.HeldReasonTurn {
+		t.Fatalf("send during a delegate turn = %+v, want queued behind it", resp)
+	}
+	select {
+	case p := <-started:
+		t.Fatalf("a second turn started for %q while the first was in flight", p)
+	default:
+	}
+	hold <- struct{}{}
+	awaitTurnStart(t, started, "extra context from the parent")
+	hold <- struct{}{}
+	awaitIdle(t, d, th.ID)
+}
+
+// A turn process recorded by a previous daemon and still alive keeps the thread's
+// slot after a restart: sends queue (send-headless refuses), nothing starts, and when
+// the process exits the slot is released and the queue delivers in order.
+func TestSurvivingLiveTurnHoldsTheSlotAfterRestart(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "restart-survivor")
+	started, hold := stubHeadlessTurns(t)
+
+	proc := exec.Command("sleep", "30")
+	if err := proc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proc.Process.Kill(); _ = proc.Wait() })
+	if err := d.store.SetHeadlessTurn(th.ID, proc.Process.Pid, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.reclaimSurvivingHeadlessTurns(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := sendResponse(t, postSend(t, d, api.ThreadSendRequest{ID: th.ID, Text: "after the restart"}))
+	if resp.Sent != "" || !resp.Deferred {
+		t.Fatalf("send to a thread with a surviving turn = %+v, want queued", resp)
+	}
+	b, _ := json.Marshal(api.ThreadSendRequest{ID: th.ID, Text: "strict"})
+	rec := httptest.NewRecorder()
+	d.handleThreadSendHeadless(rec, httptest.NewRequest(http.MethodPost, "/v1/threads/send-headless", strings.NewReader(string(b))))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("send-headless over a surviving turn = %d, want 409", rec.Code)
+	}
+	select {
+	case p := <-started:
+		t.Fatalf("a turn started for %q while the surviving process ran", p)
+	case <-time.After(1500 * time.Millisecond):
+	}
+
+	// The process exits (reaped here, as init would do in production): the slot
+	// frees, the queued message runs.
+	_ = proc.Process.Kill()
+	_ = proc.Wait()
+	awaitTurnStart(t, started, "after the restart")
+	hold <- struct{}{}
+	awaitIdle(t, d, th.ID)
 }

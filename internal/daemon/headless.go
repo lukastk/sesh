@@ -265,6 +265,13 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 				d.hlMu.Lock()
 				d.turnPID[threadID] = pid
 				d.hlMu.Unlock()
+				// Persisted too: the in-memory slot dies with this daemon, but the
+				// process can outlive it (see migration 34). A failure here is loud:
+				// the restart would not know this turn is running.
+				if err := d.store.SetHeadlessTurn(threadID, pid, time.Now()); err != nil {
+					log.Printf("headless turn of thread %s: %v", threadID, err)
+					d.flagUndeliveredHeadless(threadID, "its turn process could not be recorded, so a daemon restart would not know it is running: "+err.Error())
+				}
 			},
 		})
 
@@ -285,6 +292,9 @@ func (d *Daemon) startHeadlessTurn(thread api.Thread, text, modeOverride, modelO
 		// exactly how they would drift apart.
 		delete(d.hlInFlight, threadID)
 		delete(d.turnPID, threadID)
+		if err := d.store.ClearHeadlessTurn(threadID); err != nil {
+			log.Printf("headless turn of thread %s ended but its record was not cleared: %v", threadID, err)
+		}
 		if runErr == nil {
 			d.hlReply[threadID] = reply
 		} else {

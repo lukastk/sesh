@@ -25,8 +25,10 @@ package procs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
+	"syscall"
 )
 
 // MaxDepth bounds the upward walk. A turn's tree is a handful of levels deep
@@ -94,4 +96,16 @@ func parseStatPPID(b []byte) (int, error) {
 		return 0, fmt.Errorf("procs: negative ppid %d", ppid)
 	}
 	return ppid, nil
+}
+
+// Alive reports whether a process with this pid exists (signal 0). EPERM means it
+// exists under another user, which for the daemon's own children is never the case,
+// so it counts as alive. A reused pid reads as alive: callers that must tell a
+// process from its successor need more than this.
+func Alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }

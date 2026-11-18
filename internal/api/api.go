@@ -486,7 +486,25 @@ package api
 // lists them, POST /v1/threads/queue/drop removes one, and ThreadStatusResponse gains
 // queued_messages. `send-headless` keeps its strict refusal while a turn is in flight.
 // Browser envelopes are unchanged (the browser send_headless path is still strict).
-const SchemaVersion = 75
+// 76: BROWSER API VERSION. The browser thread page (GET /v1/browser/threads) gains
+// `browser_api` (BrowserAPIVersion), the version graphical clients gate on instead of
+// this whole-API number. No other envelope changed.
+const SchemaVersion = 76
+
+// BrowserAPIVersion is the version of the browser seam: the /v1/browser/* routes and
+// the envelopes, rows and actions they carry (internal/api/browser.go,
+// internal/daemon/browser*.go). Graphical clients (sesh-ui, Sesh in Obsidian) refuse
+// a browser_api they do not know and accept any SchemaVersion, so a sesh release that
+// does not touch the browser seam never strands them.
+//
+// Bump it ONLY when an existing browser client would misread or misuse a browser
+// answer: a field it reads is removed, retyped or changes meaning; an envelope it
+// checks strictly gains a field; a route or action it calls changes behaviour. A new
+// route, a new capability token, or a new row field is additive and does not bump
+// it. Every bump must be accepted in ~/mysetup/sesh-ui src/sesh/live-adapter.ts
+// (KNOWN_BROWSER_APIS) before the daemon carrying it is deployed.
+// 1: the browser seam as of schema 76.
+const BrowserAPIVersion = 1
 
 // RoutedByHeader is stamped on EVERY response /v1/route produces (schema 51) — the
 // proxied peer's answer and the route's own refusals alike — naming the machine it

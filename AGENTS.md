@@ -34,7 +34,7 @@ files and myrig's `mmt-*` / `mt-*` vocabulary.
 | Cockpit / shells / sidebar / status | [MASTER](_dev/MASTER.md), [SHELL](_dev/SHELL.md), [SIDEBAR](_dev/SIDEBAR.md), [STATUS_OPTIONS](_dev/STATUS_OPTIONS.md), as applicable |
 | Thread MCP arguments | [THREAD_MCP_ARGS](_dev/THREAD_MCP_ARGS.md) |
 | Thread context / env | [THREAD_CONTEXT](_dev/THREAD_CONTEXT.md), [THREAD_ENV](_dev/THREAD_ENV.md) |
-| Browser API | [config](skills/sesh-cli/references/config.md), [browser-api](skills/sesh-cli/references/browser-api.md); every `api.SchemaVersion` bump must also be accepted in `~/mysetup/sesh-ui` `src/sesh/live-adapter.ts` |
+| Browser API | [config](skills/sesh-cli/references/config.md), [browser-api](skills/sesh-cli/references/browser-api.md); browser clients gate on `api.BrowserAPIVersion`, not `api.SchemaVersion`: bump it only for a browser-breaking change (rules in `internal/api/api.go`), and add it to `KNOWN_BROWSER_APIS` in `~/mysetup/sesh-ui` `src/sesh/live-adapter.ts` before deploying |
 | Idle stop / background-busy | [IDLE_STOP](_dev/IDLE_STOP.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) (background section) |
 | Current-thread inference | [IDENTITY](_dev/IDENTITY.md): env is a hint, not verified identity |
 | Delivery / agent state | [PI_DELIVERY](_dev/PI_DELIVERY.md), [STATE_AUTHORITY](_dev/STATE_AUTHORITY.md) |

@@ -42,7 +42,9 @@ type BrowserThreadSummary struct {
 }
 
 type BrowserThreadPage struct {
-	Schema       int                    `json:"schema"`
+	Schema int `json:"schema"`
+	// BrowserAPI is BrowserAPIVersion (schema 76): the number browser clients gate on.
+	BrowserAPI   int                    `json:"browser_api"`
 	Capabilities []string               `json:"capabilities"`
 	Threads      []BrowserThreadSummary `json:"threads"`
 	NextCursor   string                 `json:"next_cursor,omitempty"`

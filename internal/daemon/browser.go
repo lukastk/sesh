@@ -407,6 +407,7 @@ func (d *Daemon) handleBrowserThreads(w http.ResponseWriter, r *http.Request) {
 	page := append([]api.BrowserThreadSummary(nil), filtered[start:end]...)
 	resp := api.BrowserThreadPage{
 		Schema:       api.SchemaVersion,
+		BrowserAPI:   api.BrowserAPIVersion,
 		Capabilities: browserCapabilityTokens(),
 		Threads:      page,
 	}

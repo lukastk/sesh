@@ -11,6 +11,16 @@ rather than falling back to raw files, another protocol version or a live source
 Browser send and the display projection (`browser.send-v1`, `browser.display-v1`)
 are documented in [delivery](delivery.md).
 
+## Versioning
+
+Every browser envelope carries the daemon's whole-API `schema`, which rises with any
+sesh change. The thread page (`GET /v1/browser/threads`) also carries `browser_api`
+(`api.BrowserAPIVersion`, since schema 76), which rises only when an existing browser
+client would misread a browser answer. Graphical clients refuse an unknown
+`browser_api` and accept any `schema` from their minimum up, so a sesh release that
+does not touch this seam does not require a client update. New routes, capability
+tokens and row fields are additive and do not change `browser_api`.
+
 ## Routes
 
 The browser seam is deliberately narrower than the daemon's general API:

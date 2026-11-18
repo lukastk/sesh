@@ -438,6 +438,9 @@ func TestBrowserTerminalAvailabilityUsesFreshHeadfulState(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
+	if page.Schema != api.SchemaVersion || page.BrowserAPI != api.BrowserAPIVersion || !bytes.Contains(rec.Body.Bytes(), []byte(`"browser_api":`)) {
+		t.Fatalf("browser thread page must carry schema and browser_api: %s", rec.Body.String())
+	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"terminal_available":true`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`"terminal_available":false`)) {
 		t.Fatalf("browser thread JSON omitted explicit terminal availability: %s", rec.Body.String())
 	}

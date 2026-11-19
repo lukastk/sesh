@@ -49,6 +49,16 @@ func main() {
 	// ssh path, by the route proxy itself on the http path.
 	if routableSubcommand(os.Args[1]) {
 		machine, rest := extractMachineFlag(os.Args[1:])
+		// No --machine: a `thread` verb whose --id names a thread another machine owns
+		// runs there (see findthread.go). A local match, or no match, stays local.
+		if machine == "" {
+			inferred, err := remoteMachineForThreadID(config.Load(), rest)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "sesh:", err)
+				os.Exit(1)
+			}
+			machine = inferred
+		}
 		if machine != "" {
 			cfg := config.Load() // the LOCAL config — captured before routing can set SESH_ROUTE_MACHINE
 			if machine != cfg.Machine {

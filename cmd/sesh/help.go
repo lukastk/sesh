@@ -184,8 +184,8 @@ does not wrap can be driven straight against the tmux server.`,
 	},
 
 	"thread": {
-		summary:  "thread layer — coding-agent sessions (new | list | stop | delete | resume | headful | rename | tag | archive | send | send-headless | queue | status | grid | …)",
-		usage:    "sesh thread <new|list|stop|pane|capture|status|send|send-headless|queue|headless-reply|rename|info|adopt|transcript|notify|mcp-arg|reparent|tag|archive|delete|resume|headful|grid|snapshot>",
+		summary:  "thread layer — coding-agent sessions (new | list | stop | delete | resume | headful | rename | tag | archive | send | send-headless | queue | find | status | grid | …)",
+		usage:    "sesh thread <new|list|stop|pane|capture|status|send|send-headless|queue|find|headless-reply|rename|info|adopt|transcript|notify|mcp-arg|reparent|tag|archive|delete|resume|headful|grid|snapshot>",
 		examples: []string{"sesh thread new --agent claude --name fix-bug --cwd ~/proj", "sesh thread list --all-machines"},
 	},
 	"thread new": {
@@ -253,6 +253,11 @@ delivery cannot start, the thread is flagged with it and it stays queued (see
 ` + "`thread queue`" + `). --wait then waits for that message's turn to settle.`,
 		usage:    "sesh thread send --id <id> --text <text> [--pane <%id>] [--window <n>] [--wait --timeout <dur>] [--respect-typing <dur>] [--typing-deadline <dur>] [--on-typing <defer|wait|skip>] [--machine <m>]",
 		examples: []string{"sesh thread send --id 1a2b3c4d --text 'run the tests'", "sesh thread send --id 1a2b3c4d --text 'fix it' --wait --timeout 5m", "sesh thread send --id 1a2b3c4d --text 'now' --respect-typing 0"},
+	},
+	"thread find": {
+		summary:  "find a thread by id or id prefix on ANY machine the mesh knows: prints each match with the machine that owns it. Read from the local daemon's mesh cache, so it costs no network hop.",
+		usage:    "sesh thread find <id-or-prefix> [--json]",
+		examples: []string{"sesh thread find 8e529ef4", "sesh thread find 1fb199f6 --json"},
 	},
 	"thread queue": {
 		summary:  "list a headless thread's queued messages (sent while a turn was in flight), in the order they will run, or drop one without delivering it",

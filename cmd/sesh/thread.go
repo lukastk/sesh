@@ -67,6 +67,8 @@ func runThread(args []string) error {
 		return threadSendHeadless(cfg, rest)
 	case "queue":
 		return threadQueue(cfg, rest)
+	case "find":
+		return threadFind(cfg, rest)
 	case "headless-reply":
 		return threadHeadlessReply(cfg, rest)
 	case "rename":

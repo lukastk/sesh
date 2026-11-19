@@ -531,6 +531,9 @@ var flagDocs = map[string][]flagDoc{
 		{"--id", "thread id or unique prefix (default: the current thread)"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},
+	"thread find": {
+		{"--json", "emit JSON rows (machine, id, name, local) instead of the text form"},
+	},
 	"thread queue": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--drop", "drop the queued message with this seq without delivering it (it is not run and nothing is flagged)"},

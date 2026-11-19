@@ -18,6 +18,8 @@ func TestLoadIdleStop(t *testing.T) {
 		{"set", "[idle_stop]\nafter = \"24h\"\n", 24 * time.Hour, ""},
 		{"zero refused", "[idle_stop]\nafter = \"0s\"\n", 0, "must be positive"},
 		{"garbage refused", "[idle_stop]\nafter = \"a day\"\n", 0, "[idle_stop] after"},
+		{"flagged_after alone", "[idle_stop]\nflagged_after = \"168h\"\n", 0, ""},
+		{"flagged_after zero refused", "[idle_stop]\nafter = \"48h\"\nflagged_after = \"0s\"\n", 0, "flagged_after"},
 	} {
 		home := t.TempDir()
 		if tc.toml != "" {
@@ -34,6 +36,9 @@ func TestLoadIdleStop(t *testing.T) {
 		}
 		if err != nil || got.After != tc.want {
 			t.Errorf("%s: got %v, %v; want %s", tc.name, got.After, err, tc.want)
+		}
+		if tc.name == "flagged_after alone" && (err != nil || got.FlaggedAfter != 168*time.Hour || got.After != 0) {
+			t.Errorf("flagged_after alone: got %+v, %v", got, err)
 		}
 	}
 }

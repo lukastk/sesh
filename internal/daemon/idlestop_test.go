@@ -56,7 +56,7 @@ func TestIdleStopVerdict(t *testing.T) {
 		{"static since first seen, under the limit", agent, with(func(s *api.ThreadSnapshot) { s.LastActiveUnix = 0 }), true, now.Add(-time.Hour), day, false, "idle 1h0m0s of"},
 		{"first seen after the last change wins", agent, idle, true, now.Add(-time.Hour), day, false, "idle 1h0m0s of"},
 	} {
-		stop, reason, _, _ := idleStopVerdict(tc.th, tc.snap, tc.have, tc.first, tc.after, now)
+		stop, reason, _, _ := idleStopVerdict(tc.th, tc.snap, tc.have, tc.first, tc.after, 0, now)
 		if stop != tc.stop || !strings.Contains(reason, tc.reasonIn) {
 			t.Errorf("%s: got stop=%v reason=%q, want stop=%v reason containing %q", tc.name, stop, reason, tc.stop, tc.reasonIn)
 		}
@@ -121,5 +121,45 @@ func TestIdleStopRecordRoundTrip(t *testing.T) {
 	}
 	if err := st.SetThreadIdleStop("nope", ""); err != store.ErrThreadNotFound {
 		t.Fatalf("unknown thread: want ErrThreadNotFound, got %v", err)
+	}
+}
+
+// A flagged thread (someone still owes it a look) is kept for flagged_after, not the
+// machine limit. The rule is about the thread's flag, so clearing the flag returns it to
+// the machine limit; a per-thread duration is an explicit choice and wins over both.
+func TestIdleStopFlaggedLimit(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	ago := func(d time.Duration) int64 { return now.Add(-d).Unix() }
+	const day = 24 * time.Hour
+	week := 7 * day
+	snap := func(idle time.Duration) api.ThreadSnapshot {
+		return api.ThreadSnapshot{Head: api.Headful, Busy: api.BusyIdle, LastActiveUnix: ago(idle)}
+	}
+	base := api.Thread{ID: "t", AgentKind: "claude"}
+	flagged := base
+	flagged.Flagged = true
+	flagged.FlagReason = "turn ended"
+	override := func(th api.Thread, v string) api.Thread { th.IdleStop = v; return th }
+
+	for _, tc := range []struct {
+		name     string
+		th       api.Thread
+		idle     time.Duration
+		flagAft  time.Duration
+		stop     bool
+		reasonIn string
+	}{
+		{"flagged, idle 3 days, week rule: kept", flagged, 3 * day, week, false, "of 168h0m0s"},
+		{"flagged, idle 8 days, week rule: stopped", flagged, 8 * day, week, true, "limit 168h0m0s"},
+		{"unflagged, idle 3 days: machine limit applies", base, 3 * day, week, true, "limit 48h0m0s"},
+		{"flagged, no flagged_after: machine limit", flagged, 3 * day, 0, true, "limit 48h0m0s"},
+		{"flagged, per-thread shorter override wins", override(flagged, "1h"), 2 * day, week, true, "limit 1h0m0s"},
+		{"flagged, per-thread longer override wins", override(flagged, "720h"), 8 * day, week, false, "of 720h0m0s"},
+		{"flagged, never override keeps it", override(flagged, "never"), 30 * day, week, false, "never"},
+	} {
+		stop, reason, _, _ := idleStopVerdict(tc.th, snap(tc.idle), true, time.Time{}, 2*day, tc.flagAft, now)
+		if stop != tc.stop || !strings.Contains(reason, tc.reasonIn) {
+			t.Errorf("%s: got stop=%v reason=%q, want stop=%v reason containing %q", tc.name, stop, reason, tc.stop, tc.reasonIn)
+		}
 	}
 }

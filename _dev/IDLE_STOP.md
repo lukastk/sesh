@@ -18,8 +18,16 @@ Idle-stop never archives, unflags or deletes anything.
 
 ```toml
 [idle_stop]
-after = "24h"   # absent = idle-stop is off on this machine
+after = "48h"           # absent = idle-stop is off on this machine
+flagged_after = "168h"  # optional: the limit for FLAGGED threads (no per-thread override)
 ```
+
+**Flagged threads**: a flag means someone still owes the thread a look, so it is
+kept for `flagged_after` rather than `after`. Precedence per thread: a per-thread override wins
+(explicit choice about that thread); otherwise a flagged thread uses `flagged_after` when set;
+otherwise `after`. Clearing the flag returns the thread to the machine limit on the next sweep.
+`flagged_after` alone stops only flagged threads, at that limit. The verdict reason still reads
+`limit <d>`, so `idle-stop preview` shows which limit applied.
 
 - The key lives in the shared `config.toml`; a machine may override it in its
   `config.local.toml` overlay (e.g. a shorter limit on a low-memory machine).

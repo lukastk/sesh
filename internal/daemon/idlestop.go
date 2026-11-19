@@ -37,7 +37,12 @@ import (
 // idlestop_test.go. snap/haveSnap are the maintainer's published state for the
 // thread. It returns the limit that applies (0 = none) and how long the thread
 // has been idle (0 when not measured).
-func idleStopVerdict(th api.Thread, snap api.ThreadSnapshot, haveSnap bool, firstSeen time.Time, machineAfter time.Duration, now time.Time) (stop bool, reason string, limit, idleFor time.Duration) {
+//
+// flaggedAfter (the [idle_stop] flagged_after limit, 0 = none) replaces the machine
+// limit for a flagged thread that has no per-thread override: a flag means someone
+// still owes that thread a look, so it is kept longer. A per-thread duration is an
+// explicit choice about that thread and wins over both.
+func idleStopVerdict(th api.Thread, snap api.ThreadSnapshot, haveSnap bool, firstSeen time.Time, machineAfter, flaggedAfter time.Duration, now time.Time) (stop bool, reason string, limit, idleFor time.Duration) {
 	if !api.HasConversation(th.AgentKind) {
 		// A shell thread's busy is pinned idle (a long build would look idle) and
 		// stopping one kills its whole session, including any agent panes inside
@@ -54,6 +59,9 @@ func idleStopVerdict(th api.Thread, snap api.ThreadSnapshot, haveSnap bool, firs
 		return false, "idle_stop = never", 0, 0
 	}
 	limit = machineAfter
+	if th.Flagged && flaggedAfter > 0 {
+		limit = flaggedAfter
+	}
 	if override > 0 {
 		limit = override
 	}
@@ -184,7 +192,7 @@ func (d *Daemon) idleStopSweep(now time.Time) {
 	for _, th := range threads {
 		snap, ok := d.maint.stateOf(th.ID)
 		first := d.idleSeen.observe(th.ID, ok && snap.Head == api.Headful, now)
-		stop, reason, _, _ := idleStopVerdict(th, snap, ok, first, d.idleStop.After, now)
+		stop, reason, _, _ := idleStopVerdict(th, snap, ok, first, d.idleStop.After, d.idleStop.FlaggedAfter, now)
 		if !stop {
 			continue
 		}
@@ -261,7 +269,7 @@ func (d *Daemon) handleIdleStopPreview(w http.ResponseWriter, r *http.Request) {
 			continue // nothing to stop: the preview lists live threads only
 		}
 		first := d.idleSeen.observe(th.ID, true, now)
-		stop, reason, limit, idleFor := idleStopVerdict(th, snap, ok, first, d.idleStop.After, now)
+		stop, reason, limit, idleFor := idleStopVerdict(th, snap, ok, first, d.idleStop.After, d.idleStop.FlaggedAfter, now)
 		c := api.IdleStopCandidate{ID: th.ID, Name: th.Name, Stop: stop, Reason: reason, IdleSeconds: int64(idleFor / time.Second)}
 		if limit > 0 {
 			c.Limit = limit.String()

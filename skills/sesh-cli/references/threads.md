@@ -195,10 +195,13 @@ last.
 
 Each daemon stops its own headful **agent** threads once they have been idle for longer
 than their limit: `[idle_stop] after` in the machine's config (the shared `config.toml`,
-overridable per machine in `config.local.toml`), or the thread's own override. A stop is
-exactly `thread stop`: the agent process and its pane end; the record, its flag, archive
-state, tags, holds and parent stay; `thread resume` brings the conversation back. Without
-`[idle_stop] after` and without an override, nothing is ever stopped.
+overridable per machine in `config.local.toml`), or the thread's own override. A FLAGGED
+thread uses `[idle_stop] flagged_after` instead when that key is set, so a flag keeps a
+thread alive longer (the fleet sets 168h, a week). A per-thread override still wins over
+both. A stop is exactly `thread stop`: the agent process and its pane end; the record, its
+flag, archive state, tags, holds and parent stay; `thread resume` brings the conversation
+back. Without `[idle_stop] after` and without an override, nothing is ever stopped, and
+`flagged_after` alone stops only flagged threads with no override, at that limit.
 
 ```bash
 sesh idle-stop preview [--json] [--machine <m>]     # each live thread: STOP, or keep + why

@@ -75,7 +75,8 @@ respect_typing_deadline = "10m"  # a delivery still held this long fails loudly 
 browser_respect_typing = "0s"    # the window for sends typed in a browser UI (Sesh in Obsidian); default: respect_typing
 
 [idle_stop]                      # stop headful agent threads left idle (see threads.md, "Idle stop")
-after = "24h"                    # positive duration; absent = no machine-wide limit
+after = "48h"                    # positive duration; absent = no machine-wide limit
+flagged_after = "168h"           # optional: the limit for FLAGGED threads (a per-thread override still wins)
 
 [schedules]                      # `sesh schedule` policy (the schedules themselves are records, not config)
 enabled = true                   # false = this daemon fires nothing (run-now still works)

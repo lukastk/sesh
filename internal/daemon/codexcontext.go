@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lukastk/sesh/internal/agents"
+	"github.com/lukastk/sesh/internal/agents/claude"
 )
 
 // codexHookTrust caches a successful codex context-hook trust check for one
@@ -68,6 +69,17 @@ func (d *Daemon) contextHookArgs(kind agents.Kind, threadID string) ([]string, e
 	if agents.Family(kind) == agents.Claude {
 		if contextDir, err = d.writeContextFile(threadID); err != nil {
 			return nil, err
+		}
+		// claude asks "Adding a new directory" for every --add-dir path it has no
+		// trust record for, and each thread's context folder is new. Seed it like the
+		// cwd (EnsureTrust): sesh created the folder and owns it, so this is not
+		// trusting a user-chosen path.
+		cfgPath, err := claude.GlobalConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		if err := claude.EnsureTrust(cfgPath, contextDir); err != nil {
+			return nil, fmt.Errorf("trust thread context folder: %w", err)
 		}
 	}
 	args := agents.ContextHookArgs(kind, script, contextDir)

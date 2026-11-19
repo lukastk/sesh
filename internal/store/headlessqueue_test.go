@@ -74,3 +74,40 @@ func TestHeadlessQueueSurvivesReopen(t *testing.T) {
 		t.Fatalf("after reopen = %+v err=%v, want the kept message", msgs, err)
 	}
 }
+
+// A held paste keeps its text until it is delivered or dropped, a failed one stays
+// visible as undelivered, and a restart fails every paste still held (schema 77).
+func TestHeldPasteLifecycle(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Unix(1_700_000_000, 0)
+	delivered, _ := s.InsertHeldPaste("t1", "thread send", "delivered text", now)
+	failed, _ := s.InsertHeldPaste("t1", "thread send", "failed text", now)
+	lost, _ := s.InsertHeldPaste("t1", "thread send", "lost text", now)
+
+	if err := s.DeleteHeldPaste(delivered); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FailHeldPaste(failed, "pane in use for 10m"); err != nil {
+		t.Fatal(err)
+	}
+	und, err := s.UndeliveredPastes("t1")
+	if err != nil || len(und) != 1 || und[0].Seq != failed || und[0].Text != "failed text" || und[0].Reason != "pane in use for 10m" {
+		t.Fatalf("undelivered = %+v err=%v, want the failed paste with its text and reason", und, err)
+	}
+	got, ok, err := s.GetUndeliveredPaste("t1", failed)
+	if err != nil || !ok || got.Text != "failed text" {
+		t.Fatalf("get undelivered = %+v ok=%v err=%v", got, ok, err)
+	}
+	if _, ok, _ := s.GetUndeliveredPaste("t1", lost); ok {
+		t.Fatal("a paste still held is not undelivered")
+	}
+
+	restarted, err := s.LostHeldPastes("the daemon restarted while the message was held")
+	if err != nil || len(restarted) != 1 || restarted[0].Seq != lost || restarted[0].Text != "lost text" {
+		t.Fatalf("lost at restart = %+v err=%v, want the held paste", restarted, err)
+	}
+	und, _ = s.UndeliveredPastes("t1")
+	if len(und) != 2 {
+		t.Fatalf("after restart undelivered = %d, want 2 (text kept for both)", len(und))
+	}
+}

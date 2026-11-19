@@ -260,9 +260,9 @@ delivery cannot start, the thread is flagged with it and it stays queued (see
 		examples: []string{"sesh thread find 8e529ef4", "sesh thread find 1fb199f6 --json"},
 	},
 	"thread queue": {
-		summary:  "list a headless thread's queued messages (sent while a turn was in flight), in the order they will run, or drop one without delivering it",
-		usage:    "sesh thread queue --id <id> [--drop <seq>] [--json] [--machine <m>]",
-		examples: []string{"sesh thread queue --id 1a2b3c4d", "sesh thread queue --id 1a2b3c4d --drop 3"},
+		summary:  "list a thread's queued messages (headless: sent while a turn was in flight, in the order they will run) and UNDELIVERED pane messages (text kept after a held paste failed); drop one without delivering it, or resend an undelivered one",
+		usage:    "sesh thread queue --id <id> [--drop <seq> | --resend <seq> | --drop-undelivered <seq>] [--json] [--machine <m>]",
+		examples: []string{"sesh thread queue --id 1a2b3c4d", "sesh thread queue --id 1a2b3c4d --drop 3", "sesh thread queue --id 1a2b3c4d --resend 4"},
 	},
 	"thread command": {
 		summary:  "explicitly invoke a command in a live Pi session (never terminal paste)",

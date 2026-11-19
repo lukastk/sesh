@@ -403,6 +403,21 @@ var migrations = []string{
 		pid         INTEGER NOT NULL,
 		started_unix INTEGER NOT NULL
 	);`,
+	// 35: HELD PASTES (lukastk/sesh#28; API schema 77). A paste into a pane that a viewer is typing in
+	// is held until the pane is quiet. The text used to live only in memory, so a deadline
+	// (or a restart) discarded it, leaving only a flag. Each held paste is now a row:
+	// 'held' while waiting, deleted when delivered, and 'failed' (text kept, with the
+	// reason) when it could not be delivered, until it is resent or dropped. APPENDED last.
+	`CREATE TABLE held_pastes (
+		seq            INTEGER PRIMARY KEY AUTOINCREMENT,
+		thread_id      TEXT NOT NULL,
+		sender         TEXT NOT NULL,
+		text           TEXT NOT NULL,
+		queued_at_unix INTEGER NOT NULL,
+		state          TEXT NOT NULL DEFAULT 'held',
+		reason         TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX held_pastes_thread ON held_pastes (thread_id, seq);`,
 }
 
 // migrate applies any unapplied migrations. The current version lives in

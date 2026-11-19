@@ -489,7 +489,13 @@ package api
 // 76: BROWSER API VERSION. The browser thread page (GET /v1/browser/threads) gains
 // `browser_api` (BrowserAPIVersion), the version graphical clients gate on instead of
 // this whole-API number. No other envelope changed.
-const SchemaVersion = 76
+// 77: HELD PASTES (lukastk/sesh#28). A paste into a pane held for a typing viewer is
+// recorded before it waits, so a deadline or a restart no longer discards its text. A
+// failed paste stays as an undelivered message (ThreadQueueResponse.undelivered) until
+// POST /v1/threads/queue/resend delivers it again, or POST /v1/threads/queue/drop with
+// undelivered=true removes it. A daemon restart fails every held paste (text kept) and
+// flags its thread. Additive; browser envelopes are unchanged.
+const SchemaVersion = 77
 
 // BrowserAPIVersion is the version of the browser seam: the /v1/browser/* routes and
 // the envelopes, rows and actions they carry (internal/api/browser.go,

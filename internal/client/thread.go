@@ -451,3 +451,16 @@ func (c *Client) ThreadQueue(ctx context.Context, id string) (api.ThreadQueueRes
 func (c *Client) ThreadQueueDrop(ctx context.Context, id string, seq int64) error {
 	return c.postJSON(ctx, "http://unix/v1/threads/queue/drop", api.ThreadQueueDropRequest{ID: id, Seq: seq}, nil)
 }
+
+// ThreadQueueDropUndelivered removes a failed pane paste (schema 77) without
+// delivering it.
+func (c *Client) ThreadQueueDropUndelivered(ctx context.Context, id string, seq int64) error {
+	return c.postJSON(ctx, "http://unix/v1/threads/queue/drop", api.ThreadQueueDropRequest{ID: id, Seq: seq, Undelivered: true}, nil)
+}
+
+// ThreadQueueResend posts POST /v1/threads/queue/resend (schema 77): deliver a
+// failed pane paste again through the held-delivery path.
+func (c *Client) ThreadQueueResend(ctx context.Context, id string, seq int64) (api.ThreadSendResponse, error) {
+	var out api.ThreadSendResponse
+	return out, c.postJSON(ctx, "http://unix/v1/threads/queue/resend", api.ThreadQueueResendRequest{ID: id, Seq: seq}, &out)
+}

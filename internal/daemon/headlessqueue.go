@@ -219,6 +219,19 @@ func (d *Daemon) watchSurvivingTurn(threadID string, pid int) {
 // restart stay queued (see the package comment) and each thread is flagged, so
 // the messages are visible in the gutter instead of waiting unnoticed.
 func (d *Daemon) reportSurvivingHeadlessQueues() error {
+	// Held pastes do not survive a restart: each is failed with its text kept, and its
+	// thread is flagged so the operator can resend it (`thread queue --resend`).
+	lost, err := d.store.LostHeldPastes("the daemon restarted while the message was held")
+	if err != nil {
+		return err
+	}
+	for _, h := range lost {
+		reason := fmt.Sprintf("undelivered message from %s: the daemon restarted while it was held (text kept: sesh thread queue --id %s --resend %d)", h.Sender, h.ThreadID, h.Seq)
+		log.Printf("send: %s: %s", h.ThreadID, reason)
+		if _, err := d.store.AutoFlag(h.ThreadID, reason); err != nil {
+			return fmt.Errorf("flag %s for a held paste lost at restart: %w", h.ThreadID, err)
+		}
+	}
 	counts, err := d.store.ThreadsWithHeadlessQueue()
 	if err != nil {
 		return err
@@ -252,9 +265,17 @@ func (d *Daemon) handleThreadQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := api.ThreadQueueResponse{Schema: api.SchemaVersion, ID: id, Working: d.turnInFlight(id), Messages: []api.QueuedMessage{}}
+	undelivered, err := d.store.UndeliveredPastes(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := api.ThreadQueueResponse{Schema: api.SchemaVersion, ID: id, Working: d.turnInFlight(id), Messages: []api.QueuedMessage{}, Undelivered: []api.UndeliveredMessage{}}
 	for _, m := range msgs {
 		out.Messages = append(out.Messages, api.QueuedMessage{Seq: m.Seq, Sender: m.Sender, Text: m.Text, QueuedAtUnix: m.QueuedAtUnix})
+	}
+	for _, h := range undelivered {
+		out.Undelivered = append(out.Undelivered, api.UndeliveredMessage{Seq: h.Seq, Sender: h.Sender, Text: h.Text, QueuedAtUnix: h.QueuedAtUnix, Reason: h.Reason})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -271,6 +292,24 @@ func (d *Daemon) handleThreadQueueDrop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread queue drop: id and a positive seq are required")
 		return
 	}
+	if req.Undelivered {
+		h, ok, err := d.store.GetUndeliveredPaste(req.ID, req.Seq)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("thread queue drop: no undelivered message %d for thread %s", req.Seq, req.ID))
+			return
+		}
+		if err := d.store.DeleteHeldPaste(h.Seq); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Printf("send: undelivered message %d to %s dropped by request (from %s)", req.Seq, req.ID, h.Sender)
+		writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "id": req.ID, "dropped": req.Seq, "undelivered": true})
+		return
+	}
 	found, err := d.store.DeleteHeadless(req.ID, req.Seq)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -282,4 +321,59 @@ func (d *Daemon) handleThreadQueueDrop(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("headless: queued message %d of %s dropped by request", req.Seq, req.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"schema": api.SchemaVersion, "id": req.ID, "dropped": req.Seq})
+}
+
+// handleThreadQueueResend delivers a failed pane paste again (POST
+// /v1/threads/queue/resend, schema 77). It goes through the normal held-delivery
+// path, so the typing guard applies again: a pane still in use is held, not pasted
+// over. The old record is removed only once the new attempt has taken the text
+// (sent or held), so a refusal leaves the undelivered message where it was.
+func (d *Daemon) handleThreadQueueResend(w http.ResponseWriter, r *http.Request) {
+	var req api.ThreadQueueResendRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ID == "" || req.Seq <= 0 {
+		writeError(w, http.StatusBadRequest, "thread queue resend: id and a positive seq are required")
+		return
+	}
+	thread, err := d.store.GetThread(req.ID)
+	if err != nil {
+		d.threadOpErr(w, err)
+		return
+	}
+	h, ok, err := d.store.GetUndeliveredPaste(req.ID, req.Seq)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("thread queue resend: no undelivered message %d for thread %s", req.Seq, req.ID))
+		return
+	}
+	resolve := func() (string, string, bool, error) {
+		loc, found, ferr := d.tmux.FindPaneByThreadID(req.ID)
+		if ferr != nil || !found {
+			return "", "", false, ferr
+		}
+		return loc.Pane, loc.Session, true, nil
+	}
+	if _, _, found, ferr := resolve(); ferr != nil {
+		writeError(w, http.StatusInternalServerError, ferr.Error())
+		return
+	} else if !found {
+		writeError(w, http.StatusConflict, "thread queue resend: the thread has no live pane to deliver into; the message stays undelivered (drop it with --drop-undelivered, or send it again with thread send)")
+		return
+	}
+	preq := pasteRequest{thread: thread, text: h.Text, guard: d.pasteGuardFor(nil, nil), sender: h.Sender, resolve: resolve}
+	out, err := d.pasteDefer(preq)
+	if err != nil {
+		writeError(w, http.StatusConflict, "thread queue resend: "+err.Error()+" — the message stays undelivered")
+		return
+	}
+	if err := d.store.DeleteHeldPaste(h.Seq); err != nil {
+		log.Printf("send: resent message %d to %s, but its undelivered record was not cleared: %v", h.Seq, req.ID, err)
+	}
+	writeJSON(w, http.StatusOK, out.response(req.ID))
 }

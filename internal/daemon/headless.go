@@ -22,6 +22,7 @@ func (d *Daemon) routesHeadless(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/threads/send-headless", d.handleThreadSendHeadless)
 	mux.HandleFunc("GET /v1/threads/queue", d.handleThreadQueue)
 	mux.HandleFunc("POST /v1/threads/queue/drop", d.handleThreadQueueDrop)
+	mux.HandleFunc("POST /v1/threads/queue/resend", d.handleThreadQueueResend)
 	mux.HandleFunc("GET /v1/threads/headless-reply", d.handleThreadHeadlessReply)
 	mux.HandleFunc("GET /v1/threads/turn-identity", d.handleTurnIdentity)
 }

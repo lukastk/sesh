@@ -1494,6 +1494,8 @@ func threadQueue(cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("queue", flag.ContinueOnError)
 	id := fs.String("id", "", "thread id or unique prefix (required)")
 	drop := fs.Int64("drop", 0, "drop the queued message with this seq without delivering it")
+	resend := fs.Int64("resend", 0, "deliver an UNDELIVERED pane message (listed below) again, through the typing guard")
+	dropUndelivered := fs.Int64("drop-undelivered", 0, "drop an UNDELIVERED pane message (listed below) without delivering it")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1503,6 +1505,34 @@ func threadQueue(cfg config.Config, args []string) error {
 		return err
 	}
 	c := daemonClient(cfg)
+	if *resend != 0 {
+		if *resend < 0 {
+			return errors.New("thread queue: --resend takes a positive message seq")
+		}
+		out, err := c.ThreadQueueResend(context.Background(), rid, *resend)
+		if err != nil {
+			return err
+		}
+		if out.Sent != "" {
+			fmt.Printf("resent message %d to %s (delivered)\n", *resend, rid)
+			return nil
+		}
+		if out.Deferred {
+			fmt.Printf("resent message %d to %s: the pane is in use, held again (held_reason %s)\n", *resend, rid, out.HeldReason)
+			return nil
+		}
+		return fmt.Errorf("thread queue: resend of message %d not accepted (%+v)", *resend, out)
+	}
+	if *dropUndelivered != 0 {
+		if *dropUndelivered < 0 {
+			return errors.New("thread queue: --drop-undelivered takes a positive message seq")
+		}
+		if err := c.ThreadQueueDropUndelivered(context.Background(), rid, *dropUndelivered); err != nil {
+			return err
+		}
+		fmt.Printf("dropped undelivered message %d from %s (not delivered)\n", *dropUndelivered, rid)
+		return nil
+	}
 	if *drop != 0 {
 		if *drop < 0 {
 			return errors.New("thread queue: --drop takes a positive message seq")
@@ -1520,13 +1550,21 @@ func threadQueue(cfg config.Config, args []string) error {
 	if *asJSON {
 		return emitJSON(resp)
 	}
-	if len(resp.Messages) == 0 {
+	if len(resp.Messages) == 0 && len(resp.Undelivered) == 0 {
 		fmt.Printf("no queued messages for %s (working=%t)\n", rid, resp.Working)
 		return nil
 	}
-	fmt.Printf("%d queued message(s) for %s (working=%t), in delivery order:\n", len(resp.Messages), rid, resp.Working)
-	for _, m := range resp.Messages {
-		fmt.Printf("  %d  %s  from %s  %s\n", m.Seq, time.Unix(m.QueuedAtUnix, 0).Format("15:04:05"), m.Sender, m.Text)
+	if len(resp.Messages) > 0 {
+		fmt.Printf("%d queued message(s) for %s (working=%t), in delivery order:\n", len(resp.Messages), rid, resp.Working)
+		for _, m := range resp.Messages {
+			fmt.Printf("  %d  %s  from %s  %s\n", m.Seq, time.Unix(m.QueuedAtUnix, 0).Format("15:04:05"), m.Sender, m.Text)
+		}
+	}
+	if len(resp.Undelivered) > 0 {
+		fmt.Printf("%d UNDELIVERED pane message(s) for %s (the text is kept; --resend <seq> delivers again, --drop-undelivered <seq> discards):\n", len(resp.Undelivered), rid)
+		for _, m := range resp.Undelivered {
+			fmt.Printf("  %d  %s  from %s  %s\n      why: %s\n", m.Seq, time.Unix(m.QueuedAtUnix, 0).Format("15:04:05"), m.Sender, m.Text, m.Reason)
+		}
 	}
 	return nil
 }

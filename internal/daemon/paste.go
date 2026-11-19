@@ -206,7 +206,13 @@ func (d *Daemon) pasteDefer(req pasteRequest) (pasteOutcome, error) {
 		return out, err
 	}
 	deadline := time.Now().Add(req.guard.Deadline)
-	d.enqueuePaste(req, deadline, reason)
+	// The text is recorded before the hold, so a deadline or a restart cannot discard
+	// it: a failed hold keeps its row (state failed) until it is resent or dropped.
+	seq, err := d.store.InsertHeldPaste(req.thread.ID, req.sender, req.text, time.Now())
+	if err != nil {
+		return pasteOutcome{}, deliveryRefused{fmt.Errorf("hold the message (not sent): %w", err)}
+	}
+	d.enqueuePaste(req, deadline, reason, seq)
 	d.pasteHeld.Add(1)
 	return pasteOutcome{Deferred: true, HeldReason: reason, InputAgo: typing.ago, DeadlineUnix: deadline.Unix()}, nil
 }
@@ -246,6 +252,7 @@ type pendingPaste struct {
 	req      pasteRequest
 	queuedAt time.Time
 	deadline time.Time
+	seq      int64 // the held_pastes row that holds this text (migration 35)
 }
 
 // pasteQueue is one thread's FIFO of held deliveries. A single drainer per
@@ -257,7 +264,7 @@ type pasteQueue struct {
 	inFlight bool // the drainer holds one popped item it is still polling
 }
 
-func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time, reason string) {
+func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time, reason string, seq int64) {
 	d.pasteMu.Lock()
 	defer d.pasteMu.Unlock()
 	if d.pasteQueues == nil {
@@ -268,7 +275,7 @@ func (d *Daemon) enqueuePaste(req pasteRequest, deadline time.Time, reason strin
 		q = &pasteQueue{}
 		d.pasteQueues[req.thread.ID] = q
 	}
-	q.items = append(q.items, pendingPaste{req: req, queuedAt: time.Now(), deadline: deadline})
+	q.items = append(q.items, pendingPaste{req: req, queuedAt: time.Now(), deadline: deadline, seq: seq})
 	if reason == heldBlocked {
 		log.Printf("send: %s → %s (%s) held — the thread is blocked on a dialog; delivering once it unblocks",
 			req.sender, req.thread.ID, req.thread.Name)
@@ -333,7 +340,7 @@ func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 			if err != nil {
 				reason = err.Error()
 			}
-			d.failHeldPaste(req, reason)
+			d.failHeldPaste(item, reason)
 			return
 		}
 		now := time.Now()
@@ -349,21 +356,24 @@ func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 		}
 		quiet, ago, qerr := d.paneQuiet(session, req.guard, now)
 		if qerr != nil {
-			d.failHeldPaste(req, qerr.Error())
+			d.failHeldPaste(item, qerr.Error())
 			return
 		}
 		if quiet {
 			if serr := d.deliverHeaded(req.thread, target, req.text); serr != nil {
-				d.failHeldPaste(req, serr.Error())
+				d.failHeldPaste(item, serr.Error())
 				return
 			}
 			d.pasteDelivered.Add(1)
+			if derr := d.store.DeleteHeldPaste(item.seq); derr != nil {
+				log.Printf("send: %s → %s: delivered, but its held record was not cleared: %v", req.sender, req.thread.ID, derr)
+			}
 			log.Printf("send: %s → %s (%s) delivered after a %s hold", req.sender, req.thread.ID, req.thread.Name,
 				now.Sub(item.queuedAt).Round(time.Second))
 			return
 		}
 		if !now.Before(item.deadline) {
-			d.failHeldPaste(req, fmt.Sprintf("pane in use for %s (last input %s ago)", req.guard.Deadline, ago.Round(time.Second)))
+			d.failHeldPaste(item, fmt.Sprintf("pane in use for %s (last input %s ago)", req.guard.Deadline, ago.Round(time.Second)))
 			return
 		}
 		select {
@@ -375,14 +385,19 @@ func (d *Daemon) deliverHeldPaste(item pendingPaste) {
 	}
 }
 
-// failHeldPaste is the loud end of a held delivery: a log line AND an auto-flag
-// on the target carrying the reason, so the undelivered message is visible in
-// the gutter rather than lost.
-func (d *Daemon) failHeldPaste(req pasteRequest, why string) {
+// failHeldPaste is the loud end of a held delivery: the text stays in its
+// held_pastes row (state failed, with the reason) so it can be resent, a log line,
+// AND an auto-flag on the target carrying the reason, so the undelivered message is
+// visible in the gutter rather than lost.
+func (d *Daemon) failHeldPaste(item pendingPaste, why string) {
+	req := item.req
 	d.pasteFlagged.Add(1)
 	reason := fmt.Sprintf("undelivered message from %s: %s", req.sender, why)
 	log.Printf("send: %s → %s (%s) FAILED: %s", req.sender, req.thread.ID, req.thread.Name, why)
-	flagged, err := d.store.AutoFlag(req.thread.ID, reason)
+	if err := d.store.FailHeldPaste(item.seq, reason); err != nil {
+		log.Printf("send: keeping the text of %s's undelivered message: %v", req.thread.ID, err)
+	}
+	flagged, err := d.store.AutoFlag(req.thread.ID, reason+fmt.Sprintf(" (text kept: sesh thread queue --id %s --resend %d)", req.thread.ID, item.seq))
 	switch {
 	case err != nil:
 		log.Printf("send: flagging %s after the failed delivery: %v", req.thread.ID, err)

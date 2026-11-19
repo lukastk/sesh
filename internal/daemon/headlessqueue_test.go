@@ -350,3 +350,68 @@ func TestFailedFirstTurnLeavesTheConversationStarted(t *testing.T) {
 		t.Fatalf("turn Started flags = %v, want [false true]: the second turn must resume the failed first one", calls)
 	}
 }
+
+// A held pane paste that cannot be delivered keeps its text as an undelivered
+// message and flags the thread with a resend hint (schema 77). Before, the text was
+// dropped at the deadline and only the flag remained.
+func TestHeldPasteFailureKeepsTheText(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "held-paste")
+	seq, err := d.store.InsertHeldPaste(th.ID, "thread send", "the important note", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone := func() (string, string, bool, error) { return "", "", false, nil }
+	d.deliverHeldPaste(pendingPaste{req: pasteRequest{thread: th, text: "the important note", sender: "thread send", resolve: gone}, seq: seq})
+
+	und, err := d.store.UndeliveredPastes(th.ID)
+	if err != nil || len(und) != 1 || und[0].Text != "the important note" {
+		t.Fatalf("undelivered = %+v err=%v, want the text kept", und, err)
+	}
+	got, _ := d.store.GetThread(th.ID)
+	if !got.Flagged || !strings.Contains(got.FlagReason, "--resend") {
+		t.Fatalf("flag = %v %q, want a flag naming the resend", got.Flagged, got.FlagReason)
+	}
+}
+
+// Resend refuses while the thread has no live pane and keeps the message where it
+// was, so nothing is lost by asking.
+func TestResendWithoutAPaneKeepsTheMessage(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "resend-no-pane")
+	seq, _ := d.store.InsertHeldPaste(th.ID, "thread send", "keep me", time.Now())
+	if err := d.store.FailHeldPaste(seq, "pane in use"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(api.ThreadQueueResendRequest{ID: th.ID, Seq: seq})
+	rec := httptest.NewRecorder()
+	d.handleThreadQueueResend(rec, httptest.NewRequest(http.MethodPost, "/v1/threads/queue/resend", strings.NewReader(string(b))))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("resend with no pane = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	und, _ := d.store.UndeliveredPastes(th.ID)
+	if len(und) != 1 || und[0].Text != "keep me" {
+		t.Fatalf("after refused resend undelivered = %+v, want the message kept", und)
+	}
+}
+
+// A held paste that was still waiting when the daemon restarted is failed with its
+// text, and its thread is flagged.
+func TestHeldPasteLostAtRestartIsFlagged(t *testing.T) {
+	d := newBrowserTestDaemon(t, "self", "")
+	th := insertArchiveGateThread(t, d, "restart-held")
+	if _, err := d.store.InsertHeldPaste(th.ID, "thread send", "waiting text", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.reportSurvivingHeadlessQueues(); err != nil {
+		t.Fatal(err)
+	}
+	und, _ := d.store.UndeliveredPastes(th.ID)
+	if len(und) != 1 || und[0].Text != "waiting text" || !strings.Contains(und[0].Reason, "restarted") {
+		t.Fatalf("undelivered after restart = %+v", und)
+	}
+	got, _ := d.store.GetThread(th.ID)
+	if !got.Flagged {
+		t.Fatal("thread not flagged for a held paste lost at restart")
+	}
+}

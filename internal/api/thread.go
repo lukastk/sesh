@@ -540,10 +540,32 @@ type ThreadQueueResponse struct {
 	ID       string          `json:"id"`
 	Working  bool            `json:"working"`
 	Messages []QueuedMessage `json:"messages"`
+	// Undelivered (schema 76) are pastes into a live pane that could not be delivered:
+	// the pane stayed in use past the deadline, or the thread changed underneath. The
+	// text is kept until resent (ThreadQueueResendRequest) or dropped.
+	Undelivered []UndeliveredMessage `json:"undelivered"`
+}
+
+// UndeliveredMessage is one failed held paste (schema 76).
+type UndeliveredMessage struct {
+	Seq          int64  `json:"seq"`
+	Sender       string `json:"sender"`
+	Text         string `json:"text"`
+	QueuedAtUnix int64  `json:"queued_at_unix"`
+	Reason       string `json:"reason"`
 }
 
 // ThreadQueueDropRequest is the body of POST /v1/threads/queue/drop (schema 75).
 type ThreadQueueDropRequest struct {
+	ID  string `json:"id"`
+	Seq int64  `json:"seq"`
+	// Undelivered (schema 76) drops a failed pane paste instead of a queued turn.
+	Undelivered bool `json:"undelivered,omitempty"`
+}
+
+// ThreadQueueResendRequest is the body of POST /v1/threads/queue/resend (schema 76):
+// deliver a failed pane paste again, through the normal held-delivery path.
+type ThreadQueueResendRequest struct {
 	ID  string `json:"id"`
 	Seq int64  `json:"seq"`
 }

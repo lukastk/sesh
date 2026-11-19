@@ -537,6 +537,8 @@ var flagDocs = map[string][]flagDoc{
 	"thread queue": {
 		{"--id", "thread id or unique prefix (required)"},
 		{"--drop", "drop the queued message with this seq without delivering it (it is not run and nothing is flagged)"},
+		{"--resend", "deliver an undelivered pane message again, through the typing guard (the text is kept if the pane is still in use)"},
+		{"--drop-undelivered", "discard an undelivered pane message without delivering it"},
 		{"--json", "emit JSON (working flag and messages) instead of the text form"},
 		{"--machine", "route this command to machine <m> over the mesh (instead of the local daemon)"},
 	},

@@ -63,7 +63,11 @@ by agent output), and pastes it once the pane has been quiet that long. What a
 held delivery does is `--on-typing`: **`defer`** (the default — the daemon queues
 it per thread, FIFO, prints `deferred <id>` and delivers later; a delivery still
 held at `[send] respect_typing_deadline` (10m) FAILS loudly and auto-flags the
-thread with `undelivered message from …` as the reason, never pasting anyway),
+thread with `undelivered message from …` as the reason, never pasting anyway; the
+text is KEPT as an undelivered message, listed by `sesh thread queue --id <id>`, which
+`--resend <seq>` delivers again through the guard and `--drop-undelivered <seq>` discards.
+A held paste does not survive a daemon restart: it is failed with its text kept and the
+thread is flagged),
 **`wait`** (block the command until the pane is quiet, bounded by `--timeout`;
 the default under `--wait`), or **`skip`** (refuse with a non-zero exit, queue
 nothing — for periodic senders). `--respect-typing <dur>` overrides the window
